@@ -37,9 +37,19 @@
     {
       "id": "QUALITY-CHECK-001",
       "kind": "quality-check",
-      "content": "검증 대기",
+      "content": "TDD, 구문 검사, 단위 테스트 6개, VS Code 1.129.1 E2E 및 변경 범위 검토 통과",
       "attributes": {
-        "status": "pending"
+        "status": "pass",
+        "executionTarget": {
+          "contractVersion": "1.0.0",
+          "invocationId": "codex-20260726-visual-polish-001",
+          "headCommit": "68da9cdfd432f4cafa68efd0d72d6a0670365a61",
+          "revision": 1,
+          "attempt": 1
+        },
+        "evidence": [
+          "blocks/evidence/verification.txt"
+        ]
       }
     }
   ],
