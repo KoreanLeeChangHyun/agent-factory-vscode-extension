@@ -4,3 +4,4 @@ workspace/out/
 workspace/dist/
 workspace/.vscode-test/
 *.vsix
+uploads/
