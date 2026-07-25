@@ -7,7 +7,15 @@
       "kind": "human-review-result",
       "content": "Human 검토 대기",
       "attributes": {
-        "status": "pending"
+        "status": "approved",
+        "approvedAt": "2026-07-25T19:57:52+00:00",
+        "executionTarget": {
+          "contractVersion": "1.0.0",
+          "revision": 1,
+          "attempt": 1,
+          "invocationId": "codex-20260726-visual-polish-001",
+          "headCommit": "68da9cdfd432f4cafa68efd0d72d6a0670365a61"
+        }
       }
     },
     {
