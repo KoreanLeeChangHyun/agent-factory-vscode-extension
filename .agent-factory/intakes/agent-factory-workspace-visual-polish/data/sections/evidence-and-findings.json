@@ -49,6 +49,20 @@
         "answer": "A",
         "decisionState": "accepted"
       }
+    },
+    {
+      "id": "INTERVIEW-003",
+      "kind": "interview",
+      "content": {
+        "question": "미추적 상태인 별도 ready Work Unit을 어떻게 보존하고 시각 개선 브랜치를 병합할까요?",
+        "choiceA": "별도 Work Unit을 로컬 exclude에 잠시 등록하고 no-ff 병합한 뒤 exclude 제거",
+        "choiceB": "별도 Work Unit을 main에 커밋한 뒤 no-ff 병합",
+        "choiceC": "별도 작업이 커밋될 때까지 병합 보류",
+        "recommendation": "A",
+        "rationale": "별도 작업 내용을 변경하지 않고 현재 병합만 완료하는 가장 작은 방법이다.",
+        "answer": "B",
+        "decisionState": "accepted"
+      }
     }
   ],
   "subsections": []

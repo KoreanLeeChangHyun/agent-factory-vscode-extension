@@ -54,6 +54,15 @@
         "blocking": [],
         "nonBlocking": []
       }
+    },
+    {
+      "id": "DECISION-003",
+      "kind": "decision-status",
+      "content": {
+        "decision": "agent-factory-agents-left-region-port ready Work Unit을 main에 커밋한 뒤 시각 개선 브랜치를 no-ff로 병합한다.",
+        "rationale": "Human이 B를 선택했다.",
+        "status": "accepted"
+      }
     }
   ],
   "subsections": []
