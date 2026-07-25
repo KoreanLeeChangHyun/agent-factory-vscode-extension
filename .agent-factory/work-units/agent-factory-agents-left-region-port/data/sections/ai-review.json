@@ -1,0 +1,30 @@
+{
+  "id": "ai-review",
+  "title": "AI Review",
+  "content": [
+    {
+      "id": "AI-CHECKLIST-001",
+      "kind": "ai-checklist",
+      "content": [
+        "Intake와 Work Unit 범위 및 Human A 결정 준수",
+        "TDD 순서 준수",
+        "Specification과 구현 추적성",
+        "VS Code native View Container, Tree View와 Webview View 공식 경계 준수",
+        "SVG-only 아이콘, CSP, 키보드와 보조기술 접근성 준수",
+        "실제 Workspace Explorer와 세션별 로컬 Chat 상태 검증",
+        "backend, ../web, workspace와 오른쪽 Workspace 범위 미변경",
+        "검증 및 품질 기준 통과"
+      ]
+    },
+    {
+      "id": "AI-REVIEW-RESULT-001",
+      "kind": "ai-review-result",
+      "content": "AI 검토 대기",
+      "attributes": {
+        "result": "pending",
+        "checklistResult": "pending"
+      }
+    }
+  ],
+  "subsections": []
+}
