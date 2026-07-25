@@ -1,0 +1,28 @@
+{
+  "id": "ai-review",
+  "title": "AI Review",
+  "content": [
+    {
+      "id": "AI-CHECKLIST-001",
+      "kind": "ai-checklist",
+      "content": [
+        "Intake와 Work Unit 범위 준수",
+        "TDD 순서 준수",
+        "Human의 B 시각 방향과 Specification 추적성",
+        "VS Code theme token 및 접근성 경계 준수",
+        "DOM, 문구, 키보드와 상태 동작 미변경",
+        "단위 및 E2E 검증 통과"
+      ]
+    },
+    {
+      "id": "AI-REVIEW-RESULT-001",
+      "kind": "ai-review-result",
+      "content": "AI 검토 대기",
+      "attributes": {
+        "result": "pending",
+        "checklistResult": "pending"
+      }
+    }
+  ],
+  "subsections": []
+}
