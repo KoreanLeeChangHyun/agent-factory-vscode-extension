@@ -1,0 +1,6 @@
+/.agent-factory/worktree/
+workspace/node_modules/
+workspace/out/
+workspace/dist/
+workspace/.vscode-test/
+*.vsix
