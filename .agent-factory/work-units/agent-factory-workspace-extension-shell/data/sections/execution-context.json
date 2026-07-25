@@ -1,0 +1,21 @@
+{
+  "id": "execution-context",
+  "title": "Execution Context",
+  "content": [
+    {
+      "id": "execution-context-shell",
+      "kind": "execution-context",
+      "content": {
+        "goalId": "agent-factory-workspace-extension-shell",
+        "objective": "agent-factory-workspace VS Code 확장 scaffold와 5개 탭 shell 구현",
+        "execInvocation": "/goal agent-factory-workspace-extension-shell",
+        "executionAgent": "Codex",
+        "repository": "/home/deus/workspace/agent-factory/vscode-extension",
+        "baseRef": "main",
+        "branch": "work-unit/agent-factory-workspace-extension-shell",
+        "worktreePath": "/home/deus/workspace/agent-factory/vscode-extension/.agent-factory/worktree/agent-factory-workspace-extension-shell"
+      }
+    }
+  ],
+  "subsections": []
+}

@@ -1,0 +1,28 @@
+{
+  "id": "ai-review",
+  "title": "AI Review",
+  "content": [
+    {
+      "id": "ai-checklist-shell",
+      "kind": "ai-checklist",
+      "content": [
+        "Intake와 Work Unit 범위 준수",
+        "TDD 순서 준수",
+        "Specification과 구현 추적성",
+        "VS Code 공식 Webview 보안·테마·접근성 근거 준수",
+        "테스트 및 품질 검증 통과",
+        "범위 밖 web 및 후속 기능 미변경"
+      ]
+    },
+    {
+      "id": "ai-review-result-shell",
+      "kind": "ai-review-result",
+      "content": "실행 전",
+      "attributes": {
+        "result": "not-run",
+        "checklistResult": "not-run"
+      }
+    }
+  ],
+  "subsections": []
+}
