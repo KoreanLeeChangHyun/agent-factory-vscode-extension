@@ -21,7 +21,7 @@
       "kind": "execution-state",
       "content": {
         "contractVersion": "1.0.0",
-        "state": "running",
+        "state": "review",
         "subject": {
           "algorithm": "gitCommit",
           "digest": "2866de136de90059c0028b7d413fdb5c61138ba7"
@@ -34,15 +34,36 @@
         ],
         "history": [],
         "progress": {
-          "completedSteps": [],
-          "pendingStep": "specification-and-tests",
-          "lastVerifiedHead": "2866de136de90059c0028b7d413fdb5c61138ba7",
+          "completedSteps": [
+            "specification-and-tests",
+            "implementation-and-verification"
+          ],
+          "pendingStep": null,
+          "lastVerifiedHead": "0be640dde67917cf84759c51448f506fda83ef27",
           "checkpoints": [
             {
               "stepId": "specification-and-tests",
               "state": "pending",
               "headCommit": "2866de136de90059c0028b7d413fdb5c61138ba7",
               "idempotencyKey": "agents-left-spec-tests-pending-v1"
+            },
+            {
+              "stepId": "specification-and-tests",
+              "state": "completed",
+              "headCommit": "0be640dde67917cf84759c51448f506fda83ef27",
+              "idempotencyKey": "agents-left-spec-tests-completed-v1"
+            },
+            {
+              "stepId": "implementation-and-verification",
+              "state": "pending",
+              "headCommit": "0be640dde67917cf84759c51448f506fda83ef27",
+              "idempotencyKey": "agents-left-implementation-pending-v1"
+            },
+            {
+              "stepId": "implementation-and-verification",
+              "state": "completed",
+              "headCommit": "0be640dde67917cf84759c51448f506fda83ef27",
+              "idempotencyKey": "agents-left-implementation-completed-v1"
             }
           ],
           "retry": {}
