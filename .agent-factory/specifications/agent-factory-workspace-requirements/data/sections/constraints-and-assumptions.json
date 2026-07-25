@@ -1,0 +1,17 @@
+{
+  "id": "constraints-and-assumptions",
+  "title": "constraints-and-assumptions",
+  "content": [
+    {
+      "id": "manifest-constraint",
+      "kind": "constraint",
+      "content": [
+        "publisher는 agent-factory이다.",
+        "engines.vscode는 ^1.129.0이다.",
+        "초기 구현은 workspace 아래에 둔다.",
+        "web 저장소는 변경하지 않는다."
+      ]
+    }
+  ],
+  "subsections": []
+}

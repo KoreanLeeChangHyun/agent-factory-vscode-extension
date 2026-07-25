@@ -1,0 +1,18 @@
+{
+  "id": "acceptance-criteria",
+  "title": "acceptance-criteria",
+  "content": [
+    {
+      "id": "acceptance-shell",
+      "kind": "acceptance-criterion",
+      "content": [
+        "Extension Development Host에서 명령으로 Webview가 열린다.",
+        "5개 탭과 선택 헤더 및 바디가 표시된다.",
+        "탭 선택, 키보드 탐색, 선택 상태 보존이 검증된다.",
+        "Dashboard, Design, Context는 기능 없는 shell이다.",
+        "Specification, 단위 테스트, 핵심 E2E 및 보안·테마·접근성 점검이 통과한다."
+      ]
+    }
+  ],
+  "subsections": []
+}

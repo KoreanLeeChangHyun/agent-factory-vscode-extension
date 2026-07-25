@@ -1,0 +1,17 @@
+{
+  "id": "quality-and-non-functional-requirements",
+  "title": "quality-and-non-functional-requirements",
+  "content": [
+    {
+      "id": "quality-shell",
+      "kind": "non-functional-requirement",
+      "content": [
+        "VS Code 테마 토큰을 사용한다.",
+        "키보드와 보조기술이 탭 구조와 선택 상태를 인식할 수 있어야 한다.",
+        "Webview는 nonce 기반 CSP와 제한된 localResourceRoots를 사용한다.",
+        "Webview는 파일시스템 또는 프로세스 명령에 직접 접근하지 않는다."
+      ]
+    }
+  ],
+  "subsections": []
+}

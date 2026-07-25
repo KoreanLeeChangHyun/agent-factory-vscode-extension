@@ -1,0 +1,34 @@
+{
+  "name": "agent-factory-workspace",
+  "displayName": "Agent Factory Workspace",
+  "description": "Explore Agent Factory artifacts and manage Work Units from VS Code.",
+  "version": "0.0.1",
+  "publisher": "agent-factory",
+  "engines": {
+    "vscode": "^1.129.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "activationEvents": [
+    "onCommand:agentFactoryWorkspace.open"
+  ],
+  "main": "./src/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "agentFactoryWorkspace.open",
+        "title": "Agent Factory: Open Workspace"
+      }
+    ]
+  },
+  "scripts": {
+    "check": "npm run check:syntax && npm run test:unit",
+    "check:syntax": "node --check src/extension.js && node --check src/webviewShell.js",
+    "test:unit": "node --test test/unit/*.test.js",
+    "test:e2e": "node ./test/runTest.js"
+  },
+  "devDependencies": {
+    "@vscode/test-electron": "3.1.0"
+  }
+}

@@ -1,0 +1,17 @@
+{
+  "id": "functional-requirements",
+  "title": "functional-requirements",
+  "content": [
+    {
+      "id": "functional-shell",
+      "kind": "functional-requirement",
+      "content": [
+        "확장 명령은 에디터 영역에 Webview 패널을 연다.",
+        "Webview는 Dashboard, Design, Kanban, Context, View 탭과 선택 헤더 및 바디를 표시한다.",
+        "탭 선택은 해당 패널을 표시하고 선택 상태를 보존한다.",
+        "Dashboard, Design, Context는 초기 릴리스에서 기능 없는 shell이다."
+      ]
+    }
+  ],
+  "subsections": []
+}

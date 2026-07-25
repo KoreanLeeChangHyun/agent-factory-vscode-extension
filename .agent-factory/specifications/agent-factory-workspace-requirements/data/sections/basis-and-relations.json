@@ -1,0 +1,24 @@
+{
+  "id": "basis-and-relations",
+  "title": "basis-and-relations",
+  "content": [
+    {
+      "id": "requirements-basis-intake",
+      "kind": "basis",
+      "content": "검증된 Intake와 extension-shell Work Unit",
+      "sourceRefs": [
+        {
+          "artifactType": "intake",
+          "id": "agent-factory-workspace",
+          "path": ".agent-factory/intakes/agent-factory-workspace"
+        },
+        {
+          "artifactType": "work-unit",
+          "id": "agent-factory-workspace-extension-shell",
+          "path": ".agent-factory/work-units/agent-factory-workspace-extension-shell"
+        }
+      ]
+    }
+  ],
+  "subsections": []
+}

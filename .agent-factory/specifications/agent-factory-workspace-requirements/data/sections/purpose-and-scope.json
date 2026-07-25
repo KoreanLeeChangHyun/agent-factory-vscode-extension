@@ -1,0 +1,23 @@
+{
+  "id": "purpose-and-scope",
+  "title": "purpose-and-scope",
+  "content": [
+    {
+      "id": "requirements-purpose",
+      "kind": "purpose",
+      "content": "agent-factory-workspace VS Code 확장의 구현 및 검증 기준을 정의한다."
+    },
+    {
+      "id": "requirements-scope",
+      "kind": "scope",
+      "content": [
+        "에디터 영역 Webview shell",
+        "Dashboard, Design, Kanban, Context, View 탭",
+        "Kanban 및 View 초기 기능",
+        "확장 호스트와 Webview 경계",
+        "검증 및 Human 승인 경계"
+      ]
+    }
+  ],
+  "subsections": []
+}

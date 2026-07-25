@@ -1,0 +1,28 @@
+{
+  "id": "decisions-and-open-items",
+  "title": "decisions-and-open-items",
+  "content": [
+    {
+      "id": "accepted-decisions",
+      "kind": "decision-status",
+      "content": [
+        "에디터 영역 Webview 사용",
+        "5개 탭 shell 제공",
+        "초기 기능은 Kanban과 View",
+        "publisher agent-factory",
+        "engines.vscode ^1.129.0",
+        "확장 호스트가 로컬 데이터와 Git 경계를 소유",
+        "main 기준 Agent Factory Work Unit 실행"
+      ]
+    },
+    {
+      "id": "unresolved-design-details",
+      "kind": "open-items",
+      "content": [
+        "산출물 읽기 모델 세부 계약은 artifact-view Work Unit에서 결정한다.",
+        "관리자 명령과 Git 조작의 정확한 허용 목록은 kanban-operations Work Unit에서 결정한다."
+      ]
+    }
+  ],
+  "subsections": []
+}
