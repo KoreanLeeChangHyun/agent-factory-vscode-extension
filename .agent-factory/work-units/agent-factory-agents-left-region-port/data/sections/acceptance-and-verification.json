@@ -44,7 +44,8 @@
       "kind": "quality-check",
       "content": "검증 대기",
       "attributes": {
-        "status": "pending"
+        "status": "planned",
+        "evidence": []
       }
     }
   ],

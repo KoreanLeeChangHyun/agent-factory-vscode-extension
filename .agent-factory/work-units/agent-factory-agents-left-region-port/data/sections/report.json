@@ -8,8 +8,7 @@
       "content": "실행 보고 대기",
       "attributes": {
         "verificationResult": "pending",
-        "changedArtifacts": [],
-        "remainingRisks": []
+        "evidence": []
       }
     }
   ],

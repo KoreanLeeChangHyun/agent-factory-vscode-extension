@@ -1,0 +1,52 @@
+{
+  "name": "agent-factory-agents",
+  "displayName": "Agent Factory Agents",
+  "description": "Explore the active workspace and manage local Agent Factory chat drafts from the VS Code sidebar.",
+  "version": "0.0.1",
+  "publisher": "agent-factory",
+  "engines": {
+    "vscode": "^1.129.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "activationEvents": [
+    "onView:agentFactoryAgents.explorer",
+    "onView:agentFactoryAgents.chat"
+  ],
+  "main": "./src/extension.js",
+  "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "agentFactoryAgents",
+          "title": "Agent Factory",
+          "icon": "media/agent-factory.svg"
+        }
+      ]
+    },
+    "views": {
+      "agentFactoryAgents": [
+        {
+          "id": "agentFactoryAgents.explorer",
+          "name": "Explorer"
+        },
+        {
+          "id": "agentFactoryAgents.chat",
+          "name": "Agents",
+          "type": "webview"
+        }
+      ]
+    }
+  },
+  "scripts": {
+    "check": "npm run check:syntax && npm run test:unit",
+    "check:syntax": "node --check src/extension.js && node --check src/explorerModel.js && node --check src/explorerTree.js && node --check src/chatView.js",
+    "test:unit": "node --test test/unit/*.test.js",
+    "test:e2e": "node ./test/runTest.js"
+  },
+  "devDependencies": {
+    "@vscode/test-electron": "3.1.0"
+  }
+}
+

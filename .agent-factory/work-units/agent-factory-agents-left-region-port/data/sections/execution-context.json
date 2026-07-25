@@ -15,6 +15,45 @@
         "branch": "work-unit/agent-factory-agents-left-region-port",
         "worktreePath": "/home/deus/workspace/agent-factory/vscode-extension/.agent-factory/worktree/agent-factory-agents-left-region-port"
       }
+    },
+    {
+      "id": "EXECUTION-STATE-001",
+      "kind": "execution-state",
+      "content": {
+        "contractVersion": "1.0.0",
+        "state": "running",
+        "subject": {
+          "algorithm": "gitCommit",
+          "digest": "2866de136de90059c0028b7d413fdb5c61138ba7"
+        },
+        "currentRevision": 1,
+        "currentAttempt": 1,
+        "invocationId": "codex-20260726-agents-left-region-port-001",
+        "invocationChain": [
+          "codex-20260726-agents-left-region-port-001"
+        ],
+        "history": [],
+        "progress": {
+          "completedSteps": [],
+          "pendingStep": "specification-and-tests",
+          "lastVerifiedHead": "2866de136de90059c0028b7d413fdb5c61138ba7",
+          "checkpoints": [
+            {
+              "stepId": "specification-and-tests",
+              "state": "pending",
+              "headCommit": "2866de136de90059c0028b7d413fdb5c61138ba7",
+              "idempotencyKey": "agents-left-spec-tests-pending-v1"
+            }
+          ],
+          "retry": {}
+        },
+        "recovery": {
+          "status": "running",
+          "ownerInvocationId": "codex-20260726-agents-left-region-port-001",
+          "blockerId": null,
+          "evidence": null
+        }
+      }
     }
   ],
   "subsections": []

@@ -1,6 +1,19 @@
 {
   "id": "verification-and-traceability",
   "title": "verification-and-traceability",
-  "content": [],
+  "content": [
+    {
+      "id": "agents-port-verification",
+      "kind": "verification",
+      "content": [
+        "agent-factory-agents-left-region-port Intake와 Work Unit 추적성 검증",
+        "manifest contribution 및 SVG icon 단위 검증",
+        "Explorer model과 Workspace Tree Provider 단위 검증",
+        "Chat CSP, 탭, 로컬 세션과 draft 상태 단위 검증",
+        "VS Code 1.129.x Extension Host에서 container와 Views 등록 E2E 검증",
+        "Human Activity Bar, Explorer와 Chat 상호작용 검토"
+      ]
+    }
+  ],
   "subsections": []
 }

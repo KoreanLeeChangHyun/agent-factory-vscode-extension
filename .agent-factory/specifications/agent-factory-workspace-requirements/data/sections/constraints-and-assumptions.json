@@ -8,8 +8,10 @@
       "content": [
         "publisher는 agent-factory이다.",
         "engines.vscode는 ^1.129.0이다.",
-        "초기 구현은 workspace 아래에 둔다.",
-        "web 저장소는 변경하지 않는다."
+        "workspace 구현은 workspace 아래에 유지한다.",
+        "agents 독립 Extension은 agents 아래에 둔다.",
+        "web 저장소와 workspace Extension은 agents 포팅에서 변경하지 않는다.",
+        "agents Chat backend 계약은 이번 범위에 포함하지 않는다."
       ]
     }
   ],

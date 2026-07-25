@@ -12,7 +12,11 @@
         "publisher agent-factory",
         "engines.vscode ^1.129.0",
         "확장 호스트가 로컬 데이터와 Git 경계를 소유",
-        "main 기준 Agent Factory Work Unit 실행"
+        "main 기준 Agent Factory Work Unit 실행",
+        "agents는 왼쪽 영역 전용 독립 Extension으로 구현",
+        "agents는 native Activity Bar View Container와 Primary Sidebar Views 사용",
+        "첫 포팅은 실제 Workspace Explorer와 로컬 Chat 세션 및 Composer draft까지 포함",
+        "메시지 전송과 backend 연결은 제외"
       ]
     },
     {
@@ -20,7 +24,8 @@
       "kind": "open-items",
       "content": [
         "산출물 읽기 모델 세부 계약은 artifact-view Work Unit에서 결정한다.",
-        "관리자 명령과 Git 조작의 정확한 허용 목록은 kanban-operations Work Unit에서 결정한다."
+        "관리자 명령과 Git 조작의 정확한 허용 목록은 kanban-operations Work Unit에서 결정한다.",
+        "agents Chat의 메시지 전송, backend 연결, 원격 세션과 스트리밍은 후속 Intake에서 결정한다."
       ]
     }
   ],

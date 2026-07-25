@@ -5,7 +5,7 @@
     {
       "id": "project-purpose",
       "kind": "purpose",
-      "content": "Agent Factory 산출물 탐색·열람과 Work Unit 실행·상태 관리를 VS Code 에디터 영역에서 제공한다."
+      "content": "Agent Factory 산출물 탐색·열람과 Work Unit 실행·상태 관리를 VS Code 에디터 및 네이티브 Workbench View 영역에서 제공한다."
     },
     {
       "id": "project-scope",
@@ -14,6 +14,8 @@
         "VS Code 에디터 Webview",
         "Dashboard, Design, Kanban, Context, View 탭 shell",
         "Kanban 및 View 초기 기능",
+        "Activity Bar와 Primary Sidebar 기반 독립 agents Extension",
+        "Workspace Explorer Tree View와 로컬 Chat Webview View",
         "독립 확장 구현"
       ]
     }

@@ -16,7 +16,8 @@
       "id": "unresolved-items",
       "kind": "open-items",
       "content": [
-        "후속 Work Unit에서 산출물 읽기 모델과 Work Unit 조작 계약을 상세화한다."
+        "후속 Work Unit에서 산출물 읽기 모델과 Work Unit 조작 계약을 상세화한다.",
+        "agents Chat의 메시지 전송, backend 연결, 원격 세션과 스트리밍 계약은 후속 Intake에서 결정한다."
       ]
     }
   ],

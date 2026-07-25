@@ -5,7 +5,7 @@
     {
       "id": "requirements-basis-intake",
       "kind": "basis",
-      "content": "검증된 Intake와 extension-shell Work Unit",
+      "content": "검증된 Workspace 및 Agents Intake와 해당 Work Unit",
       "sourceRefs": [
         {
           "artifactType": "intake",
@@ -16,6 +16,16 @@
           "artifactType": "work-unit",
           "id": "agent-factory-workspace-extension-shell",
           "path": ".agent-factory/work-units/agent-factory-workspace-extension-shell"
+        },
+        {
+          "artifactType": "intake",
+          "id": "agent-factory-agents-left-region-port",
+          "path": ".agent-factory/intakes/agent-factory-agents-left-region-port"
+        },
+        {
+          "artifactType": "work-unit",
+          "id": "agent-factory-agents-left-region-port",
+          "path": ".agent-factory/work-units/agent-factory-agents-left-region-port"
         }
       ]
     }

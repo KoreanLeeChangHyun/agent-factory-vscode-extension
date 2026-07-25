@@ -6,12 +6,16 @@
       "id": "acceptance-shell",
       "kind": "acceptance-criterion",
       "content": [
-        "Extension Development Host에서 명령으로 Webview가 열린다.",
-        "5개 탭과 선택 헤더 및 바디가 표시된다.",
-        "탭 선택, 키보드 탐색, 선택 상태 보존이 검증된다.",
+        "workspace Extension Development Host에서 명령으로 Webview가 열린다.",
+        "workspace의 5개 탭과 선택 헤더 및 바디가 표시된다.",
+        "workspace 탭 선택, 키보드 탐색, 선택 상태 보존이 검증된다.",
         "Dashboard, Design, Context는 기능 없는 shell이다.",
-        "지원되는 VS Code 테마에서 탭 상태와 헤더 및 본문 표면이 구분되고 콘텐츠가 균형 잡힌 폭과 여백으로 표시된다.",
-        "Specification, 단위 테스트, 핵심 E2E 및 보안·테마·접근성 점검이 통과한다."
+        "지원되는 VS Code 테마에서 workspace 탭 상태와 헤더 및 본문 표면이 구분되고 콘텐츠가 균형 잡힌 폭과 여백으로 표시된다.",
+        "agents Extension Development Host에서 native Activity Bar container와 Explorer 및 Agents Chat View가 표시된다.",
+        "agents Explorer가 현재 Workspace Folder를 계층적으로 표시하고 폴더 확장을 지원한다.",
+        "agents Chat이 Main과 Workflow 전환, 로컬 세션 생성과 선택, 세션별 Composer draft 상태 보존을 지원한다.",
+        "agents Chat은 메시지 전송과 backend 연결을 노출하지 않는다.",
+        "Specification, 단위 테스트, 핵심 E2E 및 보안·테마·접근성·SVG 점검이 통과한다."
       ]
     }
   ],
