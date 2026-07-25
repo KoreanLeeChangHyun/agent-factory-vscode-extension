@@ -37,10 +37,19 @@
     {
       "id": "quality-check-extension-shell",
       "kind": "quality-check",
-      "content": "실행 전",
+      "content": "Specification, 구문, 단위, E2E 및 정적 보안 경계 검증 통과",
       "attributes": {
-        "status": "not-run",
-        "evidence": []
+        "status": "pass",
+        "executionTarget": {
+          "contractVersion": "1.0.0",
+          "invocationId": "codex-20260725-extension-shell-001",
+          "headCommit": "c437ee6fd3499260e09ca9bbfc76ec6bd59021f4",
+          "revision": 1,
+          "attempt": 1
+        },
+        "evidence": [
+          "blocks/evidence/shell-verification.txt"
+        ]
       }
     }
   ],

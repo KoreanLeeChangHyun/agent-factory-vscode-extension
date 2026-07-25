@@ -1,0 +1,29 @@
+Work Unit: agent-factory-workspace-extension-shell
+Execution target: c3ddeab5e2cc38453c24772e49762fa79b7e5d42
+
+TDD evidence
+- Initial command: npm run test:unit
+- Initial result: failed because ../../src/webviewShell did not exist.
+- Implementation followed the failing manifest/Webview shell tests.
+
+Specification validation
+- project-core: valid=true, profile=project-core@1.0.0, validationMode=full
+- agent-factory-workspace-requirements: valid=true, profile=requirements-specification@1.0.0, validationMode=full
+
+Dependency audit
+- Command: npm install
+- Result: added 38 packages, audited 39 packages, found 0 vulnerabilities
+
+Unit and syntax verification
+- Command: npm run check
+- Result: exit 0
+- Syntax: src/extension.js and src/webviewShell.js passed node --check
+- Unit tests: 5 passed, 0 failed
+
+VS Code E2E verification
+- Command: npm run test:e2e
+- VS Code: 1.129.1
+- Result: extension discovered, activated, command registered and executed; exit 0
+
+Additional compatibility observation
+- The same headless Extension Development Host workflow passed on VS Code 1.130.0.
