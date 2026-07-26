@@ -1,15 +1,15 @@
 {
   "schemaVersion": "4.0.0",
-  "documentVersion": "1.0.29",
+  "documentVersion": "1.0.30",
   "id": "agent-factory-workspace-kanban-authoring",
   "artifactType": "work-unit",
   "projectId": "agent-factory-workspace",
   "lifecycle": {
     "phase": "work-unit",
-    "status": "review"
+    "status": "done"
   },
   "createdAt": "2026-07-26T15:38:40+00:00",
-  "updatedAt": "2026-07-26T16:08:12+00:00",
+  "updatedAt": "2026-07-26T16:09:59+00:00",
   "language": "ko",
   "theme": "default",
   "provenance": {
