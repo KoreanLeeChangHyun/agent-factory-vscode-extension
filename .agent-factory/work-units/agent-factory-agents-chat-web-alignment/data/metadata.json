@@ -1,6 +1,6 @@
 {
   "schemaVersion": "4.0.0",
-  "documentVersion": "1.0.33",
+  "documentVersion": "1.0.34",
   "id": "agent-factory-agents-chat-web-alignment",
   "artifactType": "work-unit",
   "projectId": "agent-factory-workspace",
@@ -9,7 +9,7 @@
     "status": "done"
   },
   "createdAt": "2026-07-26T14:51:02+00:00",
-  "updatedAt": "2026-07-26T15:39:39+00:00",
+  "updatedAt": "2026-07-26T15:50:16+00:00",
   "language": "ko",
   "theme": "default",
   "provenance": {

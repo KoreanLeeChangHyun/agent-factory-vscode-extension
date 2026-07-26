@@ -27,6 +27,29 @@
           "linux-x64 VSIX는 135986859 bytes이므로 내부 배포 채널의 크기 정책은 배포 결정 전에 확인해야 한다."
         ]
       }
+    },
+    {
+      "id": "INTEGRATION-E1BA1F427E7147AB",
+      "kind": "integration-result",
+      "content": {
+        "humanDecision": "approved",
+        "operationResult": "already-merged",
+        "relationship": "already-merged",
+        "repository": "/home/deus/workspace/agent-factory/vscode-extension",
+        "sourceBranch": "work-unit/agent-factory-agents-chat-web-alignment",
+        "sourceCommit": "cf7507934bd547c9b3232955438afd0a28a2bf22",
+        "strategy": "no-ff",
+        "targetAfterCommit": "cd8ddf190824f7668bf162ff83ace19a46c1bcb5",
+        "targetBeforeCommit": "cd8ddf190824f7668bf162ff83ace19a46c1bcb5",
+        "targetBranch": "main",
+        "workUnitId": "agent-factory-agents-chat-web-alignment",
+        "worktreePath": "/home/deus/workspace/agent-factory/vscode-extension/.agent-factory/worktree/agent-factory-agents-chat-web-alignment",
+        "receiptSha256": "e1ba1f427e7147ab17dd84de2bc05037f938ad2f241ee971094b714434ca8be2"
+      },
+      "attributes": {
+        "status": "already-merged"
+      },
+      "blockRef": "blocks/evidence/agents-chat-web-alignment-integration.json"
     }
   ],
   "subsections": []
