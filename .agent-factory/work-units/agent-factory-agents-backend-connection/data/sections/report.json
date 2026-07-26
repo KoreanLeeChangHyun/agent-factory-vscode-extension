@@ -7,7 +7,7 @@
       "kind": "report-result",
       "content": "실행 전",
       "attributes": {
-        "verificationResult": "not-run",
+        "verificationResult": "pending",
         "evidence": []
       }
     }

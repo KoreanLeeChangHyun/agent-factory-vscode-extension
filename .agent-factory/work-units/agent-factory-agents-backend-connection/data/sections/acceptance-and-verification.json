@@ -46,7 +46,7 @@
       "kind": "quality-check",
       "content": "실행 전",
       "attributes": {
-        "status": "not-run",
+        "status": "planned",
         "evidence": []
       }
     }

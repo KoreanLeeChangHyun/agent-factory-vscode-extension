@@ -49,3 +49,16 @@ test("Activity Bar icon is a monochrome 24px SVG asset", () => {
   assert.doesNotMatch(icon, /#[0-9a-f]{3,8}/i);
 });
 
+test("manifest packages the pinned linux-x64 Codex payload without a web dependency", () => {
+  assert.equal(
+    manifest.dependencies["@openai/codex-linux-x64"],
+    "npm:@openai/codex@0.145.0-linux-x64",
+  );
+  assert.equal(manifest.devDependencies["@vscode/vsce"], "3.9.2");
+  assert.equal(
+    manifest.scripts["package:linux-x64"],
+    "vsce package --allow-missing-repository --target linux-x64 --out dist/agent-factory-agents-linux-x64.vsix",
+  );
+  assert.deepEqual(manifest.extensionKind, ["workspace"]);
+  assert.doesNotMatch(JSON.stringify(manifest), /\.\.\/web/);
+});

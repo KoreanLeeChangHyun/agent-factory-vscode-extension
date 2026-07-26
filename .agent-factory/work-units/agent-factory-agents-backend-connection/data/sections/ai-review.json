@@ -23,8 +23,8 @@
       "kind": "ai-review-result",
       "content": "실행 전",
       "attributes": {
-        "result": "not-run",
-        "checklistResult": "not-run"
+        "result": "pending",
+        "checklistResult": "pending"
       }
     }
   ],
