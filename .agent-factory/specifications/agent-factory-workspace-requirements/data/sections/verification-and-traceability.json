@@ -21,9 +21,11 @@
       "id": "kanban-operations-verification",
       "kind": "verification",
       "content": [
-        "agent-factory-workspace-kanban-viewer Intake와 네 개의 Kanban Work Unit basis 추적성 검증",
-        "reader, message contract, 6개 상태 board, filter, watcher와 reconnect 단위·통합 검증",
-        "manager create·edit·transition과 capability·drag·keyboard negative path 검증",
+        "agent-factory-workspace-kanban-viewer Intake와 Kanban Work Unit basis 추적성 검증",
+        "reader, message contract, 6개 헤더 보드 선택기, 단일 선택 보드, count, watcher와 reconnect 단위·통합 검증",
+        "검색·필터 DOM, 상태와 처리 로직 부재 검증",
+        "full-height board, hidden horizontal selector scroll과 independent hidden vertical card scroll viewport 검증",
+        "manager transition, capability, header drop target, drag·keyboard negative path 검증",
         "Goal, checkpoint, worktree, execution progress·failure·recovery 통합 검증",
         "Human review, rework, integration receipt와 PR 승인·실패 경계 검증",
         "VS Code Extension Host E2E와 Human Kanban workflow 검토"

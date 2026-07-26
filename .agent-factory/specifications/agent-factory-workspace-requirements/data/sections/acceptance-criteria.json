@@ -28,12 +28,14 @@
       "id": "acceptance-kanban-operations",
       "kind": "acceptance-criterion",
       "content": [
-        "canonical Work Unit fixture가 정확한 6개 lifecycle 칼럼에 표시되고 filter, count, refresh와 reconnect가 동작한다.",
-        "허용된 target만 dragover와 Move 메뉴에서 활성화되며 manager가 성공한 뒤 카드 위치가 확정된다.",
-        "생성·편집·상태 변경은 manager를 통과하고 실패 시 부분 canonical 변경이 남지 않는다.",
+        "6개 lifecycle 보드 선택기가 헤더에서 가능한 폭에 한눈에 표시되고 선택한 보드 하나만 본문에 표시된다.",
+        "좁은 폭에서 헤더 선택기는 숨김 가로 스크롤을 제공하고 선택 보드는 남은 높이를 채우며 카드 목록은 숨김 세로 스크롤을 제공한다.",
+        "제목·id 검색과 필터 UI 및 저장 상태가 존재하지 않으며 count, refresh와 reconnect는 동작한다.",
+        "허용된 헤더 보드 target만 dragover와 Move 메뉴에서 활성화되며 manager가 성공한 뒤 카드 위치가 확정된다.",
+        "상태 변경은 manager를 통과하고 실패 시 부분 canonical 변경이 남지 않는다.",
         "실행은 matching Goal, checkpoint와 dedicated worktree를 사용하고 진행·오류·복구 상태를 표시한다.",
         "Human review, rework, integration과 PR은 각각 별도 확인과 결과 evidence를 가진다.",
-        "단위, manager·Git 통합, 핵심 VS Code E2E, 접근성·테마·보안과 Human 검토가 통과한다."
+        "단위, manager 통합, viewport E2E, 접근성·테마·보안과 Human 검토가 통과한다."
       ]
     },
     {

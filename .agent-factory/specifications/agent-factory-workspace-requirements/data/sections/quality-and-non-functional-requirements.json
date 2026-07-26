@@ -27,6 +27,9 @@
         "Webview는 파일시스템, manager, Codex, Git 또는 GitHub 명령을 직접 실행하지 않는다.",
         "capability preflight와 실제 command는 확장 호스트가 현재 canonical 상태를 기준으로 각각 검증한다.",
         "지원하지 않는 schema, unsafe path, symlink, stale 상태와 command failure는 mutation 없이 근거 있는 오류를 표시한다.",
+        "보드 선택기는 가능한 폭에서 한눈에 보이고 좁은 폭에서만 가로 스크롤되며 시각적 스크롤바를 숨긴다.",
+        "선택 보드는 남은 panel 높이를 채우고 카드 목록이 독립 세로 스크롤되며 시각적 스크롤바를 숨긴다.",
+        "숨긴 스크롤바와 무관하게 keyboard focus, 선택 상태, accessible name과 wheel·trackpad scrolling을 유지한다.",
         "dragging movement에는 click·tap과 keyboard로 수행하는 동등한 Move 대체 조작을 제공한다.",
         "장시간 action은 request identity, pending 상태, 중복 방지, bounded retry와 authoritative refresh를 사용한다.",
         "강제 Git 작업, dirty worktree 제거, 자동 merge와 자동 PR promotion을 제공하지 않는다."

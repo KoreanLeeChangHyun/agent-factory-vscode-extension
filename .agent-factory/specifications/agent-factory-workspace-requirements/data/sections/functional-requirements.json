@@ -24,12 +24,17 @@
       "id": "functional-kanban-operations",
       "kind": "functional-requirement",
       "content": [
-        "workspace Kanban은 canonical Work Unit v4를 backlog, ready, working, review, done, blocked 칼럼에 표시한다.",
+        "workspace Kanban은 canonical Work Unit v4를 backlog, ready, working, review, done, blocked 상태 보드로 분류한다.",
+        "Kanban 선택 헤더는 6개 상태 보드 선택기를 가능한 폭에서 동일 너비로 한눈에 표시하고 선택 상태를 보존한다.",
+        "헤더 폭이 부족하면 보드 선택기만 가로 스크롤되며 스크롤바는 표시하지 않는다.",
+        "본문은 선택한 상태 보드 하나만 전체 가로 폭과 남은 세로 높이로 표시한다.",
+        "선택 보드의 카드 목록은 독립적으로 세로 스크롤되며 스크롤바는 표시하지 않는다.",
+        "Kanban은 제목 또는 id 검색과 필터 UI 및 필터 상태를 제공하지 않는다.",
         "카드는 제목, id, updatedAt과 존재하는 실행·review·Human 승인·integration·PR 상태를 표시한다.",
-        "보드는 제목·id 필터, 칼럼별 항목 수, filesystem 변경 자동 갱신과 Webview 재연결 복원을 제공한다.",
+        "보드는 상태별 항목 수, filesystem 변경 자동 갱신과 Webview 재연결 복원을 제공한다.",
         "확장 호스트는 카드별 target lifecycle capability와 거절 사유를 계산한다.",
-        "카드는 허용된 target으로 drag and drop할 수 있고 동일한 click, tap, keyboard Move 작업을 제공한다.",
-        "Work Unit 생성·편집·상태 변경은 canonical manager 명령을 통해 수행한다.",
+        "허용된 헤더 보드 선택기는 drag and drop target으로 동작하고 동일한 click, tap, keyboard Move 작업을 제공한다.",
+        "Work Unit 상태 변경은 canonical manager 명령을 통해 수행한다.",
         "Work Unit 실행은 Goal, checkpoint, dedicated worktree와 execution state 계약을 통해 수행한다.",
         "Human review 승인·rework, Git integration과 PR 생성은 각각 독립적인 Human 확인을 요구한다."
       ]
