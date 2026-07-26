@@ -19,8 +19,7 @@
       "content": "AI review 대기",
       "attributes": {
         "result": "pending",
-        "checklistResult": "pending",
-        "evidence": []
+        "checklistResult": "pending"
       }
     }
   ],

@@ -15,6 +15,38 @@
         "branch": "work-unit/agent-factory-workspace-kanban-fixture-stability",
         "worktreePath": "/home/deus/workspace/agent-factory/vscode-extension/.agent-factory/worktree/agent-factory-workspace-kanban-fixture-stability"
       }
+    },
+    {
+      "id": "EXECUTION-STATE-001",
+      "kind": "execution-state",
+      "content": {
+        "contractVersion": "1.0.0",
+        "state": "running",
+        "subject": {
+          "algorithm": "gitCommit",
+          "digest": "6884aa8bb59eb60ed24b804a84adfe7bdce05c9e"
+        },
+        "currentRevision": 1,
+        "currentAttempt": 1,
+        "invocationId": "codex-20260727-kanban-fixture-stability-001",
+        "invocationChain": [
+          "codex-20260727-kanban-fixture-stability-001"
+        ],
+        "history": [],
+        "progress": {
+          "completedSteps": [],
+          "pendingStep": null,
+          "lastVerifiedHead": "6884aa8bb59eb60ed24b804a84adfe7bdce05c9e",
+          "checkpoints": [],
+          "retry": {}
+        },
+        "recovery": {
+          "status": "running",
+          "ownerInvocationId": "codex-20260727-kanban-fixture-stability-001",
+          "blockerId": null,
+          "evidence": null
+        }
+      }
     }
   ],
   "subsections": []
