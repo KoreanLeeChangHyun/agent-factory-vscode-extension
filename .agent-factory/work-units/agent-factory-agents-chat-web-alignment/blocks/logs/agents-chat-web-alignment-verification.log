@@ -1,0 +1,38 @@
+Agent Factory Work Unit: agent-factory-agents-chat-web-alignment
+Execution branch: work-unit/agent-factory-agents-chat-web-alignment
+Implementation commit: 9afc1aec361c05f3c1f7ced5ccb337d0b04c8a8e
+
+TDD
+- Before implementation: node --test test/unit/chatView.test.js
+  Result: 7 tests, 3 pass, 4 fail.
+  Failing contracts: Workspace geometry, composer hierarchy, message turns, keyboard/IME behavior.
+- After implementation: node --test test/unit/chatView.test.js
+  Result: 7 tests, 7 pass, 0 fail.
+
+Automated verification
+- npm run check
+  Result: syntax checks passed; 23 unit tests passed; 1 integration test passed.
+- Initial npm run test:e2e
+  Result: exited 1 before Extension Host launch because @vscode/test-electron was absent in the linked worktree.
+  Recovery: recorded as transient retry, then ran npm ci from agents/package-lock.json.
+- npm ci
+  Result: 310 packages installed; audit reported 0 vulnerabilities.
+- npm run test:e2e
+  Result: VS Code 1.129.1 downloaded and Extension Host flow exited 0.
+- npm run package:linux-x64
+  Result: linux-x64 VSIX packaged; 19 files; 129.69 MB.
+  Warning retained for Human review: LICENSE file not found.
+- npm run verify:vsix
+  Result: pass; fileCount 19; bundled binary reports codex-cli 0.145.0.
+  Archive: agents/dist/agent-factory-agents-linux-x64.vsix
+  Archive size: 135986859 bytes.
+- git diff --check
+  Result: pass.
+
+Scope and source checks
+- Changed product source: agents/src/chatView.js.
+- Changed tests: agents/test/unit/chatView.test.js and agents/test/suite/index.js.
+- Web and Workspace source repositories were read-only evidence and were not modified.
+- Existing chat.ready, chat.submit and chat.cancel message types remain present.
+- Touched icon controls use inline SVG with aria-hidden="true" and focusable="false".
+- No Web theme variables, Web runtime imports, raster icons, icon fonts, or icon-like Unicode glyphs were added.

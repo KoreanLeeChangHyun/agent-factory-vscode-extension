@@ -3,7 +3,11 @@
 const assert = require("node:assert/strict");
 const test = require("node:test");
 
-const { createChatViewHtml } = require("../../src/chatView");
+const {
+  createChatViewHtml,
+  groupMessagesIntoTurns,
+  shouldSubmitComposerKey,
+} = require("../../src/chatView");
 
 function render() {
   return createChatViewHtml({
@@ -62,4 +66,100 @@ test("Chat view enforces CSP and exposes an allowlisted Extension Host boundary"
   assert.match(html, /window\.addEventListener\("message"/);
   assert.match(html, /textContent/);
   assert.doesNotMatch(html, /\.innerHTML\s*=/);
+});
+
+test("Chat view aligns mode tabs and the session header with Workspace geometry", () => {
+  const html = render();
+
+  assert.match(html, /body\s*\{[^}]*margin:\s*0;[^}]*padding:\s*0;/s);
+  assert.match(html, /\.mode-tabs\s*\{[^}]*padding:\s*0;/s);
+  assert.match(html, /\.mode-tab\s*\{[^}]*position:\s*relative;/s);
+  assert.match(html, /\.mode-tab\s*\{[^}]*min-height:\s*34px;/s);
+  assert.match(
+    html,
+    /\.mode-tab-indicator\s*\{[^}]*right:\s*8px;[^}]*bottom:\s*0;[^}]*left:\s*8px;[^}]*height:\s*2px;/s,
+  );
+  assert.match(html, /class="mode-tab-indicator" aria-hidden="true"/);
+  assert.match(html, /\.session-header\s*\{[^}]*min-height:\s*44px;/s);
+  assert.match(html, /\.mode-panel\s*\{[^}]*padding:\s*0;/s);
+});
+
+test("Chat view renders one Web-aligned composer card with a transparent input and bottom action", () => {
+  const html = render();
+
+  assert.match(html, /\.composer-region\s*\{[^}]*padding:\s*8px 0 0;/s);
+  assert.match(
+    html,
+    /\.composer-card\s*\{[^}]*position:\s*relative;[^}]*min-height:\s*72px;[^}]*padding:\s*12px;[^}]*border:\s*1px solid/s,
+  );
+  assert.match(
+    html,
+    /\.composer\s*\{[^}]*max-height:\s*144px;[^}]*padding:\s*0 44px 32px 0;[^}]*border:\s*0;[^}]*background:\s*transparent;/s,
+  );
+  assert.match(
+    html,
+    /\.composer-action\s*\{[^}]*position:\s*absolute;[^}]*right:\s*12px;[^}]*bottom:\s*12px;[^}]*width:\s*28px;[^}]*height:\s*28px;/s,
+  );
+  assert.match(
+    html,
+    /class="composer-card"[\s\S]*data-composer[\s\S]*data-send[\s\S]*data-cancel[\s\S]*<\/div>\s*<div class="session-status"/,
+  );
+  assert.match(html, /sendButton\.hidden = running/);
+  assert.match(html, /cancelButton\.hidden = !running/);
+  assert.doesNotMatch(html, /--af-color-|frontend\/src|agent-factory\/web/);
+});
+
+test("Chat view groups messages into turns with user cards and transparent assistant output", () => {
+  const messages = [
+    { role: "assistant", text: "opening" },
+    { role: "user", text: "one" },
+    { role: "assistant", text: "two" },
+    { role: "assistant", text: "follow-up" },
+    { role: "user", text: "three" },
+    { role: "assistant", text: "four" },
+  ];
+
+  assert.deepEqual(
+    groupMessagesIntoTurns(messages).map((turn) =>
+      turn.map((message) => message.text),
+    ),
+    [["opening"], ["one", "two"], ["follow-up"], ["three", "four"]],
+  );
+
+  const html = render();
+  assert.match(html, /turn\.className = "message-turn"/);
+  assert.match(html, /element\.className = "message message-" \+ item\.role/);
+  assert.match(
+    html,
+    /\.message-user\s*\{[^}]*padding:\s*7px 9px;[^}]*border:\s*1px solid[^}]*background:/s,
+  );
+  assert.match(
+    html,
+    /\.message-assistant\s*\{[^}]*padding:\s*7px 0;[^}]*border:\s*0;[^}]*background:\s*transparent;/s,
+  );
+});
+
+test("Chat composer submits Enter and existing shortcuts while preserving Shift+Enter and IME composition", () => {
+  assert.equal(shouldSubmitComposerKey({ key: "Enter" }), true);
+  assert.equal(
+    shouldSubmitComposerKey({ key: "Enter", ctrlKey: true }),
+    true,
+  );
+  assert.equal(
+    shouldSubmitComposerKey({ key: "Enter", metaKey: true }),
+    true,
+  );
+  assert.equal(
+    shouldSubmitComposerKey({ key: "Enter", shiftKey: true }),
+    false,
+  );
+  assert.equal(
+    shouldSubmitComposerKey({ key: "Enter", isComposing: true }),
+    false,
+  );
+  assert.equal(shouldSubmitComposerKey({ key: "a" }), false);
+
+  const html = render();
+  assert.match(html, /if \(!shouldSubmitComposerKey\(event\)\) return;/);
+  assert.match(html, /event\.preventDefault\(\);\s*submit\(\);/s);
 });

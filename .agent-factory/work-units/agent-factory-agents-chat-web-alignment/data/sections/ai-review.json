@@ -17,10 +17,23 @@
     {
       "id": "AI-REVIEW-STATUS",
       "kind": "ai-review-result",
-      "content": "아직 실행하지 않음",
+      "content": "AI checklist 전체 점검 통과. Workspace 34px·44px·2px와 8px inset geometry, Web composer와 message turn hierarchy, Enter·Shift+Enter·기존 shortcut·IME 경계를 확인했다. Session -> DOM -> State, chat.ready·chat.submit·chat.cancel, CSP, VS Code theme token, inline SVG와 Web runtime 독립을 보존했고 차단 결함을 발견하지 못했다.",
       "attributes": {
-        "result": "not-run",
-        "checklistResult": "not-run"
+        "result": "pass",
+        "checklistResult": "pass",
+        "executionTarget": {
+          "contractVersion": "1.0.0",
+          "invocationId": "019f9d6b-06db-74a1-8adf-905d76ff2f16",
+          "headCommit": "e890dd81ccacaf8fe9f0996b337648245b1f3fe9",
+          "revision": 1,
+          "attempt": 1
+        },
+        "evidence": [
+          "npm run check: 23 unit 및 1 integration pass",
+          "npm run test:e2e: VS Code 1.129.1 Extension Host exit 0",
+          "npm run verify:vsix: fileCount 19, codex-cli 0.145.0",
+          "git diff --check 및 SVG·Web dependency source boundary 검사 pass"
+        ]
       }
     }
   ],

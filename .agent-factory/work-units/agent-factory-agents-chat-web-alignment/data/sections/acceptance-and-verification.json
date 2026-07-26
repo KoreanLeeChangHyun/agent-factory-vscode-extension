@@ -39,10 +39,19 @@
     {
       "id": "QUALITY-STATUS",
       "kind": "quality-check",
-      "content": "아직 실행하지 않음",
+      "content": "syntax, unit, integration, Extension Host E2E, linux-x64 packaging, VSIX contents와 source boundary 검증 통과",
       "attributes": {
-        "status": "not-run",
-        "evidence": []
+        "status": "pass",
+        "executionTarget": {
+          "contractVersion": "1.0.0",
+          "invocationId": "019f9d6b-06db-74a1-8adf-905d76ff2f16",
+          "headCommit": "e890dd81ccacaf8fe9f0996b337648245b1f3fe9",
+          "revision": 1,
+          "attempt": 1
+        },
+        "evidence": [
+          "blocks/logs/agents-chat-web-alignment-verification.log"
+        ]
       }
     }
   ],

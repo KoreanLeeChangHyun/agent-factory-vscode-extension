@@ -1,3 +1,18 @@
 {
-  "blocks": []
+  "blocks": [
+    {
+      "path": "blocks/evidence/worktree-inspect.json",
+      "mediaType": "application/json",
+      "description": "Canonical clean worktree inspect receipt before evidence registration",
+      "sha256": "322cbc67600a6fb32dfcc440af04be31ff6abaf0e42617a85d2c2f60b081d75d",
+      "sizeBytes": 626
+    },
+    {
+      "path": "blocks/logs/agents-chat-web-alignment-verification.log",
+      "mediaType": "text/plain",
+      "description": "Agents chat Web alignment implementation and verification evidence",
+      "sha256": "9aa2d348f2845dd76c33618dbeeb9b967396d1ee15bb232b34d52cd88426052a",
+      "sizeBytes": 1905
+    }
+  ]
 }
