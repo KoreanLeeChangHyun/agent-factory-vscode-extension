@@ -1,15 +1,15 @@
 {
   "schemaVersion": "4.0.0",
-  "documentVersion": "1.0.13",
+  "documentVersion": "1.0.21",
   "id": "agent-factory-workspace-kanban-fixture-stability",
   "artifactType": "work-unit",
   "projectId": "agent-factory-workspace",
   "lifecycle": {
     "phase": "work-unit",
-    "status": "working"
+    "status": "review"
   },
   "createdAt": "2026-07-26T16:23:45+00:00",
-  "updatedAt": "2026-07-26T16:26:30+00:00",
+  "updatedAt": "2026-07-26T16:32:21+00:00",
   "language": "ko",
   "theme": "default",
   "provenance": {

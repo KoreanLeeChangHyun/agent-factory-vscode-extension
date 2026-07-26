@@ -21,7 +21,7 @@
       "kind": "execution-state",
       "content": {
         "contractVersion": "1.0.0",
-        "state": "running",
+        "state": "review",
         "subject": {
           "algorithm": "gitCommit",
           "digest": "6884aa8bb59eb60ed24b804a84adfe7bdce05c9e"
@@ -34,10 +34,19 @@
         ],
         "history": [],
         "progress": {
-          "completedSteps": [],
+          "completedSteps": [
+            "plan-kanban-fixture-stability"
+          ],
           "pendingStep": null,
-          "lastVerifiedHead": "6884aa8bb59eb60ed24b804a84adfe7bdce05c9e",
-          "checkpoints": [],
+          "lastVerifiedHead": "eac23c36e8c4f08d8a4f1d3c6543a79bcc8e77bd",
+          "checkpoints": [
+            {
+              "stepId": "plan-kanban-fixture-stability",
+              "state": "completed",
+              "headCommit": "eac23c36e8c4f08d8a4f1d3c6543a79bcc8e77bd",
+              "idempotencyKey": "kanban-fixture-stability-plan-complete-001"
+            }
+          ],
           "retry": {}
         },
         "recovery": {

@@ -1,3 +1,11 @@
 {
-  "blocks": []
+  "blocks": [
+    {
+      "path": "blocks/evidence/kanban-fixture-stability-verification.txt",
+      "mediaType": "text/plain",
+      "description": "mutable fixture 실패 재현과 self-contained manager fixture 검증 근거",
+      "sha256": "573f40bf7ff6e78886710f095a9652705eee668798c9e3e581569991eb4b1768",
+      "sizeBytes": 1353
+    }
+  ]
 }
