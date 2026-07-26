@@ -5,11 +5,20 @@
     {
       "id": "REPORT-RESULT-001",
       "kind": "report-result",
-      "content": "실행 보고 대기",
+      "content": "본문과 empty-state의 최대 폭 및 바깥 좌우 여백을 제거하고 5개 탭을 균등 전체 폭으로 정렬했다. 헤더와 본문 표면은 VS Code editor semantic theme token으로 정렬했다. 구현 커밋 189370ef75cde894f4edc1697aac4243870597f3. 자동 검증은 모두 통과했다. 최종 inspect 등록으로 최초 inspect에 없던 blocks/evidence/worktree-inspect.json만 추가됐고, 이미 변경 목록에 있던 blocks/index.json 및 report 경로만 갱신됐다. 남은 항목은 다크·라이트 및 넓고 좁은 화면의 Human 시각 검토다.",
       "attributes": {
-        "verificationResult": "pending",
-        "changedArtifacts": [],
-        "remainingRisks": []
+        "verificationResult": "pass",
+        "executionTarget": {
+          "contractVersion": "1.0.0",
+          "invocationId": "019f9c3f-3ce9-7c02-b376-8c18726defdd",
+          "headCommit": "dd70ff08cb19a9aed2271257dc52d1ead5b3d02a",
+          "revision": 1,
+          "attempt": 1
+        },
+        "evidence": [
+          "blocks/evidence/verification.txt",
+          "blocks/evidence/worktree-inspect.json"
+        ]
       }
     }
   ],

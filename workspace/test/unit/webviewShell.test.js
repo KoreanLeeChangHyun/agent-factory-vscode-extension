@@ -51,7 +51,7 @@ test("shell uses VS Code state APIs and keyboard tab navigation", () => {
   assert.match(html, /End/);
 });
 
-test("shell uses theme-aware hierarchy and balanced responsive spacing", () => {
+test("shell fills the available width with equal theme-aware tabs and surfaces", () => {
   const html = createWebviewHtml({
     cspSource: "vscode-webview://test",
     nonce: "test-nonce",
@@ -61,10 +61,18 @@ test("shell uses theme-aware hierarchy and balanced responsive spacing", () => {
   assert.match(html, /--vscode-tab-inactiveBackground/);
   assert.match(html, /--vscode-tab-hoverBackground/);
   assert.match(html, /--vscode-tab-activeBorder/);
-  assert.match(html, /--vscode-editorWidget-border/);
-  assert.match(html, /width:\s*min\(100%,\s*720px\)/);
-  assert.match(html, /margin-inline:\s*auto/);
-  assert.match(html, /padding:\s*clamp\(/);
+  assert.match(html, /\.workspace-tabs\s*\{[^}]*padding:\s*0;/s);
+  assert.match(html, /\.workspace-tab\s*\{[^}]*flex:\s*1 1 0;/s);
+  assert.match(html, /\.workspace-tab\s*\{[^}]*min-width:\s*0;/s);
+  assert.match(html, /\.workspace-panel\s*\{[^}]*padding:\s*0;/s);
+  assert.match(html, /\.empty-state\s*\{[^}]*width:\s*100%;/s);
+  assert.match(html, /\.empty-state\s*\{[^}]*min-height:\s*100%;/s);
+  assert.match(html, /\.empty-state\s*\{[^}]*margin:\s*0;/s);
+  assert.match(html, /\.selected-header\s*\{[^}]*--vscode-editor-background/s);
+  assert.match(html, /\.empty-state\s*\{[^}]*--vscode-editor-background/s);
+  assert.doesNotMatch(html, /--vscode-editorWidget-(?:background|border)/);
+  assert.doesNotMatch(html, /width:\s*min\(100%,\s*720px\)/);
+  assert.doesNotMatch(html, /margin-inline:\s*auto/);
   assert.doesNotMatch(
     html,
     /(?:color|background|border(?:-color)?):\s*(?:#[0-9a-f]{3,8}|rgba?\(|hsla?\()/i,
