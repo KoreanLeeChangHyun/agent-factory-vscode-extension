@@ -1,0 +1,16 @@
+{
+  "id": "execution",
+  "title": "Execution",
+  "content": [
+    {
+      "id": "execution-result-kanban-transitions",
+      "kind": "execution-result",
+      "content": "실행 전",
+      "attributes": {
+        "status": "pending",
+        "verificationResult": "pending"
+      }
+    }
+  ],
+  "subsections": []
+}

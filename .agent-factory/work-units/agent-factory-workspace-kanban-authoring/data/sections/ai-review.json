@@ -1,0 +1,30 @@
+{
+  "id": "ai-review",
+  "title": "AI Review",
+  "content": [
+    {
+      "id": "ai-checklist-kanban-transitions",
+      "kind": "ai-checklist",
+      "content": [
+        "Intake의 DnD/Action-only 최신 결정 준수",
+        "TDD 순서 준수",
+        "Webview-host-manager 소유권 분리",
+        "manager-only mutation과 shell 없는 argv allowlist",
+        "capability preflight와 actual manager 재검증",
+        "drag·Move 접근성 동등성",
+        "stale·failure·중복·보안 negative path 검증",
+        "생성·편집·실행·검토·병합·PR 범위 미구현"
+      ]
+    },
+    {
+      "id": "ai-review-result-kanban-transitions",
+      "kind": "ai-review-result",
+      "content": "AI 검토 대기",
+      "attributes": {
+        "result": "pending",
+        "checklistResult": "pending"
+      }
+    }
+  ],
+  "subsections": []
+}
