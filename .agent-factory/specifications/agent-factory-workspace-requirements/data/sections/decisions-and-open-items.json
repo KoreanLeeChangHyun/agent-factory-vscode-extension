@@ -49,6 +49,16 @@
         "생성·편집·실행·상태 변경·Human review·병합·PR을 단계별 Work Unit으로 구현한다.",
         "병합과 PR은 lifecycle 이동과 분리된 Human 승인 action이다."
       ]
+    },
+    {
+      "id": "agents-chat-web-alignment-decisions",
+      "kind": "decision-status",
+      "content": [
+        "Agents의 tab 및 selected session header hierarchy와 외부 gutter 경계는 Workspace 확장을 기준으로 정렬한다.",
+        "Agents의 composer 및 message history visual hierarchy는 Web 코드를 기준으로 VS Webview에 독립 구현한다.",
+        "Enter 전송, Shift+Enter 줄바꿈과 기존 Ctrl 또는 Cmd+Enter 전송을 함께 지원한다.",
+        "Web 전용 unsupported controls와 Web runtime dependency는 추가하지 않는다."
+      ]
     }
   ],
   "subsections": []

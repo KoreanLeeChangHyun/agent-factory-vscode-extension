@@ -33,6 +33,18 @@
         "Human review, rework, integration과 PR은 각각 별도 확인과 결과 evidence를 가진다.",
         "단위, manager·Git 통합, 핵심 VS Code E2E, 접근성·테마·보안과 Human 검토가 통과한다."
       ]
+    },
+    {
+      "id": "acceptance-agents-chat-web-alignment",
+      "kind": "acceptance-criterion",
+      "content": [
+        "Agents mode tabs, session header와 outer gutter가 Workspace 기준 hierarchy와 정합하게 표시된다.",
+        "Composer는 Web 기준의 card, transparent input과 bottom action hierarchy를 사용하되 unsupported controls를 노출하지 않는다.",
+        "User message는 card로, Assistant message는 transparent text로 동일 turn 아래 렌더링된다.",
+        "Enter, Shift+Enter, Ctrl 또는 Cmd+Enter와 IME composing negative path가 검증된다.",
+        "submit, cancel, reconnect, draft restore, CSP, session DOM ownership과 Web runtime 독립성이 유지된다.",
+        "단위, 통합, VS Code Extension Host E2E 및 linux-x64 VSIX contents 검증이 통과한다."
+      ]
     }
   ],
   "subsections": []

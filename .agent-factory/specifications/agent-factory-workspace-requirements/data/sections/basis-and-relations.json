@@ -66,6 +66,20 @@
           "path": ".agent-factory/intakes/agent-factory-workspace-kanban-viewer"
         }
       ]
+    },
+    {
+      "id": "agents-chat-web-alignment-basis",
+      "kind": "source-basis",
+      "content": {
+        "description": "Agents 채팅 입력창과 메시지 내역 정합성 요구사항은 canonical Intake agent-factory-agents-chat-web-alignment에서 정렬되었다."
+      },
+      "sourceRefs": [
+        {
+          "artifactType": "intake",
+          "id": "agent-factory-agents-chat-web-alignment",
+          "path": ".agent-factory/intakes/agent-factory-agents-chat-web-alignment"
+        }
+      ]
     }
   ],
   "subsections": []

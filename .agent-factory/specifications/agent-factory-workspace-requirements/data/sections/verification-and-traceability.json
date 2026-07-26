@@ -27,6 +27,18 @@
         "Human review, rework, integration receipt와 PR 승인·실패 경계 검증",
         "VS Code Extension Host E2E와 Human Kanban workflow 검토"
       ]
+    },
+    {
+      "id": "agents-chat-web-alignment-verification",
+      "kind": "verification",
+      "content": [
+        "agent-factory-agents-chat-web-alignment Intake와 Work Unit basis 추적성 검증",
+        "Workspace tab 및 header source와 Web composer 및 message source 대비 DOM·CSS source 검증",
+        "role turn rendering, composer action layout, keyboard 및 IME 단위 회귀 검증",
+        "기존 submit, cancel, reconnect, draft, session ownership, CSP와 SVG 단위·통합 검증",
+        "VS Code 1.129.x Extension Host E2E와 linux-x64 VSIX package 검증",
+        "Human 설치본 입력창·메시지 내역·탭·헤더 시각 검토"
+      ]
     }
   ],
   "subsections": []

@@ -30,6 +30,17 @@
         "Work Unit 실행은 Goal, checkpoint, dedicated worktree와 execution state 계약을 통해 수행한다.",
         "Human review 승인·rework, Git integration과 PR 생성은 각각 독립적인 Human 확인을 요구한다."
       ]
+    },
+    {
+      "id": "functional-agents-chat-web-alignment",
+      "kind": "functional-requirement",
+      "content": [
+        "Agents의 상단 mode tabs와 session header는 Workspace와 정합한 hierarchy 및 full-width outer surface를 제공한다.",
+        "Agents composer는 하나의 bordered surface 안에 입력면과 우하단 send 또는 cancel action을 소유한다.",
+        "Agents message history는 user와 assistant를 turn으로 묶고 role별 visual hierarchy를 구분한다.",
+        "Enter는 메시지를 전송하고 Shift+Enter는 줄바꿈을 입력하며 Ctrl 또는 Cmd+Enter 전송도 호환한다.",
+        "세션별 draft, messages, loading, status, error 및 backend request ownership을 보존한다."
+      ]
     }
   ],
   "subsections": []

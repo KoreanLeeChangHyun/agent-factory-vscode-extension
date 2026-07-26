@@ -31,6 +31,16 @@
         "장시간 action은 request identity, pending 상태, 중복 방지, bounded retry와 authoritative refresh를 사용한다.",
         "강제 Git 작업, dirty worktree 제거, 자동 merge와 자동 PR promotion을 제공하지 않는다."
       ]
+    },
+    {
+      "id": "quality-agents-chat-web-alignment",
+      "kind": "non-functional-requirement",
+      "content": [
+        "Agents 채팅 UI는 VS Code semantic theme token을 사용하고 모든 icon-like control은 inline SVG로 렌더링한다.",
+        "Webview는 Web source나 runtime을 import 또는 호출하지 않고 현재 Extension Host message allowlist를 유지한다.",
+        "좁은 sidebar에서도 input과 action이 겹치지 않으며 keyboard focus와 accessible name을 유지한다.",
+        "IME composing 중 Enter는 전송하지 않고 multiline 및 기존 submit shortcut 회귀를 방지한다."
+      ]
     }
   ],
   "subsections": []
