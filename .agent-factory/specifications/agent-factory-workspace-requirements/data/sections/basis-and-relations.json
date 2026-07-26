@@ -40,6 +40,18 @@
           "path": ".agent-factory/intakes/agent-factory-workspace-full-width-alignment"
         }
       ]
+    },
+    {
+      "id": "requirements-basis-agents-backend-intake",
+      "kind": "basis",
+      "content": "독립 VS Code Agents Codex 실행 백엔드 Intake",
+      "sourceRefs": [
+        {
+          "artifactType": "intake",
+          "id": "agent-factory-agents-backend-connection",
+          "path": ".agent-factory/intakes/agent-factory-agents-backend-connection"
+        }
+      ]
     }
   ],
   "subsections": []

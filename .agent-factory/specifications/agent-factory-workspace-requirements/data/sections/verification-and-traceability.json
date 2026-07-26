@@ -6,12 +6,14 @@
       "id": "agents-port-verification",
       "kind": "verification",
       "content": [
-        "agent-factory-agents-left-region-port Intake와 Work Unit 추적성 검증",
-        "manifest contribution 및 SVG icon 단위 검증",
+        "agent-factory-agents-left-region-port 및 agent-factory-agents-backend-connection Intake 추적성 검증",
+        "manifest contribution, linux-x64 VSIX target, 포함 Codex CLI와 SVG icon 단위 검증",
         "Explorer model과 Workspace Tree Provider 단위 검증",
-        "Chat CSP, 탭, 로컬 세션과 draft 상태 단위 검증",
-        "VS Code 1.129.x Extension Host에서 container와 Views 등록 E2E 검증",
-        "Human Activity Bar, Explorer와 Chat 상호작용 검토"
+        "Chat CSP, 탭, 세션 상태, Webview 메시지 허용 목록과 세션별 DOM 소유권 단위 검증",
+        "Codex exec JSONL parser, session id binding, resume, cancellation과 오류 정규화 단위 및 통합 검증",
+        "가짜 Codex 실행 파일을 사용한 Extension Host 메시지·스트림·취소·재연결 E2E 검증",
+        "VS Code 1.129.x Extension Host에서 container, Views와 설치된 패키지 경계 검증",
+        "Human Activity Bar, Explorer, Chat 송수신과 인증 오류 검토"
       ]
     }
   ],

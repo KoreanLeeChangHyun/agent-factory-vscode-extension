@@ -17,7 +17,9 @@
         "확장 호스트와 Webview 경계",
         "Activity Bar와 Primary Sidebar 기반 agents 독립 Extension",
         "Workspace Explorer Tree View",
-        "Main 및 Workflow 로컬 Chat Webview View",
+        "Main 및 Workflow Agents Chat Webview View",
+        "Agents Chat의 Codex 메시지 실행, 스트리밍, 취소, 재연결과 세션 복원",
+        "linux-x64 플랫폼별 VSIX와 포함된 Codex CLI 실행 경계",
         "검증 및 Human 승인 경계"
       ]
     }

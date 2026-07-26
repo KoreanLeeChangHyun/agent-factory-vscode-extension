@@ -12,10 +12,12 @@
         "본문 panel과 empty-state는 최대 폭 제한 및 바깥 좌우 여백 없이 에디터의 가용 가로 폭을 사용한다.",
         "키보드와 보조기술이 탭 구조와 선택 상태를 인식할 수 있어야 한다.",
         "Webview는 nonce 기반 CSP와 제한된 localResourceRoots를 사용한다.",
-        "Webview는 파일시스템 또는 프로세스 명령에 직접 접근하지 않는다.",
+        "Webview는 파일시스템, Codex 실행 파일 또는 프로세스 명령에 직접 접근하지 않는다.",
+        "Extension Host는 Webview 메시지를 허용 목록과 형식 검증 후 처리하고 Codex 프로세스 수명주기를 소유한다.",
         "계층형 Workspace 데이터는 native Tree View로 표시한다.",
         "모든 사용자 아이콘은 실제 SVG를 사용한다.",
-        "agents Chat의 로컬 상태는 vscode.getState와 vscode.setState로 보존한다."
+        "agents Chat의 UI 상태는 vscode.getState와 vscode.setState로 보존한다.",
+        "Codex 인증 비밀은 Webview 메시지나 로그에 노출하지 않는다."
       ]
     }
   ],
