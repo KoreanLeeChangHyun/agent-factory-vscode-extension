@@ -24,7 +24,7 @@
   },
   "scripts": {
     "check": "npm run check:syntax && npm run test:unit",
-    "check:syntax": "node --check src/extension.js && node --check src/kanbanController.js && node --check src/kanbanManager.js && node --check src/kanbanReader.js && node --check src/webviewShell.js",
+    "check:syntax": "node --check src/extension.js && node --check src/artifactController.js && node --check src/artifactManager.js && node --check src/artifactReader.js && node --check src/kanbanController.js && node --check src/kanbanManager.js && node --check src/kanbanReader.js && node --check src/webviewShell.js",
     "test:unit": "node --test test/unit/*.test.js",
     "test:manager": "node --test test/integration/*.test.js",
     "test:e2e": "node ./test/runTest.js"

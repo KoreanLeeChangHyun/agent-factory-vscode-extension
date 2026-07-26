@@ -5,15 +5,14 @@ const test = require("node:test");
 
 const { TAB_DEFINITIONS, createWebviewHtml } = require("../../src/webviewShell");
 
-test("shell defines the five approved tabs in order", () => {
+test("shell defines the four approved tabs in order", () => {
   assert.deepEqual(
     TAB_DEFINITIONS.map(({ id, label }) => ({ id, label })),
     [
       { id: "dashboard", label: "Dashboard" },
-      { id: "design", label: "Design" },
+      { id: "editor", label: "Editor" },
       { id: "kanban", label: "Kanban" },
       { id: "context", label: "Context" },
-      { id: "view", label: "View" },
     ],
   );
 });
@@ -25,8 +24,8 @@ test("shell renders an accessible tablist, selected header, and secure CSP", () 
   });
 
   assert.match(html, /role="tablist"/);
-  assert.equal((html.match(/data-tab-id="/g) || []).length, 5);
-  assert.equal((html.match(/data-panel-id="/g) || []).length, 5);
+  assert.equal((html.match(/data-tab-id="/g) || []).length, 4);
+  assert.equal((html.match(/data-panel-id="/g) || []).length, 4);
   assert.match(html, /aria-selected="true"[^>]*>Dashboard</);
   assert.match(html, /data-selected-title>Dashboard</);
   assert.match(
@@ -46,11 +45,31 @@ test("shell uses VS Code state APIs and keyboard tab navigation", () => {
   assert.match(html, /getState\(\)/);
   assert.match(html, /vscode\.setState\(state\)/);
   assert.match(html, /state\.selectedTab = tabId/);
+  assert.match(html, /\["design", "view"\]\.includes\(state\.selectedTab\)/);
   assert.match(html, /state\.kanbanFilter = filterInput\.value/);
   assert.match(html, /ArrowLeft/);
   assert.match(html, /ArrowRight/);
   assert.match(html, /Home/);
   assert.match(html, /End/);
+});
+
+test("Editor renders artifact navigation, structured fields, and read-only JSON", () => {
+  const html = createWebviewHtml({
+    cspSource: "vscode-webview://test",
+    nonce: "test-nonce",
+  });
+
+  assert.match(html, /data-editor-artifacts/);
+  assert.match(html, /data-editor-sections/);
+  assert.match(html, /data-editor-items/);
+  assert.match(html, /data-editor-fields/);
+  assert.match(html, /data-editor-preview/);
+  assert.match(html, /artifact\.ready/);
+  assert.match(html, /type:\s*"artifact\.select"/);
+  assert.match(html, /type:\s*"artifact\.saveItem"/);
+  assert.match(html, /requestArtifact\(\s*state\.selectedArtifactType,\s*state\.selectedArtifactId,\s*false/);
+  assert.match(html, /editorPreview\.textContent\s*=/);
+  assert.doesNotMatch(html, /editorPreview\.innerHTML\s*=/);
 });
 
 test("Kanban panel renders six columns, filter, counts, and transition controls", () => {

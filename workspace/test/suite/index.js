@@ -20,6 +20,10 @@ async function run() {
   const { readKanbanSnapshot } = require(
     join(extension.extensionPath, "src", "kanbanReader"),
   );
+  const {
+    readArtifactDocument,
+    readArtifactIndex,
+  } = require(join(extension.extensionPath, "src", "artifactReader"));
   const { createWebviewHtml } = require(
     join(extension.extensionPath, "src", "webviewShell"),
   );
@@ -51,6 +55,31 @@ async function run() {
   assert.equal((html.match(/data-kanban-column="/g) || []).length, 6);
   assert.match(html, /data-kanban-filter/);
   assert.match(html, /kanban\.snapshot/);
+  assert.deepEqual(
+    (html.match(/data-tab-id="(?:dashboard|editor|kanban|context)"/g) || [])
+      .map((entry) => entry.match(/"([^"]+)"/)[1]),
+    ["dashboard", "editor", "kanban", "context"],
+  );
+  assert.match(html, /data-editor-artifacts/);
+  assert.match(html, /artifact\.saveItem/);
+
+  const artifactIndex = await readArtifactIndex(
+    join(extension.extensionPath, ".."),
+  );
+  assert.ok(
+    artifactIndex.artifacts.some(
+      ({ artifactType, id }) =>
+        artifactType === "intake" && id === "agent-factory-workspace-editor",
+    ),
+    "canonical Editor Intake is discoverable",
+  );
+  const editorIntake = await readArtifactDocument(
+    join(extension.extensionPath, ".."),
+    "intake",
+    "agent-factory-workspace-editor",
+  );
+  assert.ok(editorIntake.sections.length > 0);
+  assert.equal(editorIntake.preview.metadata.artifactType, "intake");
 
   const commands = await vscode.commands.getCommands(true);
   assert.ok(commands.includes("agentFactoryWorkspace.open"));

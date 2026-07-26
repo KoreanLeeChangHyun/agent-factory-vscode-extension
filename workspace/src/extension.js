@@ -3,6 +3,7 @@
 const { randomBytes } = require("node:crypto");
 const vscode = require("vscode");
 
+const { createArtifactController } = require("./artifactController");
 const { createKanbanController } = require("./kanbanController");
 const { createWorkUnitTransitionRunner } = require("./kanbanManager");
 const { createWebviewHtml } = require("./webviewShell");
@@ -12,6 +13,7 @@ const VIEW_TYPE = "agentFactoryWorkspace.workspace";
 
 let workspacePanel;
 let kanbanController;
+let artifactController;
 
 function openWorkspacePanel() {
   if (workspacePanel) {
@@ -42,10 +44,17 @@ function openWorkspacePanel() {
     projectRoot,
     runTransition: createWorkUnitTransitionRunner(),
   });
+  artifactController = createArtifactController({
+    vscode,
+    panel: workspacePanel,
+    projectRoot,
+  });
 
   workspacePanel.onDidDispose(() => {
     kanbanController?.dispose();
     kanbanController = undefined;
+    artifactController?.dispose();
+    artifactController = undefined;
     workspacePanel = undefined;
   });
 
@@ -61,6 +70,8 @@ function activate(context) {
 function deactivate() {
   kanbanController?.dispose();
   kanbanController = undefined;
+  artifactController?.dispose();
+  artifactController = undefined;
   workspacePanel?.dispose();
   workspacePanel = undefined;
 }

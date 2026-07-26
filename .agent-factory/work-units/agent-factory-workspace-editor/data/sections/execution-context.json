@@ -15,6 +15,38 @@
         "branch": "work-unit/agent-factory-workspace-editor",
         "worktreePath": "/home/deus/workspace/agent-factory/vscode-extension/.agent-factory/worktree/agent-factory-workspace-editor"
       }
+    },
+    {
+      "id": "EXECUTION-STATE-001",
+      "kind": "execution-state",
+      "content": {
+        "contractVersion": "1.0.0",
+        "state": "running",
+        "subject": {
+          "algorithm": "gitCommit",
+          "digest": "bc1d92bcc8abac81bf0ba75a5a5af5919ac24a5d"
+        },
+        "currentRevision": 1,
+        "currentAttempt": 1,
+        "invocationId": "4e4326d1-fda7-4a5a-bcbe-de42d95e83c2",
+        "invocationChain": [
+          "4e4326d1-fda7-4a5a-bcbe-de42d95e83c2"
+        ],
+        "history": [],
+        "progress": {
+          "completedSteps": [],
+          "pendingStep": null,
+          "lastVerifiedHead": "bc1d92bcc8abac81bf0ba75a5a5af5919ac24a5d",
+          "checkpoints": [],
+          "retry": {}
+        },
+        "recovery": {
+          "status": "running",
+          "ownerInvocationId": "4e4326d1-fda7-4a5a-bcbe-de42d95e83c2",
+          "blockerId": null,
+          "evidence": null
+        }
+      }
     }
   ],
   "subsections": []

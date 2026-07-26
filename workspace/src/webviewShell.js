@@ -7,9 +7,9 @@ const TAB_DEFINITIONS = Object.freeze([
     description: "Dashboard 기능은 후속 Work Unit에서 구현됩니다.",
   },
   {
-    id: "design",
-    label: "Design",
-    description: "Design 기능은 후속 Work Unit에서 구현됩니다.",
+    id: "editor",
+    label: "Editor",
+    description: "Canonical Agent Factory artifact editor",
   },
   {
     id: "kanban",
@@ -20,11 +20,6 @@ const TAB_DEFINITIONS = Object.freeze([
     id: "context",
     label: "Context",
     description: "Context 기능은 후속 Work Unit에서 구현됩니다.",
-  },
-  {
-    id: "view",
-    label: "View",
-    description: "Agent Factory 산출물 열람은 후속 Work Unit에서 구현됩니다.",
   },
 ]);
 
@@ -71,9 +66,9 @@ function createWebviewHtml({ cspSource, nonce }) {
 
   const panels = TAB_DEFINITIONS.map((definition, index) => {
     const { id, label, description } = definition;
-    const content =
-      id === "kanban"
-        ? `
+    let content;
+    if (id === "kanban") {
+      content = `
         <div class="kanban-workspace" aria-busy="true">
           <div class="kanban-toolbar">
             <label class="kanban-filter-label">
@@ -93,12 +88,38 @@ function createWebviewHtml({ cspSource, nonce }) {
           <div class="kanban-board" aria-label="Work Unit lifecycle board">
             ${kanbanColumns}
           </div>
-        </div>`
-        : `
+        </div>`;
+    } else if (id === "editor") {
+      content = `
+        <div class="artifact-editor" aria-busy="true">
+          <aside class="artifact-browser" aria-label="Artifact browser">
+            <div class="artifact-browser-header">
+              <strong>Artifacts</strong>
+              <button class="secondary-button" type="button" data-editor-refresh>새로 고침</button>
+            </div>
+            <div class="artifact-list" data-editor-artifacts></div>
+            <div class="section-list" data-editor-sections></div>
+            <div class="item-list" data-editor-items></div>
+          </aside>
+          <section class="artifact-detail" aria-label="Artifact editor">
+            <div class="artifact-editor-status" data-editor-status role="status" aria-live="polite">
+              artifact를 선택하세요.
+            </div>
+            <div class="artifact-editor-error" data-editor-error role="alert" hidden></div>
+            <div class="artifact-fields" data-editor-fields></div>
+            <div class="artifact-preview-shell">
+              <h2>Read-only JSON</h2>
+              <pre class="artifact-preview" data-editor-preview tabindex="0"></pre>
+            </div>
+          </section>
+        </div>`;
+    } else {
+      content = `
         <div class="empty-state">
           <h2>${label}</h2>
           <p>${description}</p>
         </div>`;
+    }
 
     return `
       <section
@@ -253,6 +274,154 @@ function createWebviewHtml({ cspSource, nonce }) {
         margin: 0;
         color: var(--vscode-descriptionForeground);
         line-height: 1.5;
+      }
+
+      .artifact-editor {
+        display: grid;
+        min-height: calc(100vh - 78px);
+        grid-template-columns: minmax(220px, 28%) minmax(0, 1fr);
+      }
+
+      .artifact-browser {
+        min-width: 0;
+        padding: 12px;
+        overflow: auto;
+        border-right: 1px solid var(--vscode-panel-border);
+        background: var(--vscode-sideBar-background);
+      }
+
+      .artifact-browser-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+        margin-bottom: 10px;
+      }
+
+      .artifact-list,
+      .section-list,
+      .item-list {
+        display: grid;
+        gap: 3px;
+        margin-bottom: 12px;
+      }
+
+      .section-list,
+      .item-list {
+        padding-top: 10px;
+        border-top: 1px solid var(--vscode-panel-border);
+      }
+
+      .artifact-tree-button {
+        min-width: 0;
+        padding: 6px 8px;
+        overflow: hidden;
+        border: 0;
+        color: var(--vscode-foreground);
+        background: transparent;
+        text-align: left;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        cursor: pointer;
+      }
+
+      .artifact-tree-button:hover,
+      .artifact-tree-button[aria-current="true"] {
+        background: var(--vscode-list-hoverBackground);
+      }
+
+      .artifact-tree-button[aria-current="true"] {
+        color: var(--vscode-list-activeSelectionForeground);
+        background: var(--vscode-list-activeSelectionBackground);
+      }
+
+      .artifact-detail {
+        min-width: 0;
+        padding: 16px;
+        overflow: auto;
+      }
+
+      .artifact-editor-status,
+      .artifact-editor-error {
+        min-height: 22px;
+        margin-bottom: 10px;
+        color: var(--vscode-descriptionForeground);
+        font-size: 12px;
+      }
+
+      .artifact-editor-error {
+        padding: 8px 10px;
+        border: 1px solid var(--vscode-inputValidation-errorBorder);
+        color: var(--vscode-inputValidation-errorForeground, var(--vscode-foreground));
+        background: var(--vscode-inputValidation-errorBackground);
+      }
+
+      .artifact-fields {
+        display: grid;
+        gap: 10px;
+        margin-bottom: 16px;
+      }
+
+      .artifact-field {
+        display: grid;
+        gap: 4px;
+      }
+
+      .artifact-field label,
+      .artifact-preview-shell h2 {
+        color: var(--vscode-descriptionForeground);
+        font-size: 12px;
+        font-weight: 600;
+      }
+
+      .artifact-field input,
+      .artifact-field textarea {
+        width: 100%;
+        min-height: 28px;
+        padding: 5px 7px;
+        border: 1px solid var(--vscode-input-border, transparent);
+        color: var(--vscode-input-foreground);
+        background: var(--vscode-input-background);
+        font: inherit;
+      }
+
+      .artifact-field textarea {
+        min-height: 88px;
+        resize: vertical;
+      }
+
+      .artifact-save-row {
+        display: flex;
+        justify-content: flex-end;
+      }
+
+      .artifact-preview-shell {
+        border-top: 1px solid var(--vscode-panel-border);
+      }
+
+      .artifact-preview {
+        min-height: 220px;
+        margin: 0;
+        padding: 12px;
+        overflow: auto;
+        border: 1px solid var(--vscode-panel-border);
+        color: var(--vscode-editor-foreground);
+        background: var(--vscode-textCodeBlock-background);
+        font-family: var(--vscode-editor-font-family);
+        font-size: var(--vscode-editor-font-size);
+        white-space: pre;
+      }
+
+      @media (max-width: 720px) {
+        .artifact-editor {
+          grid-template-columns: 1fr;
+        }
+
+        .artifact-browser {
+          max-height: 42vh;
+          border-right: 0;
+          border-bottom: 1px solid var(--vscode-panel-border);
+        }
       }
 
       .kanban-workspace {
@@ -470,11 +639,34 @@ function createWebviewHtml({ cspSource, nonce }) {
         const errors = document.querySelector('[data-kanban-errors]');
         const kanbanWorkspace = document.querySelector('.kanban-workspace');
         const kanbanColumns = Array.from(document.querySelectorAll('[data-kanban-column]'));
-        const state = { selectedTab: "dashboard", kanbanFilter: "", ...(vscode.getState() || {}) };
+        const artifactList = document.querySelector('[data-editor-artifacts]');
+        const sectionList = document.querySelector('[data-editor-sections]');
+        const itemList = document.querySelector('[data-editor-items]');
+        const editorFields = document.querySelector('[data-editor-fields]');
+        const editorPreview = document.querySelector('[data-editor-preview]');
+        const editorStatus = document.querySelector('[data-editor-status]');
+        const editorError = document.querySelector('[data-editor-error]');
+        const editorRefresh = document.querySelector('[data-editor-refresh]');
+        const artifactEditor = document.querySelector('.artifact-editor');
+        const state = {
+          selectedTab: "dashboard",
+          kanbanFilter: "",
+          selectedArtifactType: "",
+          selectedArtifactId: "",
+          selectedSectionId: "",
+          selectedItemId: "",
+          ...(vscode.getState() || {}),
+        };
+        if (["design", "view"].includes(state.selectedTab)) {
+          state.selectedTab = "editor";
+        }
         const knownTabs = new Set(tabs.map((tab) => tab.dataset.tabId));
         let snapshot;
+        let artifactIndex;
+        let artifactDocument;
         let dragState;
         let transitionSequence = 0;
+        let editorSaveSequence = 0;
         const pendingWorkUnits = new Set();
 
         function persistState() {
@@ -512,6 +704,260 @@ function createWebviewHtml({ cspSource, nonce }) {
           element.textContent = text;
           parent.append(element);
           return element;
+        }
+
+        function createTreeButton(label, selected, onSelect) {
+          const button = document.createElement("button");
+          button.className = "artifact-tree-button";
+          button.type = "button";
+          button.textContent = label;
+          button.title = label;
+          button.setAttribute("aria-current", String(selected));
+          button.addEventListener("click", onSelect);
+          return button;
+        }
+
+        function requestArtifact(artifactType, artifactId, resetSelection = true) {
+          state.selectedArtifactType = artifactType;
+          state.selectedArtifactId = artifactId;
+          if (resetSelection) {
+            state.selectedSectionId = "";
+            state.selectedItemId = "";
+          }
+          persistState();
+          artifactEditor.setAttribute("aria-busy", "true");
+          editorStatus.textContent = artifactId + " 불러오는 중…";
+          vscode.postMessage({
+            type: "artifact.select",
+            artifactType,
+            artifactId,
+          });
+        }
+
+        function renderArtifactIndex() {
+          artifactList.replaceChildren();
+          const artifacts = artifactIndex?.artifacts || [];
+          const labels = {
+            intake: "Intake",
+            specification: "Specification",
+            "work-unit": "Work Unit",
+          };
+          let previousType;
+          for (const artifact of artifacts) {
+            if (artifact.artifactType !== previousType) {
+              appendTextElement(
+                artifactList,
+                "strong",
+                "artifact-type-heading",
+                labels[artifact.artifactType] || artifact.artifactType,
+              );
+              previousType = artifact.artifactType;
+            }
+            artifactList.append(
+              createTreeButton(
+                artifact.title + " · " + artifact.id,
+                state.selectedArtifactType === artifact.artifactType &&
+                  state.selectedArtifactId === artifact.id,
+                () => requestArtifact(artifact.artifactType, artifact.id),
+              ),
+            );
+          }
+          if (artifacts.length === 0) {
+            appendTextElement(
+              artifactList,
+              "p",
+              "kanban-column-empty",
+              "지원되는 artifact 없음",
+            );
+          }
+        }
+
+        function selectedSection() {
+          return artifactDocument?.sections.find(
+            (section) => section.id === state.selectedSectionId,
+          );
+        }
+
+        function selectedItem() {
+          return selectedSection()?.items.find(
+            (item) => item.id === state.selectedItemId,
+          );
+        }
+
+        function selectSection(sectionId) {
+          state.selectedSectionId = sectionId;
+          const section = artifactDocument.sections.find(
+            (candidate) => candidate.id === sectionId,
+          );
+          state.selectedItemId = section?.items[0]?.id || "";
+          persistState();
+          renderArtifactDocument();
+        }
+
+        function selectItem(itemId) {
+          state.selectedItemId = itemId;
+          persistState();
+          renderArtifactDocument();
+        }
+
+        function fieldEditor(label, value, commit) {
+          const wrapper = document.createElement("div");
+          wrapper.className = "artifact-field";
+          const fieldLabel = document.createElement("label");
+          fieldLabel.textContent = label;
+          let input;
+          if (typeof value === "boolean") {
+            input = document.createElement("input");
+            input.type = "checkbox";
+            input.checked = value;
+            input.addEventListener("change", () => commit(input.checked));
+          } else if (typeof value === "number") {
+            input = document.createElement("input");
+            input.type = "number";
+            input.value = String(value);
+            input.addEventListener("input", () => commit(Number(input.value)));
+          } else {
+            input = document.createElement("textarea");
+            const stringList =
+              Array.isArray(value) &&
+              value.every((entry) => typeof entry === "string");
+            input.value = stringList ? value.join("\\n") : String(value ?? "");
+            input.addEventListener("input", () =>
+              commit(stringList ? input.value.split("\\n") : input.value),
+            );
+          }
+          wrapper.append(fieldLabel, input);
+          return wrapper;
+        }
+
+        function renderStructuredFields() {
+          editorFields.replaceChildren();
+          const item = selectedItem();
+          if (!item) {
+            appendTextElement(
+              editorFields,
+              "p",
+              "kanban-column-empty",
+              "편집할 content item을 선택하세요.",
+            );
+            return;
+          }
+          let draft = structuredClone(item.content);
+          const editable = [];
+          const register = (label, value, commit) => {
+            const supported =
+              ["string", "number", "boolean"].includes(typeof value) ||
+              (Array.isArray(value) &&
+                value.every((entry) => typeof entry === "string"));
+            if (supported) {
+              editable.push(fieldEditor(label, value, commit));
+            }
+          };
+          if (
+            ["string", "number", "boolean"].includes(typeof draft) ||
+            (Array.isArray(draft) &&
+              draft.every((entry) => typeof entry === "string"))
+          ) {
+            register("content", draft, (value) => {
+              draft = value;
+            });
+          } else if (draft && typeof draft === "object" && !Array.isArray(draft)) {
+            for (const [key, value] of Object.entries(draft)) {
+              register(key, value, (nextValue) => {
+                draft[key] = nextValue;
+              });
+            }
+          }
+          editorFields.append(...editable);
+          if (editable.length === 0) {
+            appendTextElement(
+              editorFields,
+              "p",
+              "kanban-column-empty",
+              "이 item에는 현재 지원되는 scalar 또는 string-list field가 없습니다.",
+            );
+            return;
+          }
+          const saveRow = document.createElement("div");
+          saveRow.className = "artifact-save-row";
+          const saveButton = document.createElement("button");
+          saveButton.className = "secondary-button";
+          saveButton.type = "button";
+          saveButton.textContent = "Manager로 저장";
+          saveButton.addEventListener("click", () => {
+            const requestId =
+              "artifact-save-" + Date.now() + "-" + ++editorSaveSequence;
+            artifactEditor.setAttribute("aria-busy", "true");
+            editorStatus.textContent = item.id + " manager 검증 중…";
+            vscode.postMessage({
+              type: "artifact.saveItem",
+              requestId,
+              artifactType: artifactDocument.artifactType,
+              artifactId: artifactDocument.id,
+              sectionId: state.selectedSectionId,
+              itemId: item.id,
+              documentVersion: artifactDocument.documentVersion,
+              content: draft,
+            });
+          });
+          saveRow.append(saveButton);
+          editorFields.append(saveRow);
+        }
+
+        function renderArtifactDocument() {
+          sectionList.replaceChildren();
+          itemList.replaceChildren();
+          if (!artifactDocument) {
+            editorPreview.textContent = "";
+            renderStructuredFields();
+            return;
+          }
+          const sections = artifactDocument.sections || [];
+          if (
+            !sections.some((section) => section.id === state.selectedSectionId)
+          ) {
+            state.selectedSectionId = sections[0]?.id || "";
+          }
+          for (const section of sections) {
+            sectionList.append(
+              createTreeButton(
+                section.title,
+                section.id === state.selectedSectionId,
+                () => selectSection(section.id),
+              ),
+            );
+          }
+          const section = selectedSection();
+          if (
+            !section?.items.some((item) => item.id === state.selectedItemId)
+          ) {
+            state.selectedItemId = section?.items[0]?.id || "";
+          }
+          for (const item of section?.items || []) {
+            itemList.append(
+              createTreeButton(
+                item.id + " · " + item.kind,
+                item.id === state.selectedItemId,
+                () => selectItem(item.id),
+              ),
+            );
+          }
+          editorPreview.textContent = JSON.stringify(
+            artifactDocument.preview,
+            null,
+            2,
+          );
+          editorStatus.textContent =
+            artifactDocument.title +
+            " · " +
+            artifactDocument.artifactType +
+            " · " +
+            artifactDocument.documentVersion;
+          editorError.hidden = true;
+          artifactEditor.setAttribute("aria-busy", "false");
+          persistState();
+          renderArtifactIndex();
+          renderStructuredFields();
         }
 
         function formatMeta(card) {
@@ -733,6 +1179,11 @@ function createWebviewHtml({ cspSource, nonce }) {
           kanbanWorkspace.setAttribute("aria-busy", "true");
           vscode.postMessage({ type: "kanban.refresh" });
         });
+        editorRefresh.addEventListener("click", () => {
+          artifactEditor.setAttribute("aria-busy", "true");
+          editorStatus.textContent = "artifact 목록 갱신 중…";
+          vscode.postMessage({ type: "artifact.refresh" });
+        });
         window.addEventListener("message", (event) => {
           const message = event.data;
           if (!message || typeof message !== "object") {
@@ -770,11 +1221,66 @@ function createWebviewHtml({ cspSource, nonce }) {
                 message.error?.message || "Work Unit manager가 전이를 거부했습니다.";
             }
             renderKanban();
+          } else if (
+            message.type === "artifact.index" &&
+            message.index?.schemaVersion === "1.0.0"
+          ) {
+            artifactIndex = message.index;
+            renderArtifactIndex();
+            artifactEditor.setAttribute("aria-busy", "false");
+            if (
+              state.selectedArtifactType &&
+              state.selectedArtifactId &&
+              artifactIndex.artifacts.some(
+                (artifact) =>
+                  artifact.artifactType === state.selectedArtifactType &&
+                  artifact.id === state.selectedArtifactId,
+              )
+            ) {
+              requestArtifact(
+                state.selectedArtifactType,
+                state.selectedArtifactId,
+                false,
+              );
+            } else {
+              editorStatus.textContent =
+                artifactIndex.artifacts.length +
+                "개 artifact · 탐색할 항목을 선택하세요.";
+            }
+          } else if (
+            message.type === "artifact.document" &&
+            message.document?.schemaVersion === "1.0.0"
+          ) {
+            artifactDocument = message.document;
+            state.selectedArtifactType = artifactDocument.artifactType;
+            state.selectedArtifactId = artifactDocument.id;
+            renderArtifactDocument();
+          } else if (message.type === "artifact.savePending") {
+            artifactEditor.setAttribute("aria-busy", "true");
+            editorStatus.textContent = "manager 저장 및 full validation 중…";
+          } else if (message.type === "artifact.saveResult") {
+            artifactEditor.setAttribute("aria-busy", "false");
+            if (message.ok) {
+              editorStatus.textContent = "manager 저장 및 validation 완료";
+              editorError.hidden = true;
+              vscode.postMessage({ type: "artifact.refresh" });
+            } else {
+              editorStatus.textContent = "저장이 적용되지 않았습니다.";
+              editorError.hidden = false;
+              editorError.textContent =
+                message.error?.message || "artifact manager가 저장을 거부했습니다.";
+            }
+          } else if (message.type === "artifact.error") {
+            artifactEditor.setAttribute("aria-busy", "false");
+            editorError.hidden = false;
+            editorError.textContent =
+              message.error?.message || "artifact를 불러오지 못했습니다.";
           }
         });
 
         activateTab(knownTabs.has(state.selectedTab) ? state.selectedTab : "dashboard");
         vscode.postMessage({ type: "kanban.ready" });
+        vscode.postMessage({ type: "artifact.ready" });
       })();
     </script>
   </body>
