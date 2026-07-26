@@ -1,15 +1,15 @@
 {
   "schemaVersion": "4.0.0",
-  "documentVersion": "1.0.44",
+  "documentVersion": "1.0.45",
   "id": "agent-factory-agents-editor-area",
   "artifactType": "work-unit",
   "projectId": "agent-factory-workspace",
   "lifecycle": {
     "phase": "work-unit",
-    "status": "review"
+    "status": "done"
   },
   "createdAt": "2026-07-26T16:26:15+00:00",
-  "updatedAt": "2026-07-26T17:01:48+00:00",
+  "updatedAt": "2026-07-26T17:04:56+00:00",
   "language": "ko",
   "theme": "default",
   "provenance": {
