@@ -38,10 +38,19 @@
     {
       "id": "quality-check-kanban-board",
       "kind": "quality-check",
-      "content": "실행 전 품질 검증 대기",
+      "content": "구문, 13개 단위 테스트, 실제 canonical reader probe, VS Code 1.129.1 E2E, production audit와 diff 검증이 통과했다.",
       "attributes": {
-        "status": "planned",
-        "evidence": []
+        "status": "pass",
+        "executionTarget": {
+          "contractVersion": "1.0.0",
+          "invocationId": "codex-20260726-kanban-board-001",
+          "headCommit": "94427689893d3f08600ae79626dd852f38007f4d",
+          "revision": 1,
+          "attempt": 1
+        },
+        "evidence": [
+          "blocks/evidence/kanban-board-verification.txt"
+        ]
       }
     }
   ],

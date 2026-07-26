@@ -21,7 +21,7 @@
       "kind": "execution-state",
       "content": {
         "contractVersion": "1.0.0",
-        "state": "running",
+        "state": "review",
         "subject": {
           "algorithm": "gitCommit",
           "digest": "94427689893d3f08600ae79626dd852f38007f4d"
@@ -35,10 +35,11 @@
         "history": [],
         "progress": {
           "completedSteps": [
-            "specification-and-tests"
+            "specification-and-tests",
+            "implementation-and-verification"
           ],
-          "pendingStep": "implementation-and-verification",
-          "lastVerifiedHead": "94427689893d3f08600ae79626dd852f38007f4d",
+          "pendingStep": null,
+          "lastVerifiedHead": "c393790025c70e65a0da0294f419171541857e14",
           "checkpoints": [
             {
               "stepId": "specification-and-tests",
@@ -57,6 +58,12 @@
               "state": "pending",
               "headCommit": "94427689893d3f08600ae79626dd852f38007f4d",
               "idempotencyKey": "kanban-board-implementation-pending-v1"
+            },
+            {
+              "stepId": "implementation-and-verification",
+              "state": "completed",
+              "headCommit": "c393790025c70e65a0da0294f419171541857e14",
+              "idempotencyKey": "kanban-board-implementation-completed-v1"
             }
           ],
           "retry": {}

@@ -1,15 +1,15 @@
 {
   "schemaVersion": "4.0.0",
-  "documentVersion": "1.0.16",
+  "documentVersion": "1.0.27",
   "id": "agent-factory-workspace-kanban-board",
   "artifactType": "work-unit",
   "projectId": "agent-factory-workspace",
   "lifecycle": {
     "phase": "work-unit",
-    "status": "working"
+    "status": "review"
   },
   "createdAt": "2026-07-26T14:40:47+00:00",
-  "updatedAt": "2026-07-26T15:07:18+00:00",
+  "updatedAt": "2026-07-26T15:11:04+00:00",
   "language": "ko",
   "theme": "default",
   "provenance": {

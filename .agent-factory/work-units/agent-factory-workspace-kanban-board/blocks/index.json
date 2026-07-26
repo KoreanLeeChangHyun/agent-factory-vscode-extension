@@ -1,3 +1,11 @@
 {
-  "blocks": []
+  "blocks": [
+    {
+      "path": "blocks/evidence/kanban-board-verification.txt",
+      "mediaType": "text/plain",
+      "description": "Kanban board implementation and verification evidence",
+      "sha256": "538049c83e71cb82dde998951dec8d394b03e7fc3d96394c4aa6ec3338dc32cc",
+      "sizeBytes": 2225
+    }
+  ]
 }
