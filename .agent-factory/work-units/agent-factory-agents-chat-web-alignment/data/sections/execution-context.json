@@ -37,10 +37,12 @@
           "completedSteps": [
             "PLAN-001",
             "PLAN-002",
-            "PLAN-003"
+            "PLAN-003",
+            "PLAN-004",
+            "PLAN-005"
           ],
-          "pendingStep": "PLAN-004",
-          "lastVerifiedHead": "e890dd81ccacaf8fe9f0996b337648245b1f3fe9",
+          "pendingStep": null,
+          "lastVerifiedHead": "9afc1aec361c05f3c1f7ced5ccb337d0b04c8a8e",
           "checkpoints": [
             {
               "stepId": "PLAN-001",
@@ -83,6 +85,24 @@
               "state": "pending",
               "headCommit": "e890dd81ccacaf8fe9f0996b337648245b1f3fe9",
               "idempotencyKey": "rev1-attempt1-plan004-pending"
+            },
+            {
+              "stepId": "PLAN-004",
+              "state": "completed",
+              "headCommit": "9afc1aec361c05f3c1f7ced5ccb337d0b04c8a8e",
+              "idempotencyKey": "rev1-attempt1-plan004-completed"
+            },
+            {
+              "stepId": "PLAN-005",
+              "state": "pending",
+              "headCommit": "9afc1aec361c05f3c1f7ced5ccb337d0b04c8a8e",
+              "idempotencyKey": "rev1-attempt1-plan005-pending"
+            },
+            {
+              "stepId": "PLAN-005",
+              "state": "completed",
+              "headCommit": "9afc1aec361c05f3c1f7ced5ccb337d0b04c8a8e",
+              "idempotencyKey": "rev1-attempt1-plan005-completed"
             }
           ],
           "retry": {

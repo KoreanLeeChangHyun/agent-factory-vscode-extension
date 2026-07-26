@@ -1,3 +1,11 @@
 {
-  "blocks": []
+  "blocks": [
+    {
+      "path": "blocks/logs/agents-chat-web-alignment-verification.log",
+      "mediaType": "text/plain",
+      "description": "Agents chat Web alignment implementation and verification evidence",
+      "sha256": "9aa2d348f2845dd76c33618dbeeb9b967396d1ee15bb232b34d52cd88426052a",
+      "sizeBytes": 1905
+    }
+  ]
 }
