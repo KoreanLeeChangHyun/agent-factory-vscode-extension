@@ -22,6 +22,15 @@
         "산출물 읽기 모델 세부 계약은 artifact-view Work Unit에서 결정한다.",
         "관리자 명령과 Git 조작의 정확한 허용 목록은 kanban-operations Work Unit에서 결정한다."
       ]
+    },
+    {
+      "id": "full-width-layout-decision",
+      "kind": "decision-status",
+      "content": [
+        "본문은 제한된 최대 폭과 가운데 카드 배치를 사용하지 않고 에디터 가용 폭을 사용한다.",
+        "5개 탭은 동일 너비로 tablist 전체 폭을 채운다.",
+        "탭, 헤더와 본문 표면은 VS Code semantic theme token을 사용한다."
+      ]
     }
   ],
   "subsections": []

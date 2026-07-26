@@ -7,10 +7,11 @@
       "kind": "acceptance-criterion",
       "content": [
         "Extension Development Host에서 명령으로 Webview가 열린다.",
-        "5개 탭과 선택 헤더 및 바디가 표시된다.",
+        "5개 탭이 동일 너비로 tablist 전체 폭을 채우고 선택 헤더 및 바디가 표시된다.",
         "탭 선택, 키보드 탐색, 선택 상태 보존이 검증된다.",
         "Dashboard, Design, Context는 기능 없는 shell이다.",
-        "지원되는 VS Code 테마에서 탭 상태와 헤더 및 본문 표면이 구분되고 콘텐츠가 균형 잡힌 폭과 여백으로 표시된다.",
+        "본문 panel과 empty-state가 최대 폭 제한 및 바깥 좌우 여백 없이 에디터의 가용 폭을 채운다.",
+        "지원되는 VS Code 테마에서 탭, 헤더와 본문 표면이 semantic theme token으로 일관되게 표시된다.",
         "Specification, 단위 테스트, 핵심 E2E 및 보안·테마·접근성 점검이 통과한다."
       ]
     }
