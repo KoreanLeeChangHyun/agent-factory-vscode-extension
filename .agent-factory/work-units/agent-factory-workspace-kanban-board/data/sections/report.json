@@ -5,12 +5,35 @@
     {
       "id": "report-result-kanban-board",
       "kind": "report-result",
-      "content": "실행 전 보고 대기",
+      "content": "Workspace Kanban 보드 기반 구현 완료. 실제 canonical Work Unit을 6개 상태로 투영하며 filter, count, watcher, reconnect, partial error, drag와 동등한 Move preview를 제공한다. 실제 canonical mutation은 후속 Work Unit 범위다.",
       "attributes": {
-        "verificationResult": "pending",
-        "evidence": [],
-        "changedArtifacts": [],
-        "remainingRisks": []
+        "verificationResult": "pass",
+        "executionTarget": {
+          "contractVersion": "1.0.0",
+          "invocationId": "codex-20260726-kanban-board-001",
+          "headCommit": "94427689893d3f08600ae79626dd852f38007f4d",
+          "revision": 1,
+          "attempt": 1
+        },
+        "evidence": [
+          "blocks/evidence/kanban-board-verification.txt",
+          "blocks/evidence/worktree-inspect-review.json"
+        ],
+        "changedArtifacts": [
+          "workspace/package.json",
+          "workspace/src/extension.js",
+          "workspace/src/kanbanController.js",
+          "workspace/src/kanbanReader.js",
+          "workspace/src/webviewShell.js",
+          "workspace/test/suite/index.js",
+          "workspace/test/unit/kanbanController.test.js",
+          "workspace/test/unit/kanbanReader.test.js",
+          "workspace/test/unit/webviewShell.test.js"
+        ],
+        "remainingRisks": [
+          "pointer-level Chromium drag gesture는 Human review에서 확인한다.",
+          "실제 상태 변경은 후속 authoring Work Unit에서 manager semantic revalidation과 함께 구현한다."
+        ]
       }
     }
   ],

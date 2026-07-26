@@ -1,0 +1,19 @@
+{
+  "command": "inspect",
+  "context": {
+    "branch": "work-unit/agent-factory-workspace-kanban-board",
+    "changes": [],
+    "dirty": false,
+    "headCommit": "bfa3845cde5f4d58ecc6771879d89834d5fbbc0e",
+    "lockReason": "Agent Factory Work Unit execution: work-unit/agent-factory-workspace-kanban-board",
+    "locked": true,
+    "repository": "/home/deus/workspace/agent-factory/vscode-extension",
+    "workUnitId": "agent-factory-workspace-kanban-board",
+    "worktreePath": "/home/deus/workspace/agent-factory/vscode-extension/.agent-factory/worktree/agent-factory-workspace-kanban-board"
+  },
+  "error": null,
+  "ok": true,
+  "operations": [],
+  "schemaVersion": "1.0.0",
+  "state": "clean"
+}

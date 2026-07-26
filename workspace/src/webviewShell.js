@@ -14,7 +14,7 @@ const TAB_DEFINITIONS = Object.freeze([
   {
     id: "kanban",
     label: "Kanban",
-    description: "Work Unit 보드는 후속 Work Unit에서 구현됩니다.",
+    description: "Canonical Work Unit lifecycle board",
   },
   {
     id: "context",
@@ -26,6 +26,15 @@ const TAB_DEFINITIONS = Object.freeze([
     label: "View",
     description: "Agent Factory 산출물 열람은 후속 Work Unit에서 구현됩니다.",
   },
+]);
+
+const KANBAN_COLUMNS = Object.freeze([
+  { id: "backlog", label: "Backlog" },
+  { id: "ready", label: "Ready" },
+  { id: "working", label: "Working" },
+  { id: "review", label: "Review" },
+  { id: "done", label: "Done" },
+  { id: "blocked", label: "Blocked" },
 ]);
 
 function createWebviewHtml({ cspSource, nonce }) {
@@ -47,8 +56,51 @@ function createWebviewHtml({ cspSource, nonce }) {
       >${label}</button>`,
   ).join("");
 
-  const panels = TAB_DEFINITIONS.map(
-    ({ id, label, description }, index) => `
+  const kanbanColumns = KANBAN_COLUMNS.map(
+    ({ id, label }) => `
+      <section class="kanban-column" data-kanban-column="${id}" aria-labelledby="kanban-column-${id}">
+        <header class="kanban-column-header">
+          <h3 id="kanban-column-${id}">${label}</h3>
+          <span class="kanban-count" data-column-count aria-label="${label} 항목 수">0</span>
+        </header>
+        <div class="kanban-card-list" data-card-list>
+          <p class="kanban-column-empty">항목 없음</p>
+        </div>
+      </section>`,
+  ).join("");
+
+  const panels = TAB_DEFINITIONS.map((definition, index) => {
+    const { id, label, description } = definition;
+    const content =
+      id === "kanban"
+        ? `
+        <div class="kanban-workspace" aria-busy="true">
+          <div class="kanban-toolbar">
+            <label class="kanban-filter-label">
+              <span>Work Unit 필터</span>
+              <input
+                type="search"
+                data-kanban-filter
+                placeholder="제목 또는 id"
+                autocomplete="off"
+              >
+            </label>
+            <button class="secondary-button" type="button" data-kanban-refresh>새로 고침</button>
+            <span class="kanban-updated" data-kanban-updated aria-live="polite">불러오는 중…</span>
+          </div>
+          <div class="kanban-notice" data-kanban-notice role="status" aria-live="polite"></div>
+          <div class="kanban-errors" data-kanban-errors role="alert" hidden></div>
+          <div class="kanban-board" aria-label="Work Unit lifecycle board">
+            ${kanbanColumns}
+          </div>
+        </div>`
+        : `
+        <div class="empty-state">
+          <h2>${label}</h2>
+          <p>${description}</p>
+        </div>`;
+
+    return `
       <section
         class="workspace-panel"
         id="panel-${id}"
@@ -57,12 +109,9 @@ function createWebviewHtml({ cspSource, nonce }) {
         data-panel-id="${id}"
         ${index === 0 ? "" : "hidden"}
       >
-        <div class="empty-state">
-          <h2>${label}</h2>
-          <p>${description}</p>
-        </div>
-      </section>`,
-  ).join("");
+        ${content}
+      </section>`;
+  }).join("");
 
   return `<!DOCTYPE html>
 <html lang="ko">
@@ -206,6 +255,191 @@ function createWebviewHtml({ cspSource, nonce }) {
         line-height: 1.5;
       }
 
+      .kanban-workspace {
+        min-height: 100%;
+        padding: 16px;
+      }
+
+      .kanban-toolbar {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px;
+        align-items: end;
+        margin-bottom: 12px;
+      }
+
+      .kanban-filter-label {
+        display: grid;
+        flex: 1 1 260px;
+        gap: 4px;
+        max-width: 520px;
+        color: var(--vscode-descriptionForeground);
+        font-size: 12px;
+      }
+
+      .kanban-filter-label input,
+      .kanban-card select {
+        min-height: 28px;
+        border: 1px solid var(--vscode-input-border, transparent);
+        color: var(--vscode-input-foreground);
+        background: var(--vscode-input-background);
+      }
+
+      .kanban-filter-label input {
+        padding: 4px 8px;
+      }
+
+      .kanban-filter-label input:focus-visible,
+      .kanban-card select:focus-visible,
+      .secondary-button:focus-visible,
+      .move-button:focus-visible,
+      .kanban-card:focus-visible {
+        outline: 1px solid var(--vscode-focusBorder);
+        outline-offset: 1px;
+      }
+
+      .secondary-button,
+      .move-button {
+        min-height: 28px;
+        padding: 4px 10px;
+        border: 1px solid var(--vscode-button-border, transparent);
+        color: var(--vscode-button-secondaryForeground);
+        background: var(--vscode-button-secondaryBackground);
+        cursor: pointer;
+      }
+
+      .secondary-button:hover,
+      .move-button:hover {
+        background: var(--vscode-button-secondaryHoverBackground);
+      }
+
+      .kanban-updated {
+        min-height: 28px;
+        padding: 6px 0;
+        color: var(--vscode-descriptionForeground);
+        font-size: 12px;
+      }
+
+      .kanban-notice,
+      .kanban-errors {
+        min-height: 20px;
+        margin-bottom: 8px;
+        color: var(--vscode-descriptionForeground);
+        font-size: 12px;
+        line-height: 1.4;
+      }
+
+      .kanban-errors {
+        padding: 8px 10px;
+        border: 1px solid var(--vscode-inputValidation-warningBorder);
+        color: var(--vscode-inputValidation-warningForeground, var(--vscode-foreground));
+        background: var(--vscode-inputValidation-warningBackground);
+      }
+
+      .kanban-board {
+        display: grid;
+        grid-template-columns: repeat(6, minmax(230px, 1fr));
+        gap: 10px;
+        min-width: 1430px;
+        align-items: start;
+      }
+
+      .kanban-column {
+        min-height: 180px;
+        border: 1px solid var(--vscode-panel-border);
+        background: var(--vscode-sideBar-background);
+      }
+
+      .kanban-column.is-drop-target {
+        outline: 2px solid var(--vscode-focusBorder);
+        outline-offset: -2px;
+        background: var(--vscode-list-dropBackground);
+      }
+
+      .kanban-column-header {
+        display: flex;
+        min-height: 38px;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+        padding: 8px 10px;
+        border-bottom: 1px solid var(--vscode-panel-border);
+      }
+
+      .kanban-column-header h3 {
+        margin: 0;
+        font-size: 12px;
+        font-weight: 600;
+        text-transform: uppercase;
+      }
+
+      .kanban-count {
+        min-width: 22px;
+        padding: 1px 6px;
+        border-radius: 10px;
+        color: var(--vscode-badge-foreground);
+        background: var(--vscode-badge-background);
+        text-align: center;
+      }
+
+      .kanban-card-list {
+        display: grid;
+        gap: 8px;
+        padding: 8px;
+      }
+
+      .kanban-column-empty {
+        margin: 12px 4px;
+        color: var(--vscode-descriptionForeground);
+        font-size: 12px;
+        text-align: center;
+      }
+
+      .kanban-card {
+        display: grid;
+        gap: 7px;
+        padding: 10px;
+        border: 1px solid var(--vscode-widget-border, var(--vscode-panel-border));
+        color: var(--vscode-foreground);
+        background: var(--vscode-editor-background);
+      }
+
+      .kanban-card[draggable="true"] {
+        cursor: grab;
+      }
+
+      .kanban-card[aria-grabbed="true"] {
+        opacity: 0.65;
+        cursor: grabbing;
+      }
+
+      .kanban-card-title {
+        margin: 0;
+        overflow-wrap: anywhere;
+        font-size: 13px;
+        line-height: 1.35;
+      }
+
+      .kanban-card-id,
+      .kanban-card-meta {
+        margin: 0;
+        color: var(--vscode-descriptionForeground);
+        font-size: 11px;
+        line-height: 1.35;
+        overflow-wrap: anywhere;
+      }
+
+      .kanban-card-actions {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) auto;
+        gap: 6px;
+      }
+
+      .kanban-card select {
+        min-width: 0;
+        padding: 3px 5px;
+      }
+
       [hidden] {
         display: none !important;
       }
@@ -229,8 +463,21 @@ function createWebviewHtml({ cspSource, nonce }) {
         const tabs = Array.from(document.querySelectorAll('[role="tab"]'));
         const panels = Array.from(document.querySelectorAll('[role="tabpanel"]'));
         const selectedTitle = document.querySelector('[data-selected-title]');
-        const state = vscode.getState() || {};
+        const filterInput = document.querySelector('[data-kanban-filter]');
+        const refreshButton = document.querySelector('[data-kanban-refresh]');
+        const updatedLabel = document.querySelector('[data-kanban-updated]');
+        const notice = document.querySelector('[data-kanban-notice]');
+        const errors = document.querySelector('[data-kanban-errors]');
+        const kanbanWorkspace = document.querySelector('.kanban-workspace');
+        const kanbanColumns = Array.from(document.querySelectorAll('[data-kanban-column]'));
+        const state = { selectedTab: "dashboard", kanbanFilter: "", ...(vscode.getState() || {}) };
         const knownTabs = new Set(tabs.map((tab) => tab.dataset.tabId));
+        let snapshot;
+        let dragState;
+
+        function persistState() {
+          vscode.setState(state);
+        }
 
         function activateTab(tabId, options = {}) {
           if (!knownTabs.has(tabId)) {
@@ -253,7 +500,149 @@ function createWebviewHtml({ cspSource, nonce }) {
 
           const activeTab = tabs.find((tab) => tab.dataset.tabId === tabId);
           selectedTitle.textContent = activeTab.textContent.trim();
-          vscode.setState({ selectedTab: tabId });
+          state.selectedTab = tabId;
+          persistState();
+        }
+
+        function appendTextElement(parent, tagName, className, text) {
+          const element = document.createElement(tagName);
+          element.className = className;
+          element.textContent = text;
+          parent.append(element);
+          return element;
+        }
+
+        function formatMeta(card) {
+          const values = [];
+          if (card.execution) {
+            values.push(
+              "실행 " +
+                (card.execution.state || "unknown") +
+                " · r" +
+                (card.execution.revision || "-") +
+                " a" +
+                (card.execution.attempt || "-"),
+            );
+          }
+          if (card.humanReviewStatus) {
+            values.push("Human review " + card.humanReviewStatus);
+          }
+          if (card.integrationStatus) {
+            values.push("Integration " + card.integrationStatus);
+          }
+          if (card.pullRequestStatus) {
+            values.push("PR " + card.pullRequestStatus);
+          }
+          return values.join(" · ");
+        }
+
+        function showMovePreview(cardId, target) {
+          notice.textContent =
+            cardId +
+            " → " +
+            target +
+            ": 상태 변경은 다음 Work Unit에서 활성화됩니다.";
+        }
+
+        function createCard(card) {
+          const cardElement = document.createElement("article");
+          cardElement.className = "kanban-card";
+          cardElement.dataset.workUnitId = card.id;
+          cardElement.tabIndex = 0;
+
+          const allowedCapabilities = card.capabilities.filter((capability) => capability.allowed);
+          cardElement.draggable = allowedCapabilities.length > 0;
+          cardElement.setAttribute("aria-grabbed", "false");
+
+          appendTextElement(cardElement, "h4", "kanban-card-title", card.title);
+          appendTextElement(cardElement, "p", "kanban-card-id", card.id);
+          const meta = formatMeta(card);
+          if (meta) {
+            appendTextElement(cardElement, "p", "kanban-card-meta", meta);
+          }
+
+          const actions = document.createElement("div");
+          actions.className = "kanban-card-actions";
+          const moveTarget = document.createElement("select");
+          moveTarget.dataset.moveTarget = "";
+          moveTarget.setAttribute("aria-label", card.title + " 이동 대상");
+          const placeholder = document.createElement("option");
+          placeholder.value = "";
+          placeholder.textContent = "Move…";
+          moveTarget.append(placeholder);
+          for (const capability of allowedCapabilities) {
+            const option = document.createElement("option");
+            option.value = capability.target;
+            option.textContent = capability.target;
+            option.title = capability.reason;
+            moveTarget.append(option);
+          }
+          const moveButton = document.createElement("button");
+          moveButton.className = "move-button";
+          moveButton.type = "button";
+          moveButton.dataset.moveButton = "";
+          moveButton.textContent = "Move";
+          moveButton.disabled = allowedCapabilities.length === 0;
+          moveButton.addEventListener("click", () => {
+            if (moveTarget.value) {
+              showMovePreview(card.id, moveTarget.value);
+            }
+          });
+          actions.append(moveTarget, moveButton);
+          cardElement.append(actions);
+
+          cardElement.addEventListener("dragstart", (event) => {
+            const allowedTargets = new Set(
+              allowedCapabilities.map((capability) => capability.target),
+            );
+            dragState = { cardId: card.id, allowedTargets };
+            cardElement.setAttribute("aria-grabbed", "true");
+            event.dataTransfer.effectAllowed = "move";
+            event.dataTransfer.setData("text/plain", card.id);
+          });
+          cardElement.addEventListener("dragend", () => {
+            dragState = undefined;
+            cardElement.setAttribute("aria-grabbed", "false");
+            for (const column of kanbanColumns) {
+              column.classList.remove("is-drop-target");
+            }
+          });
+
+          return cardElement;
+        }
+
+        function renderKanban() {
+          if (!snapshot) {
+            return;
+          }
+          const filter = state.kanbanFilter.trim().toLocaleLowerCase("ko-KR");
+          for (const column of kanbanColumns) {
+            const model = snapshot.columns.find(
+              (candidate) => candidate.id === column.dataset.kanbanColumn,
+            );
+            const cards = (model?.cards || []).filter((card) => {
+              const searchable = (card.title + " " + card.id).toLocaleLowerCase("ko-KR");
+              return !filter || searchable.includes(filter);
+            });
+            const cardList = column.querySelector('[data-card-list]');
+            const count = column.querySelector('[data-column-count]');
+            count.textContent = String(cards.length);
+            cardList.replaceChildren();
+            if (cards.length === 0) {
+              appendTextElement(cardList, "p", "kanban-column-empty", "항목 없음");
+            } else {
+              cardList.append(...cards.map(createCard));
+            }
+          }
+
+          const snapshotErrors = Array.isArray(snapshot.errors) ? snapshot.errors : [];
+          errors.hidden = snapshotErrors.length === 0;
+          errors.textContent = snapshotErrors
+            .map((error) => (error.workUnitId ? error.workUnitId + ": " : "") + error.message)
+            .join("\\n");
+          updatedLabel.textContent =
+            "갱신 " + new Date(snapshot.generatedAt).toLocaleString("ko-KR");
+          kanbanWorkspace.setAttribute("aria-busy", "false");
         }
 
         for (const [index, tab] of tabs.entries()) {
@@ -281,7 +670,60 @@ function createWebviewHtml({ cspSource, nonce }) {
           });
         }
 
+        for (const column of kanbanColumns) {
+          column.addEventListener("dragover", (event) => {
+            const allowedTargets = dragState?.allowedTargets || new Set();
+            if (allowedTargets.has(column.dataset.kanbanColumn)) {
+              event.preventDefault();
+              event.dataTransfer.dropEffect = "move";
+              column.classList.add("is-drop-target");
+            }
+          });
+          column.addEventListener("dragleave", () => {
+            column.classList.remove("is-drop-target");
+          });
+          column.addEventListener("drop", (event) => {
+            event.preventDefault();
+            column.classList.remove("is-drop-target");
+            const allowedTargets = dragState?.allowedTargets || new Set();
+            if (dragState && allowedTargets.has(column.dataset.kanbanColumn)) {
+              showMovePreview(dragState.cardId, column.dataset.kanbanColumn);
+            }
+          });
+        }
+
+        filterInput.value = state.kanbanFilter;
+        filterInput.addEventListener("input", () => {
+          state.kanbanFilter = filterInput.value;
+          persistState();
+          renderKanban();
+        });
+        refreshButton.addEventListener("click", () => {
+          kanbanWorkspace.setAttribute("aria-busy", "true");
+          vscode.postMessage({ type: "kanban.refresh" });
+        });
+        window.addEventListener("message", (event) => {
+          const message = event.data;
+          if (!message || typeof message !== "object") {
+            return;
+          }
+          if (
+            message.type === "kanban.snapshot" &&
+            message.snapshot?.schemaVersion === "1.0.0"
+          ) {
+            snapshot = message.snapshot;
+            notice.textContent = "";
+            renderKanban();
+          } else if (message.type === "kanban.error") {
+            kanbanWorkspace.setAttribute("aria-busy", "false");
+            errors.hidden = false;
+            errors.textContent = message.error?.message || "Kanban을 불러오지 못했습니다.";
+            updatedLabel.textContent = "갱신 실패";
+          }
+        });
+
         activateTab(knownTabs.has(state.selectedTab) ? state.selectedTab : "dashboard");
+        vscode.postMessage({ type: "kanban.ready" });
       })();
     </script>
   </body>
@@ -289,6 +731,7 @@ function createWebviewHtml({ cspSource, nonce }) {
 }
 
 module.exports = {
+  KANBAN_COLUMNS,
   TAB_DEFINITIONS,
   createWebviewHtml,
 };
