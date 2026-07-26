@@ -32,44 +32,48 @@
       "kind": "work-unit-basis",
       "content": {
         "workUnitId": "agent-factory-workspace-full-width-alignment",
-        "goal": "Agent Factory Workspace Webview의 본문과 탭을 전체 폭으로 정렬하고 표면 색상을 VS Code semantic theme token에 맞춘다.",
+        "goal": "Agent Factory Workspace Webview의 최외곽 gutter를 제거하고 내부 읽기 여백을 유지한다.",
         "specificationImpactRef": "SPECIFICATION-IMPACT-001",
         "executionOrder": 1,
         "scope": [
-          "workspace-body, workspace-panel, empty-state 전체 폭 배치",
-          "5개 workspace-tab 동일 너비 전체 폭 배치",
-          "탭, 선택 헤더, 본문 표면의 VS Code semantic theme token 정렬",
+          "Webview body 최외곽 좌우 gutter 제거",
+          "selected-header와 empty-state 내부 읽기 여백 유지",
+          "5개 workspace-tab 동일 너비 전체 폭 배치 유지",
+          "탭, 선택 헤더, 본문 표면의 VS Code semantic theme token 유지",
           "단위·E2E·Human 화면 검증"
         ],
         "outOfScope": [
           "탭 이름, 순서와 보이는 문구 변경",
           "DOM 구조, 이벤트, 키보드 탐색과 상태 보존 변경",
+          "selected-header와 empty-state 내부 읽기 여백 제거",
           "각 탭 기능 구현",
           "Webview 메시지와 보안 경계 변경"
         ],
         "expectedOutputs": [
           "workspace/src/webviewShell.js",
           "workspace/test/unit/webviewShell.test.js",
-          "전체 폭 및 테마 정렬 검증 근거"
+          "최외곽 gutter 제거 및 내부 여백 보존 검증 근거"
         ],
         "acceptanceCriteria": [
-          "본문 panel과 empty-state가 최대 폭 제한 및 바깥 좌우 여백 없이 에디터 가용 폭을 채운다.",
+          "최외곽 Webview gutter 없이 탭과 표면이 에디터 가용 폭을 채운다.",
+          "selected-header와 empty-state의 기존 내부 읽기 여백은 유지된다.",
           "5개 탭이 동일 너비로 tablist 전체 폭을 채운다.",
-          "탭, 선택 헤더와 본문 표면이 VS Code semantic theme token을 사용한다.",
           "기존 탭 문구, DOM, 키보드 탐색, 상태 보존과 보안 경계 검증이 통과한다."
         ],
         "verification": [
-          "TDD 기반 Webview 스타일 경계 단위 테스트",
+          "TDD 기반 Webview body padding 경계 단위 테스트",
           "npm run check",
           "npm run test:e2e",
-          "다크 및 라이트 VS Code 테마 Human 화면 검토"
+          "다크 VS Code 테마 Human 화면 검토"
         ],
         "evidenceRefs": [
           "HUMAN-REQUEST-001",
-          "INTERNAL-EVIDENCE-001"
+          "INTERNAL-EVIDENCE-001",
+          "INTERVIEW-GUTTER-001"
         ],
         "decisionRefs": [
-          "DECISION-FULL-WIDTH-001"
+          "DECISION-FULL-WIDTH-001",
+          "DECISION-OUTER-GUTTER-001"
         ],
         "dependencies": [
           "agent-factory-workspace-visual-polish"

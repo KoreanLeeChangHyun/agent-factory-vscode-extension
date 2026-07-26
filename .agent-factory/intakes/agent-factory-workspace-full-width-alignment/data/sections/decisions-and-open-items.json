@@ -27,6 +27,15 @@
         "blocking": [],
         "nonBlocking": []
       }
+    },
+    {
+      "id": "DECISION-OUTER-GUTTER-001",
+      "kind": "decision-status",
+      "content": {
+        "decision": "최외곽 Webview gutter만 제거하고 selected-header와 empty-state의 내부 읽기 여백은 유지한다.",
+        "rationale": "Human이 첨부 화면 검토 후 선택지 A를 명시적으로 선택했다.",
+        "status": "accepted"
+      }
     }
   ],
   "subsections": []

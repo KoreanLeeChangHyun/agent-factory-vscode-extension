@@ -23,6 +23,26 @@
         ],
         "limitations": []
       }
+    },
+    {
+      "id": "INTERVIEW-GUTTER-001",
+      "kind": "interview",
+      "content": {
+        "question": "어느 범위까지 좌우 여백을 제거할지 결정",
+        "recommendation": "A",
+        "rationale": "최외곽 gutter를 제거하면서 헤더와 본문 텍스트의 가독성 여백을 보존한다.",
+        "answer": "A",
+        "decisionState": "accepted",
+        "choices": [
+          "A: 최외곽 공백만 제거하고 내부 읽기 여백 유지",
+          "B: 모든 좌우 여백 제거",
+          "C: 현재 상태 유지"
+        ]
+      },
+      "attributes": {
+        "status": "answered"
+      },
+      "blockRef": "blocks/evidence/human-full-width-review.png"
     }
   ],
   "subsections": []
