@@ -3,12 +3,14 @@
 const { randomBytes } = require("node:crypto");
 const vscode = require("vscode");
 
+const { createKanbanController } = require("./kanbanController");
 const { createWebviewHtml } = require("./webviewShell");
 
 const COMMAND_OPEN_WORKSPACE = "agentFactoryWorkspace.open";
 const VIEW_TYPE = "agentFactoryWorkspace.workspace";
 
 let workspacePanel;
+let kanbanController;
 
 function openWorkspacePanel() {
   if (workspacePanel) {
@@ -32,7 +34,16 @@ function openWorkspacePanel() {
     nonce: randomBytes(18).toString("base64url"),
   });
 
+  const projectRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+  kanbanController = createKanbanController({
+    vscode,
+    panel: workspacePanel,
+    projectRoot,
+  });
+
   workspacePanel.onDidDispose(() => {
+    kanbanController?.dispose();
+    kanbanController = undefined;
     workspacePanel = undefined;
   });
 
@@ -46,6 +57,8 @@ function activate(context) {
 }
 
 function deactivate() {
+  kanbanController?.dispose();
+  kanbanController = undefined;
   workspacePanel?.dispose();
   workspacePanel = undefined;
 }

@@ -44,11 +44,51 @@ test("shell uses VS Code state APIs and keyboard tab navigation", () => {
   });
 
   assert.match(html, /getState\(\)/);
-  assert.match(html, /setState\(\{ selectedTab: tabId \}\)/);
+  assert.match(html, /vscode\.setState\(state\)/);
+  assert.match(html, /state\.selectedTab = tabId/);
+  assert.match(html, /state\.kanbanFilter = filterInput\.value/);
   assert.match(html, /ArrowLeft/);
   assert.match(html, /ArrowRight/);
   assert.match(html, /Home/);
   assert.match(html, /End/);
+});
+
+test("Kanban panel renders six columns, filter, counts, and non-mutating move controls", () => {
+  const html = createWebviewHtml({
+    cspSource: "vscode-webview://test",
+    nonce: "test-nonce",
+  });
+
+  for (const status of [
+    "backlog",
+    "ready",
+    "working",
+    "review",
+    "done",
+    "blocked",
+  ]) {
+    assert.match(html, new RegExp(`data-kanban-column="${status}"`));
+  }
+  assert.match(html, /data-kanban-filter/);
+  assert.match(html, /data-column-count/);
+  assert.match(html, /draggable/);
+  assert.match(html, /moveTarget\.dataset\.moveTarget/);
+  assert.match(html, /moveButton\.dataset\.moveButton/);
+  assert.match(html, /kanban\.ready/);
+  assert.match(html, /kanban\.refresh/);
+  assert.doesNotMatch(html, /postMessage\(\{[^}]*kanban\.move/s);
+});
+
+test("Kanban drag and Move controls use the same allowed capabilities", () => {
+  const html = createWebviewHtml({
+    cspSource: "vscode-webview://test",
+    nonce: "test-nonce",
+  });
+
+  assert.match(html, /card\.capabilities\.filter\(\(capability\) => capability\.allowed\)/);
+  assert.match(html, /allowedTargets\.has\(column\.dataset\.kanbanColumn\)/);
+  assert.match(html, /moveTarget\.value/);
+  assert.match(html, /상태 변경은 다음 Work Unit에서 활성화됩니다/);
 });
 
 test("shell fills the available width with equal theme-aware tabs and surfaces", () => {

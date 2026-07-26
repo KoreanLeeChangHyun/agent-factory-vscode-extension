@@ -40,7 +40,8 @@
       "kind": "quality-check",
       "content": "실행 전 품질 검증 대기",
       "attributes": {
-        "status": "pending"
+        "status": "planned",
+        "evidence": []
       }
     }
   ],
