@@ -6,6 +6,13 @@
       "description": "Kanban board implementation and verification evidence",
       "sha256": "538049c83e71cb82dde998951dec8d394b03e7fc3d96394c4aa6ec3338dc32cc",
       "sizeBytes": 2225
+    },
+    {
+      "path": "blocks/evidence/worktree-inspect-review.json",
+      "mediaType": "application/json",
+      "description": "Clean review worktree inspection at bfa3845",
+      "sha256": "5da69413e71afcbd95391d9576a59848e68700ae47dd6214aa0697f678db23cf",
+      "sizeBytes": 700
     }
   ]
 }
