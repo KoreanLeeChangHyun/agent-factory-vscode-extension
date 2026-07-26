@@ -2,28 +2,30 @@
 
 const { randomBytes } = require("node:crypto");
 
-const CHAT_VIEW_ID = "agentFactoryAgents.chat";
+function configureChatWebview({
+  webview,
+  controller,
+  nonce = randomBytes(18).toString("base64url"),
+}) {
+  webview.options = {
+    enableScripts: true,
+    localResourceRoots: [],
+  };
+  webview.html = createChatViewHtml({
+    cspSource: webview.cspSource,
+    nonce,
+  });
+  controller.setPostMessage((message) => webview.postMessage(message));
+  const messageSubscription = webview.onDidReceiveMessage((message) =>
+    controller.handleMessage(message),
+  );
 
-class AgentsChatViewProvider {
-  constructor({ controller }) {
-    this.controller = controller;
-  }
-
-  resolveWebviewView(webviewView) {
-    const { webview } = webviewView;
-    webview.options = {
-      enableScripts: true,
-      localResourceRoots: [],
-    };
-    webview.html = createChatViewHtml({
-      cspSource: webview.cspSource,
-      nonce: randomBytes(18).toString("base64url"),
-    });
-    this.controller.setPostMessage((message) => webview.postMessage(message));
-    webview.onDidReceiveMessage((message) =>
-      this.controller.handleMessage(message),
-    );
-  }
+  return {
+    dispose() {
+      messageSubscription.dispose();
+      controller.setPostMessage(async () => {});
+    },
+  };
 }
 
 function groupMessagesIntoTurns(messages) {
@@ -73,7 +75,7 @@ function createChatViewHtml({ cspSource, nonce }) {
       :root {
         color-scheme: light dark;
         color: var(--vscode-foreground);
-        background: var(--vscode-sideBar-background);
+        background: var(--vscode-editor-background);
         font-family: var(--vscode-font-family);
         font-size: var(--vscode-font-size);
       }
@@ -86,7 +88,7 @@ function createChatViewHtml({ cspSource, nonce }) {
         margin: 0;
         padding: 0;
         overflow: hidden;
-        background: var(--vscode-sideBar-background);
+        background: var(--vscode-editor-background);
       }
 
       button, textarea { font: inherit; }
@@ -296,7 +298,7 @@ function createChatViewHtml({ cspSource, nonce }) {
         gap: 4px;
         padding: 8px 0 0;
         border-top: 1px solid var(--vscode-panel-border);
-        background: var(--vscode-sideBar-background);
+        background: var(--vscode-editor-background);
       }
 
       .composer-card {
@@ -644,8 +646,7 @@ function createChatViewHtml({ cspSource, nonce }) {
 }
 
 module.exports = {
-  CHAT_VIEW_ID,
-  AgentsChatViewProvider,
+  configureChatWebview,
   createChatViewHtml,
   groupMessagesIntoTurns,
   shouldSubmitComposerKey,

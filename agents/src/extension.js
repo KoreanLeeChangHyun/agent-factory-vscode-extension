@@ -2,19 +2,18 @@
 
 const vscode = require("vscode");
 
-const {
-  CHAT_VIEW_ID,
-  AgentsChatViewProvider,
-} = require("./chatView");
+const { createAgentsPanelManager } = require("./agentsPanel");
 const { AgentsChatController } = require("./chatBackend");
 const {
   CodexRunner,
   resolveBundledCodexPath,
 } = require("./codexAdapter");
-const { registerWorkspaceExplorer } = require("./explorerTree");
+const { registerLauncher } = require("./launcher");
+
+const COMMAND_OPEN_AGENTS = "agentFactoryAgents.open";
 
 function activate(context) {
-  registerWorkspaceExplorer(context);
+  registerLauncher(vscode, context);
   const executablePath = resolveBundledCodexPath({
     extensionPath: context.extensionPath,
   });
@@ -26,15 +25,12 @@ function activate(context) {
       vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || context.extensionPath,
   });
   context.subscriptions.push({ dispose: () => runner.dispose() });
+  const panelManager = createAgentsPanelManager({ vscode, controller });
   context.subscriptions.push(
-    vscode.window.registerWebviewViewProvider(
-      CHAT_VIEW_ID,
-      new AgentsChatViewProvider({ controller }),
-      {
-        webviewOptions: {
-          retainContextWhenHidden: true,
-        },
-      },
+    panelManager,
+    vscode.commands.registerCommand(
+      COMMAND_OPEN_AGENTS,
+      panelManager.open,
     ),
   );
 }
@@ -42,6 +38,7 @@ function activate(context) {
 function deactivate() {}
 
 module.exports = {
+  COMMAND_OPEN_AGENTS,
   activate,
   deactivate,
 };

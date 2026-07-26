@@ -41,10 +41,19 @@
     {
       "id": "QUALITY-STATUS",
       "kind": "quality-check",
-      "content": "실행 전 품질 검증 대기",
+      "content": "문법, 단위, 통합, VS Code 1.129.1 E2E와 linux-x64 VSIX 검증 통과",
       "attributes": {
-        "status": "planned",
-        "evidence": []
+        "status": "pass",
+        "executionTarget": {
+          "contractVersion": "1.0.0",
+          "invocationId": "019f9d6b-06db-74a1-8adf-905d76ff2f16",
+          "headCommit": "d2ac2487b3277562c1ab816cfdf2c125105c5e3e",
+          "revision": 1,
+          "attempt": 1
+        },
+        "evidence": [
+          "blocks/evidence/agents-editor-area-verification.txt"
+        ]
       }
     }
   ],
