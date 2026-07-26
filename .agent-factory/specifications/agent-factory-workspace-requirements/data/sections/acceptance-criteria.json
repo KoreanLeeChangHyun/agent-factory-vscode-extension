@@ -21,6 +21,18 @@
         "Codex 인증이 없거나 실행이 실패하면 비밀을 노출하지 않는 오류와 복구 안내를 표시한다.",
         "Specification, 단위 테스트, 핵심 E2E 및 보안·테마·접근성·패키지 점검이 통과한다."
       ]
+    },
+    {
+      "id": "acceptance-kanban-operations",
+      "kind": "acceptance-criterion",
+      "content": [
+        "canonical Work Unit fixture가 정확한 6개 lifecycle 칼럼에 표시되고 filter, count, refresh와 reconnect가 동작한다.",
+        "허용된 target만 dragover와 Move 메뉴에서 활성화되며 manager가 성공한 뒤 카드 위치가 확정된다.",
+        "생성·편집·상태 변경은 manager를 통과하고 실패 시 부분 canonical 변경이 남지 않는다.",
+        "실행은 matching Goal, checkpoint와 dedicated worktree를 사용하고 진행·오류·복구 상태를 표시한다.",
+        "Human review, rework, integration과 PR은 각각 별도 확인과 결과 evidence를 가진다.",
+        "단위, manager·Git 통합, 핵심 VS Code E2E, 접근성·테마·보안과 Human 검토가 통과한다."
+      ]
     }
   ],
   "subsections": []

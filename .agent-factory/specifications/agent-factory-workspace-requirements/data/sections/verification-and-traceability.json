@@ -15,6 +15,18 @@
         "VS Code 1.129.x Extension Host에서 container, Views와 설치된 패키지 경계 검증",
         "Human Activity Bar, Explorer, Chat 송수신과 인증 오류 검토"
       ]
+    },
+    {
+      "id": "kanban-operations-verification",
+      "kind": "verification",
+      "content": [
+        "agent-factory-workspace-kanban-viewer Intake와 네 개의 Kanban Work Unit basis 추적성 검증",
+        "reader, message contract, 6개 상태 board, filter, watcher와 reconnect 단위·통합 검증",
+        "manager create·edit·transition과 capability·drag·keyboard negative path 검증",
+        "Goal, checkpoint, worktree, execution progress·failure·recovery 통합 검증",
+        "Human review, rework, integration receipt와 PR 승인·실패 경계 검증",
+        "VS Code Extension Host E2E와 Human Kanban workflow 검토"
+      ]
     }
   ],
   "subsections": []

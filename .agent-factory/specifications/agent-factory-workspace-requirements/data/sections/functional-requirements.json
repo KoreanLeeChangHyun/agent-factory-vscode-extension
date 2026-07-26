@@ -16,6 +16,20 @@
         "Agents Chat은 Extension Host를 통해 Codex 메시지 실행, JSONL 스트리밍, 취소, 재연결과 명시적 세션 복원을 제공한다.",
         "Agents Extension은 ../web 런타임과 독립적으로 설치되고 실행된다."
       ]
+    },
+    {
+      "id": "functional-kanban-operations",
+      "kind": "functional-requirement",
+      "content": [
+        "workspace Kanban은 canonical Work Unit v4를 backlog, ready, working, review, done, blocked 칼럼에 표시한다.",
+        "카드는 제목, id, updatedAt과 존재하는 실행·review·Human 승인·integration·PR 상태를 표시한다.",
+        "보드는 제목·id 필터, 칼럼별 항목 수, filesystem 변경 자동 갱신과 Webview 재연결 복원을 제공한다.",
+        "확장 호스트는 카드별 target lifecycle capability와 거절 사유를 계산한다.",
+        "카드는 허용된 target으로 drag and drop할 수 있고 동일한 click, tap, keyboard Move 작업을 제공한다.",
+        "Work Unit 생성·편집·상태 변경은 canonical manager 명령을 통해 수행한다.",
+        "Work Unit 실행은 Goal, checkpoint, dedicated worktree와 execution state 계약을 통해 수행한다.",
+        "Human review 승인·rework, Git integration과 PR 생성은 각각 독립적인 Human 확인을 요구한다."
+      ]
     }
   ],
   "subsections": []

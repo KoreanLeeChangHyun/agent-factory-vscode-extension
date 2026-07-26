@@ -19,6 +19,18 @@
         "agents Chat의 UI 상태는 vscode.getState와 vscode.setState로 보존한다.",
         "Codex 인증 비밀은 Webview 메시지나 로그에 노출하지 않는다."
       ]
+    },
+    {
+      "id": "quality-kanban-operations",
+      "kind": "non-functional-requirement",
+      "content": [
+        "Webview는 파일시스템, manager, Codex, Git 또는 GitHub 명령을 직접 실행하지 않는다.",
+        "capability preflight와 실제 command는 확장 호스트가 현재 canonical 상태를 기준으로 각각 검증한다.",
+        "지원하지 않는 schema, unsafe path, symlink, stale 상태와 command failure는 mutation 없이 근거 있는 오류를 표시한다.",
+        "dragging movement에는 click·tap과 keyboard로 수행하는 동등한 Move 대체 조작을 제공한다.",
+        "장시간 action은 request identity, pending 상태, 중복 방지, bounded retry와 authoritative refresh를 사용한다.",
+        "강제 Git 작업, dirty worktree 제거, 자동 merge와 자동 PR promotion을 제공하지 않는다."
+      ]
     }
   ],
   "subsections": []

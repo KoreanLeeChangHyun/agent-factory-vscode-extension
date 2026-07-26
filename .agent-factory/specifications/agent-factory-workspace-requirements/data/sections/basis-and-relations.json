@@ -52,6 +52,20 @@
           "path": ".agent-factory/intakes/agent-factory-agents-backend-connection"
         }
       ]
+    },
+    {
+      "id": "kanban-operations-intake-basis",
+      "kind": "source-basis",
+      "content": {
+        "description": "전체 Kanban 운영 요구사항은 canonical Intake agent-factory-workspace-kanban-viewer에서 정렬되었다."
+      },
+      "sourceRefs": [
+        {
+          "artifactType": "intake",
+          "id": "agent-factory-workspace-kanban-viewer",
+          "path": ".agent-factory/intakes/agent-factory-workspace-kanban-viewer"
+        }
+      ]
     }
   ],
   "subsections": []
