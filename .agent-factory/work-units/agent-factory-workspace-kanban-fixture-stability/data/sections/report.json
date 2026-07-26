@@ -5,10 +5,28 @@
     {
       "id": "report-result-kanban-fixture-stability",
       "kind": "report-result",
-      "content": "실행 전 보고 대기",
+      "content": "Kanban manager integration fixture 안정화 완료. manager가 임시 clone 안에 고정 ID canonical fixture를 생성하고 integration과 VS Code E2E가 동일한 ready에서 backlog 전이를 검증한다. production source는 변경하지 않았다.",
       "attributes": {
-        "verificationResult": "pending",
-        "evidence": []
+        "verificationResult": "pass",
+        "executionTarget": {
+          "contractVersion": "1.0.0",
+          "invocationId": "codex-20260727-kanban-fixture-stability-001",
+          "headCommit": "6884aa8bb59eb60ed24b804a84adfe7bdce05c9e",
+          "revision": 1,
+          "attempt": 1
+        },
+        "evidence": [
+          "blocks/evidence/kanban-fixture-stability-verification.txt"
+        ],
+        "changedArtifacts": [
+          "workspace/test/helpers/kanbanFixture.js",
+          "workspace/test/integration/kanbanManager.integration.test.js",
+          "workspace/test/suite/index.js"
+        ],
+        "remainingRisks": [
+          "manager 기반 fixture 준비로 integration과 E2E 실행 시간이 각각 약 30초 증가한다.",
+          "fixture는 검증된 Kanban Intake basis가 repository에 ready로 유지된다는 project 계약을 사용한다."
+        ]
       }
     }
   ],

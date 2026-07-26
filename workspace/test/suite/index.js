@@ -9,7 +9,6 @@ const { promisify } = require("node:util");
 const vscode = require("vscode");
 
 const execFile = promisify(execFileCallback);
-const FIXTURE_ID = "agent-factory-agents-chat-web-alignment";
 
 async function run() {
   const extension = vscode.extensions.getExtension(
@@ -24,9 +23,16 @@ async function run() {
   const { createWebviewHtml } = require(
     join(extension.extensionPath, "src", "webviewShell"),
   );
-  const { createWorkUnitTransitionRunner } = require(
+  const {
+    createWorkUnitTransitionRunner,
+    discoverWorkUnitManager,
+  } = require(
     join(extension.extensionPath, "src", "kanbanManager"),
   );
+  const {
+    FIXTURE_ID,
+    createReadyKanbanFixture,
+  } = require(join(extension.extensionPath, "test", "helpers", "kanbanFixture"));
   const snapshot = await readKanbanSnapshot(join(extension.extensionPath, ".."));
   assert.deepEqual(
     snapshot.columns.map(({ id }) => id),
@@ -58,6 +64,11 @@ async function run() {
       ["clone", "--quiet", "--shared", join(extension.extensionPath, ".."), fixtureRoot],
       { shell: false },
     );
+    const manager = await discoverWorkUnitManager();
+    await createReadyKanbanFixture({
+      managerPath: manager.path,
+      projectRoot: fixtureRoot,
+    });
     const transition = createWorkUnitTransitionRunner();
     await transition({
       projectRoot: fixtureRoot,

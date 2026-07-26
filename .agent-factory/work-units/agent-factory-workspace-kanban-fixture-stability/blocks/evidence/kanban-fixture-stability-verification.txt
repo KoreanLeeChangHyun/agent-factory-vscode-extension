@@ -1,0 +1,26 @@
+Agent Factory Workspace Kanban fixture stability verification
+
+Failure evidence
+- main 병합 후 npm run test:manager가 0/1로 실패했다.
+- 실패 위치는 manager 실행 전 ready 칼럼 assertion이었다.
+- 기존 fixture Work Unit agent-factory-agents-chat-web-alignment가 외부 Agents Chat 완료로 ready에서 done으로 바뀐 것이 원인이었다.
+
+Verified implementation
+- commit: eac23c36e8c4f08d8a4f1d3c6543a79bcc8e77bd
+- branch: work-unit/agent-factory-workspace-kanban-fixture-stability
+- invocation: codex-20260727-kanban-fixture-stability-001
+- canonical execution subject: 6884aa8bb59eb60ed24b804a84adfe7bdce05c9e
+
+Fixture contract
+- 고정 ID kanban-manager-transition-fixture를 임시 clone 안에서만 사용한다.
+- 설치된 Work Unit manager의 create, section-items-put, metadata-set, transition 명령으로 canonical ready fixture를 준비한다.
+- 현재 repository의 실제 Work Unit id 또는 lifecycle status를 fixture로 사용하지 않는다.
+- integration과 VS Code E2E가 같은 helper와 fixture 계약을 사용한다.
+- production workspace/src 파일은 변경하지 않았다.
+
+Verification
+- npm run check: 21 passed, 0 failed.
+- npm run test:manager: 1 passed, 0 failed.
+- npm run test:e2e: VS Code 1.129.1 Extension Host exit code 0.
+- npm audit: 0 vulnerabilities.
+- git diff --check: pass.

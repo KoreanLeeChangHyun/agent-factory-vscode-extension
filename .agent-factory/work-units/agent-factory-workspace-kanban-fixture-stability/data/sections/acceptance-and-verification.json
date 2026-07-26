@@ -37,10 +37,19 @@
     {
       "id": "quality-check-kanban-fixture-stability",
       "kind": "quality-check",
-      "content": "실행 전 품질 검증 대기",
+      "content": "단위 21개, 실제 manager 통합 1개, VS Code 1.129.1 E2E와 diff 검증을 통과했다.",
       "attributes": {
-        "status": "planned",
-        "evidence": []
+        "status": "pass",
+        "executionTarget": {
+          "contractVersion": "1.0.0",
+          "invocationId": "codex-20260727-kanban-fixture-stability-001",
+          "headCommit": "6884aa8bb59eb60ed24b804a84adfe7bdce05c9e",
+          "revision": 1,
+          "attempt": 1
+        },
+        "evidence": [
+          "blocks/evidence/kanban-fixture-stability-verification.txt"
+        ]
       }
     }
   ],

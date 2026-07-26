@@ -10,11 +10,15 @@ const { promisify } = require("node:util");
 
 const {
   createWorkUnitTransitionRunner,
+  discoverWorkUnitManager,
 } = require("../../src/kanbanManager");
 const { readKanbanSnapshot } = require("../../src/kanbanReader");
+const {
+  FIXTURE_ID,
+  createReadyKanbanFixture,
+} = require("../helpers/kanbanFixture");
 
 const execFile = promisify(execFileCallback);
-const FIXTURE_ID = "agent-factory-agents-chat-web-alignment";
 
 test("installed manager transitions an isolated canonical fixture", async () => {
   const repositoryRoot = join(__dirname, "..", "..", "..");
@@ -22,6 +26,11 @@ test("installed manager transitions an isolated canonical fixture", async () => 
   try {
     await execFile("git", ["clone", "--quiet", "--shared", repositoryRoot, fixtureRoot], {
       shell: false,
+    });
+    const manager = await discoverWorkUnitManager();
+    await createReadyKanbanFixture({
+      managerPath: manager.path,
+      projectRoot: fixtureRoot,
     });
     const before = await readKanbanSnapshot(fixtureRoot);
     assert.equal(
