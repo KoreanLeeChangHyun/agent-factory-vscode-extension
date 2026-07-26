@@ -1,6 +1,13 @@
 {
   "blocks": [
     {
+      "path": "blocks/evidence/worktree-inspect.json",
+      "mediaType": "application/json",
+      "description": "Canonical clean worktree inspect receipt before evidence registration",
+      "sha256": "094ead70fe72ba44bfff4eddd4b2825a710c3bcfaf2a4f171381637010d3ba48",
+      "sizeBytes": 626
+    },
+    {
       "path": "blocks/logs/agents-backend-verification.log",
       "mediaType": "text/plain",
       "description": "Agents backend implementation and verification evidence",
