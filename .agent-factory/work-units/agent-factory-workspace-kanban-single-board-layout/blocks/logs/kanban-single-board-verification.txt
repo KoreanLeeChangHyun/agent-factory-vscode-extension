@@ -1,0 +1,15 @@
+Agent Factory Workspace Kanban single-board verification
+
+Execution target: 629443c00a1a4d4875eb295d3ab035f945f41213
+TDD red: 새 단일 보드 계약을 추가한 뒤 기존 구현에서 4개 테스트 실패 확인.
+npm run check: syntax 및 unit 29/29 통과.
+npm run test:manager: installed manager integration 1/1 통과.
+npm run test:e2e: VS Code 1.129.1 Extension Host 종료 코드 0.
+Viewport: Chrome headless 480x800, 838x944, 1440x900에서 육안 검증.
+Viewport result: 가능한 폭에서 6개 selector가 동일 너비로 표시되고 좁은 폭에서 선택 selector가 보이도록 가로 스크롤됨.
+Viewport result: 선택 board 하나가 전체 폭과 남은 높이를 사용하고 card list만 세로 스크롤됨.
+Viewport result: 가로·세로 scrollbar, 검색·filter UI가 보이지 않음.
+VSIX: /tmp/agent-factory-workspace-kanban-single-board-layout.vsix
+VSIX SHA-256: f3cb4eeab1d135d284b65a79cfb04f86c59501c8930652a241da3e4292b27f45
+Packaged webviewShell.js SHA-256: f4e145c2383c28b14538d20fec964dd51116124b2955e5882ec1f64275d0dd1d
+Source webviewShell.js SHA-256: f4e145c2383c28b14538d20fec964dd51116124b2955e5882ec1f64275d0dd1d

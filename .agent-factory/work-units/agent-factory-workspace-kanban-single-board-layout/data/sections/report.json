@@ -5,10 +5,19 @@
     {
       "id": "REPORT-STATUS",
       "kind": "report-result",
-      "content": "실행 전 보고 대기",
+      "content": "승인된 single-board Kanban layout 구현 및 검증 완료. Human review와 별도 integration 승인 대기.",
       "attributes": {
-        "verificationResult": "pending",
-        "evidence": []
+        "verificationResult": "pass",
+        "executionTarget": {
+          "contractVersion": "1.0.0",
+          "invocationId": "codex-kanban-single-board-20260727-001",
+          "headCommit": "3b077b47e6099d3f9c389f00318d8cd3f5fa6729",
+          "revision": 1,
+          "attempt": 1
+        },
+        "evidence": [
+          "blocks/logs/kanban-single-board-verification.txt"
+        ]
       }
     }
   ],

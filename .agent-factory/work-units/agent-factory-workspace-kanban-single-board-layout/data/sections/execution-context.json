@@ -21,7 +21,7 @@
       "kind": "execution-state",
       "content": {
         "contractVersion": "1.0.0",
-        "state": "running",
+        "state": "review",
         "subject": {
           "algorithm": "gitCommit",
           "digest": "3b077b47e6099d3f9c389f00318d8cd3f5fa6729"
@@ -34,10 +34,54 @@
         ],
         "history": [],
         "progress": {
-          "completedSteps": [],
+          "completedSteps": [
+            "PLAN-001",
+            "PLAN-002",
+            "PLAN-003",
+            "PLAN-004",
+            "PLAN-005",
+            "PLAN-006"
+          ],
           "pendingStep": null,
-          "lastVerifiedHead": "3b077b47e6099d3f9c389f00318d8cd3f5fa6729",
-          "checkpoints": [],
+          "lastVerifiedHead": "629443c00a1a4d4875eb295d3ab035f945f41213",
+          "checkpoints": [
+            {
+              "stepId": "PLAN-001",
+              "state": "completed",
+              "headCommit": "629443c00a1a4d4875eb295d3ab035f945f41213",
+              "idempotencyKey": "revision-1-attempt-1-plan-001-completed"
+            },
+            {
+              "stepId": "PLAN-002",
+              "state": "completed",
+              "headCommit": "629443c00a1a4d4875eb295d3ab035f945f41213",
+              "idempotencyKey": "revision-1-attempt-1-plan-002-completed"
+            },
+            {
+              "stepId": "PLAN-003",
+              "state": "completed",
+              "headCommit": "629443c00a1a4d4875eb295d3ab035f945f41213",
+              "idempotencyKey": "revision-1-attempt-1-plan-003-completed"
+            },
+            {
+              "stepId": "PLAN-004",
+              "state": "completed",
+              "headCommit": "629443c00a1a4d4875eb295d3ab035f945f41213",
+              "idempotencyKey": "revision-1-attempt-1-plan-004-completed"
+            },
+            {
+              "stepId": "PLAN-005",
+              "state": "completed",
+              "headCommit": "629443c00a1a4d4875eb295d3ab035f945f41213",
+              "idempotencyKey": "revision-1-attempt-1-plan-005-completed"
+            },
+            {
+              "stepId": "PLAN-006",
+              "state": "completed",
+              "headCommit": "629443c00a1a4d4875eb295d3ab035f945f41213",
+              "idempotencyKey": "revision-1-attempt-1-plan-006-completed"
+            }
+          ],
           "retry": {}
         },
         "recovery": {

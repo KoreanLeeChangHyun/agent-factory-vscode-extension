@@ -17,10 +17,17 @@
     {
       "id": "AI-REVIEW-STATUS",
       "kind": "ai-review-result",
-      "content": "AI review 대기",
+      "content": "범위, DOM ownership, capability 경계, 접근성, 회귀와 package evidence를 검토했으며 발견된 미해결 결함 없음",
       "attributes": {
-        "result": "pending",
-        "checklistResult": "pending"
+        "result": "pass",
+        "checklistResult": "pass",
+        "executionTarget": {
+          "contractVersion": "1.0.0",
+          "invocationId": "codex-kanban-single-board-20260727-001",
+          "headCommit": "3b077b47e6099d3f9c389f00318d8cd3f5fa6729",
+          "revision": 1,
+          "attempt": 1
+        }
       }
     }
   ],

@@ -29,10 +29,19 @@
     {
       "id": "QUALITY-STATUS",
       "kind": "quality-check",
-      "content": "실행 전 품질 검증 대기",
+      "content": "승인 범위 구현과 전체 검증 통과",
       "attributes": {
-        "status": "planned",
-        "evidence": []
+        "status": "pass",
+        "executionTarget": {
+          "contractVersion": "1.0.0",
+          "invocationId": "codex-kanban-single-board-20260727-001",
+          "headCommit": "3b077b47e6099d3f9c389f00318d8cd3f5fa6729",
+          "revision": 1,
+          "attempt": 1
+        },
+        "evidence": [
+          "blocks/logs/kanban-single-board-verification.txt"
+        ]
       }
     },
     {

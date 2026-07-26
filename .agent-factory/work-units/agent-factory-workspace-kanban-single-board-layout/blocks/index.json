@@ -1,3 +1,11 @@
 {
-  "blocks": []
+  "blocks": [
+    {
+      "path": "blocks/logs/kanban-single-board-verification.txt",
+      "mediaType": "text/plain",
+      "description": "Kanban single-board 구현, 테스트, viewport와 VSIX 검증 증빙",
+      "sha256": "0eb7b59fd2ea283dbb740980a933c2a42922517786572832d16e5570d9bf4d8d",
+      "sizeBytes": 1163
+    }
+  ]
 }
