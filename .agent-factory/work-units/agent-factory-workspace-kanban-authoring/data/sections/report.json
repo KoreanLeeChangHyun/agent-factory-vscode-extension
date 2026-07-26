@@ -16,7 +16,8 @@
           "attempt": 1
         },
         "evidence": [
-          "blocks/evidence/kanban-transitions-verification.txt"
+          "blocks/evidence/kanban-transitions-verification.txt",
+          "blocks/evidence/worktree-inspect-review.json"
         ],
         "changedArtifacts": [
           "workspace/package.json",
