@@ -1,6 +1,13 @@
 {
   "blocks": [
     {
+      "path": "blocks/evidence/kanban-transitions-integration.json",
+      "mediaType": "application/json",
+      "description": "Raw Work Unit integration receipt",
+      "sha256": "4864bce5ac777c1fcbc347bd614a9af68806aac96965b212b3a7ea52d8669b43",
+      "sizeBytes": 769
+    },
+    {
       "path": "blocks/evidence/kanban-transitions-verification.txt",
       "mediaType": "text/plain",
       "description": "Kanban DnD 전이 TDD, manager 통합, VS Code E2E 및 보안 검증 근거",
