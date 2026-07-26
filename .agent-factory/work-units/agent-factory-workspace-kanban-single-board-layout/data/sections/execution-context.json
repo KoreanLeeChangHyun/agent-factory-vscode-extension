@@ -15,6 +15,38 @@
         "branch": "work-unit/agent-factory-workspace-kanban-single-board-layout",
         "worktreePath": "/home/deus/workspace/agent-factory/vscode-extension/.agent-factory/worktree/agent-factory-workspace-kanban-single-board-layout"
       }
+    },
+    {
+      "id": "EXECUTION-STATE-001",
+      "kind": "execution-state",
+      "content": {
+        "contractVersion": "1.0.0",
+        "state": "running",
+        "subject": {
+          "algorithm": "gitCommit",
+          "digest": "3b077b47e6099d3f9c389f00318d8cd3f5fa6729"
+        },
+        "currentRevision": 1,
+        "currentAttempt": 1,
+        "invocationId": "codex-kanban-single-board-20260727-001",
+        "invocationChain": [
+          "codex-kanban-single-board-20260727-001"
+        ],
+        "history": [],
+        "progress": {
+          "completedSteps": [],
+          "pendingStep": null,
+          "lastVerifiedHead": "3b077b47e6099d3f9c389f00318d8cd3f5fa6729",
+          "checkpoints": [],
+          "retry": {}
+        },
+        "recovery": {
+          "status": "running",
+          "ownerInvocationId": "codex-kanban-single-board-20260727-001",
+          "blockerId": null,
+          "evidence": null
+        }
+      }
     }
   ],
   "subsections": []

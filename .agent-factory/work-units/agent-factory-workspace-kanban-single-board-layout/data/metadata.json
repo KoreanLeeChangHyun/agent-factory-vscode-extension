@@ -1,15 +1,15 @@
 {
   "schemaVersion": "4.0.0",
-  "documentVersion": "1.0.25",
+  "documentVersion": "1.0.27",
   "id": "agent-factory-workspace-kanban-single-board-layout",
   "artifactType": "work-unit",
   "projectId": "agent-factory-workspace",
   "lifecycle": {
     "phase": "work-unit",
-    "status": "ready"
+    "status": "working"
   },
   "createdAt": "2026-07-26T19:46:32+00:00",
-  "updatedAt": "2026-07-26T19:48:57+00:00",
+  "updatedAt": "2026-07-26T19:52:59+00:00",
   "language": "ko",
   "theme": "vscode-native",
   "provenance": {

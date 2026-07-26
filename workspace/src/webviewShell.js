@@ -51,13 +51,33 @@ function createWebviewHtml({ cspSource, nonce }) {
       >${label}</button>`,
   ).join("");
 
+  const kanbanBoardTabs = KANBAN_COLUMNS.map(
+    ({ id, label }, index) => `
+      <button
+        class="kanban-board-tab"
+        id="kanban-board-tab-${id}"
+        type="button"
+        role="tab"
+        aria-controls="kanban-column-${id}"
+        aria-selected="${index === 0}"
+        data-kanban-board-target="${id}"
+        tabindex="${index === 0 ? "0" : "-1"}"
+      >
+        <span>${label}</span>
+        <span class="kanban-count" data-board-count aria-label="${label} 항목 수">0</span>
+      </button>`,
+  ).join("");
+
   const kanbanColumns = KANBAN_COLUMNS.map(
-    ({ id, label }) => `
-      <section class="kanban-column" data-kanban-column="${id}" aria-labelledby="kanban-column-${id}">
-        <header class="kanban-column-header">
-          <h3 id="kanban-column-${id}">${label}</h3>
-          <span class="kanban-count" data-column-count aria-label="${label} 항목 수">0</span>
-        </header>
+    ({ id }, index) => `
+      <section
+        class="kanban-column"
+        id="kanban-column-${id}"
+        role="tabpanel"
+        aria-labelledby="kanban-board-tab-${id}"
+        data-kanban-column="${id}"
+        ${index === 0 ? "" : "hidden"}
+      >
         <div class="kanban-card-list" data-card-list>
           <p class="kanban-column-empty">항목 없음</p>
         </div>
@@ -71,15 +91,6 @@ function createWebviewHtml({ cspSource, nonce }) {
       content = `
         <div class="kanban-workspace" aria-busy="true">
           <div class="kanban-toolbar">
-            <label class="kanban-filter-label">
-              <span>Work Unit 필터</span>
-              <input
-                type="search"
-                data-kanban-filter
-                placeholder="제목 또는 id"
-                autocomplete="off"
-              >
-            </label>
             <button class="secondary-button" type="button" data-kanban-refresh>새로 고침</button>
             <span class="kanban-updated" data-kanban-updated aria-live="polite">불러오는 중…</span>
           </div>
@@ -232,18 +243,87 @@ function createWebviewHtml({ cspSource, nonce }) {
         display: flex;
         min-height: 44px;
         align-items: center;
+        gap: clamp(12px, 2vw, 24px);
+        min-width: 0;
         padding: 0 clamp(16px, 2.5vw, 32px);
         border-bottom: 1px solid var(--vscode-panel-border);
         background: var(--vscode-editor-background);
       }
 
       .selected-header h1 {
+        flex: 0 0 auto;
         margin: 0;
         overflow: hidden;
         font-size: 13px;
         font-weight: 600;
         text-overflow: ellipsis;
         white-space: nowrap;
+      }
+
+      .kanban-board-selector {
+        display: flex;
+        flex: 1 1 auto;
+        gap: 0;
+        min-width: 0;
+        overflow-x: auto;
+        scrollbar-width: none;
+      }
+
+      .kanban-board-selector::-webkit-scrollbar {
+        display: none;
+      }
+
+      .kanban-board-tab {
+        position: relative;
+        display: flex;
+        flex: 1 0 88px;
+        min-width: 88px;
+        min-height: 43px;
+        align-items: center;
+        justify-content: center;
+        gap: 6px;
+        padding: 6px 8px;
+        border: 0;
+        border-left: 1px solid var(--vscode-panel-border);
+        color: var(--vscode-tab-inactiveForeground);
+        background: transparent;
+        cursor: pointer;
+      }
+
+      .kanban-board-tab:last-child {
+        border-right: 1px solid var(--vscode-panel-border);
+      }
+
+      .kanban-board-tab:hover,
+      .kanban-board-tab.is-drop-target {
+        color: var(--vscode-tab-activeForeground);
+        background: var(--vscode-list-hoverBackground);
+      }
+
+      .kanban-board-tab.is-drop-target {
+        outline: 2px solid var(--vscode-focusBorder);
+        outline-offset: -2px;
+        background: var(--vscode-list-dropBackground);
+      }
+
+      .kanban-board-tab[aria-selected="true"] {
+        color: var(--vscode-tab-activeForeground);
+        background: var(--vscode-tab-activeBackground);
+      }
+
+      .kanban-board-tab[aria-selected="true"]::after {
+        position: absolute;
+        right: 0;
+        bottom: 0;
+        left: 0;
+        height: 2px;
+        content: "";
+        background: var(--vscode-tab-activeBorder, var(--vscode-focusBorder));
+      }
+
+      .kanban-board-tab:focus-visible {
+        outline: 1px solid var(--vscode-focusBorder);
+        outline-offset: -1px;
       }
 
       .workspace-body {
@@ -425,40 +505,23 @@ function createWebviewHtml({ cspSource, nonce }) {
       }
 
       .kanban-workspace {
-        min-height: 100%;
-        padding: 16px;
+        display: grid;
+        height: calc(100vh - 78px);
+        min-height: 0;
+        grid-template-rows: auto auto auto minmax(0, 1fr);
+        padding: 12px 16px 0;
+        overflow: hidden;
       }
 
       .kanban-toolbar {
         display: flex;
-        flex-wrap: wrap;
+        align-items: center;
+        justify-content: flex-end;
         gap: 10px;
-        align-items: end;
-        margin-bottom: 12px;
+        min-height: 32px;
+        margin-bottom: 8px;
       }
 
-      .kanban-filter-label {
-        display: grid;
-        flex: 1 1 260px;
-        gap: 4px;
-        max-width: 520px;
-        color: var(--vscode-descriptionForeground);
-        font-size: 12px;
-      }
-
-      .kanban-filter-label input,
-      .kanban-card select {
-        min-height: 28px;
-        border: 1px solid var(--vscode-input-border, transparent);
-        color: var(--vscode-input-foreground);
-        background: var(--vscode-input-background);
-      }
-
-      .kanban-filter-label input {
-        padding: 4px 8px;
-      }
-
-      .kanban-filter-label input:focus-visible,
       .kanban-card select:focus-visible,
       .secondary-button:focus-visible,
       .move-button:focus-visible,
@@ -483,10 +546,14 @@ function createWebviewHtml({ cspSource, nonce }) {
       }
 
       .kanban-updated {
+        min-width: 0;
         min-height: 28px;
         padding: 6px 0;
+        overflow: hidden;
         color: var(--vscode-descriptionForeground);
         font-size: 12px;
+        text-overflow: ellipsis;
+        white-space: nowrap;
       }
 
       .kanban-notice,
@@ -505,41 +572,27 @@ function createWebviewHtml({ cspSource, nonce }) {
         background: var(--vscode-inputValidation-warningBackground);
       }
 
+      .kanban-notice:empty {
+        min-height: 0;
+        margin-bottom: 0;
+      }
+
       .kanban-board {
         display: grid;
-        grid-template-columns: repeat(6, minmax(230px, 1fr));
-        gap: 10px;
-        min-width: 1430px;
-        align-items: start;
+        grid-template-columns: minmax(0, 1fr);
+        gap: 0;
+        min-width: 0;
+        min-height: 0;
+        overflow: hidden;
       }
 
       .kanban-column {
-        min-height: 180px;
+        display: grid;
+        height: 100%;
+        min-height: 0;
+        grid-template-rows: minmax(0, 1fr);
         border: 1px solid var(--vscode-panel-border);
         background: var(--vscode-sideBar-background);
-      }
-
-      .kanban-column.is-drop-target {
-        outline: 2px solid var(--vscode-focusBorder);
-        outline-offset: -2px;
-        background: var(--vscode-list-dropBackground);
-      }
-
-      .kanban-column-header {
-        display: flex;
-        min-height: 38px;
-        align-items: center;
-        justify-content: space-between;
-        gap: 8px;
-        padding: 8px 10px;
-        border-bottom: 1px solid var(--vscode-panel-border);
-      }
-
-      .kanban-column-header h3 {
-        margin: 0;
-        font-size: 12px;
-        font-weight: 600;
-        text-transform: uppercase;
       }
 
       .kanban-count {
@@ -553,8 +606,16 @@ function createWebviewHtml({ cspSource, nonce }) {
 
       .kanban-card-list {
         display: grid;
+        min-height: 0;
+        align-content: start;
         gap: 8px;
         padding: 8px;
+        overflow-y: auto;
+        scrollbar-width: none;
+      }
+
+      .kanban-card-list::-webkit-scrollbar {
+        display: none;
       }
 
       .kanban-column-empty {
@@ -606,7 +667,11 @@ function createWebviewHtml({ cspSource, nonce }) {
 
       .kanban-card select {
         min-width: 0;
+        min-height: 28px;
         padding: 3px 5px;
+        border: 1px solid var(--vscode-input-border, transparent);
+        color: var(--vscode-input-foreground);
+        background: var(--vscode-input-background);
       }
 
       [hidden] {
@@ -621,6 +686,15 @@ function createWebviewHtml({ cspSource, nonce }) {
       </nav>
       <header class="selected-header">
         <h1 data-selected-title>Dashboard</h1>
+        <div
+          class="kanban-board-selector"
+          data-kanban-board-selector
+          role="tablist"
+          aria-label="Kanban boards"
+          hidden
+        >
+          ${kanbanBoardTabs}
+        </div>
       </header>
       <div class="workspace-body">
         ${panels}
@@ -629,10 +703,13 @@ function createWebviewHtml({ cspSource, nonce }) {
     <script nonce="${nonce}">
       (() => {
         const vscode = acquireVsCodeApi();
-        const tabs = Array.from(document.querySelectorAll('[role="tab"]'));
-        const panels = Array.from(document.querySelectorAll('[role="tabpanel"]'));
+        const tabs = Array.from(document.querySelectorAll('[data-tab-id]'));
+        const panels = Array.from(document.querySelectorAll('[data-panel-id]'));
         const selectedTitle = document.querySelector('[data-selected-title]');
-        const filterInput = document.querySelector('[data-kanban-filter]');
+        const kanbanBoardSelector = document.querySelector('[data-kanban-board-selector]');
+        const kanbanBoardTabs = Array.from(
+          document.querySelectorAll('[data-kanban-board-target]'),
+        );
         const refreshButton = document.querySelector('[data-kanban-refresh]');
         const updatedLabel = document.querySelector('[data-kanban-updated]');
         const notice = document.querySelector('[data-kanban-notice]');
@@ -650,17 +727,24 @@ function createWebviewHtml({ cspSource, nonce }) {
         const artifactEditor = document.querySelector('.artifact-editor');
         const state = {
           selectedTab: "dashboard",
-          kanbanFilter: "",
+          selectedKanbanBoard: "backlog",
           selectedArtifactType: "",
           selectedArtifactId: "",
           selectedSectionId: "",
           selectedItemId: "",
           ...(vscode.getState() || {}),
         };
+        delete state.kanbanFilter;
         if (["design", "view"].includes(state.selectedTab)) {
           state.selectedTab = "editor";
         }
         const knownTabs = new Set(tabs.map((tab) => tab.dataset.tabId));
+        const knownKanbanBoards = new Set(
+          kanbanBoardTabs.map((tab) => tab.dataset.kanbanBoardTarget),
+        );
+        if (!knownKanbanBoards.has(state.selectedKanbanBoard)) {
+          state.selectedKanbanBoard = "backlog";
+        }
         let snapshot;
         let artifactIndex;
         let artifactDocument;
@@ -694,7 +778,31 @@ function createWebviewHtml({ cspSource, nonce }) {
 
           const activeTab = tabs.find((tab) => tab.dataset.tabId === tabId);
           selectedTitle.textContent = activeTab.textContent.trim();
+          kanbanBoardSelector.hidden = tabId !== "kanban";
           state.selectedTab = tabId;
+          persistState();
+        }
+
+        function selectKanbanBoard(boardId, options = {}) {
+          if (!knownKanbanBoards.has(boardId)) {
+            return;
+          }
+
+          state.selectedKanbanBoard = boardId;
+          for (const boardTab of kanbanBoardTabs) {
+            const selected = boardTab.dataset.kanbanBoardTarget === boardId;
+            boardTab.setAttribute("aria-selected", String(selected));
+            boardTab.tabIndex = selected ? 0 : -1;
+            if (selected) {
+              boardTab.scrollIntoView({ block: "nearest", inline: "nearest" });
+              if (options.focus) {
+                boardTab.focus();
+              }
+            }
+          }
+          for (const column of kanbanColumns) {
+            column.hidden = column.dataset.kanbanColumn !== boardId;
+          }
           persistState();
         }
 
@@ -1080,8 +1188,8 @@ function createWebviewHtml({ cspSource, nonce }) {
           cardElement.addEventListener("dragend", () => {
             dragState = undefined;
             cardElement.setAttribute("aria-grabbed", "false");
-            for (const column of kanbanColumns) {
-              column.classList.remove("is-drop-target");
+            for (const boardTab of kanbanBoardTabs) {
+              boardTab.classList.remove("is-drop-target");
             }
           });
 
@@ -1092,18 +1200,19 @@ function createWebviewHtml({ cspSource, nonce }) {
           if (!snapshot) {
             return;
           }
-          const filter = state.kanbanFilter.trim().toLocaleLowerCase("ko-KR");
+          const selectedBoard = state.selectedKanbanBoard;
           for (const column of kanbanColumns) {
+            column.hidden = column.dataset.kanbanColumn !== selectedBoard;
             const model = snapshot.columns.find(
               (candidate) => candidate.id === column.dataset.kanbanColumn,
             );
-            const cards = (model?.cards || []).filter((card) => {
-              const searchable = (card.title + " " + card.id).toLocaleLowerCase("ko-KR");
-              return !filter || searchable.includes(filter);
-            });
+            const cards = model?.cards || [];
             const cardList = column.querySelector('[data-card-list]');
-            const count = column.querySelector('[data-column-count]');
-            count.textContent = String(cards.length);
+            const boardTab = kanbanBoardTabs.find(
+              (candidate) =>
+                candidate.dataset.kanbanBoardTarget === column.dataset.kanbanColumn,
+            );
+            boardTab.querySelector('[data-board-count]').textContent = String(cards.length);
             cardList.replaceChildren();
             if (cards.length === 0) {
               appendTextElement(cardList, "p", "kanban-column-empty", "항목 없음");
@@ -1147,34 +1256,56 @@ function createWebviewHtml({ cspSource, nonce }) {
           });
         }
 
-        for (const column of kanbanColumns) {
-          column.addEventListener("dragover", (event) => {
+        for (const [index, boardTab] of kanbanBoardTabs.entries()) {
+          boardTab.addEventListener("click", () => {
+            selectKanbanBoard(boardTab.dataset.kanbanBoardTarget);
+          });
+
+          boardTab.addEventListener("keydown", (event) => {
+            let targetIndex;
+            if (event.key === "ArrowLeft") {
+              targetIndex =
+                (index - 1 + kanbanBoardTabs.length) % kanbanBoardTabs.length;
+            } else if (event.key === "ArrowRight") {
+              targetIndex = (index + 1) % kanbanBoardTabs.length;
+            } else if (event.key === "Home") {
+              targetIndex = 0;
+            } else if (event.key === "End") {
+              targetIndex = kanbanBoardTabs.length - 1;
+            } else {
+              return;
+            }
+            event.preventDefault();
+            selectKanbanBoard(
+              kanbanBoardTabs[targetIndex].dataset.kanbanBoardTarget,
+              { focus: true },
+            );
+          });
+
+          boardTab.addEventListener("dragover", (event) => {
             const allowedTargets = dragState?.allowedTargets || new Set();
-            if (allowedTargets.has(column.dataset.kanbanColumn)) {
+            if (allowedTargets.has(boardTab.dataset.kanbanBoardTarget)) {
               event.preventDefault();
               event.dataTransfer.dropEffect = "move";
-              column.classList.add("is-drop-target");
+              boardTab.classList.add("is-drop-target");
             }
           });
-          column.addEventListener("dragleave", () => {
-            column.classList.remove("is-drop-target");
+          boardTab.addEventListener("dragleave", () => {
+            boardTab.classList.remove("is-drop-target");
           });
-          column.addEventListener("drop", (event) => {
+          boardTab.addEventListener("drop", (event) => {
             event.preventDefault();
-            column.classList.remove("is-drop-target");
+            boardTab.classList.remove("is-drop-target");
             const allowedTargets = dragState?.allowedTargets || new Set();
-            if (dragState && allowedTargets.has(column.dataset.kanbanColumn)) {
-              requestTransition(dragState.card, column.dataset.kanbanColumn);
+            if (
+              dragState &&
+              allowedTargets.has(boardTab.dataset.kanbanBoardTarget)
+            ) {
+              requestTransition(dragState.card, boardTab.dataset.kanbanBoardTarget);
             }
           });
         }
 
-        filterInput.value = state.kanbanFilter;
-        filterInput.addEventListener("input", () => {
-          state.kanbanFilter = filterInput.value;
-          persistState();
-          renderKanban();
-        });
         refreshButton.addEventListener("click", () => {
           kanbanWorkspace.setAttribute("aria-busy", "true");
           vscode.postMessage({ type: "kanban.refresh" });
@@ -1214,6 +1345,7 @@ function createWebviewHtml({ cspSource, nonce }) {
               notice.textContent =
                 message.workUnitId + " → " + message.targetStatus + " 전이가 완료되었습니다.";
               errors.hidden = true;
+              selectKanbanBoard(message.targetStatus);
             } else {
               notice.textContent = "상태 전이가 적용되지 않았습니다.";
               errors.hidden = false;
@@ -1279,6 +1411,7 @@ function createWebviewHtml({ cspSource, nonce }) {
         });
 
         activateTab(knownTabs.has(state.selectedTab) ? state.selectedTab : "dashboard");
+        selectKanbanBoard(state.selectedKanbanBoard);
         vscode.postMessage({ type: "kanban.ready" });
         vscode.postMessage({ type: "artifact.ready" });
       })();

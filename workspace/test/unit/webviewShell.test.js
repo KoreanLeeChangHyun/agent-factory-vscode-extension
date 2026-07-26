@@ -46,7 +46,10 @@ test("shell uses VS Code state APIs and keyboard tab navigation", () => {
   assert.match(html, /vscode\.setState\(state\)/);
   assert.match(html, /state\.selectedTab = tabId/);
   assert.match(html, /\["design", "view"\]\.includes\(state\.selectedTab\)/);
-  assert.match(html, /state\.kanbanFilter = filterInput\.value/);
+  assert.match(html, /selectedKanbanBoard:\s*"backlog"/);
+  assert.match(html, /state\.selectedKanbanBoard = boardId/);
+  assert.match(html, /delete state\.kanbanFilter/);
+  assert.doesNotMatch(html, /state\.kanbanFilter\s*=/);
   assert.match(html, /ArrowLeft/);
   assert.match(html, /ArrowRight/);
   assert.match(html, /Home/);
@@ -72,7 +75,7 @@ test("Editor renders artifact navigation, structured fields, and read-only JSON"
   assert.doesNotMatch(html, /editorPreview\.innerHTML\s*=/);
 });
 
-test("Kanban panel renders six columns, filter, counts, and transition controls", () => {
+test("Kanban renders header board selectors and only the selected board", () => {
   const html = createWebviewHtml({
     cspSource: "vscode-webview://test",
     nonce: "test-nonce",
@@ -87,9 +90,15 @@ test("Kanban panel renders six columns, filter, counts, and transition controls"
     "blocked",
   ]) {
     assert.match(html, new RegExp(`data-kanban-column="${status}"`));
+    assert.match(html, new RegExp(`data-kanban-board-target="${status}"`));
   }
-  assert.match(html, /data-kanban-filter/);
-  assert.match(html, /data-column-count/);
+  assert.equal((html.match(/data-kanban-board-target="/g) || []).length, 6);
+  assert.match(html, /data-kanban-board-selector/);
+  assert.match(html, /data-board-count/);
+  assert.match(html, /column\.hidden = column\.dataset\.kanbanColumn !== selectedBoard/);
+  assert.doesNotMatch(html, /data-kanban-filter/);
+  assert.doesNotMatch(html, /Work Unit 필터/);
+  assert.doesNotMatch(html, /placeholder="제목 또는 id"/);
   assert.match(html, /draggable/);
   assert.match(html, /moveTarget\.dataset\.moveTarget/);
   assert.match(html, /moveButton\.dataset\.moveButton/);
@@ -106,15 +115,36 @@ test("Kanban drag and Move controls use the same capability and request contract
   });
 
   assert.match(html, /card\.capabilities\.filter\(\(capability\) => capability\.allowed\)/);
-  assert.match(html, /allowedTargets\.has\(column\.dataset\.kanbanColumn\)/);
+  assert.match(html, /allowedTargets\.has\(boardTab\.dataset\.kanbanBoardTarget\)/);
   assert.match(html, /requestTransition\(card,\s*moveTarget\.value\)/);
   assert.match(
     html,
-    /requestTransition\(dragState\.card,\s*column\.dataset\.kanbanColumn\)/,
+    /requestTransition\(dragState\.card,\s*boardTab\.dataset\.kanbanBoardTarget\)/,
   );
   assert.match(html, /snapshotGeneratedAt:\s*snapshot\.generatedAt/);
   assert.match(html, /message\.type === "kanban\.transitionResult"/);
   assert.doesNotMatch(html, /showMovePreview/);
+});
+
+test("Kanban fills the remaining height with hidden independent scrollbars and no board gaps", () => {
+  const html = createWebviewHtml({
+    cspSource: "vscode-webview://test",
+    nonce: "test-nonce",
+  });
+
+  assert.match(html, /\.kanban-board-selector\s*\{[^}]*overflow-x:\s*auto;/s);
+  assert.match(html, /\.kanban-board-selector\s*\{[^}]*scrollbar-width:\s*none;/s);
+  assert.match(html, /\.kanban-board-selector::?-webkit-scrollbar\s*\{[^}]*display:\s*none;/s);
+  assert.match(html, /\.kanban-workspace\s*\{[^}]*height:\s*calc\(100vh - 78px\);/s);
+  assert.match(html, /\.kanban-workspace\s*\{[^}]*grid-template-rows:[^;]*minmax\(0,\s*1fr\);/s);
+  assert.match(html, /\.kanban-board\s*\{[^}]*min-height:\s*0;/s);
+  assert.match(html, /\.kanban-board\s*\{[^}]*gap:\s*0;/s);
+  assert.match(html, /\.kanban-column\s*\{[^}]*height:\s*100%;/s);
+  assert.match(html, /\.kanban-card-list\s*\{[^}]*overflow-y:\s*auto;/s);
+  assert.match(html, /\.kanban-card-list\s*\{[^}]*scrollbar-width:\s*none;/s);
+  assert.match(html, /\.kanban-card-list::?-webkit-scrollbar\s*\{[^}]*display:\s*none;/s);
+  assert.doesNotMatch(html, /min-width:\s*1430px/);
+  assert.doesNotMatch(html, /repeat\(6,\s*minmax\(230px,\s*1fr\)\)/);
 });
 
 test("shell fills the available width with equal theme-aware tabs and surfaces", () => {

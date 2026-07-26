@@ -53,7 +53,11 @@ async function run() {
     nonce: "e2e-nonce",
   });
   assert.equal((html.match(/data-kanban-column="/g) || []).length, 6);
-  assert.match(html, /data-kanban-filter/);
+  assert.equal((html.match(/data-kanban-board-target="/g) || []).length, 6);
+  assert.match(html, /data-kanban-board-selector/);
+  assert.doesNotMatch(html, /data-kanban-filter/);
+  assert.match(html, /selectedKanbanBoard/);
+  assert.match(html, /scrollbar-width:\s*none/);
   assert.match(html, /kanban\.snapshot/);
   assert.deepEqual(
     (html.match(/data-tab-id="(?:dashboard|editor|kanban|context)"/g) || [])
