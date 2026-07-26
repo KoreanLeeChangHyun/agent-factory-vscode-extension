@@ -25,15 +25,32 @@ async function run() {
   );
   assert.ok(extension, "development extension is discoverable");
   await extension.activate();
+  const workspaceExtension = vscode.extensions.getExtension(
+    "agent-factory.agent-factory-workspace",
+  );
+  assert.ok(workspaceExtension, "Workspace development extension is discoverable");
+  await workspaceExtension.activate();
 
   const commands = await vscode.commands.getCommands(true);
   assert.ok(commands.includes("workbench.view.extension.agentFactoryAgents"));
-  assert.ok(commands.includes("agentFactoryAgents.chat.focus"));
+  assert.ok(commands.includes("agentFactoryAgents.open"));
+  assert.ok(commands.includes("agentFactoryWorkspace.open"));
 
   await vscode.commands.executeCommand(
     "workbench.view.extension.agentFactoryAgents",
   );
-  await vscode.commands.executeCommand("agentFactoryAgents.chat.focus");
+  const agentsPanel = await vscode.commands.executeCommand(
+    "agentFactoryAgents.open",
+  );
+  assert.equal(agentsPanel.viewType, "agentFactoryAgents.panel");
+  assert.equal(
+    await vscode.commands.executeCommand("agentFactoryAgents.open"),
+    agentsPanel,
+  );
+  const workspacePanel = await vscode.commands.executeCommand(
+    "agentFactoryWorkspace.open",
+  );
+  assert.equal(workspacePanel.viewType, "agentFactoryWorkspace.workspace");
   verifyChatViewContract();
   await verifyFakeChatFlow();
 }

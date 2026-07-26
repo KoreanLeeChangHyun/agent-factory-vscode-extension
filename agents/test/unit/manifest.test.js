@@ -13,14 +13,14 @@ const icon = readFileSync(
   "utf8",
 );
 
-test("manifest contributes one native Activity Bar container and two views", () => {
+test("manifest contributes one native launcher with editor commands", () => {
   assert.equal(manifest.name, "agent-factory-agents");
   assert.equal(manifest.publisher, "agent-factory");
   assert.equal(manifest.engines.vscode, "^1.129.0");
   assert.equal(manifest.main, "./src/extension.js");
   assert.deepEqual(manifest.activationEvents, [
-    "onView:agentFactoryAgents.explorer",
-    "onView:agentFactoryAgents.chat",
+    "onView:agentFactoryAgents.launcher",
+    "onCommand:agentFactoryAgents.open",
   ]);
   assert.deepEqual(manifest.contributes.viewsContainers.activitybar, [
     {
@@ -31,15 +31,30 @@ test("manifest contributes one native Activity Bar container and two views", () 
   ]);
   assert.deepEqual(manifest.contributes.views.agentFactoryAgents, [
     {
-      id: "agentFactoryAgents.explorer",
-      name: "Explorer",
-    },
-    {
-      id: "agentFactoryAgents.chat",
-      name: "Agents",
-      type: "webview",
+      id: "agentFactoryAgents.launcher",
+      name: "Agent Factory",
     },
   ]);
+  assert.deepEqual(manifest.contributes.commands, [
+    {
+      command: "agentFactoryAgents.open",
+      title: "Agent Factory: Open Agents",
+    },
+  ]);
+  assert.deepEqual(manifest.contributes.viewsWelcome, [
+    {
+      view: "agentFactoryAgents.launcher",
+      contents:
+        "Open Agent Factory tools in the editor area.\n" +
+        "[Open Agents](command:agentFactoryAgents.open)\n" +
+        "[Open Workspace](command:agentFactoryWorkspace.open)",
+    },
+  ]);
+
+  const serialized = JSON.stringify(manifest);
+  assert.doesNotMatch(serialized, /agentFactoryAgents\.explorer/);
+  assert.doesNotMatch(serialized, /agentFactoryAgents\.chat/);
+  assert.doesNotMatch(serialized, /"type":"webview"/);
 });
 
 test("Activity Bar icon is a monochrome 24px SVG asset", () => {

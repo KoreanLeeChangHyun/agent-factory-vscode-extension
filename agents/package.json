@@ -1,7 +1,7 @@
 {
   "name": "agent-factory-agents",
   "displayName": "Agent Factory Agents",
-  "description": "Run bundled Codex agent sessions from the VS Code sidebar.",
+  "description": "Open Agent Factory tools and run bundled Codex agent sessions in the VS Code editor area.",
   "version": "0.0.1",
   "publisher": "agent-factory",
   "engines": {
@@ -14,8 +14,8 @@
     "workspace"
   ],
   "activationEvents": [
-    "onView:agentFactoryAgents.explorer",
-    "onView:agentFactoryAgents.chat"
+    "onView:agentFactoryAgents.launcher",
+    "onCommand:agentFactoryAgents.open"
   ],
   "main": "./src/extension.js",
   "contributes": {
@@ -31,20 +31,27 @@
     "views": {
       "agentFactoryAgents": [
         {
-          "id": "agentFactoryAgents.explorer",
-          "name": "Explorer"
-        },
-        {
-          "id": "agentFactoryAgents.chat",
-          "name": "Agents",
-          "type": "webview"
+          "id": "agentFactoryAgents.launcher",
+          "name": "Agent Factory"
         }
       ]
-    }
+    },
+    "commands": [
+      {
+        "command": "agentFactoryAgents.open",
+        "title": "Agent Factory: Open Agents"
+      }
+    ],
+    "viewsWelcome": [
+      {
+        "view": "agentFactoryAgents.launcher",
+        "contents": "Open Agent Factory tools in the editor area.\n[Open Agents](command:agentFactoryAgents.open)\n[Open Workspace](command:agentFactoryWorkspace.open)"
+      }
+    ]
   },
   "scripts": {
     "check": "npm run check:syntax && npm run test:unit && npm run test:integration",
-    "check:syntax": "node --check src/extension.js && node --check src/explorerModel.js && node --check src/explorerTree.js && node --check src/chatView.js && node --check src/chatBackend.js && node --check src/codexAdapter.js",
+    "check:syntax": "node --check src/extension.js && node --check src/launcher.js && node --check src/agentsPanel.js && node --check src/chatView.js && node --check src/chatBackend.js && node --check src/codexAdapter.js",
     "test:unit": "node --test test/unit/*.test.js",
     "test:integration": "node --test test/integration/*.test.js",
     "test:e2e": "node ./test/runTest.js",
