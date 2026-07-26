@@ -7,14 +7,15 @@
       "kind": "human-review-result",
       "content": "Human 검토 대기",
       "attributes": {
-        "status": "pending",
+        "status": "approved",
         "executionTarget": {
           "contractVersion": "1.0.0",
-          "invocationId": "codex-20260727-kanban-fixture-stability-001",
-          "headCommit": "6884aa8bb59eb60ed24b804a84adfe7bdce05c9e",
           "revision": 1,
-          "attempt": 1
-        }
+          "attempt": 1,
+          "invocationId": "codex-20260727-kanban-fixture-stability-001",
+          "headCommit": "6884aa8bb59eb60ed24b804a84adfe7bdce05c9e"
+        },
+        "approvedAt": "2026-07-26T16:33:36+00:00"
       }
     },
     {
