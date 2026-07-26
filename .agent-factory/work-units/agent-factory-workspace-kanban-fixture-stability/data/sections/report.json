@@ -28,6 +28,29 @@
           "fixture는 검증된 Kanban Intake basis가 repository에 ready로 유지된다는 project 계약을 사용한다."
         ]
       }
+    },
+    {
+      "id": "INTEGRATION-CBF6292069B4823C",
+      "kind": "integration-result",
+      "content": {
+        "humanDecision": "approved",
+        "operationResult": "already-merged",
+        "relationship": "already-merged",
+        "repository": "/home/deus/workspace/agent-factory/vscode-extension",
+        "sourceBranch": "work-unit/agent-factory-workspace-kanban-fixture-stability",
+        "sourceCommit": "f8275c0a54bc79ee35e2beec0a77c18a7704654e",
+        "strategy": "no-ff",
+        "targetAfterCommit": "d85d685de0c2fe07f534219ad0d55a7ce1f40379",
+        "targetBeforeCommit": "d85d685de0c2fe07f534219ad0d55a7ce1f40379",
+        "targetBranch": "main",
+        "workUnitId": "agent-factory-workspace-kanban-fixture-stability",
+        "worktreePath": "/home/deus/workspace/agent-factory/vscode-extension/.agent-factory/worktree/agent-factory-workspace-kanban-fixture-stability",
+        "receiptSha256": "cbf6292069b4823c395c1f3cca96411e77d39dc22fd6fa0767d113fdcfad2bd3"
+      },
+      "attributes": {
+        "status": "already-merged"
+      },
+      "blockRef": "blocks/evidence/kanban-fixture-stability-integration.json"
     }
   ],
   "subsections": []
