@@ -1,0 +1,233 @@
+{
+  "id": "work-unit-basis",
+  "title": "Work Unit Basis",
+  "content": [
+    {
+      "id": "specification-impact-kanban-operations",
+      "kind": "specification-impact",
+      "content": {
+        "status": "aligned",
+        "reason": "기존 requirements Specification을 이번 Intake의 전체 Kanban 운영, drag capability, 실행, Human review, integration과 PR 요구사항으로 갱신한다.",
+        "specificationRefs": [
+          ".agent-factory/specifications/agent-factory-workspace-requirements"
+        ]
+      },
+      "attributes": {
+        "status": "aligned"
+      }
+    },
+    {
+      "id": "work-unit-basis-kanban-board",
+      "kind": "work-unit-basis",
+      "content": {
+        "workUnitId": "agent-factory-workspace-kanban-board",
+        "goal": "canonical Work Unit 읽기 모델과 GitHub Projects 참고 Kanban 보드 기반을 구현한다.",
+        "executionOrder": 1,
+        "scope": [
+          "requirements Specification 정합성 확인",
+          "schemaVersion 4.0.0 Work Unit reader와 안전한 project root 경계",
+          "확장 호스트-Webview snapshot 및 오류 message contract",
+          "backlog, ready, working, review, done, blocked 6개 칼럼",
+          "카드 정보, 항목 수, 제목·id filter, empty·partial-error 상태",
+          "filesystem watcher와 Webview state 복원",
+          "카드별 transition capability와 drag·Move affordance의 비변경 기반",
+          "단위·통합·핵심 VS Code E2E, 접근성·테마·보안 검증"
+        ],
+        "outOfScope": [
+          "canonical Work Unit 생성·편집·상태 변경",
+          "Codex 실행",
+          "Human review 승인·rework",
+          "Git integration과 PR 생성",
+          "다른 workspace 탭과 agents·web 변경"
+        ],
+        "expectedOutputs": [
+          "workspace/src",
+          "workspace/test"
+        ],
+        "acceptanceCriteria": [
+          "실제 canonical fixture가 정확한 6개 상태 칼럼에 표시된다.",
+          "filter, count, watcher refresh, reconnect, empty와 partial error가 검증된다.",
+          "지원하지 않는 schema와 unsafe path는 mutation capability 없이 오류를 표시한다.",
+          "drag와 Move 대상은 capability와 동일하게 표시되지만 이 Work Unit은 mutation을 수행하지 않는다."
+        ],
+        "verification": [
+          "npm run check",
+          "focused reader and message integration tests",
+          "VS Code E2E board rendering and accessibility checks"
+        ],
+        "dependencies": [
+          "agent-factory-workspace-extension-shell"
+        ],
+        "evidenceRefs": [
+          "internal-evidence-existing-kanban-shell",
+          "internal-evidence-existing-web-kanban",
+          "web-evidence-github-projects-board-layout",
+          "web-evidence-github-projects-best-practices",
+          "web-evidence-github-projects-filtering"
+        ],
+        "decisionRefs": [
+          "decision-github-projects-reference",
+          "decision-drag-and-drop-required",
+          "decision-preflight-drop-capabilities"
+        ]
+      }
+    },
+    {
+      "id": "work-unit-basis-kanban-authoring",
+      "kind": "work-unit-basis",
+      "content": {
+        "workUnitId": "agent-factory-workspace-kanban-authoring",
+        "goal": "Kanban에서 manager 기반 Work Unit 생성·편집과 capability 제한 drag and drop 상태 작업을 구현한다.",
+        "executionOrder": 2,
+        "scope": [
+          "설치된 Work Unit manager discovery와 지원 계약 확인",
+          "manager 기반 Work Unit create와 허용 section item edit form",
+          "capability 기반 dragstart, dragover, drop과 click·tap·keyboard Move 메뉴",
+          "backlog, ready, blocked 전이 및 action-specific validation",
+          "authoritative manager 응답 후 refresh와 stale·failure 표시",
+          "경로·symlink·message spoofing·command injection negative test",
+          "단위·manager 통합·VS Code E2E와 Human 검토"
+        ],
+        "outOfScope": [
+          "Codex execution orchestration",
+          "Human review done 승인",
+          "Git integration",
+          "PR 생성",
+          "direct canonical JSON mutation"
+        ],
+        "expectedOutputs": [
+          "workspace/src",
+          "workspace/test"
+        ],
+        "acceptanceCriteria": [
+          "생성·편집은 manager를 통과하며 실패 시 부분 package가 남지 않는다.",
+          "허용된 drag·Move target만 활성화되고 실제 command가 다시 검증한다.",
+          "불가능한 target은 정확한 reason과 함께 mutation 전에 차단된다.",
+          "pointer, click, tap, keyboard 조작이 동일 action contract를 사용한다."
+        ],
+        "verification": [
+          "npm run check",
+          "Work Unit manager integration fixtures",
+          "VS Code E2E create edit drag keyboard and negative security checks"
+        ],
+        "dependencies": [
+          "agent-factory-workspace-kanban-board"
+        ],
+        "evidenceRefs": [
+          "internal-evidence-work-unit-transition-contract",
+          "web-evidence-w3c-dragging-alternative",
+          "web-evidence-w3c-dragging-keyboard"
+        ],
+        "decisionRefs": [
+          "decision-full-kanban-operations",
+          "decision-drag-and-drop-required",
+          "decision-preflight-drop-capabilities"
+        ]
+      }
+    },
+    {
+      "id": "work-unit-basis-kanban-execution",
+      "kind": "work-unit-basis",
+      "content": {
+        "workUnitId": "agent-factory-workspace-kanban-execution",
+        "goal": "Kanban에서 Human 요청 기반 Work Unit 실행과 working, review, blocked lifecycle workflow를 구현한다.",
+        "executionOrder": 3,
+        "scope": [
+          "실행 대상 Goal preflight와 충돌 차단",
+          "checkpoint inspect, worktree prepare, execution-init, attempt-start와 resume",
+          "Codex execution process 진행·취소·복구 표시",
+          "execution-progress, execution-failure, blocker-resolve와 bounded retry",
+          "working과 review target drag action workflow",
+          "장시간 작업 request identity와 중복 실행 방지",
+          "manager·worktree·process 통합 test와 핵심 VS Code E2E"
+        ],
+        "outOfScope": [
+          "Human review done 승인",
+          "Git integration",
+          "PR 생성",
+          "자동 execution",
+          "강제 worktree cleanup"
+        ],
+        "expectedOutputs": [
+          "workspace/src",
+          "workspace/test"
+        ],
+        "acceptanceCriteria": [
+          "실행은 matching Goal과 inspected checkpoint 및 canonical worktree만 사용한다.",
+          "working·review·blocked 이동은 해당 action gate를 충족한 경우에만 완료된다.",
+          "진행·오류·재시도·복구 상태가 canonical 실행 상태와 일치한다.",
+          "취소·재연결·중복 요청이 다른 Work Unit 또는 attempt 상태를 오염시키지 않는다."
+        ],
+        "verification": [
+          "npm run check",
+          "Goal and worktree adapter integration tests",
+          "Codex process lifecycle tests",
+          "VS Code E2E execution and recovery workflow"
+        ],
+        "dependencies": [
+          "agent-factory-workspace-kanban-authoring"
+        ],
+        "evidenceRefs": [
+          "internal-evidence-work-unit-transition-contract"
+        ],
+        "decisionRefs": [
+          "decision-full-kanban-operations",
+          "decision-preflight-drop-capabilities"
+        ]
+      }
+    },
+    {
+      "id": "work-unit-basis-kanban-promotion",
+      "kind": "work-unit-basis",
+      "content": {
+        "workUnitId": "agent-factory-workspace-kanban-promotion",
+        "goal": "Kanban에서 Human review, rework, Git integration과 PR 생성의 별도 승인 workflow를 구현한다.",
+        "executionOrder": 4,
+        "scope": [
+          "review card의 Human checklist와 review method 표시",
+          "Human approval done 전이와 Human-approved rework-start",
+          "integration inspect와 Human-approved worktree integrate",
+          "integration receipt canonical 등록",
+          "명시적 repository, base, head, title, body 기반 Human-approved PR 생성",
+          "integration·PR 결과와 실패·재시도 표시",
+          "각 작업별 독립 confirmation과 audit evidence",
+          "Git·GitHub negative test와 핵심 VS Code E2E"
+        ],
+        "outOfScope": [
+          "자동 Human 승인",
+          "자동 merge",
+          "자동 PR promotion",
+          "force push·force merge",
+          "dirty worktree cleanup",
+          "deployment"
+        ],
+        "expectedOutputs": [
+          "workspace/src",
+          "workspace/test"
+        ],
+        "acceptanceCriteria": [
+          "done, rework, integration과 PR은 각각 독립적인 Human 확인을 요구한다.",
+          "integration은 work-unit-execution receipt를 반환하고 canonical package에 등록된다.",
+          "PR은 명시된 remote target으로 생성되며 URL 또는 정확한 실패를 표시한다.",
+          "한 작업의 승인이 다른 작업이나 다른 Work Unit에 재사용되지 않는다."
+        ],
+        "verification": [
+          "npm run check",
+          "Git integration and refusal tests",
+          "GitHub PR adapter mock and authorization tests",
+          "VS Code E2E review integration PR workflow"
+        ],
+        "dependencies": [
+          "agent-factory-workspace-kanban-execution"
+        ],
+        "evidenceRefs": [
+          "internal-evidence-work-unit-transition-contract"
+        ],
+        "decisionRefs": [
+          "decision-full-kanban-operations"
+        ]
+      }
+    }
+  ],
+  "subsections": []
+}
