@@ -27,6 +27,29 @@
           "최종 VSIX 크기는 129.69 MB이므로 배포 채널의 크기 정책은 배포 승인 전에 별도 확인해야 한다."
         ]
       }
+    },
+    {
+      "id": "INTEGRATION-8F475CA4A181BE2F",
+      "kind": "integration-result",
+      "content": {
+        "humanDecision": "approved",
+        "operationResult": "merge-commit-created",
+        "relationship": "diverged",
+        "repository": "/home/deus/workspace/agent-factory/vscode-extension",
+        "sourceBranch": "work-unit/agent-factory-agents-backend-connection",
+        "sourceCommit": "e1b8c323aadea3f1dacb82002af44fe71be70f48",
+        "strategy": "no-ff",
+        "targetAfterCommit": "7fd9de551286af0247ce9495b0ad6c528be29c0b",
+        "targetBeforeCommit": "c3f4efed0fa12b9d883c4ef3403812aef1d0e43a",
+        "targetBranch": "main",
+        "workUnitId": "agent-factory-agents-backend-connection",
+        "worktreePath": "/home/deus/workspace/agent-factory/vscode-extension/.agent-factory/worktree/agent-factory-agents-backend-connection",
+        "receiptSha256": "8f475ca4a181be2f901399ff6ac69e3f01494c87498aae6cb16c92d77c39e99a"
+      },
+      "attributes": {
+        "status": "integrated"
+      },
+      "blockRef": "blocks/integration/main-no-ff.json"
     }
   ],
   "subsections": []

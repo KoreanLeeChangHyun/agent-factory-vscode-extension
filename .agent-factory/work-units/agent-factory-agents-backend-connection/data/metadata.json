@@ -1,6 +1,6 @@
 {
   "schemaVersion": "4.0.0",
-  "documentVersion": "1.0.44",
+  "documentVersion": "1.0.45",
   "id": "agent-factory-agents-backend-connection",
   "artifactType": "work-unit",
   "projectId": "agent-factory-workspace",
@@ -9,7 +9,7 @@
     "status": "done"
   },
   "createdAt": "2026-07-26T08:38:22+00:00",
-  "updatedAt": "2026-07-26T09:34:45+00:00",
+  "updatedAt": "2026-07-26T09:37:21+00:00",
   "language": "ko",
   "theme": "vscode-native",
   "provenance": {

@@ -8,6 +8,13 @@
       "sizeBytes": 626
     },
     {
+      "path": "blocks/integration/main-no-ff.json",
+      "mediaType": "application/json",
+      "description": "Raw Work Unit integration receipt",
+      "sha256": "8f475ca4a181be2f901399ff6ac69e3f01494c87498aae6cb16c92d77c39e99a",
+      "sizeBytes": 3399
+    },
+    {
       "path": "blocks/logs/agents-backend-verification.log",
       "mediaType": "text/plain",
       "description": "Agents backend implementation and verification evidence",
