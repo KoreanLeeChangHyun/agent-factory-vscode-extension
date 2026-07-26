@@ -16,8 +16,10 @@
           "attempt": 1
         },
         "implementationCommit": "9afc1aec361c05f3c1f7ced5ccb337d0b04c8a8e",
+        "boundedRegistrationDelta": "첫 clean inspect 이후 blocks/index.json, blocks/evidence/worktree-inspect.json, data/metadata.json과 data/sections/report.json만 evidence 등록을 위해 변경했다.",
         "evidence": [
-          "blocks/logs/agents-chat-web-alignment-verification.log"
+          "blocks/logs/agents-chat-web-alignment-verification.log",
+          "blocks/evidence/worktree-inspect.json"
         ],
         "remainingRisks": [
           "실제 사용자 Codex 인증을 소비하는 live message turn과 설치본 시각 검토는 Human review가 필요하다.",
