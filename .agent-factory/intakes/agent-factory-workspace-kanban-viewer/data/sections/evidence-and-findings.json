@@ -234,6 +234,22 @@
           "C: title과 lifecycle 상태만 편집"
         ]
       }
+    },
+    {
+      "id": "interview-kanban-interaction-scope-correction",
+      "kind": "interview",
+      "content": {
+        "question": "Kanban에서 DnD와 Action만 제공할 때 Action 범위를 어떻게 정할까요?",
+        "recommendation": "A",
+        "rationale": "Kanban을 상태 조작과 lifecycle 명령에 집중하면서 기존 실행·검토·병합·PR 목표를 카드 Action으로 유지하고 생성·편집 UI를 제외한다.",
+        "answer": "A",
+        "decisionState": "accepted",
+        "choices": [
+          "A: DnD 상태 전이와 실행·승인/재작업·병합·PR 카드 Action, 생성·편집 없음",
+          "B: A와 카드 Edit Action, 생성 없음",
+          "C: DnD 상태 전이만, Action 후속 결정"
+        ]
+      }
     }
   ],
   "subsections": []

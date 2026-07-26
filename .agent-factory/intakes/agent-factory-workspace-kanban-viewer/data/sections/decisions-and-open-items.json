@@ -16,10 +16,10 @@
       "kind": "decision-status",
       "content": {
         "decision": "GitHub Projects를 참고한 Kanban에서 Work Unit 생성·편집·실행·상태 변경·병합·PR까지 제공한다.",
-        "status": "accepted",
-        "evidenceRef": "human-feedback-kanban-must-be-writable",
-        "supersedes": [
-          "decision-read-only-kanban"
+        "status": "superseded",
+        "evidenceRef": "interview-kanban-interaction-scope-correction",
+        "supersededBy": [
+          "decision-kanban-dnd-actions-only"
         ]
       }
     },
@@ -114,9 +114,23 @@
       "id": "decision-kanban-authoring-edit-scope",
       "kind": "decision-status",
       "content": {
-        "decision": "Kanban Work Unit 편집은 title, goal, scope, out-of-scope, plan, acceptance criteria, Human checklist의 안내형 form으로 제한한다. execution-state, 실행·검토 결과와 integration receipt는 UI 편집 대상이 아니다.",
+        "decision": "Kanban Work Unit 편집은 title, goal, scope, out-of-scope, plan, acceptance criteria, Human checklist의 안내형 form으로 제한한다.",
+        "status": "superseded",
+        "evidenceRef": "interview-kanban-interaction-scope-correction",
+        "supersededBy": "decision-kanban-dnd-actions-only"
+      }
+    },
+    {
+      "id": "decision-kanban-dnd-actions-only",
+      "kind": "decision-status",
+      "content": {
+        "decision": "Kanban은 DnD와 동등한 Move 조작으로 상태를 전이하고 카드 Action으로 실행·Human review/rework·병합·PR을 제공한다. 생성·편집 UI는 제공하지 않는다.",
         "status": "accepted",
-        "evidenceRef": "interview-kanban-authoring-edit-scope"
+        "evidenceRef": "interview-kanban-interaction-scope-correction",
+        "supersedes": [
+          "decision-kanban-authoring-edit-scope",
+          "decision-full-kanban-operations"
+        ]
       }
     }
   ],

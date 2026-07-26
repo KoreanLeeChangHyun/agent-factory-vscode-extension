@@ -77,11 +77,10 @@
       "kind": "work-unit-basis",
       "content": {
         "workUnitId": "agent-factory-workspace-kanban-authoring",
-        "goal": "Kanban에서 manager 기반 Work Unit 생성·편집과 capability 제한 drag and drop 상태 작업을 구현한다.",
+        "goal": "Kanban에서 capability 제한 DnD와 동등한 Move Action 상태 전이를 구현한다.",
         "executionOrder": 2,
         "scope": [
           "설치된 Work Unit manager discovery와 지원 계약 확인",
-          "manager 기반 Work Unit create와 허용 section item edit form",
           "capability 기반 dragstart, dragover, drop과 click·tap·keyboard Move 메뉴",
           "backlog, ready, blocked 전이 및 action-specific validation",
           "authoritative manager 응답 후 refresh와 stale·failure 표시",
@@ -89,6 +88,7 @@
           "단위·manager 통합·VS Code E2E와 Human 검토"
         ],
         "outOfScope": [
+          "Work Unit 생성·편집 UI",
           "Codex execution orchestration",
           "Human review done 승인",
           "Git integration",
@@ -100,15 +100,15 @@
           "workspace/test"
         ],
         "acceptanceCriteria": [
-          "생성·편집은 manager를 통과하며 실패 시 부분 package가 남지 않는다.",
           "허용된 drag·Move target만 활성화되고 실제 command가 다시 검증한다.",
           "불가능한 target은 정확한 reason과 함께 mutation 전에 차단된다.",
-          "pointer, click, tap, keyboard 조작이 동일 action contract를 사용한다."
+          "pointer, click, tap, keyboard 조작이 동일 action contract를 사용한다.",
+          "Kanban에 생성·편집 form이나 mutation command를 노출하지 않는다."
         ],
         "verification": [
           "npm run check",
-          "Work Unit manager integration fixtures",
-          "VS Code E2E create edit drag keyboard and negative security checks"
+          "Work Unit manager transition integration fixtures",
+          "VS Code E2E drag keyboard and negative security checks"
         ],
         "dependencies": [
           "agent-factory-workspace-kanban-board"
@@ -119,7 +119,7 @@
           "web-evidence-w3c-dragging-keyboard"
         ],
         "decisionRefs": [
-          "decision-full-kanban-operations",
+          "decision-kanban-dnd-actions-only",
           "decision-drag-and-drop-required",
           "decision-preflight-drop-capabilities"
         ]
