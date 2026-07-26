@@ -127,9 +127,16 @@
         ],
         "progress": {
           "completedSteps": [],
-          "pendingStep": null,
-          "lastVerifiedHead": "e436cc3806ae78a2a54e5d86a206bdf57b9f0f40",
-          "checkpoints": [],
+          "pendingStep": "reconcile-main-specification-conflict",
+          "lastVerifiedHead": "3e94f1029e3c127211ad1cee6da20e4fc1c67874",
+          "checkpoints": [
+            {
+              "stepId": "reconcile-main-specification-conflict",
+              "state": "pending",
+              "headCommit": "3e94f1029e3c127211ad1cee6da20e4fc1c67874",
+              "idempotencyKey": "agents-left-rework2-reconcile-pending-v1"
+            }
+          ],
           "retry": {}
         },
         "recovery": {
