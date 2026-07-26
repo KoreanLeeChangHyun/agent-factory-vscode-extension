@@ -8,6 +8,13 @@
       "sizeBytes": 1638
     },
     {
+      "path": "blocks/evidence/integration-main-no-ff.json",
+      "mediaType": "application/json",
+      "description": "Raw Work Unit integration receipt",
+      "sha256": "0658803bbb1a8dff4612f00cf14f7b353cc3d491762d1676af0669053579a08f",
+      "sizeBytes": 3230
+    },
+    {
       "path": "blocks/evidence/worktree-inspect-before-review.json",
       "mediaType": "application/json",
       "description": "Exact worktree inspect result before review transition",
