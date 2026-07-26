@@ -1,6 +1,13 @@
 {
   "blocks": [
     {
+      "path": "blocks/evidence/integration-main.json",
+      "mediaType": "application/json",
+      "description": "Raw Work Unit integration receipt",
+      "sha256": "4c984ea8c61f6378bc7f19208873eb00ae0ac0c8981f29f9a861682050f849c1",
+      "sizeBytes": 2041
+    },
+    {
       "path": "blocks/evidence/verification.txt",
       "mediaType": "text/plain",
       "description": "TDD red, dependency preparation, syntax, unit, VS Code 1.129.1 E2E, diff, and scope review evidence",

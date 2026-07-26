@@ -1,6 +1,6 @@
 {
   "schemaVersion": "4.0.0",
-  "documentVersion": "1.0.25",
+  "documentVersion": "1.0.26",
   "id": "agent-factory-workspace-full-width-alignment",
   "artifactType": "work-unit",
   "projectId": "agent-factory-workspace",
@@ -9,7 +9,7 @@
     "status": "review"
   },
   "createdAt": "2026-07-26T02:06:47+00:00",
-  "updatedAt": "2026-07-26T02:35:25+00:00",
+  "updatedAt": "2026-07-26T07:43:18+00:00",
   "language": "ko",
   "theme": "vscode-native",
   "provenance": {
