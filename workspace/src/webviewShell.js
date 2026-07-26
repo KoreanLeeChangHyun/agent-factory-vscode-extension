@@ -108,7 +108,7 @@ function createWebviewHtml({ cspSource, nonce }) {
         display: flex;
         gap: 2px;
         min-width: 0;
-        padding: 8px clamp(12px, 2vw, 24px) 0;
+        padding: 0;
         overflow-x: auto;
         border-bottom: 1px solid var(--vscode-panel-border);
         background: var(
@@ -119,7 +119,8 @@ function createWebviewHtml({ cspSource, nonce }) {
 
       .workspace-tab {
         position: relative;
-        flex: 0 0 auto;
+        flex: 1 1 0;
+        min-width: 0;
         min-height: 34px;
         padding: 6px 12px 8px;
         border: 0;
@@ -161,12 +162,8 @@ function createWebviewHtml({ cspSource, nonce }) {
         min-height: 44px;
         align-items: center;
         padding: 0 clamp(16px, 2.5vw, 32px);
-        border-bottom: 1px solid
-          var(--vscode-editorWidget-border, var(--vscode-panel-border));
-        background: var(
-          --vscode-editorWidget-background,
-          var(--vscode-editor-background)
-        );
+        border-bottom: 1px solid var(--vscode-panel-border);
+        background: var(--vscode-editor-background);
       }
 
       .selected-header h1 {
@@ -181,21 +178,20 @@ function createWebviewHtml({ cspSource, nonce }) {
       .workspace-body {
         min-height: 0;
         overflow: auto;
+        background: var(--vscode-editor-background);
       }
 
       .workspace-panel {
         min-height: 100%;
-        padding: clamp(20px, 3vw, 40px);
+        padding: 0;
       }
 
       .empty-state {
-        width: min(100%, 720px);
-        margin-inline: auto;
+        width: 100%;
+        min-height: 100%;
+        margin: 0;
         padding: clamp(24px, 3vw, 36px);
-        border: 1px solid
-          var(--vscode-editorWidget-border, var(--vscode-panel-border));
-        border-radius: 6px;
-        background: var(--vscode-editorWidget-background);
+        background: var(--vscode-editor-background);
       }
 
       .empty-state h2 {
