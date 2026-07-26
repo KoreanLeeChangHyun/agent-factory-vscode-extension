@@ -6,13 +6,15 @@
       "id": "functional-shell",
       "kind": "functional-requirement",
       "content": [
-        "workspace 확장 명령은 에디터 영역에 Webview 패널을 연다.",
+        "workspace 확장 명령은 에디터 영역에 singleton Webview panel을 열고 이미 열려 있으면 reveal한다.",
         "workspace Webview는 Dashboard, Design, Kanban, Context, View 탭과 선택 헤더 및 바디를 표시한다.",
         "workspace 탭 선택은 해당 패널을 표시하고 선택 상태를 보존한다.",
         "Dashboard, Design, Context는 초기 릴리스에서 기능 없는 shell이다.",
-        "agents 확장은 native Activity Bar View Container에 Explorer와 Agents Chat View를 등록한다.",
-        "Explorer는 열린 Workspace Folder의 디렉터리와 파일을 native Tree View로 표시한다.",
-        "Agents Chat은 Main과 Workflow 탭, 세션 생성과 선택 및 세션별 Composer 상태를 제공한다.",
+        "Agent Factory Activity Bar container는 하나의 empty native launcher View를 제공한다.",
+        "launcher View는 Agents와 Workspace를 여는 command links를 제공한다.",
+        "Agents open command는 에디터 영역에 singleton Agents Webview panel을 열고 이미 열려 있으면 reveal한다.",
+        "agents 확장은 file Explorer와 sidebar Chat Webview View를 등록하지 않는다.",
+        "Agents Chat은 editor panel에서 Main과 Workflow 탭, 세션 생성과 선택 및 세션별 Composer 상태를 제공한다.",
         "Agents Chat은 Extension Host를 통해 Codex 메시지 실행, JSONL 스트리밍, 취소, 재연결과 명시적 세션 복원을 제공한다.",
         "Agents Extension은 ../web 런타임과 독립적으로 설치되고 실행된다."
       ]

@@ -23,6 +23,18 @@
           "path": ".agent-factory/intakes/agent-factory-workspace"
         }
       ]
+    },
+    {
+      "id": "source-intake-agents-editor-area",
+      "kind": "basis",
+      "content": "Agents editor area 및 launcher surface Intake",
+      "sourceRefs": [
+        {
+          "artifactType": "intake",
+          "id": "agent-factory-agents-editor-area",
+          "path": ".agent-factory/intakes/agent-factory-agents-editor-area"
+        }
+      ]
     }
   ],
   "subsections": []

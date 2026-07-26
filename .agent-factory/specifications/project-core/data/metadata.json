@@ -1,6 +1,6 @@
 {
   "schemaVersion": "1.0.0",
-  "documentVersion": "1.0.10",
+  "documentVersion": "1.0.12",
   "id": "project-core",
   "artifactType": "specification",
   "projectId": "agent-factory-workspace",
@@ -9,7 +9,7 @@
     "status": "draft"
   },
   "createdAt": "2026-07-25T14:28:11+00:00",
-  "updatedAt": "2026-07-25T20:05:49+00:00",
+  "updatedAt": "2026-07-26T16:22:09+00:00",
   "language": "ko",
   "theme": "default",
   "provenance": {

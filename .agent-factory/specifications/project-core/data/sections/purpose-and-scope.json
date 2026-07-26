@@ -14,8 +14,8 @@
         "VS Code 에디터 Webview",
         "Dashboard, Design, Kanban, Context, View 탭 shell",
         "Kanban 및 View 초기 기능",
-        "Activity Bar와 Primary Sidebar 기반 독립 agents Extension",
-        "Workspace Explorer Tree View와 로컬 Chat Webview View",
+        "Agent Factory launcher View",
+        "Agents와 Workspace singleton editor Webview panel",
         "독립 확장 구현"
       ]
     }

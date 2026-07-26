@@ -80,6 +80,20 @@
           "path": ".agent-factory/intakes/agent-factory-agents-chat-web-alignment"
         }
       ]
+    },
+    {
+      "id": "agents-editor-area-basis",
+      "kind": "source-basis",
+      "content": {
+        "description": "Agents editor area와 Agent Factory launcher 요구사항은 canonical Intake agent-factory-agents-editor-area에서 정렬되었다."
+      },
+      "sourceRefs": [
+        {
+          "artifactType": "intake",
+          "id": "agent-factory-agents-editor-area",
+          "path": ".agent-factory/intakes/agent-factory-agents-editor-area"
+        }
+      ]
     }
   ],
   "subsections": []
