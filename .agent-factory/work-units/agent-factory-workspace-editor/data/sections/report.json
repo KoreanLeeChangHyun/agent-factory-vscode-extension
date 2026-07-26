@@ -5,10 +5,19 @@
     {
       "id": "REPORT-STATUS",
       "kind": "report-result",
-      "content": "실행 전 보고 대기",
+      "content": "Design과 View를 Editor로 통합하고 canonical Intake, Specification, Work Unit 탐색·structured manager 저장·읽기 전용 JSON preview를 구현했다. 기존 Kanban DnD와 Action은 유지했다.",
       "attributes": {
-        "verificationResult": "pending",
-        "evidence": []
+        "verificationResult": "pass",
+        "executionTarget": {
+          "contractVersion": "1.0.0",
+          "invocationId": "4e4326d1-fda7-4a5a-bcbe-de42d95e83c2",
+          "headCommit": "bc1d92bcc8abac81bf0ba75a5a5af5919ac24a5d",
+          "revision": 1,
+          "attempt": 1
+        },
+        "evidence": [
+          "blocks/evidence/workspace-editor-verification.txt"
+        ]
       }
     }
   ],

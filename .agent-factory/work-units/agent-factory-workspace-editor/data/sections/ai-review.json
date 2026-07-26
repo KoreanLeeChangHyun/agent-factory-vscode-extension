@@ -17,10 +17,23 @@
     {
       "id": "AI-REVIEW-STATUS",
       "kind": "ai-review-result",
-      "content": "AI review 대기",
+      "content": "범위, manager write boundary, Webview message allowlist, stale/path/symlink 방어, textContent preview와 Kanban 회귀를 검토했으며 blocking finding 없음",
       "attributes": {
-        "result": "pending",
-        "checklistResult": "pending"
+        "result": "pass",
+        "checklistResult": "pass",
+        "executionTarget": {
+          "contractVersion": "1.0.0",
+          "invocationId": "4e4326d1-fda7-4a5a-bcbe-de42d95e83c2",
+          "headCommit": "bc1d92bcc8abac81bf0ba75a5a5af5919ac24a5d",
+          "revision": 1,
+          "attempt": 1
+        },
+        "evidence": [
+          "artifactReader, artifactManager, artifactController 책임 분리 확인",
+          "raw JSON 직접 쓰기 및 arbitrary command 경로 없음",
+          "manager preflight와 full validation 통합 테스트 통과",
+          "Kanban unit 및 installed manager regression 통과"
+        ]
       }
     }
   ],

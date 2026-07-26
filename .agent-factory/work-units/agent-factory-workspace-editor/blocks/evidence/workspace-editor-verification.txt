@@ -1,0 +1,31 @@
+Agent Factory Workspace Editor verification
+
+Execution target:
+- Commit: 11d1f50e3d0d5f7fd4d64561815833a3f70bbe2c
+- Invocation: 4e4326d1-fda7-4a5a-bcbe-de42d95e83c2
+- Revision: 1
+- Attempt: 1
+
+Verification:
+- npm run check
+  - syntax checks passed
+  - unit tests: 28 passed, 0 failed
+- npm run test:manager
+  - installed Intake manager structured save: passed
+  - installed Work Unit manager Kanban transition regression: passed
+  - total: 2 passed, 0 failed
+- npm run test:e2e
+  - VS Code 1.129.1 Extension Host exited with code 0
+- VSIX
+  - path: /tmp/agent-factory-workspace-editor-11d1f50.vsix
+  - archive test: no errors
+  - SHA-256: 5d374c2bddbfb5003eea52bbd43e4243bab39277a7b9b853fa0a0f2fd1b17ff8
+
+AI review:
+- Unified tab order and saved-state migration match the approved scope.
+- Artifact reader, controller, and manager adapter responsibilities are separated.
+- Raw JSON writes and arbitrary commands are not exposed.
+- Artifact identity, canonical paths, symlinks, stale versions, message shapes, and content shape are validated.
+- JSON preview uses textContent.
+- Existing Kanban DnD, Action, controller, and installed-manager tests passed.
+- Blocking findings: none.

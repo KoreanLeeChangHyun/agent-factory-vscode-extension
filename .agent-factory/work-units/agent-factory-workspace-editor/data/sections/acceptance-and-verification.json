@@ -30,10 +30,19 @@
     {
       "id": "QUALITY-STATUS",
       "kind": "quality-check",
-      "content": "실행 전 품질 검증 대기",
+      "content": "정적 검사, 단위 28개, 실제 manager 통합 2개, VS Code Extension Host E2E와 VSIX 무결성 검증 완료",
       "attributes": {
-        "status": "planned",
-        "evidence": []
+        "status": "pass",
+        "executionTarget": {
+          "contractVersion": "1.0.0",
+          "invocationId": "4e4326d1-fda7-4a5a-bcbe-de42d95e83c2",
+          "headCommit": "bc1d92bcc8abac81bf0ba75a5a5af5919ac24a5d",
+          "revision": 1,
+          "attempt": 1
+        },
+        "evidence": [
+          "blocks/evidence/workspace-editor-verification.txt"
+        ]
       }
     },
     {

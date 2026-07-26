@@ -19,12 +19,12 @@
     {
       "id": "HUMAN-REVIEW-METHOD-001",
       "kind": "human-review-method",
-      "content": "생성된 Workspace VSIX를 설치하고 Reload Window 후 네 탭, 상태 이전, artifact 및 section 탐색, JSON preview, manager 기반 structured save, validation failure와 Kanban 회귀를 체크리스트 순서로 확인한 뒤 승인 또는 rework를 결정한다."
+      "content": "VSIX /tmp/agent-factory-workspace-editor-11d1f50.vsix (SHA-256 5d374c2bddbfb5003eea52bbd43e4243bab39277a7b9b853fa0a0f2fd1b17ff8)을 설치하고 Reload Window 후 네 탭, 상태 이전, artifact/section 탐색, 읽기 전용 JSON preview, manager 기반 structured save, validation failure와 Kanban DnD/Action 회귀를 체크리스트 순서로 확인한다."
     },
     {
       "id": "HUMAN-REVIEW-STATUS",
       "kind": "human-review-result",
-      "content": "Human 검토 대기",
+      "content": "Human 검토 준비 완료",
       "attributes": {
         "status": "pending"
       }

@@ -1,3 +1,11 @@
 {
-  "blocks": []
+  "blocks": [
+    {
+      "path": "blocks/evidence/workspace-editor-verification.txt",
+      "mediaType": "text/plain",
+      "description": "Workspace Editor 자동 검증과 AI review 근거",
+      "sha256": "2554dc47f8de0ee1a1bfb3e0fbf5dc458bc8cbb5054c138114b8568ab629a7ed",
+      "sizeBytes": 1181
+    }
+  ]
 }
