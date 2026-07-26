@@ -21,7 +21,7 @@
       "kind": "execution-state",
       "content": {
         "contractVersion": "1.0.0",
-        "state": "running",
+        "state": "review",
         "subject": {
           "algorithm": "gitCommit",
           "digest": "a103262a73acd5bba988ee222d6d3d5afe7dbc95"
@@ -34,10 +34,19 @@
         ],
         "history": [],
         "progress": {
-          "completedSteps": [],
+          "completedSteps": [
+            "plan-tdd-kanban-transitions"
+          ],
           "pendingStep": null,
-          "lastVerifiedHead": "a103262a73acd5bba988ee222d6d3d5afe7dbc95",
-          "checkpoints": [],
+          "lastVerifiedHead": "befdf4f22627d33e9ce8d3da319c9403f01b04e2",
+          "checkpoints": [
+            {
+              "stepId": "plan-tdd-kanban-transitions",
+              "state": "completed",
+              "headCommit": "befdf4f22627d33e9ce8d3da319c9403f01b04e2",
+              "idempotencyKey": "kanban-transitions-plan-complete-001"
+            }
+          ],
           "retry": {}
         },
         "recovery": {

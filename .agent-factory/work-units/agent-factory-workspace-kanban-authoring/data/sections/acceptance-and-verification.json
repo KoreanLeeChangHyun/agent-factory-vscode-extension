@@ -40,10 +40,19 @@
     {
       "id": "quality-check-kanban-transitions",
       "kind": "quality-check",
-      "content": "실행 전 품질 검증 대기",
+      "content": "단위 21개, 실제 manager 통합 1개, VS Code 1.129.1 E2E, diff 및 보안 경계 검증을 통과했다.",
       "attributes": {
-        "status": "planned",
-        "evidence": []
+        "status": "pass",
+        "executionTarget": {
+          "contractVersion": "1.0.0",
+          "invocationId": "codex-20260727-kanban-transitions-001",
+          "headCommit": "a103262a73acd5bba988ee222d6d3d5afe7dbc95",
+          "revision": 1,
+          "attempt": 1
+        },
+        "evidence": [
+          "blocks/evidence/kanban-transitions-verification.txt"
+        ]
       }
     }
   ],
