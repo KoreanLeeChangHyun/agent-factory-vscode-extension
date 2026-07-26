@@ -1,0 +1,37 @@
+Agent Factory Work Unit: agent-factory-agents-backend-connection
+Recorded: 2026-07-26 Asia/Seoul
+Execution branch: work-unit/agent-factory-agents-backend-connection
+Implementation commit: 1576ead30208454c83741cd9dfb645132626ecab
+
+Command: npm run check
+Result: PASS
+Evidence: syntax checks passed; 19 unit tests passed; 1 real fake-executable integration test passed.
+
+Command: npm run test:e2e
+Result: PASS
+Evidence: VS Code 1.129.1 Extension Host loaded the development extension, focused agentFactoryAgents.chat, and completed the fake Codex JSONL flow. Exit code 0.
+
+Command: npm audit --omit=dev --json
+Result: PASS
+Evidence: production vulnerabilities total 0.
+
+Command: npm run package:linux-x64
+Result: PASS
+Evidence: dist/agent-factory-agents-linux-x64.vsix created with 19 files.
+Archive size: 135986405 bytes (vsce display: 129.69 MB).
+Archive SHA-256: 10970122e5ffe2471c7d03d97c05d3ece67906231a46c1e5b1f82640ff7c32b9
+Packaging warning: project LICENSE file not found.
+
+Command: npm run verify:vsix
+Result: PASS
+Evidence: required production source and linux-x64 binary present; tests, ../web, other platform payloads absent; extracted binary retained executable permission and reported codex-cli 0.145.0.
+
+Command: git diff --check
+Result: PASS
+
+Command: git diff --name-only a9f99264695ddbceeace41300191a24098a01802..1576ead30208454c83741cd9dfb645132626ecab
+Result: PASS
+Evidence: changes are limited to agents/** and the canonical Work Unit package.
+
+External authoritative source:
+https://developers.openai.com/codex/codex-manual.md

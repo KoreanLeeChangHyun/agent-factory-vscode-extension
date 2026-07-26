@@ -21,7 +21,7 @@
       "kind": "execution-state",
       "content": {
         "contractVersion": "1.0.0",
-        "state": "running",
+        "state": "review",
         "subject": {
           "algorithm": "gitCommit",
           "digest": "a9f99264695ddbceeace41300191a24098a01802"
@@ -34,10 +34,45 @@
         ],
         "history": [],
         "progress": {
-          "completedSteps": [],
-          "pendingStep": null,
-          "lastVerifiedHead": "a9f99264695ddbceeace41300191a24098a01802",
-          "checkpoints": [],
+          "completedSteps": [
+            "work",
+            "ai-review",
+            "report"
+          ],
+          "pendingStep": "human-review",
+          "lastVerifiedHead": "1576ead30208454c83741cd9dfb645132626ecab",
+          "checkpoints": [
+            {
+              "stepId": "work",
+              "state": "completed",
+              "headCommit": "1576ead30208454c83741cd9dfb645132626ecab",
+              "idempotencyKey": "revision-1-attempt-1-work-completed"
+            },
+            {
+              "stepId": "ai-review",
+              "state": "pending",
+              "headCommit": "1576ead30208454c83741cd9dfb645132626ecab",
+              "idempotencyKey": "revision-1-attempt-1-ai-review-pending"
+            },
+            {
+              "stepId": "ai-review",
+              "state": "completed",
+              "headCommit": "1576ead30208454c83741cd9dfb645132626ecab",
+              "idempotencyKey": "revision-1-attempt-1-ai-review-completed"
+            },
+            {
+              "stepId": "report",
+              "state": "completed",
+              "headCommit": "1576ead30208454c83741cd9dfb645132626ecab",
+              "idempotencyKey": "revision-1-attempt-1-report-completed"
+            },
+            {
+              "stepId": "human-review",
+              "state": "pending",
+              "headCommit": "1576ead30208454c83741cd9dfb645132626ecab",
+              "idempotencyKey": "revision-1-attempt-1-human-review-pending"
+            }
+          ],
           "retry": {}
         },
         "recovery": {

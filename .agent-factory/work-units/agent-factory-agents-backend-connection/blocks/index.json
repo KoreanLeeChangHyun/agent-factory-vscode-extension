@@ -1,3 +1,11 @@
 {
-  "blocks": []
+  "blocks": [
+    {
+      "path": "blocks/logs/agents-backend-verification.log",
+      "mediaType": "text/plain",
+      "description": "Agents backend implementation and verification evidence",
+      "sha256": "89c24ef7e654ae27fe177aadf0ebcfa82d8dcdef2b8e7518ed3bfd71d4c90f08",
+      "sizeBytes": 1548
+    }
+  ]
 }

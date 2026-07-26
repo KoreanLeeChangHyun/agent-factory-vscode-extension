@@ -21,10 +21,24 @@
     {
       "id": "AI-REVIEW-RESULT-001",
       "kind": "ai-review-result",
-      "content": "실행 전",
+      "content": "AI checklist 전체 점검 통과. Web 또는 workspace 제품 변경, shell 실행, session 간 child·DOM·state 공유, 비밀 stderr 노출, 비 SVG 아이콘과 테스트 fixture 패키징을 발견하지 못했다. 차단 결함 없음.",
       "attributes": {
-        "result": "pending",
-        "checklistResult": "pending"
+        "result": "pass",
+        "checklistResult": "pass",
+        "executionTarget": {
+          "contractVersion": "1.0.0",
+          "invocationId": "codex-goal-019f9d6b-06db-74a1-8adf-905d76ff2f16-attempt-1",
+          "headCommit": "a9f99264695ddbceeace41300191a24098a01802",
+          "revision": 1,
+          "attempt": 1
+        },
+        "evidence": [
+          "실제 패키지 경로는 설치된 @openai/codex-linux-x64 vendor/x86_64-unknown-linux-musl/bin/codex와 일치",
+          "Webview command는 chat.ready, chat.submit, chat.cancel만 허용",
+          "Codex stderr는 사용자 오류에 포함하지 않으며 process spawn은 shell:false",
+          "SVG source 검사에서 glyph, pseudo-element, raster icon 없음",
+          "VSIX는 linux-x64 payload와 production source만 포함"
+        ]
       }
     }
   ],

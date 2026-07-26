@@ -5,10 +5,25 @@
     {
       "id": "REPORT-RESULT-001",
       "kind": "report-result",
-      "content": "실행 전",
+      "content": "독립 VS Code Agents Extension에 bundled Codex 실행 backend를 구현했다. Main Agent 세션은 신규 exec와 provider session resume, JSONL 진행 및 응답, 세션별 취소, View snapshot 복원과 비밀 없는 오류를 제공한다. linux-x64 VSIX는 별도 Web 서버나 런타임 다운로드 없이 Codex 0.145.0을 포함한다.",
       "attributes": {
-        "verificationResult": "pending",
-        "evidence": []
+        "verificationResult": "pass",
+        "executionTarget": {
+          "contractVersion": "1.0.0",
+          "invocationId": "codex-goal-019f9d6b-06db-74a1-8adf-905d76ff2f16-attempt-1",
+          "headCommit": "a9f99264695ddbceeace41300191a24098a01802",
+          "revision": 1,
+          "attempt": 1
+        },
+        "evidence": [
+          "blocks/logs/agents-backend-verification.log"
+        ],
+        "remainingRisks": [
+          "실제 사용자 인증을 소비하는 live Codex turn은 자동 검증에서 실행하지 않았으므로 Human 설치 검토가 필요하다.",
+          "첫 패키지는 linux-x64 전용이며 Windows, macOS와 arm64는 후속 범위다.",
+          "vsce는 프로젝트 LICENSE 파일 부재 경고를 출력했지만 패키징과 로컬 설치물 생성은 성공했다.",
+          "최종 VSIX 크기는 129.69 MB이므로 배포 채널의 크기 정책은 배포 승인 전에 별도 확인해야 한다."
+        ]
       }
     }
   ],
