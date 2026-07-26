@@ -1,0 +1,29 @@
+{
+  "id": "ai-review",
+  "title": "AI Review",
+  "content": [
+    {
+      "id": "AI-CHECKLIST-001",
+      "kind": "ai-checklist",
+      "content": [
+        "Human feedback의 단일 선택 보드, 숨김 스크롤, full-height와 filter 제거 범위를 준수했는가",
+        "selectedBoard와 DOM ownership이 Webview state에 명시적으로 보존되는가",
+        "DnD와 Move가 기존 capability 및 manager request 경계를 우회하지 않는가",
+        "숨김 scrollbar와 무관하게 keyboard, focus, accessible name과 scrolling이 유지되는가",
+        "Editor와 Kanban reader/controller/manager 계약을 보존했는가",
+        "viewport와 package evidence가 실제 결과에 일치하는가"
+      ]
+    },
+    {
+      "id": "AI-REVIEW-STATUS",
+      "kind": "ai-review-result",
+      "content": "AI review 대기",
+      "attributes": {
+        "result": "pending",
+        "checklistResult": "pending",
+        "evidence": []
+      }
+    }
+  ],
+  "subsections": []
+}
