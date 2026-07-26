@@ -7,7 +7,7 @@
       "kind": "specification-impact",
       "content": {
         "status": "aligned",
-        "reason": "기존 requirements Specification을 이번 Intake의 전체 Kanban 운영, drag capability, 실행, Human review, integration과 PR 요구사항으로 갱신한다.",
+        "reason": "requirements Specification을 헤더 보드 선택기, 단일 선택 보드, 숨김 스크롤과 검색·필터 제거 요구사항으로 갱신했다.",
         "specificationRefs": [
           ".agent-factory/specifications/agent-factory-workspace-requirements"
         ]
@@ -225,6 +225,62 @@
         ],
         "decisionRefs": [
           "decision-full-kanban-operations"
+        ]
+      }
+    },
+    {
+      "id": "work-unit-basis-kanban-single-board-layout",
+      "kind": "work-unit-basis",
+      "content": {
+        "workUnitId": "agent-factory-workspace-kanban-single-board-layout",
+        "goal": "Kanban을 헤더 보드 선택기와 단일 선택 보드 레이아웃으로 재구성한다.",
+        "executionOrder": 5,
+        "scope": [
+          "선택 헤더의 6개 lifecycle 보드 선택기와 count",
+          "가능한 폭의 동일 너비 한눈 표시 및 부족한 폭의 숨김 가로 스크롤",
+          "선택 보드 하나만 전체 폭과 남은 높이로 표시",
+          "선택 보드 카드 목록의 독립 숨김 세로 스크롤",
+          "보드 사이 gap 제거",
+          "제목·id 검색·필터 DOM, 상태와 로직 제거",
+          "허용된 헤더 보드 선택기의 DnD drop target과 기존 Move Action 보존",
+          "responsive viewport 단위·Extension Host E2E와 VSIX 검증"
+        ],
+        "outOfScope": [
+          "Kanban reader, manager와 lifecycle capability 계약 변경",
+          "Work Unit 생성·편집 UI",
+          "다른 Workspace 탭과 Agents 또는 Web 변경",
+          "raw canonical JSON mutation",
+          "자동 merge, cleanup, push와 PR promotion"
+        ],
+        "expectedOutputs": [
+          "workspace/src/webviewShell.js",
+          "workspace/test/unit/webviewShell.test.js",
+          "workspace/test/suite/index.js",
+          "설치 가능한 Workspace VSIX"
+        ],
+        "acceptanceCriteria": [
+          "6개 보드 선택기가 가능한 폭에서 한눈에 보이고 좁은 폭에서는 scrollbar 없는 가로 스크롤을 제공한다.",
+          "선택 보드 하나만 전체 폭과 남은 높이를 채우고 카드 목록은 scrollbar 없는 독립 세로 스크롤을 제공한다.",
+          "검색·필터 DOM, state와 처리 로직이 제거된다.",
+          "DnD와 Move Action은 동일 capability 계약을 유지하고 헤더 보드 선택기가 drop target으로 동작한다.",
+          "기존 Editor와 Kanban manager 통합 회귀가 통과한다."
+        ],
+        "verification": [
+          "npm run check",
+          "npm run test:manager",
+          "VS Code Extension Host E2E with narrow viewport contract",
+          "VSIX archive and installed-source verification"
+        ],
+        "dependencies": [
+          "agent-factory-workspace-kanban-authoring",
+          "agent-factory-workspace-editor"
+        ],
+        "evidenceRefs": [
+          "human-feedback-kanban-single-board-layout",
+          "internal-evidence-deployed-kanban-layout-defect"
+        ],
+        "decisionRefs": [
+          "decision-kanban-single-board-layout"
         ]
       }
     }

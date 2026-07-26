@@ -13,7 +13,7 @@
       "id": "requirement-board-columns",
       "kind": "requirement",
       "content": {
-        "requirement": "Kanban은 backlog, ready, working, review, done, blocked의 6개 canonical lifecycle 상태 칼럼과 각 항목 수를 표시한다."
+        "requirement": "Kanban 선택 헤더는 backlog, ready, working, review, done, blocked의 6개 canonical lifecycle 보드 선택기와 각 항목 수를 표시하고 본문에는 선택한 보드 하나만 표시한다."
       }
     },
     {
@@ -27,7 +27,7 @@
       "id": "requirement-board-filter",
       "kind": "requirement",
       "content": {
-        "requirement": "Kanban은 GitHub Projects를 참고해 제목과 Work Unit id를 대상으로 하는 즉시 필터를 제공한다."
+        "requirement": "Kanban은 제목 또는 Work Unit id 검색과 필터 UI 및 필터 상태를 제공하지 않는다."
       }
     },
     {
@@ -55,7 +55,7 @@
       "id": "requirement-drag-and-drop",
       "kind": "requirement",
       "content": {
-        "requirement": "카드는 capability가 허용하는 lifecycle 칼럼으로 drag and drop할 수 있고 동일 작업을 click, tap, keyboard로 수행하는 Move 메뉴를 제공한다."
+        "requirement": "카드는 capability가 허용하는 lifecycle 헤더 보드 선택기로 drag and drop할 수 있고 동일 작업을 click, tap, keyboard로 수행하는 Move 메뉴를 제공한다."
       }
     },
     {
@@ -118,7 +118,7 @@
       "id": "acceptance-board",
       "kind": "acceptance-criterion",
       "content": {
-        "criterion": "실제 canonical fixture가 정확한 6개 lifecycle 칼럼에 표시되고 필터, 항목 수, 자동 갱신, 빈 상태와 부분 읽기 오류가 검증된다."
+        "criterion": "6개 lifecycle 보드 선택기가 헤더에 가능한 한 한눈에 표시되고 좁은 폭에서는 숨김 가로 스크롤되며, 선택한 보드 하나만 전체 폭과 남은 높이를 채워 표시되고 카드 목록은 숨김 세로 스크롤되며 검색·필터는 존재하지 않는다."
       }
     },
     {
@@ -161,6 +161,13 @@
       "kind": "acceptance-criterion",
       "content": {
         "criterion": "단위, manager·Git 통합, 핵심 VS Code E2E와 Human 검토가 각 Work Unit 범위에 맞게 통과한다."
+      }
+    },
+    {
+      "id": "requirement-board-scroll-layout",
+      "kind": "requirement",
+      "content": {
+        "requirement": "보드 선택기는 가능한 폭에서 한눈에 표시하고 부족한 폭에서 숨김 가로 스크롤을 제공하며, 선택 보드는 남은 높이를 채우고 카드 목록은 숨김 세로 스크롤을 제공한다."
       }
     }
   ],

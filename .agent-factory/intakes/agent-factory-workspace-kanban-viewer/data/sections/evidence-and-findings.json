@@ -250,6 +250,26 @@
           "C: DnD 상태 전이만, Action 후속 결정"
         ]
       }
+    },
+    {
+      "id": "internal-evidence-deployed-kanban-layout-defect",
+      "kind": "internal-evidence",
+      "content": {
+        "kind": "runtime",
+        "source": "uploads/image copy 3.png; workspace/src/webviewShell.js; workspace/test/unit/webviewShell.test.js",
+        "method": "배포 화면과 현재 source 및 테스트 대조",
+        "findings": [
+          "838px 폭의 배포 화면에서 BACKLOG, READY, WORKING과 REVIEW 일부만 보이고 나머지 lifecycle 보드는 viewport 밖에 있다.",
+          "workspace/src/webviewShell.js의 .kanban-board는 repeat(6, minmax(230px, 1fr))와 min-width: 1430px를 사용한다.",
+          "가로 overflow는 .workspace-body가 소유해 scrollbar가 전체 panel 하단에 나타난다.",
+          "현재 단위 및 Extension Host 테스트는 viewport에서 실제 칼럼 가시성과 scrollbar 위치를 검증하지 않는다."
+        ],
+        "interpretations": [
+          "고정 6칼럼 동시 표시를 단일 선택 보드와 헤더 선택기로 교체해야 좁은 editor group에서 가독성을 확보할 수 있다."
+        ],
+        "limitations": []
+      },
+      "blockRef": "blocks/evidence/kanban-multi-column-deployed.png"
     }
   ],
   "subsections": []
