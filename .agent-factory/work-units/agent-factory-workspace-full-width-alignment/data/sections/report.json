@@ -44,6 +44,29 @@
         "status": "integrated"
       },
       "blockRef": "blocks/evidence/integration-main.json"
+    },
+    {
+      "id": "INTEGRATION-B43309493E6CA327",
+      "kind": "integration-result",
+      "content": {
+        "humanDecision": "approved",
+        "operationResult": "merge-commit-created",
+        "relationship": "diverged",
+        "repository": "/home/deus/workspace/agent-factory/vscode-extension",
+        "sourceBranch": "work-unit/agent-factory-workspace-full-width-alignment",
+        "sourceCommit": "85e81c1c325e0ea713b19e83153f86b590631d09",
+        "strategy": "no-ff",
+        "targetAfterCommit": "30eb67128935fc544c532cf6a94d495bd6eba494",
+        "targetBeforeCommit": "90e1fb667ed4be9719fa530d6d1e5dfd8d3048e4",
+        "targetBranch": "main",
+        "workUnitId": "agent-factory-workspace-full-width-alignment",
+        "worktreePath": "/home/deus/workspace/agent-factory/vscode-extension/.agent-factory/worktree/agent-factory-workspace-full-width-alignment",
+        "receiptSha256": "b43309493e6ca32717927a8ef5eead73bc589b2f15afe76c318dfad753eded3a"
+      },
+      "attributes": {
+        "status": "integrated"
+      },
+      "blockRef": "blocks/evidence/integration-main-gutter-rework.json"
     }
   ],
   "subsections": []
