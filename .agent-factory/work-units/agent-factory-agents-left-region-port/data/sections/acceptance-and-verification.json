@@ -44,17 +44,8 @@
       "kind": "quality-check",
       "content": "구문, 단위 7/7, VS Code 1.129.1 Extension Host E2E, manifest, CSP, SVG-only와 범위 경계 검증이 통과했다.",
       "attributes": {
-        "status": "pass",
-        "executionTarget": {
-          "contractVersion": "1.0.0",
-          "invocationId": "codex-20260726-agents-left-region-port-001",
-          "headCommit": "2866de136de90059c0028b7d413fdb5c61138ba7",
-          "revision": 1,
-          "attempt": 1
-        },
-        "evidence": [
-          "blocks/evidence/agents-left-region-verification.txt"
-        ]
+        "status": "planned",
+        "evidence": []
       }
     }
   ],

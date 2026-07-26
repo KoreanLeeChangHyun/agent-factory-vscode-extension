@@ -7,15 +7,8 @@
       "kind": "execution-result",
       "content": "agents 독립 VS Code Extension 구현과 계획된 검증을 완료했다.",
       "attributes": {
-        "status": "complete",
-        "verificationResult": "pass",
-        "executionTarget": {
-          "contractVersion": "1.0.0",
-          "invocationId": "codex-20260726-agents-left-region-port-001",
-          "headCommit": "2866de136de90059c0028b7d413fdb5c61138ba7",
-          "revision": 1,
-          "attempt": 1
-        }
+        "status": "pending",
+        "verificationResult": "pending"
       }
     }
   ],

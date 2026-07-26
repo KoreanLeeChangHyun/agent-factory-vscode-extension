@@ -7,18 +7,8 @@
       "kind": "report-result",
       "content": "agents에 native Activity Bar container, Workspace Explorer Tree View와 로컬 Chat Webview View를 구현했다. npm run check와 VS Code 1.129.1 E2E가 통과했다. backend와 범위 밖 경로는 변경하지 않았다. 픽셀 수준 테마·상호작용은 Human 검토 대상으로 남긴다.",
       "attributes": {
-        "verificationResult": "pass",
-        "executionTarget": {
-          "contractVersion": "1.0.0",
-          "invocationId": "codex-20260726-agents-left-region-port-001",
-          "headCommit": "2866de136de90059c0028b7d413fdb5c61138ba7",
-          "revision": 1,
-          "attempt": 1
-        },
-        "evidence": [
-          "blocks/evidence/agents-left-region-verification.txt",
-          "blocks/evidence/worktree-inspect-review.json"
-        ]
+        "verificationResult": "pending",
+        "evidence": []
       }
     }
   ],
