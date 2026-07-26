@@ -41,7 +41,7 @@
       "kind": "quality-check",
       "content": "아직 실행하지 않음",
       "attributes": {
-        "status": "not-run",
+        "status": "planned",
         "evidence": []
       }
     }

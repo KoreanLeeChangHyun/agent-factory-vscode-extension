@@ -19,8 +19,8 @@
       "kind": "ai-review-result",
       "content": "아직 실행하지 않음",
       "attributes": {
-        "result": "not-run",
-        "checklistResult": "not-run"
+        "result": "pending",
+        "checklistResult": "pending"
       }
     }
   ],

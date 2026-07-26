@@ -15,6 +15,97 @@
         "branch": "work-unit/agent-factory-agents-chat-web-alignment",
         "worktreePath": "/home/deus/workspace/agent-factory/vscode-extension/.agent-factory/worktree/agent-factory-agents-chat-web-alignment"
       }
+    },
+    {
+      "id": "EXECUTION-STATE-001",
+      "kind": "execution-state",
+      "content": {
+        "contractVersion": "1.0.0",
+        "state": "running",
+        "subject": {
+          "algorithm": "gitCommit",
+          "digest": "e890dd81ccacaf8fe9f0996b337648245b1f3fe9"
+        },
+        "currentRevision": 1,
+        "currentAttempt": 1,
+        "invocationId": "019f9d6b-06db-74a1-8adf-905d76ff2f16",
+        "invocationChain": [
+          "019f9d6b-06db-74a1-8adf-905d76ff2f16"
+        ],
+        "history": [],
+        "progress": {
+          "completedSteps": [
+            "PLAN-001",
+            "PLAN-002",
+            "PLAN-003"
+          ],
+          "pendingStep": "PLAN-004",
+          "lastVerifiedHead": "e890dd81ccacaf8fe9f0996b337648245b1f3fe9",
+          "checkpoints": [
+            {
+              "stepId": "PLAN-001",
+              "state": "pending",
+              "headCommit": "e890dd81ccacaf8fe9f0996b337648245b1f3fe9",
+              "idempotencyKey": "rev1-attempt1-plan001-pending"
+            },
+            {
+              "stepId": "PLAN-001",
+              "state": "completed",
+              "headCommit": "e890dd81ccacaf8fe9f0996b337648245b1f3fe9",
+              "idempotencyKey": "rev1-attempt1-plan001-completed"
+            },
+            {
+              "stepId": "PLAN-002",
+              "state": "pending",
+              "headCommit": "e890dd81ccacaf8fe9f0996b337648245b1f3fe9",
+              "idempotencyKey": "rev1-attempt1-plan002-pending"
+            },
+            {
+              "stepId": "PLAN-002",
+              "state": "completed",
+              "headCommit": "e890dd81ccacaf8fe9f0996b337648245b1f3fe9",
+              "idempotencyKey": "rev1-attempt1-plan002-completed"
+            },
+            {
+              "stepId": "PLAN-003",
+              "state": "pending",
+              "headCommit": "e890dd81ccacaf8fe9f0996b337648245b1f3fe9",
+              "idempotencyKey": "rev1-attempt1-plan003-pending"
+            },
+            {
+              "stepId": "PLAN-003",
+              "state": "completed",
+              "headCommit": "e890dd81ccacaf8fe9f0996b337648245b1f3fe9",
+              "idempotencyKey": "rev1-attempt1-plan003-completed"
+            },
+            {
+              "stepId": "PLAN-004",
+              "state": "pending",
+              "headCommit": "e890dd81ccacaf8fe9f0996b337648245b1f3fe9",
+              "idempotencyKey": "rev1-attempt1-plan004-pending"
+            }
+          ],
+          "retry": {
+            "PLAN-004": {
+              "count": 1,
+              "maxRetries": 2,
+              "events": [
+                {
+                  "idempotencyKey": "rev1-attempt1-plan004-missing-test-electron-1",
+                  "classification": "transient",
+                  "evidence": "npm run test:e2e exited 1 before launch: Cannot find module @vscode/test-electron in linked worktree"
+                }
+              ]
+            }
+          }
+        },
+        "recovery": {
+          "status": "running",
+          "ownerInvocationId": "019f9d6b-06db-74a1-8adf-905d76ff2f16",
+          "blockerId": null,
+          "evidence": null
+        }
+      }
     }
   ],
   "subsections": []

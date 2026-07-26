@@ -7,8 +7,8 @@
       "kind": "execution-result",
       "content": "아직 시작하지 않음",
       "attributes": {
-        "status": "not-started",
-        "verificationResult": "not-run"
+        "status": "pending",
+        "verificationResult": "pending"
       }
     }
   ],

@@ -13,6 +13,11 @@ const vscode = require("vscode");
 
 const { AgentsChatController } = require("../../src/chatBackend");
 const { CodexRunner } = require("../../src/codexAdapter");
+const {
+  createChatViewHtml,
+  groupMessagesIntoTurns,
+  shouldSubmitComposerKey,
+} = require("../../src/chatView");
 
 async function run() {
   const extension = vscode.extensions.getExtension(
@@ -29,7 +34,38 @@ async function run() {
     "workbench.view.extension.agentFactoryAgents",
   );
   await vscode.commands.executeCommand("agentFactoryAgents.chat.focus");
+  verifyChatViewContract();
   await verifyFakeChatFlow();
+}
+
+function verifyChatViewContract() {
+  const html = createChatViewHtml({
+    cspSource: "vscode-webview://e2e",
+    nonce: "e2e-nonce",
+  });
+
+  assert.match(html, /\.mode-tab\s*\{[^}]*min-height:\s*34px;/s);
+  assert.match(html, /\.session-header\s*\{[^}]*min-height:\s*44px;/s);
+  assert.match(html, /class="composer-card"/);
+  assert.match(html, /class="composer-action"/);
+  assert.match(html, /turn\.className = "message-turn"/);
+  assert.match(html, /element\.className = "message message-" \+ item\.role/);
+  assert.equal(shouldSubmitComposerKey({ key: "Enter" }), true);
+  assert.equal(
+    shouldSubmitComposerKey({ key: "Enter", shiftKey: true }),
+    false,
+  );
+  assert.equal(
+    shouldSubmitComposerKey({ key: "Enter", isComposing: true }),
+    false,
+  );
+  assert.deepEqual(
+    groupMessagesIntoTurns([
+      { role: "user", text: "hello" },
+      { role: "assistant", text: "world" },
+    ]).map((turn) => turn.map((message) => message.role)),
+    [["user", "assistant"]],
+  );
 }
 
 async function verifyFakeChatFlow() {
