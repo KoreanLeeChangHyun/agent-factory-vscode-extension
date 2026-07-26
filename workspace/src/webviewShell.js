@@ -474,6 +474,8 @@ function createWebviewHtml({ cspSource, nonce }) {
         const knownTabs = new Set(tabs.map((tab) => tab.dataset.tabId));
         let snapshot;
         let dragState;
+        let transitionSequence = 0;
+        const pendingWorkUnits = new Set();
 
         function persistState() {
           vscode.setState(state);
@@ -536,12 +538,32 @@ function createWebviewHtml({ cspSource, nonce }) {
           return values.join(" · ");
         }
 
-        function showMovePreview(cardId, target) {
-          notice.textContent =
-            cardId +
-            " → " +
-            target +
-            ": 상태 변경은 다음 Work Unit에서 활성화됩니다.";
+        function requestTransition(card, targetStatus) {
+          const capability = card.capabilities.find(
+            (candidate) => candidate.target === targetStatus,
+          );
+          if (!capability?.allowed) {
+            notice.textContent =
+              capability?.reason || "현재 상태에서 허용되지 않는 전이입니다.";
+            return;
+          }
+          if (pendingWorkUnits.has(card.id)) {
+            notice.textContent = card.id + " 상태 전이가 이미 진행 중입니다.";
+            return;
+          }
+          const requestId = "transition-" + Date.now() + "-" + ++transitionSequence;
+          pendingWorkUnits.add(card.id);
+          notice.textContent = card.id + " → " + targetStatus + " 전이 요청 중…";
+          kanbanWorkspace.setAttribute("aria-busy", "true");
+          renderKanban();
+          vscode.postMessage({
+            type: "kanban.transition",
+            requestId,
+            workUnitId: card.id,
+            fromStatus: card.status,
+            targetStatus,
+            snapshotGeneratedAt: snapshot.generatedAt,
+          });
         }
 
         function createCard(card) {
@@ -551,8 +573,10 @@ function createWebviewHtml({ cspSource, nonce }) {
           cardElement.tabIndex = 0;
 
           const allowedCapabilities = card.capabilities.filter((capability) => capability.allowed);
-          cardElement.draggable = allowedCapabilities.length > 0;
+          const pending = pendingWorkUnits.has(card.id);
+          cardElement.draggable = !pending && allowedCapabilities.length > 0;
           cardElement.setAttribute("aria-grabbed", "false");
+          cardElement.setAttribute("aria-busy", String(pending));
 
           appendTextElement(cardElement, "h4", "kanban-card-title", card.title);
           appendTextElement(cardElement, "p", "kanban-card-id", card.id);
@@ -570,22 +594,29 @@ function createWebviewHtml({ cspSource, nonce }) {
           placeholder.value = "";
           placeholder.textContent = "Move…";
           moveTarget.append(placeholder);
-          for (const capability of allowedCapabilities) {
+          for (const capability of card.capabilities) {
+            if (capability.target === card.status) {
+              continue;
+            }
             const option = document.createElement("option");
             option.value = capability.target;
-            option.textContent = capability.target;
+            option.textContent = capability.allowed
+              ? capability.target
+              : capability.target + " — " + capability.reason;
             option.title = capability.reason;
+            option.disabled = !capability.allowed;
             moveTarget.append(option);
           }
+          moveTarget.disabled = pending || allowedCapabilities.length === 0;
           const moveButton = document.createElement("button");
           moveButton.className = "move-button";
           moveButton.type = "button";
           moveButton.dataset.moveButton = "";
           moveButton.textContent = "Move";
-          moveButton.disabled = allowedCapabilities.length === 0;
+          moveButton.disabled = pending || allowedCapabilities.length === 0;
           moveButton.addEventListener("click", () => {
             if (moveTarget.value) {
-              showMovePreview(card.id, moveTarget.value);
+              requestTransition(card, moveTarget.value);
             }
           });
           actions.append(moveTarget, moveButton);
@@ -595,7 +626,7 @@ function createWebviewHtml({ cspSource, nonce }) {
             const allowedTargets = new Set(
               allowedCapabilities.map((capability) => capability.target),
             );
-            dragState = { cardId: card.id, allowedTargets };
+            dragState = { card, allowedTargets };
             cardElement.setAttribute("aria-grabbed", "true");
             event.dataTransfer.effectAllowed = "move";
             event.dataTransfer.setData("text/plain", card.id);
@@ -687,7 +718,7 @@ function createWebviewHtml({ cspSource, nonce }) {
             column.classList.remove("is-drop-target");
             const allowedTargets = dragState?.allowedTargets || new Set();
             if (dragState && allowedTargets.has(column.dataset.kanbanColumn)) {
-              showMovePreview(dragState.cardId, column.dataset.kanbanColumn);
+              requestTransition(dragState.card, column.dataset.kanbanColumn);
             }
           });
         }
@@ -719,6 +750,26 @@ function createWebviewHtml({ cspSource, nonce }) {
             errors.hidden = false;
             errors.textContent = message.error?.message || "Kanban을 불러오지 못했습니다.";
             updatedLabel.textContent = "갱신 실패";
+          } else if (message.type === "kanban.transitionPending") {
+            pendingWorkUnits.add(message.workUnitId);
+            notice.textContent =
+              message.workUnitId + " → " + message.targetStatus + " manager 검증 중…";
+            kanbanWorkspace.setAttribute("aria-busy", "true");
+            renderKanban();
+          } else if (message.type === "kanban.transitionResult") {
+            pendingWorkUnits.delete(message.workUnitId);
+            kanbanWorkspace.setAttribute("aria-busy", "false");
+            if (message.ok) {
+              notice.textContent =
+                message.workUnitId + " → " + message.targetStatus + " 전이가 완료되었습니다.";
+              errors.hidden = true;
+            } else {
+              notice.textContent = "상태 전이가 적용되지 않았습니다.";
+              errors.hidden = false;
+              errors.textContent =
+                message.error?.message || "Work Unit manager가 전이를 거부했습니다.";
+            }
+            renderKanban();
           }
         });
 

@@ -29,6 +29,12 @@ const STATUS_TRANSITIONS = Object.freeze({
   done: Object.freeze([]),
   blocked: Object.freeze(["backlog", "ready", "working", "review"]),
 });
+const DND_TARGETS = new Set(["backlog", "ready", "blocked"]);
+const ACTION_REQUIRED_REASONS = Object.freeze({
+  working: "working 전이는 실행 Action이 필요합니다.",
+  review: "review 전이는 실행 완료 검증 Action이 필요합니다.",
+  done: "done 전이는 Human 승인 Action이 필요합니다.",
+});
 
 class KanbanReadError extends Error {
   constructor(code, message) {
@@ -113,7 +119,7 @@ function findKind(value, kind) {
   return findKind(value.content, kind) || findKind(value.subsections, kind);
 }
 
-function getTransitionCapabilities(status) {
+function getTransitionCapabilities(status, transitionContext) {
   const allowedTargets = new Set(STATUS_TRANSITIONS[status] || []);
   return COLUMN_DEFINITIONS.map(({ id: target }) => {
     if (target === status) {
@@ -130,10 +136,50 @@ function getTransitionCapabilities(status) {
         reason: `${status}에서 ${target}로 직접 전이할 수 없습니다.`,
       };
     }
+    if (!DND_TARGETS.has(target)) {
+      return {
+        target,
+        allowed: false,
+        reason: ACTION_REQUIRED_REASONS[target],
+      };
+    }
+    if (
+      transitionContext &&
+      target === "blocked" &&
+      !transitionContext.hasBlockingOpenItem
+    ) {
+      return {
+        target,
+        allowed: false,
+        reason: "blocked 전이는 미해결 blocking open item이 필요합니다.",
+      };
+    }
+    if (
+      transitionContext &&
+      target === "blocked" &&
+      !transitionContext.hasExecutionState
+    ) {
+      return {
+        target,
+        allowed: false,
+        reason: "blocked 전이는 초기화된 execution state가 필요합니다.",
+      };
+    }
+    if (
+      transitionContext &&
+      target === "ready" &&
+      !transitionContext.readyCandidate
+    ) {
+      return {
+        target,
+        allowed: false,
+        reason: "ready 전이 조건(완료된 readiness·execution context·미해결 blocker 없음)이 충족되지 않았습니다.",
+      };
+    }
     return {
       target,
       allowed: true,
-      reason: "manager 전이 후보입니다. 현재 Work Unit에서는 미리 보기만 제공합니다.",
+      reason: `${target} 전이는 Work Unit manager가 실행 직전에 다시 검증합니다.`,
     };
   });
 }
@@ -141,15 +187,47 @@ function getTransitionCapabilities(status) {
 function projectCard({
   metadata,
   title,
-  executionContext,
-  humanReview,
-  report,
+  sections,
 }) {
+  const executionContext = sections.get("execution-context");
+  const humanReview = sections.get("human-review");
+  const report = sections.get("report");
   const executionState = findKind(executionContext, "execution-state");
+  const executionContextItem = findKind(executionContext, "execution-context");
   const humanReviewResult = findKind(humanReview, "human-review-result");
   const integrationResult = findKind(report, "integration-result");
   const pullRequestResult =
     findKind(report, "pull-request-result") || findKind(report, "pr-result");
+  const hasBlockingOpenItem = Array.from(sections.values()).some(
+    (section) => hasUnresolvedBlockingOpenItem(section),
+  );
+  const readiness = metadata.readiness || {};
+  const readinessKeys = [
+    "contractValid",
+    "intakeTraceabilityValid",
+    "definitionComplete",
+    "executionContextComplete",
+    "verificationPlanComplete",
+  ];
+  const executionContextContent = executionContextItem?.content;
+  const requiredExecutionContextFields = [
+    "goalId",
+    "objective",
+    "execInvocation",
+    "executionAgent",
+    "repository",
+    "baseRef",
+    "branch",
+    "worktreePath",
+  ];
+  const readyCandidate =
+    readinessKeys.every((key) => readiness[key] === true) &&
+    typeof readiness.reviewedAt === "string" &&
+    !hasBlockingOpenItem &&
+    executionContextContent &&
+    requiredExecutionContextFields.every(
+      (field) => Object.hasOwn(executionContextContent, field),
+    );
 
   return {
     id: metadata.id,
@@ -169,8 +247,32 @@ function projectCard({
       integrationResult?.content?.operationResult ||
       null,
     pullRequestStatus: pullRequestResult?.attributes?.status || null,
-    capabilities: getTransitionCapabilities(metadata.lifecycle.status),
+    capabilities: getTransitionCapabilities(metadata.lifecycle.status, {
+      hasBlockingOpenItem,
+      hasExecutionState: Boolean(executionState),
+      readyCandidate: Boolean(readyCandidate),
+    }),
   };
+}
+
+function hasUnresolvedBlockingOpenItem(value) {
+  if (Array.isArray(value)) {
+    return value.some(hasUnresolvedBlockingOpenItem);
+  }
+  if (!value || typeof value !== "object") {
+    return false;
+  }
+  if (
+    value.kind === "open-item" &&
+    value.attributes?.blocking === true &&
+    value.attributes?.resolved !== true
+  ) {
+    return true;
+  }
+  return (
+    hasUnresolvedBlockingOpenItem(value.content) ||
+    hasUnresolvedBlockingOpenItem(value.subsections)
+  );
 }
 
 async function readWorkUnit(packagePath, workUnitId) {
@@ -194,20 +296,10 @@ async function readWorkUnit(packagePath, workUnitId) {
     );
   }
 
-  const [
-    metadata,
-    title,
-    executionContext,
-    humanReview,
-    report,
-  ] = await Promise.all([
+  const [metadata, title, tableOfContents] = await Promise.all([
     readJson(packageRoot, "data/metadata.json"),
     readJson(packageRoot, "data/title.json"),
-    readJson(packageRoot, "data/sections/execution-context.json", {
-      optional: true,
-    }),
-    readJson(packageRoot, "data/sections/human-review.json", { optional: true }),
-    readJson(packageRoot, "data/sections/report.json", { optional: true }),
+    readJson(packageRoot, "data/table-of-contents.json"),
   ]);
 
   if (
@@ -231,13 +323,42 @@ async function readWorkUnit(packagePath, workUnitId) {
       `${workUnitId}의 lifecycle status가 유효하지 않습니다.`,
     );
   }
+  if (
+    !Array.isArray(tableOfContents.sections) ||
+    tableOfContents.sections.length > 32 ||
+    tableOfContents.sections.some(
+      (section) =>
+        !section ||
+        typeof section.id !== "string" ||
+        typeof section.path !== "string" ||
+        !/^data\/sections\/[a-z0-9]+(?:-[a-z0-9]+)*\.json$/.test(
+          section.path,
+        ),
+    )
+  ) {
+    throw new KanbanReadError(
+      "invalid_contract",
+      `${workUnitId}의 table of contents 계약이 유효하지 않습니다.`,
+    );
+  }
+  const sectionEntries = await Promise.all(
+    tableOfContents.sections.map(async (section) => [
+      section.id,
+      await readJson(packageRoot, section.path),
+    ]),
+  );
+  const sections = new Map(sectionEntries);
+  if (sections.size !== sectionEntries.length) {
+    throw new KanbanReadError(
+      "invalid_contract",
+      `${workUnitId}의 section id가 중복됩니다.`,
+    );
+  }
 
   return projectCard({
     metadata,
     title,
-    executionContext,
-    humanReview,
-    report,
+    sections,
   });
 }
 

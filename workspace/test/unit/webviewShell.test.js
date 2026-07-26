@@ -53,7 +53,7 @@ test("shell uses VS Code state APIs and keyboard tab navigation", () => {
   assert.match(html, /End/);
 });
 
-test("Kanban panel renders six columns, filter, counts, and non-mutating move controls", () => {
+test("Kanban panel renders six columns, filter, counts, and transition controls", () => {
   const html = createWebviewHtml({
     cspSource: "vscode-webview://test",
     nonce: "test-nonce",
@@ -76,10 +76,11 @@ test("Kanban panel renders six columns, filter, counts, and non-mutating move co
   assert.match(html, /moveButton\.dataset\.moveButton/);
   assert.match(html, /kanban\.ready/);
   assert.match(html, /kanban\.refresh/);
-  assert.doesNotMatch(html, /postMessage\(\{[^}]*kanban\.move/s);
+  assert.match(html, /type:\s*"kanban\.transition"/);
+  assert.doesNotMatch(html, /kanban\.(?:create|edit)/);
 });
 
-test("Kanban drag and Move controls use the same allowed capabilities", () => {
+test("Kanban drag and Move controls use the same capability and request contract", () => {
   const html = createWebviewHtml({
     cspSource: "vscode-webview://test",
     nonce: "test-nonce",
@@ -87,8 +88,14 @@ test("Kanban drag and Move controls use the same allowed capabilities", () => {
 
   assert.match(html, /card\.capabilities\.filter\(\(capability\) => capability\.allowed\)/);
   assert.match(html, /allowedTargets\.has\(column\.dataset\.kanbanColumn\)/);
-  assert.match(html, /moveTarget\.value/);
-  assert.match(html, /상태 변경은 다음 Work Unit에서 활성화됩니다/);
+  assert.match(html, /requestTransition\(card,\s*moveTarget\.value\)/);
+  assert.match(
+    html,
+    /requestTransition\(dragState\.card,\s*column\.dataset\.kanbanColumn\)/,
+  );
+  assert.match(html, /snapshotGeneratedAt:\s*snapshot\.generatedAt/);
+  assert.match(html, /message\.type === "kanban\.transitionResult"/);
+  assert.doesNotMatch(html, /showMovePreview/);
 });
 
 test("shell fills the available width with equal theme-aware tabs and surfaces", () => {
