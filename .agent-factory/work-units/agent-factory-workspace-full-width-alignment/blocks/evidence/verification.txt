@@ -1,0 +1,47 @@
+Agent Factory Work Unit: agent-factory-workspace-full-width-alignment
+Implementation commit: 189370ef75cde894f4edc1697aac4243870597f3
+
+TDD red
+Command:
+npm run test:unit -- --test-name-pattern='fills the available width'
+Result:
+Expected failure. The prior CSS did not match `.workspace-tabs { padding: 0; }`;
+5 tests passed and the new full-width regression test failed.
+
+Dependency preparation
+Initial command:
+npm run test:e2e
+Initial result:
+Failed before test startup because @vscode/test-electron was not installed in
+the new linked worktree.
+Recovery command:
+npm ci
+Recovery result:
+38 packages installed from package-lock.json; 0 vulnerabilities.
+
+Automated verification after implementation commit
+Command:
+npm run check
+Result:
+PASS. Syntax checks passed. Unit tests: 6 passed, 0 failed.
+
+Command:
+npm run test:e2e
+Result:
+PASS. VS Code 1.129.1 Extension Development Host loaded the development
+extension, opened the registered workspace command workflow, and exited 0.
+
+Command:
+git diff --check
+Result:
+PASS.
+
+AI scope review
+Result:
+PASS. The implementation commit changes only:
+- workspace/src/webviewShell.js
+- workspace/test/unit/webviewShell.test.js
+
+The tab labels, order, visible copy, DOM structure, event handlers, keyboard
+navigation, persisted state, Webview CSP, and message/security boundary are
+unchanged. CSS uses VS Code semantic theme tokens and adds no literal color.

@@ -15,6 +15,68 @@
         "branch": "work-unit/agent-factory-workspace-full-width-alignment",
         "worktreePath": "/home/deus/workspace/agent-factory/vscode-extension/.agent-factory/worktree/agent-factory-workspace-full-width-alignment"
       }
+    },
+    {
+      "id": "EXECUTION-STATE-001",
+      "kind": "execution-state",
+      "content": {
+        "contractVersion": "1.0.0",
+        "state": "review",
+        "subject": {
+          "algorithm": "gitCommit",
+          "digest": "dd70ff08cb19a9aed2271257dc52d1ead5b3d02a"
+        },
+        "currentRevision": 1,
+        "currentAttempt": 1,
+        "invocationId": "019f9c3f-3ce9-7c02-b376-8c18726defdd",
+        "invocationChain": [
+          "019f9c3f-3ce9-7c02-b376-8c18726defdd"
+        ],
+        "history": [],
+        "progress": {
+          "completedSteps": [
+            "plan-inspection",
+            "tdd-red",
+            "css-implementation",
+            "automated-verification"
+          ],
+          "pendingStep": null,
+          "lastVerifiedHead": "189370ef75cde894f4edc1697aac4243870597f3",
+          "checkpoints": [
+            {
+              "stepId": "plan-inspection",
+              "state": "completed",
+              "headCommit": "189370ef75cde894f4edc1697aac4243870597f3",
+              "idempotencyKey": "full-width-plan-inspection-v1"
+            },
+            {
+              "stepId": "tdd-red",
+              "state": "completed",
+              "headCommit": "189370ef75cde894f4edc1697aac4243870597f3",
+              "idempotencyKey": "full-width-tdd-red-v1"
+            },
+            {
+              "stepId": "css-implementation",
+              "state": "completed",
+              "headCommit": "189370ef75cde894f4edc1697aac4243870597f3",
+              "idempotencyKey": "full-width-css-implementation-v1"
+            },
+            {
+              "stepId": "automated-verification",
+              "state": "completed",
+              "headCommit": "189370ef75cde894f4edc1697aac4243870597f3",
+              "idempotencyKey": "full-width-automated-verification-v1"
+            }
+          ],
+          "retry": {}
+        },
+        "recovery": {
+          "status": "running",
+          "ownerInvocationId": "019f9c3f-3ce9-7c02-b376-8c18726defdd",
+          "blockerId": null,
+          "evidence": null
+        }
+      }
     }
   ],
   "subsections": []

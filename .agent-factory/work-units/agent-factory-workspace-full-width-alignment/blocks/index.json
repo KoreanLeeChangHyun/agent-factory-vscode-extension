@@ -1,3 +1,18 @@
 {
-  "blocks": []
+  "blocks": [
+    {
+      "path": "blocks/evidence/verification.txt",
+      "mediaType": "text/plain",
+      "description": "TDD red, dependency preparation, syntax, unit, VS Code 1.129.1 E2E, diff, and scope review evidence",
+      "sha256": "589a341561dbb3273cb097a9cab82eff6e98497be65860686ab9d5fc3a871fa7",
+      "sizeBytes": 1399
+    },
+    {
+      "path": "blocks/evidence/worktree-inspect.json",
+      "mediaType": "application/json",
+      "description": "Canonical worktree inspect result before final evidence registration",
+      "sha256": "1d2586b22e89dfd13398425b3f6781c3bd290ab2105d0f51c8327b4e5dc06256",
+      "sizeBytes": 1650
+    }
+  ]
 }
