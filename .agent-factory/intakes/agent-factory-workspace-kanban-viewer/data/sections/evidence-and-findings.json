@@ -218,6 +218,22 @@
           "C: 병합하지 않고 브랜치 유지 — 현재 상태 보존; 후속 Kanban Work Unit 지연"
         ]
       }
+    },
+    {
+      "id": "interview-kanban-authoring-edit-scope",
+      "kind": "interview",
+      "content": {
+        "question": "Kanban에서 Work Unit의 어떤 필드까지 편집할 수 있게 할까요?",
+        "recommendation": "A",
+        "rationale": "일반적인 계획 편집 요구를 충족하면서 manager-owned 실행 상태와 결과·receipt를 UI 편집에서 분리해 안전성과 유지보수성을 확보한다.",
+        "answer": "A",
+        "decisionState": "accepted",
+        "choices": [
+          "A: title, goal, scope, out-of-scope, plan, acceptance criteria, Human checklist 안내형 편집",
+          "B: manager가 허용하는 모든 section item 범용 편집",
+          "C: title과 lifecycle 상태만 편집"
+        ]
+      }
     }
   ],
   "subsections": []
