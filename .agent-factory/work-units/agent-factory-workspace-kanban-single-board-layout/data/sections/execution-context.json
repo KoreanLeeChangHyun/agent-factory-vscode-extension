@@ -21,7 +21,7 @@
       "kind": "execution-state",
       "content": {
         "contractVersion": "1.0.0",
-        "state": "review",
+        "state": "done",
         "subject": {
           "algorithm": "gitCommit",
           "digest": "3b077b47e6099d3f9c389f00318d8cd3f5fa6729"
