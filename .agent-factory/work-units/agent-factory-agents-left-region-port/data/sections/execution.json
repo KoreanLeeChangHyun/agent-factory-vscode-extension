@@ -5,10 +5,17 @@
     {
       "id": "EXECUTION-RESULT-001",
       "kind": "execution-result",
-      "content": "agents 독립 VS Code Extension 구현과 계획된 검증을 완료했다.",
+      "content": "main의 최신 Workspace 기준과 Agents 기준을 결합해 Specification 충돌 재작업을 완료했다.",
       "attributes": {
-        "status": "pending",
-        "verificationResult": "pending"
+        "status": "complete",
+        "verificationResult": "pass",
+        "executionTarget": {
+          "contractVersion": "1.0.0",
+          "invocationId": "codex-20260726-agents-left-conflict-rework-002",
+          "headCommit": "e436cc3806ae78a2a54e5d86a206bdf57b9f0f40",
+          "revision": 2,
+          "attempt": 1
+        }
       }
     }
   ],

@@ -19,10 +19,17 @@
     {
       "id": "AI-REVIEW-RESULT-001",
       "kind": "ai-review-result",
-      "content": "Human 선택 A/A, native VS Code 소유권, TDD, 보안·접근성·SVG 경계와 제외 범위를 검토했으며 지적 사항 없이 통과했다.",
+      "content": "main의 Workspace 전체 폭·테마 기준과 Agents Activity Bar·Explorer·Chat·SVG 기준이 모두 보존됐으며 충돌 해소 범위 밖 변경은 없음을 검토했다.",
       "attributes": {
-        "result": "pending",
-        "checklistResult": "pending"
+        "result": "pass",
+        "checklistResult": "pass",
+        "executionTarget": {
+          "contractVersion": "1.0.0",
+          "invocationId": "codex-20260726-agents-left-conflict-rework-002",
+          "headCommit": "e436cc3806ae78a2a54e5d86a206bdf57b9f0f40",
+          "revision": 2,
+          "attempt": 1
+        }
       }
     }
   ],

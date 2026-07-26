@@ -21,7 +21,7 @@
       "kind": "execution-state",
       "content": {
         "contractVersion": "1.0.0",
-        "state": "running",
+        "state": "review",
         "subject": {
           "algorithm": "gitCommit",
           "digest": "e436cc3806ae78a2a54e5d86a206bdf57b9f0f40"
@@ -126,15 +126,23 @@
           }
         ],
         "progress": {
-          "completedSteps": [],
-          "pendingStep": "reconcile-main-specification-conflict",
-          "lastVerifiedHead": "3e94f1029e3c127211ad1cee6da20e4fc1c67874",
+          "completedSteps": [
+            "reconcile-main-specification-conflict"
+          ],
+          "pendingStep": null,
+          "lastVerifiedHead": "697138f7197e6c5974a33206608872a657e9926f",
           "checkpoints": [
             {
               "stepId": "reconcile-main-specification-conflict",
               "state": "pending",
               "headCommit": "3e94f1029e3c127211ad1cee6da20e4fc1c67874",
               "idempotencyKey": "agents-left-rework2-reconcile-pending-v1"
+            },
+            {
+              "stepId": "reconcile-main-specification-conflict",
+              "state": "completed",
+              "headCommit": "697138f7197e6c5974a33206608872a657e9926f",
+              "idempotencyKey": "agents-left-rework2-reconcile-completed-v1"
             }
           ],
           "retry": {}

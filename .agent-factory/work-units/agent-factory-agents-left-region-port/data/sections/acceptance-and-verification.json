@@ -42,10 +42,19 @@
     {
       "id": "QUALITY-CHECK-001",
       "kind": "quality-check",
-      "content": "구문, 단위 7/7, VS Code 1.129.1 Extension Host E2E, manifest, CSP, SVG-only와 범위 경계 검증이 통과했다.",
+      "content": "결합 Specification, Project Core, Work Unit, Agents 7개 단위 테스트와 E2E, Workspace 6개 단위 테스트 및 conflict marker 검증이 통과했다.",
       "attributes": {
-        "status": "planned",
-        "evidence": []
+        "status": "pass",
+        "executionTarget": {
+          "contractVersion": "1.0.0",
+          "invocationId": "codex-20260726-agents-left-conflict-rework-002",
+          "headCommit": "e436cc3806ae78a2a54e5d86a206bdf57b9f0f40",
+          "revision": 2,
+          "attempt": 1
+        },
+        "evidence": [
+          "blocks/evidence/agents-left-conflict-rework-verification.txt"
+        ]
       }
     }
   ],
