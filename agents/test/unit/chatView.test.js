@@ -41,7 +41,7 @@ test("Chat view keeps local sessions and per-session drafts in VS Code state", (
   assert.match(html, /End/);
 });
 
-test("Chat view enforces CSP and exposes no backend transport or send control", () => {
+test("Chat view enforces CSP and exposes an allowlisted Extension Host boundary", () => {
   const html = render();
 
   assert.match(
@@ -49,7 +49,17 @@ test("Chat view enforces CSP and exposes no backend transport or send control", 
     /default-src 'none'; style-src vscode-webview:\/\/test 'unsafe-inline'; script-src 'nonce-test-nonce';/,
   );
   assert.match(html, /<script nonce="test-nonce">/);
-  assert.doesNotMatch(html, /\bfetch\s*\(|WebSocket|EventSource|postMessage\s*\(/);
-  assert.doesNotMatch(html, /data-send|aria-label="Send"/);
+  assert.doesNotMatch(html, /\bfetch\s*\(|WebSocket|EventSource/);
+  assert.match(html, /vscode\.postMessage\(/);
+  assert.match(html, /type: "chat\.ready"/);
+  assert.match(html, /type: "chat\.submit"/);
+  assert.match(html, /type: "chat\.cancel"/);
+  assert.match(html, /data-send/);
+  assert.match(html, /aria-label="Send message"/);
+  assert.match(html, /data-cancel/);
+  assert.match(html, /data-messages/);
+  assert.match(html, /data-session-status/);
+  assert.match(html, /window\.addEventListener\("message"/);
+  assert.match(html, /textContent/);
+  assert.doesNotMatch(html, /\.innerHTML\s*=/);
 });
-

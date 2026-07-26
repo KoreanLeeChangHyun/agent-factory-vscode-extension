@@ -44,10 +44,19 @@
     {
       "id": "QUALITY-CHECK-001",
       "kind": "quality-check",
-      "content": "실행 전",
+      "content": "자동 검증, 패키지 검증과 범위 점검 통과",
       "attributes": {
-        "status": "not-run",
-        "evidence": []
+        "status": "pass",
+        "executionTarget": {
+          "contractVersion": "1.0.0",
+          "invocationId": "codex-goal-019f9d6b-06db-74a1-8adf-905d76ff2f16-attempt-1",
+          "headCommit": "a9f99264695ddbceeace41300191a24098a01802",
+          "revision": 1,
+          "attempt": 1
+        },
+        "evidence": [
+          "blocks/logs/agents-backend-verification.log"
+        ]
       }
     }
   ],

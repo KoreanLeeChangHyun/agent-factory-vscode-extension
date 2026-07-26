@@ -5,6 +5,10 @@ const { randomBytes } = require("node:crypto");
 const CHAT_VIEW_ID = "agentFactoryAgents.chat";
 
 class AgentsChatViewProvider {
+  constructor({ controller }) {
+    this.controller = controller;
+  }
+
   resolveWebviewView(webviewView) {
     const { webview } = webviewView;
     webview.options = {
@@ -15,6 +19,10 @@ class AgentsChatViewProvider {
       cspSource: webview.cspSource,
       nonce: randomBytes(18).toString("base64url"),
     });
+    this.controller.setPostMessage((message) => webview.postMessage(message));
+    webview.onDidReceiveMessage((message) =>
+      this.controller.handleMessage(message),
+    );
   }
 }
 
@@ -42,9 +50,7 @@ function createChatViewHtml({ cspSource, nonce }) {
         font-size: var(--vscode-font-size);
       }
 
-      * {
-        box-sizing: border-box;
-      }
+      * { box-sizing: border-box; }
 
       body {
         min-width: 220px;
@@ -54,14 +60,8 @@ function createChatViewHtml({ cspSource, nonce }) {
         background: var(--vscode-sideBar-background);
       }
 
-      button,
-      textarea {
-        font: inherit;
-      }
-
-      button {
-        color: inherit;
-      }
+      button, textarea { font: inherit; }
+      button { color: inherit; }
 
       .chat-shell {
         display: grid;
@@ -98,22 +98,22 @@ function createChatViewHtml({ cspSource, nonce }) {
         box-shadow: inset 0 -1px 0 var(--vscode-focusBorder);
       }
 
-      .mode-tab:hover {
-        background: var(--vscode-list-hoverBackground);
-        color: var(--vscode-tab-activeForeground);
+      .mode-tab:hover,
+      .new-session:hover,
+      .action-button:hover:not(:disabled) {
+        background: var(--vscode-toolbar-hoverBackground);
       }
 
       .mode-tab:focus-visible,
       .session-tab:focus-visible,
       .new-session:focus-visible,
+      .action-button:focus-visible,
       .composer:focus-visible {
         outline: 1px solid var(--vscode-focusBorder);
         outline-offset: -1px;
       }
 
-      .mode-tab svg,
-      .new-session svg {
-        flex: 0 0 16px;
+      svg {
         width: 16px;
         height: 16px;
         fill: none;
@@ -169,36 +169,67 @@ function createChatViewHtml({ cspSource, nonce }) {
         cursor: pointer;
       }
 
-      .new-session:hover {
-        background: var(--vscode-toolbar-hoverBackground);
-      }
-
       .mode-panel {
         min-height: 0;
         overflow: auto;
       }
 
-      .session-surface {
-        display: grid;
+      .messages {
+        display: flex;
         min-height: 100%;
-        place-items: center;
-        padding: 16px;
+        flex-direction: column;
+        gap: 10px;
+        padding: 12px;
+      }
+
+      .empty-state {
+        margin: auto;
         color: var(--vscode-descriptionForeground);
+        line-height: 1.5;
         text-align: center;
       }
 
-      .session-surface p,
-      .workflow-surface p {
-        margin: 0;
+      .message {
+        max-width: 100%;
+        padding: 8px 10px;
+        border: 1px solid var(--vscode-panel-border);
+        border-radius: 6px;
         line-height: 1.5;
+        overflow-wrap: anywhere;
+        white-space: pre-wrap;
+      }
+
+      .message[data-role="user"] {
+        align-self: flex-end;
+        background: var(--vscode-button-secondaryBackground);
+        color: var(--vscode-button-secondaryForeground);
+      }
+
+      .message[data-role="assistant"] {
+        align-self: stretch;
+        background: var(--vscode-editor-background);
+      }
+
+      .session-status {
+        min-height: 20px;
+        color: var(--vscode-descriptionForeground);
+        font-size: 0.9em;
+      }
+
+      .session-status[data-error="true"] {
+        color: var(--vscode-errorForeground);
       }
 
       .workflow-surface {
         padding: 16px;
         color: var(--vscode-descriptionForeground);
+        line-height: 1.5;
       }
 
       .composer-region {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) auto;
+        gap: 6px;
         padding: 8px;
         border-top: 1px solid var(--vscode-panel-border);
         background: var(--vscode-sideBar-background);
@@ -221,9 +252,31 @@ function createChatViewHtml({ cspSource, nonce }) {
         color: var(--vscode-input-placeholderForeground);
       }
 
-      [hidden] {
-        display: none !important;
+      .composer-actions {
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
       }
+
+      .action-button {
+        display: grid;
+        width: 28px;
+        height: 28px;
+        padding: 0;
+        place-items: center;
+        border: 0;
+        border-radius: 3px;
+        background: var(--vscode-button-background);
+        color: var(--vscode-button-foreground);
+        cursor: pointer;
+      }
+
+      .action-button:disabled {
+        cursor: default;
+        opacity: 0.45;
+      }
+
+      [hidden] { display: none !important; }
     </style>
   </head>
   <body>
@@ -256,20 +309,34 @@ function createChatViewHtml({ cspSource, nonce }) {
         </button>
       </header>
       <section class="mode-panel" role="tabpanel" data-mode-panel="main">
-        <div class="session-surface">
-          <p>로컬 세션의 메시지는 backend 연결 Work Unit에서 제공됩니다.</p>
-        </div>
+        <div class="messages" role="log" aria-live="polite" data-messages></div>
       </section>
       <section class="mode-panel workflow-surface" role="tabpanel" data-mode-panel="workflow" hidden>
-        <p>Workflow 실행 연결은 이번 포팅 범위에 포함되지 않습니다.</p>
+        <p>Workflow 실행 연결은 이번 Work Unit 범위에 포함되지 않습니다.</p>
       </section>
       <footer class="composer-region">
-        <textarea
-          class="composer"
-          aria-label="Session draft"
-          placeholder="세션 메모를 입력하세요..."
-          data-composer
-        ></textarea>
+        <div>
+          <textarea
+            class="composer"
+            aria-label="Session draft"
+            placeholder="Codex에 메시지를 보내세요..."
+            data-composer
+          ></textarea>
+          <div class="session-status" role="status" data-session-status></div>
+        </div>
+        <div class="composer-actions">
+          <button class="action-button" type="button" aria-label="Send message" data-send>
+            <svg viewBox="0 0 16 16" aria-hidden="true" focusable="false">
+              <path d="m2.5 3 11 5-11 5 2-5-2-5Z"></path>
+              <path d="M4.5 8h5"></path>
+            </svg>
+          </button>
+          <button class="action-button" type="button" aria-label="Cancel response" data-cancel hidden>
+            <svg viewBox="0 0 16 16" aria-hidden="true" focusable="false">
+              <rect x="4" y="4" width="8" height="8" rx="1"></rect>
+            </svg>
+          </button>
+        </div>
       </footer>
     </main>
     <script nonce="${nonce}">
@@ -280,6 +347,10 @@ function createChatViewHtml({ cspSource, nonce }) {
         const sessionTabs = document.querySelector('[data-session-tabs]');
         const newSession = document.querySelector('[data-new-session]');
         const composer = document.querySelector('[data-composer]');
+        const sendButton = document.querySelector('[data-send]');
+        const cancelButton = document.querySelector('[data-cancel]');
+        const messages = document.querySelector('[data-messages]');
+        const status = document.querySelector('[data-session-status]');
         const storedState = vscode.getState() || {};
         const initialSession = { id: "local-1", title: "Session 1", draft: "" };
         const state = {
@@ -291,11 +362,21 @@ function createChatViewHtml({ cspSource, nonce }) {
           nextSessionNumber: Number.isInteger(storedState.nextSessionNumber)
             ? storedState.nextSessionNumber
             : 2,
+          backendSessions: storedState.backendSessions || {},
         };
 
         function activeSession() {
           return state.sessions.find((session) => session.id === state.activeSessionId)
             || state.sessions[0];
+        }
+
+        function backendSession() {
+          return state.backendSessions[state.activeSessionId] || {
+            messages: [],
+            status: "idle",
+            progress: null,
+            error: null,
+          };
         }
 
         function persist() {
@@ -304,26 +385,23 @@ function createChatViewHtml({ cspSource, nonce }) {
             sessions: state.sessions,
             activeSessionId: state.activeSessionId,
             nextSessionNumber: state.nextSessionNumber,
+            backendSessions: state.backendSessions,
           });
         }
 
         function activateMode(mode, options = {}) {
-          if (!modeTabs.some((tab) => tab.dataset.mode === mode)) {
-            return;
-          }
+          if (!modeTabs.some((tab) => tab.dataset.mode === mode)) return;
           state.activeMode = mode;
           for (const tab of modeTabs) {
             const selected = tab.dataset.mode === mode;
             tab.setAttribute("aria-selected", String(selected));
             tab.tabIndex = selected ? 0 : -1;
-            if (selected && options.focus) {
-              tab.focus();
-            }
+            if (selected && options.focus) tab.focus();
           }
           for (const panel of modePanels) {
             panel.hidden = panel.dataset.modePanel !== mode;
           }
-          composer.parentElement.hidden = mode !== "main";
+          composer.closest("footer").hidden = mode !== "main";
           persist();
         }
 
@@ -340,12 +418,69 @@ function createChatViewHtml({ cspSource, nonce }) {
             tab.textContent = session.title;
             tab.addEventListener("click", () => {
               state.activeSessionId = session.id;
-              renderSessions();
               composer.value = activeSession().draft;
+              render();
               persist();
             });
             sessionTabs.append(tab);
           }
+        }
+
+        function renderMessages() {
+          messages.replaceChildren();
+          const session = backendSession();
+          if (!session.messages.length) {
+            const empty = document.createElement("p");
+            empty.className = "empty-state";
+            empty.textContent = "이 세션에서 Codex와 대화를 시작하세요.";
+            messages.append(empty);
+          } else {
+            for (const item of session.messages) {
+              const element = document.createElement("article");
+              element.className = "message";
+              element.dataset.role = item.role;
+              element.textContent = item.text;
+              messages.append(element);
+            }
+          }
+          const running = session.status === "running" || session.status === "cancelling";
+          sendButton.disabled = running || !composer.value.trim();
+          cancelButton.hidden = !running;
+          status.dataset.error = String(Boolean(session.error));
+          status.textContent =
+            session.error ||
+            (running && session.progress) ||
+            statusLabel(session.status);
+          messages.scrollTop = messages.scrollHeight;
+        }
+
+        function statusLabel(value) {
+          if (value === "running") return "Codex가 응답하고 있습니다…";
+          if (value === "cancelling") return "응답을 취소하고 있습니다…";
+          if (value === "cancelled") return "응답이 취소되었습니다.";
+          if (value === "complete") return "완료";
+          if (value === "interrupted") return "이전 실행이 중단되었습니다.";
+          return "";
+        }
+
+        function render() {
+          renderSessions();
+          renderMessages();
+        }
+
+        function submit() {
+          const prompt = composer.value.trim();
+          if (!prompt || sendButton.disabled) return;
+          const session = activeSession();
+          vscode.postMessage({
+            type: "chat.submit",
+            sessionId: session.id,
+            prompt,
+          });
+          session.draft = "";
+          composer.value = "";
+          persist();
+          renderMessages();
         }
 
         for (const [index, tab] of modeTabs.entries()) {
@@ -378,20 +513,46 @@ function createChatViewHtml({ cspSource, nonce }) {
           state.nextSessionNumber += 1;
           state.sessions.push(session);
           state.activeSessionId = session.id;
-          renderSessions();
           composer.value = "";
+          render();
           composer.focus();
           persist();
         });
 
         composer.addEventListener("input", () => {
           activeSession().draft = composer.value;
+          sendButton.disabled =
+            !composer.value.trim() ||
+            ["running", "cancelling"].includes(backendSession().status);
+          persist();
+        });
+        composer.addEventListener("keydown", (event) => {
+          if (event.key === "Enter" && (event.ctrlKey || event.metaKey)) {
+            event.preventDefault();
+            submit();
+          }
+        });
+        sendButton.addEventListener("click", submit);
+        cancelButton.addEventListener("click", () => {
+          vscode.postMessage({
+            type: "chat.cancel",
+            sessionId: activeSession().id,
+          });
+        });
+        window.addEventListener("message", (event) => {
+          const message = event.data;
+          if (!message || message.type !== "chat.snapshot") return;
+          const snapshot = message.snapshot;
+          if (!snapshot || snapshot.version !== 1 || !snapshot.sessions) return;
+          state.backendSessions = snapshot.sessions;
+          renderMessages();
           persist();
         });
 
-        renderSessions();
         composer.value = activeSession().draft;
+        render();
         activateMode(state.activeMode);
+        vscode.postMessage({ type: "chat.ready" });
       })();
     </script>
   </body>
@@ -403,4 +564,3 @@ module.exports = {
   AgentsChatViewProvider,
   createChatViewHtml,
 };
-
