@@ -1,8 +1,15 @@
 "use strict";
 
 const assert = require("node:assert/strict");
+const { execFile: execFileCallback } = require("node:child_process");
+const { mkdtemp, rm } = require("node:fs/promises");
+const { tmpdir } = require("node:os");
 const { join } = require("node:path");
+const { promisify } = require("node:util");
 const vscode = require("vscode");
+
+const execFile = promisify(execFileCallback);
+const FIXTURE_ID = "agent-factory-agents-chat-web-alignment";
 
 async function run() {
   const extension = vscode.extensions.getExtension(
@@ -16,6 +23,9 @@ async function run() {
   );
   const { createWebviewHtml } = require(
     join(extension.extensionPath, "src", "webviewShell"),
+  );
+  const { createWorkUnitTransitionRunner } = require(
+    join(extension.extensionPath, "src", "kanbanManager"),
   );
   const snapshot = await readKanbanSnapshot(join(extension.extensionPath, ".."));
   assert.deepEqual(
@@ -40,6 +50,31 @@ async function run() {
   assert.ok(commands.includes("agentFactoryWorkspace.open"));
 
   await vscode.commands.executeCommand("agentFactoryWorkspace.open");
+
+  const fixtureRoot = await mkdtemp(join(tmpdir(), "kanban-vscode-e2e-"));
+  try {
+    await execFile(
+      "git",
+      ["clone", "--quiet", "--shared", join(extension.extensionPath, ".."), fixtureRoot],
+      { shell: false },
+    );
+    const transition = createWorkUnitTransitionRunner();
+    await transition({
+      projectRoot: fixtureRoot,
+      workUnitId: FIXTURE_ID,
+      targetStatus: "backlog",
+    });
+    const moved = await readKanbanSnapshot(fixtureRoot);
+    assert.equal(
+      moved.columns.find(({ id }) => id === "backlog").cards.some(
+        ({ id }) => id === FIXTURE_ID,
+      ),
+      true,
+      "actual manager transition is reflected in the authoritative board",
+    );
+  } finally {
+    await rm(fixtureRoot, { recursive: true, force: true });
+  }
 }
 
 module.exports = { run };

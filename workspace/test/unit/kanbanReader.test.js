@@ -38,6 +38,26 @@ async function createWorkUnit(root, {
     updatedAt: "2026-07-26T12:00:00Z",
   });
   await writeJson(join(packagePath, "data", "title.json"), { title });
+  await writeJson(join(packagePath, "data", "table-of-contents.json"), {
+    managerOwned: true,
+    sections: [
+      {
+        id: "execution-context",
+        path: "data/sections/execution-context.json",
+        subsections: [],
+      },
+      {
+        id: "human-review",
+        path: "data/sections/human-review.json",
+        subsections: [],
+      },
+      {
+        id: "report",
+        path: "data/sections/report.json",
+        subsections: [],
+      },
+    ],
+  });
   await writeJson(join(sectionsPath, "execution-context.json"), {
     content: [
       {
@@ -76,6 +96,7 @@ async function createWorkUnit(root, {
       },
     ],
   });
+  return packagePath;
 }
 
 test("reader projects canonical v4 Work Units into all six lifecycle columns", async () => {
@@ -116,15 +137,55 @@ test("reader projects canonical v4 Work Units into all six lifecycle columns", a
   assert.equal(snapshot.errors.length, 0);
 });
 
-test("capabilities expose only manager transition graph targets with reasons", () => {
+test("capabilities expose only DnD-safe transition targets with action reasons", () => {
   const capabilities = getTransitionCapabilities("review");
   assert.deepEqual(
     capabilities.filter(({ allowed }) => allowed).map(({ target }) => target),
-    ["working", "done", "blocked"],
+    ["blocked"],
   );
   assert.equal(
     capabilities.find(({ target }) => target === "ready").reason,
     "review에서 ready로 직접 전이할 수 없습니다.",
+  );
+  assert.equal(
+    capabilities.find(({ target }) => target === "working").reason,
+    "working 전이는 실행 Action이 필요합니다.",
+  );
+  assert.equal(
+    capabilities.find(({ target }) => target === "done").reason,
+    "done 전이는 Human 승인 Action이 필요합니다.",
+  );
+  assert.deepEqual(
+    getTransitionCapabilities("blocked")
+      .filter(({ allowed }) => allowed)
+      .map(({ target }) => target),
+    ["backlog", "ready"],
+  );
+  const blockedWithoutEvidence = getTransitionCapabilities("ready", {
+    hasBlockingOpenItem: false,
+    hasExecutionState: false,
+    readyCandidate: true,
+  });
+  assert.equal(
+    blockedWithoutEvidence.find(({ target }) => target === "blocked").allowed,
+    false,
+  );
+  assert.match(
+    blockedWithoutEvidence.find(({ target }) => target === "blocked").reason,
+    /blocking open item/,
+  );
+  const notReady = getTransitionCapabilities("blocked", {
+    hasBlockingOpenItem: true,
+    hasExecutionState: true,
+    readyCandidate: false,
+  });
+  assert.equal(
+    notReady.find(({ target }) => target === "ready").allowed,
+    false,
+  );
+  assert.match(
+    notReady.find(({ target }) => target === "ready").reason,
+    /ready 전이 조건/,
   );
 });
 
@@ -154,4 +215,29 @@ test("reader keeps valid cards while reporting unsupported and symlink packages"
     snapshot.errors.map(({ code }) => code).sort(),
     ["symlink_not_allowed", "unsupported_schema"],
   );
+});
+
+test("reader rejects table-of-contents traversal before reading a section", async () => {
+  const root = await mkdtemp(join(tmpdir(), "kanban-toc-traversal-"));
+  const packagePath = await createWorkUnit(root, {
+    id: "unsafe-toc",
+    status: "backlog",
+  });
+  await writeJson(join(packagePath, "data", "table-of-contents.json"), {
+    managerOwned: true,
+    sections: [
+      {
+        id: "escape",
+        path: "data/sections/../../title.json",
+        subsections: [],
+      },
+    ],
+  });
+
+  const snapshot = await readKanbanSnapshot(root);
+  assert.equal(
+    snapshot.columns.reduce((total, column) => total + column.cards.length, 0),
+    0,
+  );
+  assert.equal(snapshot.errors[0].code, "invalid_contract");
 });

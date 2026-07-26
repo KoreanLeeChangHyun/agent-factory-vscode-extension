@@ -4,6 +4,7 @@ const { randomBytes } = require("node:crypto");
 const vscode = require("vscode");
 
 const { createKanbanController } = require("./kanbanController");
+const { createWorkUnitTransitionRunner } = require("./kanbanManager");
 const { createWebviewHtml } = require("./webviewShell");
 
 const COMMAND_OPEN_WORKSPACE = "agentFactoryWorkspace.open";
@@ -39,6 +40,7 @@ function openWorkspacePanel() {
     vscode,
     panel: workspacePanel,
     projectRoot,
+    runTransition: createWorkUnitTransitionRunner(),
   });
 
   workspacePanel.onDidDispose(() => {
