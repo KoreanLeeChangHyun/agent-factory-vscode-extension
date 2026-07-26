@@ -7,9 +7,9 @@
       "kind": "acceptance-criterion",
       "content": [
         "Extension Development Host에서 workspace 명령으로 singleton Workspace Webview panel이 열리고 재호출 시 reveal된다.",
-        "5개 탭이 동일 너비로 tablist 전체 폭을 채우고 선택 헤더 및 바디가 표시된다.",
-        "탭 선택, 키보드 탐색, 선택 상태 보존이 검증된다.",
-        "Dashboard, Design, Context는 기능 없는 shell이다.",
+        "Dashboard, Editor, Kanban, Context 4개 탭이 동일 너비로 tablist 전체 폭을 채우고 선택 헤더 및 바디가 표시된다.",
+        "탭 선택, 키보드 탐색, 선택 상태 보존과 design 및 view 상태의 editor 이전이 검증된다.",
+        "Dashboard와 Context는 기능 없는 shell이다.",
         "본문 panel과 empty-state가 최대 폭 제한 및 바깥 좌우 여백 없이 에디터의 가용 폭을 채운다.",
         "지원되는 VS Code 테마에서 탭, 헤더와 본문 표면이 semantic theme token으로 일관되게 표시된다.",
         "agents Extension Development Host에서 Agent Factory launcher View와 Agents 및 Workspace command links가 표시된다.",
@@ -48,6 +48,18 @@
         "Enter, Shift+Enter, Ctrl 또는 Cmd+Enter와 IME composing negative path가 검증된다.",
         "submit, cancel, reconnect, draft restore, CSP, session DOM ownership과 Web runtime 독립성이 유지된다.",
         "단위, 통합, VS Code Extension Host E2E 및 linux-x64 VSIX contents 검증이 통과한다."
+      ]
+    },
+    {
+      "id": "acceptance-artifact-editor",
+      "kind": "acceptance-criterion",
+      "content": [
+        "Editor 트리는 canonical Intake, Specification, Work Unit package와 선택 artifact의 section을 표시한다.",
+        "선택 artifact의 읽기 전용 JSON 미리보기는 textContent 기반이며 canonical 내용을 반영한다.",
+        "구조화 편집은 artifact manager의 allowlisted semantic operation으로 저장되고 성공 후 다시 읽힌다.",
+        "경로 이탈, symlink package, 미지원 artifact, 임의 manager 명령, malformed message와 stale documentVersion은 mutation 없이 거부된다.",
+        "manager validation 실패는 authoritative package 상태를 보존하고 Human이 이해할 수 있는 오류를 표시한다.",
+        "기존 Kanban unit, manager integration과 Extension Host E2E가 통과한다."
       ]
     }
   ],

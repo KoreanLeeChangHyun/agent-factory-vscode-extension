@@ -7,9 +7,10 @@
       "kind": "functional-requirement",
       "content": [
         "workspace 확장 명령은 에디터 영역에 singleton Webview panel을 열고 이미 열려 있으면 reveal한다.",
-        "workspace Webview는 Dashboard, Design, Kanban, Context, View 탭과 선택 헤더 및 바디를 표시한다.",
+        "workspace Webview는 Dashboard, Editor, Kanban, Context 탭과 선택 헤더 및 바디를 표시한다.",
         "workspace 탭 선택은 해당 패널을 표시하고 선택 상태를 보존한다.",
-        "Dashboard, Design, Context는 초기 릴리스에서 기능 없는 shell이다.",
+        "저장된 selectedTab이 design 또는 view이면 editor로 이전한다.",
+        "Dashboard와 Context는 기능 없는 shell이다.",
         "Agent Factory Activity Bar container는 하나의 empty native launcher View를 제공한다.",
         "launcher View는 Agents와 Workspace를 여는 command links를 제공한다.",
         "Agents open command는 에디터 영역에 singleton Agents Webview panel을 열고 이미 열려 있으면 reveal한다.",
@@ -42,6 +43,18 @@
         "Agents message history는 user와 assistant를 turn으로 묶고 role별 visual hierarchy를 구분한다.",
         "Enter는 메시지를 전송하고 Shift+Enter는 줄바꿈을 입력하며 Ctrl 또는 Cmd+Enter 전송도 호환한다.",
         "세션별 draft, messages, loading, status, error 및 backend request ownership을 보존한다."
+      ]
+    },
+    {
+      "id": "functional-artifact-editor",
+      "kind": "functional-requirement",
+      "content": [
+        "Editor는 프로젝트의 canonical Intake, Specification, Work Unit package와 section을 탐색한다.",
+        "Editor는 artifact와 section 트리, 구조화 semantic field 편집, 읽기 전용 JSON 미리보기를 제공한다.",
+        "Extension Host는 공통 sectioned package 읽기와 artifact별 manager 쓰기 adapter를 분리한다.",
+        "편집 저장은 선택 artifact의 allowlisted manager semantic operation으로만 수행한다.",
+        "저장 직전 package identity, artifact type, documentVersion과 경로 안전성을 재검증한다.",
+        "저장 성공 또는 manager validation 실패 후 authoritative package 상태와 결과를 Webview에 반환한다."
       ]
     }
   ],

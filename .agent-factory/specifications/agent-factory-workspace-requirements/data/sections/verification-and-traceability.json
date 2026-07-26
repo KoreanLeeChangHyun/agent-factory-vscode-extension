@@ -41,6 +41,18 @@
         "VS Code 1.129.x Extension Host E2E와 linux-x64 VSIX package 검증",
         "Human 설치본 입력창·상태줄·메시지 내역·탭·헤더 시각 검토"
       ]
+    },
+    {
+      "id": "artifact-editor-verification",
+      "kind": "verification",
+      "content": [
+        "agent-factory-workspace-editor Intake와 Work Unit basis 추적성 검증",
+        "공통 sectioned package reader 및 artifact별 manager adapter 단위 검증",
+        "네 탭 순서, selectedTab migration, artifact/section tree, structured editor와 JSON preview DOM 검증",
+        "path escape, symlink, unsupported artifact, malformed message, stale documentVersion과 manager failure negative path 검증",
+        "기존 Kanban 단위 및 manager 통합 회귀 검증",
+        "VS Code 1.129.x Extension Host E2E와 Human Editor workflow 검토"
+      ]
     }
   ],
   "subsections": []

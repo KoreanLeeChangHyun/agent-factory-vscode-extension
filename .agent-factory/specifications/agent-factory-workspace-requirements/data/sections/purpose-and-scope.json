@@ -12,8 +12,8 @@
       "kind": "scope",
       "content": [
         "에디터 영역 Webview shell",
-        "Dashboard, Design, Kanban, Context, View 탭",
-        "Kanban 및 View 초기 기능",
+        "Dashboard, Editor, Kanban, Context 탭",
+        "공통 sectioned artifact Editor 및 Kanban 기능",
         "확장 호스트와 Webview 경계",
         "Agent Factory Activity Bar launcher View",
         "Agents와 Workspace singleton editor Webview panel",

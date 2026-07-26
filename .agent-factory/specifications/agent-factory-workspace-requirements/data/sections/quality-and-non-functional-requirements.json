@@ -8,7 +8,7 @@
       "content": [
         "VS Code 테마 토큰을 사용한다.",
         "탭, 선택 헤더와 본문은 역할에 맞는 VS Code semantic theme token으로 일관된 표면 계층을 제공한다.",
-        "5개 탭은 동일 너비로 tablist 전체 폭을 채운다.",
+        "4개 탭은 동일 너비로 tablist 전체 폭을 채운다.",
         "본문 panel과 empty-state는 최대 폭 제한 및 바깥 좌우 여백 없이 에디터의 가용 가로 폭을 사용한다.",
         "키보드와 보조기술이 탭 구조와 선택 상태를 인식할 수 있어야 한다.",
         "Webview는 nonce 기반 CSP와 제한된 localResourceRoots를 사용한다.",
@@ -43,6 +43,18 @@
         "status line은 22px 고정 높이이며 정상 완료 후 지속적인 완료 문구 대신 Web 기준 IDLE로 복귀한다.",
         "editor area의 좁은 editor group에서도 input과 action이 겹치지 않으며 keyboard focus와 accessible name을 유지한다.",
         "IME composing 중 Enter는 전송하지 않고 multiline 및 기존 submit shortcut 회귀를 방지한다."
+      ]
+    },
+    {
+      "id": "quality-artifact-editor",
+      "kind": "non-functional-requirement",
+      "content": [
+        "Editor Webview는 raw filesystem write, 임의 executable path, shell command 또는 임의 manager subcommand를 전달하지 않는다.",
+        "Extension Host는 project root, package identity, artifact type, manager allowlist와 message allowlist를 소유한다.",
+        "package path escape, symlink, unsupported schema 또는 artifact type과 stale documentVersion은 mutation 전에 거부한다.",
+        "JSON 미리보기는 실행 가능한 markup이 아니라 textContent로 렌더링한다.",
+        "manager 오류는 내부 명령 경로와 민감 정보를 노출하지 않는 구조화 오류로 표시한다.",
+        "Editor 변경은 기존 Kanban controller, capability, DnD와 Action 계약을 변경하지 않는다."
       ]
     }
   ],
