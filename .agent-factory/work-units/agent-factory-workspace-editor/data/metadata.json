@@ -1,6 +1,6 @@
 {
   "schemaVersion": "4.0.0",
-  "documentVersion": "1.0.64",
+  "documentVersion": "1.0.65",
   "id": "agent-factory-workspace-editor",
   "artifactType": "work-unit",
   "projectId": "agent-factory-workspace",
@@ -9,7 +9,7 @@
     "status": "done"
   },
   "createdAt": "2026-07-26T18:46:13+00:00",
-  "updatedAt": "2026-07-26T19:13:21+00:00",
+  "updatedAt": "2026-07-26T19:14:57+00:00",
   "language": "ko",
   "theme": "vscode-native",
   "provenance": {

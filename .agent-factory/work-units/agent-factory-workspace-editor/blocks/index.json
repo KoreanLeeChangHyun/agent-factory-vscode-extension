@@ -1,6 +1,13 @@
 {
   "blocks": [
     {
+      "path": "blocks/evidence/workspace-editor-integration.json",
+      "mediaType": "application/json",
+      "description": "Raw Work Unit integration receipt",
+      "sha256": "a59cf1efe1d99612a18d2283e67fdebb49d18c5daaf99b4a6d3ce8431dbff667",
+      "sizeBytes": 3006
+    },
+    {
       "path": "blocks/evidence/workspace-editor-verification.txt",
       "mediaType": "text/plain",
       "description": "Workspace Editor 자동 검증과 AI review 근거",
