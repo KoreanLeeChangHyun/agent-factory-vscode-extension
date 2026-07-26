@@ -21,15 +21,17 @@
       "kind": "execution-state",
       "content": {
         "contractVersion": "1.0.0",
-        "state": "planned",
+        "state": "running",
         "subject": {
           "algorithm": "gitCommit",
-          "digest": "2866de136de90059c0028b7d413fdb5c61138ba7"
+          "digest": "e436cc3806ae78a2a54e5d86a206bdf57b9f0f40"
         },
         "currentRevision": 2,
-        "currentAttempt": null,
-        "invocationId": null,
-        "invocationChain": [],
+        "currentAttempt": 1,
+        "invocationId": "codex-20260726-agents-left-conflict-rework-002",
+        "invocationChain": [
+          "codex-20260726-agents-left-conflict-rework-002"
+        ],
         "history": [
           {
             "revision": 1,
@@ -126,13 +128,13 @@
         "progress": {
           "completedSteps": [],
           "pendingStep": null,
-          "lastVerifiedHead": "2866de136de90059c0028b7d413fdb5c61138ba7",
+          "lastVerifiedHead": "e436cc3806ae78a2a54e5d86a206bdf57b9f0f40",
           "checkpoints": [],
           "retry": {}
         },
         "recovery": {
-          "status": "planned",
-          "ownerInvocationId": null,
+          "status": "running",
+          "ownerInvocationId": "codex-20260726-agents-left-conflict-rework-002",
           "blockerId": null,
           "evidence": null
         }

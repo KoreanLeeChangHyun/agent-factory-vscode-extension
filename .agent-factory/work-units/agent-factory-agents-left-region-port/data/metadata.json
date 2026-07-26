@@ -1,6 +1,6 @@
 {
   "schemaVersion": "4.0.0",
-  "documentVersion": "1.0.38",
+  "documentVersion": "1.0.39",
   "id": "agent-factory-agents-left-region-port",
   "artifactType": "work-unit",
   "projectId": "agent-factory-workspace",
@@ -9,7 +9,7 @@
     "status": "working"
   },
   "createdAt": "2026-07-25T19:57:56+00:00",
-  "updatedAt": "2026-07-26T02:30:34+00:00",
+  "updatedAt": "2026-07-26T02:30:48+00:00",
   "language": "ko",
   "theme": "vscode-native",
   "provenance": {
