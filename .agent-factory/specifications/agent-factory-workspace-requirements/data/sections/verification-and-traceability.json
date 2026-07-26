@@ -33,12 +33,13 @@
       "id": "agents-chat-web-alignment-verification",
       "kind": "verification",
       "content": [
-        "agent-factory-agents-chat-web-alignment Intake와 Work Unit basis 추적성 검증",
+        "agent-factory-agents-chat-web-alignment 및 agent-factory-agents-composer-rendering-correction Intake와 Work Unit basis 추적성 검증",
         "Workspace tab 및 header source와 Web composer 및 message source 대비 DOM·CSS source 검증",
-        "role turn rendering, composer action layout, keyboard 및 IME 단위 회귀 검증",
+        "20px 초기 높이, 최대 144px 자동 확장, 내부 overflow, resize handle 부재, bottom action과 22px status line 단위 회귀 검증",
+        "role turn rendering, keyboard 및 IME 단위 회귀 검증",
         "기존 submit, cancel, reconnect, draft, session ownership, CSP와 SVG 단위·통합 검증",
         "VS Code 1.129.x Extension Host E2E와 linux-x64 VSIX package 검증",
-        "Human 설치본 입력창·메시지 내역·탭·헤더 시각 검토"
+        "Human 설치본 입력창·상태줄·메시지 내역·탭·헤더 시각 검토"
       ]
     }
   ],

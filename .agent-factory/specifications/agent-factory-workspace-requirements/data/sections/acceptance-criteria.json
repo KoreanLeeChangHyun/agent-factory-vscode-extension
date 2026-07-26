@@ -41,7 +41,9 @@
       "kind": "acceptance-criterion",
       "content": [
         "Agents mode tabs, session header와 outer gutter가 Workspace 기준 hierarchy와 정합하게 표시된다.",
-        "Composer는 Web 기준의 card, transparent input과 bottom action hierarchy를 사용하되 unsupported controls를 노출하지 않는다.",
+        "Composer는 Web 기준의 최소 72px card, transparent input과 우측 하단 28px action hierarchy를 사용하되 unsupported controls를 노출하지 않는다.",
+        "빈 input의 계산 높이는 20px이고 내용에 따라 최대 144px까지 자동 확장하며 native resize handle 없이 초과 내용을 내부 스크롤한다.",
+        "22px status line은 실행, 취소와 오류 상태를 표시하고 정상 완료 후 IDLE로 복귀한다.",
         "User message는 card로, Assistant message는 transparent text로 동일 turn 아래 렌더링된다.",
         "Enter, Shift+Enter, Ctrl 또는 Cmd+Enter와 IME composing negative path가 검증된다.",
         "submit, cancel, reconnect, draft restore, CSP, session DOM ownership과 Web runtime 독립성이 유지된다.",

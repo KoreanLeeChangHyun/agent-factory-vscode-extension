@@ -38,6 +38,9 @@
       "content": [
         "Agents 채팅 UI는 VS Code semantic theme token을 사용하고 모든 icon-like control은 inline SVG로 렌더링한다.",
         "Webview는 Web source나 runtime을 import 또는 호출하지 않고 현재 Extension Host message allowlist를 유지한다.",
+        "composer input은 빈 상태 20px에서 시작하고 내용에 따라 최대 144px까지 자동 확장한 뒤 내부 스크롤하며 native resize handle을 노출하지 않는다.",
+        "composer card는 최소 72px와 12px 내부 여백을 유지하고 28px action을 우측 12px, 하단 12px에 정렬한다.",
+        "status line은 22px 고정 높이이며 정상 완료 후 지속적인 완료 문구 대신 Web 기준 IDLE로 복귀한다.",
         "editor area의 좁은 editor group에서도 input과 action이 겹치지 않으며 keyboard focus와 accessible name을 유지한다.",
         "IME composing 중 Enter는 전송하지 않고 multiline 및 기존 submit shortcut 회귀를 방지한다."
       ]
