@@ -50,3 +50,23 @@ test("shell uses VS Code state APIs and keyboard tab navigation", () => {
   assert.match(html, /Home/);
   assert.match(html, /End/);
 });
+
+test("shell uses theme-aware hierarchy and balanced responsive spacing", () => {
+  const html = createWebviewHtml({
+    cspSource: "vscode-webview://test",
+    nonce: "test-nonce",
+  });
+
+  assert.match(html, /--vscode-editorGroupHeader-tabsBackground/);
+  assert.match(html, /--vscode-tab-inactiveBackground/);
+  assert.match(html, /--vscode-tab-hoverBackground/);
+  assert.match(html, /--vscode-tab-activeBorder/);
+  assert.match(html, /--vscode-editorWidget-border/);
+  assert.match(html, /width:\s*min\(100%,\s*720px\)/);
+  assert.match(html, /margin-inline:\s*auto/);
+  assert.match(html, /padding:\s*clamp\(/);
+  assert.doesNotMatch(
+    html,
+    /(?:color|background|border(?:-color)?):\s*(?:#[0-9a-f]{3,8}|rgba?\(|hsla?\()/i,
+  );
+});

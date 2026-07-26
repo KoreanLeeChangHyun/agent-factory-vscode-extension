@@ -1,0 +1,21 @@
+{
+  "id": "execution-context",
+  "title": "Execution Context",
+  "content": [
+    {
+      "id": "EXECUTION-CONTEXT-001",
+      "kind": "execution-context",
+      "content": {
+        "goalId": "agent-factory-workspace-full-width-alignment",
+        "objective": "Agent Factory Workspace Webview 전체 폭 및 VS Code 테마 정렬",
+        "execInvocation": "/goal agent-factory-workspace-full-width-alignment",
+        "executionAgent": "Codex",
+        "repository": "/home/deus/workspace/agent-factory/vscode-extension",
+        "baseRef": "main",
+        "branch": "work-unit/agent-factory-workspace-full-width-alignment",
+        "worktreePath": "/home/deus/workspace/agent-factory/vscode-extension/.agent-factory/worktree/agent-factory-workspace-full-width-alignment"
+      }
+    }
+  ],
+  "subsections": []
+}

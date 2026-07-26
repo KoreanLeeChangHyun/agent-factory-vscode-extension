@@ -1,0 +1,29 @@
+{
+  "id": "ai-review",
+  "title": "AI Review",
+  "content": [
+    {
+      "id": "AI-CHECKLIST-001",
+      "kind": "ai-checklist",
+      "content": [
+        "Intake와 Work Unit 범위 및 Human 전체 폭 결정 준수",
+        "TDD 순서 준수",
+        "Specification과 구현 추적성",
+        "본문 전체 폭과 5개 탭 균등 전체 폭 경계 준수",
+        "VS Code semantic theme token 및 하드코딩 색상 부재",
+        "DOM, 문구, 키보드와 상태 동작 미변경",
+        "단위 및 E2E 검증 통과"
+      ]
+    },
+    {
+      "id": "AI-REVIEW-RESULT-001",
+      "kind": "ai-review-result",
+      "content": "AI 검토 대기",
+      "attributes": {
+        "result": "pending",
+        "checklistResult": "pending"
+      }
+    }
+  ],
+  "subsections": []
+}

@@ -28,6 +28,18 @@
           "path": ".agent-factory/work-units/agent-factory-agents-left-region-port"
         }
       ]
+    },
+    {
+      "id": "requirements-basis-full-width-intake",
+      "kind": "basis",
+      "content": "Agent Factory Workspace 전체 폭 정렬 Intake",
+      "sourceRefs": [
+        {
+          "artifactType": "intake",
+          "id": "agent-factory-workspace-full-width-alignment",
+          "path": ".agent-factory/intakes/agent-factory-workspace-full-width-alignment"
+        }
+      ]
     }
   ],
   "subsections": []
