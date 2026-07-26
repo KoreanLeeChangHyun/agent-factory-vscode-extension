@@ -1,0 +1,28 @@
+{
+  "id": "ai-review",
+  "title": "AI Review",
+  "content": [
+    {
+      "id": "ai-checklist-kanban-fixture-stability",
+      "kind": "ai-checklist",
+      "content": [
+        "범위와 failure cause 정합성",
+        "self-contained fixture 독립성",
+        "manager-only transition 검증",
+        "production source 무변경",
+        "단위·통합·E2E 통과"
+      ]
+    },
+    {
+      "id": "ai-review-result-kanban-fixture-stability",
+      "kind": "ai-review-result",
+      "content": "AI review 대기",
+      "attributes": {
+        "result": "pending",
+        "checklistResult": "pending",
+        "evidence": []
+      }
+    }
+  ],
+  "subsections": []
+}

@@ -1,0 +1,21 @@
+{
+  "id": "execution-context",
+  "title": "Execution Context",
+  "content": [
+    {
+      "id": "execution-context-kanban-fixture-stability",
+      "kind": "execution-context",
+      "content": {
+        "goalId": "agent-factory-workspace-kanban-fixture-stability",
+        "objective": "Kanban manager integration fixture self-contained 안정화",
+        "execInvocation": "/goal agent-factory-workspace-kanban-fixture-stability",
+        "executionAgent": "Codex",
+        "repository": "/home/deus/workspace/agent-factory/vscode-extension",
+        "baseRef": "main",
+        "branch": "work-unit/agent-factory-workspace-kanban-fixture-stability",
+        "worktreePath": "/home/deus/workspace/agent-factory/vscode-extension/.agent-factory/worktree/agent-factory-workspace-kanban-fixture-stability"
+      }
+    }
+  ],
+  "subsections": []
+}

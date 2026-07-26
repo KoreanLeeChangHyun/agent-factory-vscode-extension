@@ -1,0 +1,17 @@
+{
+  "id": "execution",
+  "title": "Execution",
+  "content": [
+    {
+      "id": "execution-result-kanban-fixture-stability",
+      "kind": "execution-result",
+      "content": "실행 결과 대기",
+      "attributes": {
+        "status": "pending",
+        "verificationResult": "pending",
+        "evidence": []
+      }
+    }
+  ],
+  "subsections": []
+}
