@@ -91,6 +91,7 @@ function createWebviewHtml({ cspSource, nonce }) {
         min-width: 320px;
         min-height: 100vh;
         margin: 0;
+        padding: 0;
         background: var(--vscode-editor-background);
       }
 

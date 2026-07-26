@@ -61,13 +61,23 @@ test("shell fills the available width with equal theme-aware tabs and surfaces",
   assert.match(html, /--vscode-tab-inactiveBackground/);
   assert.match(html, /--vscode-tab-hoverBackground/);
   assert.match(html, /--vscode-tab-activeBorder/);
+  assert.match(html, /body\s*\{[^}]*margin:\s*0;/s);
+  assert.match(html, /body\s*\{[^}]*padding:\s*0;/s);
   assert.match(html, /\.workspace-tabs\s*\{[^}]*padding:\s*0;/s);
   assert.match(html, /\.workspace-tab\s*\{[^}]*flex:\s*1 1 0;/s);
   assert.match(html, /\.workspace-tab\s*\{[^}]*min-width:\s*0;/s);
   assert.match(html, /\.workspace-panel\s*\{[^}]*padding:\s*0;/s);
+  assert.match(
+    html,
+    /\.selected-header\s*\{[^}]*padding:\s*0 clamp\(16px,\s*2\.5vw,\s*32px\);/s,
+  );
   assert.match(html, /\.empty-state\s*\{[^}]*width:\s*100%;/s);
   assert.match(html, /\.empty-state\s*\{[^}]*min-height:\s*100%;/s);
   assert.match(html, /\.empty-state\s*\{[^}]*margin:\s*0;/s);
+  assert.match(
+    html,
+    /\.empty-state\s*\{[^}]*padding:\s*clamp\(24px,\s*3vw,\s*36px\);/s,
+  );
   assert.match(html, /\.selected-header\s*\{[^}]*--vscode-editor-background/s);
   assert.match(html, /\.empty-state\s*\{[^}]*--vscode-editor-background/s);
   assert.doesNotMatch(html, /--vscode-editorWidget-(?:background|border)/);

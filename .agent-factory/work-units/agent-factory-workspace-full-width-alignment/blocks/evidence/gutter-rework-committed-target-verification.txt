@@ -1,0 +1,24 @@
+Agent Factory Workspace committed target verification
+Date: 2026-07-26
+Execution target: revision 2, attempt 2
+Invocation: codex-20260726-full-width-gutter-review-003
+Head commit: 0cba6cd19de492f5bd63976a9c3289758199fd6d
+
+Implementation target
+- Commit subject: Remove workspace webview outer gutter
+- Changed implementation files: workspace/src/webviewShell.js and workspace/test/unit/webviewShell.test.js
+- Production change: body CSS receives padding: 0.
+- Regression coverage preserves selected-header and empty-state internal padding.
+
+Verification repeated against the committed target
+- npm run check: exit 0.
+- Syntax checks: pass.
+- Unit tests: 6 passed, 0 failed.
+- npm run test:e2e: exit 0.
+- VS Code Extension Host version: 1.129.1.
+- git diff --check: exit 0.
+
+Review conclusion
+- The outer Webview gutter rule is removed.
+- Internal content reading padding is preserved.
+- Existing tab identity, order, DOM, keyboard navigation, state API, CSP, equal-width layout, and VS Code semantic theme token assertions pass.
