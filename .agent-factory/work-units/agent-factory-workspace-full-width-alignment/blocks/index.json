@@ -1,6 +1,27 @@
 {
   "blocks": [
     {
+      "path": "blocks/evidence/gutter-rework-committed-target-verification.txt",
+      "mediaType": "text/plain",
+      "description": "Revision 2 attempt 2 verification against committed implementation target",
+      "sha256": "e732c656794e1854a731b80a73e17b0dcba63f697515ececd83720b906011890",
+      "sizeBytes": 1029
+    },
+    {
+      "path": "blocks/evidence/gutter-rework-verification.txt",
+      "mediaType": "text/plain",
+      "description": "Revision 2 outer gutter TDD and automated verification evidence",
+      "sha256": "49ecd54cff1dccc657299f65b48543924dca50f5885c6474e09dc897f400858d",
+      "sizeBytes": 1174
+    },
+    {
+      "path": "blocks/evidence/gutter-rework-worktree-inspect.json",
+      "mediaType": "application/json",
+      "description": "Revision 2 dedicated Work Unit worktree inspection before review package commit",
+      "sha256": "405153b9778cbaf4faacd4c17d258084de3ceab64622409ea11a4cbfd43db98a",
+      "sizeBytes": 2508
+    },
+    {
       "path": "blocks/evidence/integration-main.json",
       "mediaType": "application/json",
       "description": "Raw Work Unit integration receipt",

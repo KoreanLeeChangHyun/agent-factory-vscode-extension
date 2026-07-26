@@ -1,0 +1,64 @@
+{
+  "command": "inspect",
+  "context": {
+    "branch": "work-unit/agent-factory-workspace-full-width-alignment",
+    "changes": [
+      {
+        "path": ".agent-factory/work-units/agent-factory-workspace-full-width-alignment/blocks/index.json",
+        "status": " M"
+      },
+      {
+        "path": ".agent-factory/work-units/agent-factory-workspace-full-width-alignment/data/metadata.json",
+        "status": " M"
+      },
+      {
+        "path": ".agent-factory/work-units/agent-factory-workspace-full-width-alignment/data/sections/acceptance-and-verification.json",
+        "status": " M"
+      },
+      {
+        "path": ".agent-factory/work-units/agent-factory-workspace-full-width-alignment/data/sections/ai-review.json",
+        "status": " M"
+      },
+      {
+        "path": ".agent-factory/work-units/agent-factory-workspace-full-width-alignment/data/sections/execution-context.json",
+        "status": " M"
+      },
+      {
+        "path": ".agent-factory/work-units/agent-factory-workspace-full-width-alignment/data/sections/execution.json",
+        "status": " M"
+      },
+      {
+        "path": ".agent-factory/work-units/agent-factory-workspace-full-width-alignment/data/sections/human-review.json",
+        "status": " M"
+      },
+      {
+        "path": ".agent-factory/work-units/agent-factory-workspace-full-width-alignment/data/sections/plan.json",
+        "status": " M"
+      },
+      {
+        "path": ".agent-factory/work-units/agent-factory-workspace-full-width-alignment/data/sections/report.json",
+        "status": " M"
+      },
+      {
+        "path": ".agent-factory/work-units/agent-factory-workspace-full-width-alignment/data/sections/work-definition.json",
+        "status": " M"
+      },
+      {
+        "path": ".agent-factory/work-units/agent-factory-workspace-full-width-alignment/blocks/evidence/gutter-rework-verification.txt",
+        "status": "??"
+      }
+    ],
+    "dirty": true,
+    "headCommit": "0cba6cd19de492f5bd63976a9c3289758199fd6d",
+    "lockReason": "Agent Factory Work Unit execution: work-unit/agent-factory-workspace-full-width-alignment",
+    "locked": true,
+    "repository": "/home/deus/workspace/agent-factory/vscode-extension",
+    "workUnitId": "agent-factory-workspace-full-width-alignment",
+    "worktreePath": "/home/deus/workspace/agent-factory/vscode-extension/.agent-factory/worktree/agent-factory-workspace-full-width-alignment"
+  },
+  "error": null,
+  "ok": true,
+  "operations": [],
+  "schemaVersion": "1.0.0",
+  "state": "dirty"
+}

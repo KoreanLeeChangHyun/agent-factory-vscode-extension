@@ -5,16 +5,16 @@
     {
       "id": "EXECUTION-RESULT-001",
       "kind": "execution-result",
-      "content": "전체 폭·균등 탭·VS Code 테마 표면 CSS 구현과 자동 검증 완료",
+      "content": "최외곽 Webview gutter만 제거하고 selected-header와 empty-state 내부 읽기 여백을 보존했다. 구현 커밋 0cba6cd19de492f5bd63976a9c3289758199fd6d를 대상으로 자동 검증을 완료했다.",
       "attributes": {
         "status": "complete",
         "verificationResult": "pass",
         "executionTarget": {
           "contractVersion": "1.0.0",
-          "invocationId": "019f9c3f-3ce9-7c02-b376-8c18726defdd",
-          "headCommit": "dd70ff08cb19a9aed2271257dc52d1ead5b3d02a",
-          "revision": 1,
-          "attempt": 1
+          "invocationId": "codex-20260726-full-width-gutter-review-003",
+          "headCommit": "0cba6cd19de492f5bd63976a9c3289758199fd6d",
+          "revision": 2,
+          "attempt": 2
         }
       }
     }
