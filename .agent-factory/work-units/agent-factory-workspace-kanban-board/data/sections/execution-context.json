@@ -1,0 +1,21 @@
+{
+  "id": "execution-context",
+  "title": "Execution Context",
+  "content": [
+    {
+      "id": "execution-context-kanban-board",
+      "kind": "execution-context",
+      "content": {
+        "goalId": "agent-factory-workspace-kanban-board",
+        "objective": "canonical Work Unit reader와 읽기 전용 Kanban 보드 기반 구현",
+        "execInvocation": "/goal agent-factory-workspace-kanban-board",
+        "executionAgent": "Codex",
+        "repository": "/home/deus/workspace/agent-factory/vscode-extension",
+        "baseRef": "main",
+        "branch": "work-unit/agent-factory-workspace-kanban-board",
+        "worktreePath": "/home/deus/workspace/agent-factory/vscode-extension/.agent-factory/worktree/agent-factory-workspace-kanban-board"
+      }
+    }
+  ],
+  "subsections": []
+}

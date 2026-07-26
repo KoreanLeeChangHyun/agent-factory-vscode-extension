@@ -1,0 +1,28 @@
+{
+  "id": "ai-review",
+  "title": "AI Review",
+  "content": [
+    {
+      "id": "ai-checklist-kanban-board",
+      "kind": "ai-checklist",
+      "content": [
+        "Intake와 Work Unit 범위 준수",
+        "TDD 순서 준수",
+        "canonical reader 및 host-only 보안 경계 준수",
+        "drag·Move 접근성 동등성 준수",
+        "단위·통합·E2E·테마·보안 검증 통과",
+        "생성·편집·실행·병합·PR 범위 미구현"
+      ]
+    },
+    {
+      "id": "ai-review-result-kanban-board",
+      "kind": "ai-review-result",
+      "content": "AI 검토 대기",
+      "attributes": {
+        "result": "pending",
+        "checklistResult": "pending"
+      }
+    }
+  ],
+  "subsections": []
+}
