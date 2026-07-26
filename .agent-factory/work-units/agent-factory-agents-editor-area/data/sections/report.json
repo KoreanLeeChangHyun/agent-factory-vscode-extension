@@ -5,10 +5,20 @@
     {
       "id": "REPORT-STATUS",
       "kind": "report-result",
-      "content": "실행 전 보고 대기",
+      "content": "Agent Factory launcher와 Agents 및 Workspace editor panel 경계를 구현했다. Agents는 singleton이며 기존 Chat backend와 session 상태를 보존한다. Explorer와 sidebar Chat runtime은 제거됐다.",
       "attributes": {
-        "verificationResult": "pending",
-        "evidence": []
+        "verificationResult": "pass",
+        "executionTarget": {
+          "contractVersion": "1.0.0",
+          "invocationId": "019f9d6b-06db-74a1-8adf-905d76ff2f16",
+          "headCommit": "d2ac2487b3277562c1ab816cfdf2c125105c5e3e",
+          "revision": 1,
+          "attempt": 1
+        },
+        "evidence": [
+          "blocks/evidence/agents-editor-area-verification.txt",
+          "blocks/evidence/worktree-inspect-before-review.json"
+        ]
       }
     }
   ],

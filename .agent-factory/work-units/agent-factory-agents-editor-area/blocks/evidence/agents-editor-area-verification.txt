@@ -1,0 +1,27 @@
+Work Unit: agent-factory-agents-editor-area
+Execution target: ddd6bb419f6875e28aed257e8a17570782e45471
+
+TDD red:
+- Command: npm run test:unit
+- Result: exit 1 before implementation.
+- Observed failures: missing ../../src/agentsPanel and legacy manifest activationEvents/views did not match the launcher contract.
+
+Verification:
+- Command: npm run check
+- Result: exit 0; syntax passed, 24 unit tests passed, 1 integration test passed.
+- Command: AGENT_FACTORY_VSCODE_TEST_CACHE_PATH=/home/deus/workspace/agent-factory/vscode-extension/agents/.vscode-test node ./test/runTest.js
+- Result: exit 0 against VS Code 1.129.1.
+- E2E coverage: Activity Bar container command, Agents WebviewPanel viewType, repeated-open object identity, Workspace WebviewPanel viewType, chat HTML contract, and fake Codex JSONL flow.
+- Command: npm run package:linux-x64
+- Result: exit 0; dist/agent-factory-agents-linux-x64.vsix contains 19 files and is 129.69 MB.
+- Command: npm run verify:vsix
+- Result: exit 0; bundled executable reports codex-cli 0.145.0.
+- Command: git diff --check
+- Result: exit 0.
+- Search: no agentFactoryAgents.explorer, sidebar Webview registration, WorkspaceExplorerProvider, or createExplorerEntries runtime reference remains. The preserved agentFactoryAgents.chat.sessions.v1 string is the existing persisted chat state key.
+
+Authoritative platform evidence:
+- https://code.visualstudio.com/api/extension-guides/webview
+- https://code.visualstudio.com/api/ux-guidelines/views
+- https://code.visualstudio.com/api/references/contribution-points#contributes.viewsWelcome
+- https://code.visualstudio.com/api/extension-guides/tree-view

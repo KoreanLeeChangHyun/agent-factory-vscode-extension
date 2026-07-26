@@ -18,11 +18,17 @@
     {
       "id": "AI-REVIEW-STATUS",
       "kind": "ai-review-result",
-      "content": "AI review 대기",
+      "content": "AI checklist 전 항목 통과. 차단 결함 없음. 설치 후 시각 및 인증 smoke는 Human review에서 확인한다.",
       "attributes": {
-        "result": "pending",
-        "checklistResult": "pending",
-        "evidence": []
+        "result": "pass",
+        "checklistResult": "pass",
+        "executionTarget": {
+          "contractVersion": "1.0.0",
+          "invocationId": "019f9d6b-06db-74a1-8adf-905d76ff2f16",
+          "headCommit": "d2ac2487b3277562c1ab816cfdf2c125105c5e3e",
+          "revision": 1,
+          "attempt": 1
+        }
       }
     }
   ],
