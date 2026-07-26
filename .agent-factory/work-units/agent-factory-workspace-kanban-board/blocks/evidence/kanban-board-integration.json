@@ -1,0 +1,37 @@
+{
+  "command": "integrate",
+  "context": {
+    "humanDecision": "approved",
+    "operationResult": "merge-commit-created",
+    "relationship": "diverged",
+    "repository": "/home/deus/workspace/agent-factory/vscode-extension",
+    "sourceBranch": "work-unit/agent-factory-workspace-kanban-board",
+    "sourceCommit": "8dc0844ef3e34925a11877cd9e50e7a5161d5f05",
+    "strategy": "no-ff",
+    "targetAfterCommit": "a11175d7028132fd0507692cbbe15a7c253de7a7",
+    "targetBeforeCommit": "1b4ac0e26dd851290675ef80a42d51ddb0a846df",
+    "targetBranch": "main",
+    "workUnitId": "agent-factory-workspace-kanban-board",
+    "worktreePath": "/home/deus/workspace/agent-factory/vscode-extension/.agent-factory/worktree/agent-factory-workspace-kanban-board"
+  },
+  "error": null,
+  "ok": true,
+  "operations": [
+    {
+      "args": [
+        "git",
+        "-C",
+        "/home/deus/workspace/agent-factory/vscode-extension",
+        "merge",
+        "--no-ff",
+        "--no-edit",
+        "8dc0844ef3e34925a11877cd9e50e7a5161d5f05"
+      ],
+      "returnCode": 0,
+      "stderr": "",
+      "stdout": "Merge made by the 'ort' strategy.\n .../blocks/evidence/kanban-board-verification.txt  |  42 ++\n .../blocks/evidence/worktree-inspect-review.json   |  19 +\n .../blocks/index.json                              |  17 +-\n .../data/metadata.json                             |   6 +-\n .../data/sections/acceptance-and-verification.json |  14 +-\n .../data/sections/ai-review.json                   |  16 +-\n .../data/sections/execution-context.json           |  60 +++\n .../data/sections/execution.json                   |  16 +-\n .../data/sections/human-review.json                |  10 +-\n .../data/sections/report.json                      |  33 +-\n workspace/package.json                             |   2 +-\n workspace/src/extension.js                         |  13 +\n workspace/src/kanbanController.js                  |  98 +++++\n workspace/src/kanbanReader.js                      | 325 ++++++++++++++\n workspace/src/webviewShell.js                      | 465 ++++++++++++++++++++-\n workspace/test/suite/index.js                      |  26 ++\n workspace/test/unit/kanbanController.test.js       | 116 +++++\n workspace/test/unit/kanbanReader.test.js           | 157 +++++++\n workspace/test/unit/webviewShell.test.js           |  42 +-\n 19 files changed, 1446 insertions(+), 31 deletions(-)\n create mode 100644 .agent-factory/work-units/agent-factory-workspace-kanban-board/blocks/evidence/kanban-board-verification.txt\n create mode 100644 .agent-factory/work-units/agent-factory-workspace-kanban-board/blocks/evidence/worktree-inspect-review.json\n create mode 100644 workspace/src/kanbanController.js\n create mode 100644 workspace/src/kanbanReader.js\n create mode 100644 workspace/test/unit/kanbanController.test.js\n create mode 100644 workspace/test/unit/kanbanReader.test.js\n"
+    }
+  ],
+  "schemaVersion": "1.0.0",
+  "state": "integrated"
+}

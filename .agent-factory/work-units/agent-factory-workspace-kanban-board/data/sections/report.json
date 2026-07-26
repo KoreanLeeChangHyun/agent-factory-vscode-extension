@@ -35,6 +35,29 @@
           "실제 상태 변경은 후속 authoring Work Unit에서 manager semantic revalidation과 함께 구현한다."
         ]
       }
+    },
+    {
+      "id": "INTEGRATION-3A399AE32D5779B9",
+      "kind": "integration-result",
+      "content": {
+        "humanDecision": "approved",
+        "operationResult": "merge-commit-created",
+        "relationship": "diverged",
+        "repository": "/home/deus/workspace/agent-factory/vscode-extension",
+        "sourceBranch": "work-unit/agent-factory-workspace-kanban-board",
+        "sourceCommit": "8dc0844ef3e34925a11877cd9e50e7a5161d5f05",
+        "strategy": "no-ff",
+        "targetAfterCommit": "a11175d7028132fd0507692cbbe15a7c253de7a7",
+        "targetBeforeCommit": "1b4ac0e26dd851290675ef80a42d51ddb0a846df",
+        "targetBranch": "main",
+        "workUnitId": "agent-factory-workspace-kanban-board",
+        "worktreePath": "/home/deus/workspace/agent-factory/vscode-extension/.agent-factory/worktree/agent-factory-workspace-kanban-board",
+        "receiptSha256": "3a399ae32d5779b9ad411cdd611a88f80193af9c540e1db0b4c2d03268b9ed04"
+      },
+      "attributes": {
+        "status": "integrated"
+      },
+      "blockRef": "blocks/evidence/kanban-board-integration.json"
     }
   ],
   "subsections": []

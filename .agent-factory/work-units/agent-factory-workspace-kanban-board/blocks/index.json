@@ -1,6 +1,13 @@
 {
   "blocks": [
     {
+      "path": "blocks/evidence/kanban-board-integration.json",
+      "mediaType": "application/json",
+      "description": "Raw Work Unit integration receipt",
+      "sha256": "3a399ae32d5779b9ad411cdd611a88f80193af9c540e1db0b4c2d03268b9ed04",
+      "sizeBytes": 2962
+    },
+    {
       "path": "blocks/evidence/kanban-board-verification.txt",
       "mediaType": "text/plain",
       "description": "Kanban board implementation and verification evidence",
