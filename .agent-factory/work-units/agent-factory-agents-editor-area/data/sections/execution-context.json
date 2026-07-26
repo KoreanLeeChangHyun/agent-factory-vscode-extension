@@ -1,0 +1,21 @@
+{
+  "id": "execution-context",
+  "title": "Execution Context",
+  "content": [
+    {
+      "id": "EXECUTION-CONTEXT-001",
+      "kind": "execution-context",
+      "content": {
+        "goalId": "agent-factory-agents-editor-area",
+        "objective": "Agent Factory launcher와 Agents editor area 전환을 구현하고 검증한다.",
+        "execInvocation": "/goal agent-factory-agents-editor-area",
+        "executionAgent": "Codex",
+        "repository": "/home/deus/workspace/agent-factory/vscode-extension",
+        "baseRef": "main",
+        "branch": "work-unit/agent-factory-agents-editor-area",
+        "worktreePath": "/home/deus/workspace/agent-factory/vscode-extension/.agent-factory/worktree/agent-factory-agents-editor-area"
+      }
+    }
+  ],
+  "subsections": []
+}
