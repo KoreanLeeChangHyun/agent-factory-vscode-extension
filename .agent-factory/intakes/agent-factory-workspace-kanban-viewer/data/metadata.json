@@ -1,6 +1,6 @@
 {
   "schemaVersion": "2.0.0",
-  "documentVersion": "1.0.62",
+  "documentVersion": "1.0.67",
   "id": "agent-factory-workspace-kanban-viewer",
   "artifactType": "intake",
   "projectId": "agent-factory-workspace",
@@ -9,7 +9,7 @@
     "status": "ready"
   },
   "createdAt": "2026-07-26T11:15:23+00:00",
-  "updatedAt": "2026-07-26T14:04:30+00:00",
+  "updatedAt": "2026-07-26T15:25:13+00:00",
   "language": "ko",
   "theme": "default",
   "provenance": {
@@ -19,7 +19,7 @@
   },
   "relations": [],
   "readiness": {
-    "reviewedAt": "2026-07-26T14:04:19Z",
+    "reviewedAt": "2026-07-26T15:25:04.747Z",
     "contractValid": true,
     "evidenceComplete": true,
     "requirementsComplete": true,

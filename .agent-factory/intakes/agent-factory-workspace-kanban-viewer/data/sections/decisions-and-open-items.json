@@ -100,6 +100,15 @@
         "blocking": [],
         "nonBlocking": []
       }
+    },
+    {
+      "id": "decision-kanban-board-integration",
+      "kind": "decision-status",
+      "content": {
+        "decision": "work-unit/agent-factory-workspace-kanban-board를 main에 no-ff로 병합한다.",
+        "status": "accepted",
+        "evidenceRef": "interview-kanban-board-integration"
+      }
     }
   ],
   "subsections": []
