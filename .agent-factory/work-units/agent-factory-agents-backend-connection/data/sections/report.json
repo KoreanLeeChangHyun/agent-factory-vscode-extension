@@ -1,0 +1,16 @@
+{
+  "id": "report",
+  "title": "Report",
+  "content": [
+    {
+      "id": "REPORT-RESULT-001",
+      "kind": "report-result",
+      "content": "실행 전",
+      "attributes": {
+        "verificationResult": "not-run",
+        "evidence": []
+      }
+    }
+  ],
+  "subsections": []
+}

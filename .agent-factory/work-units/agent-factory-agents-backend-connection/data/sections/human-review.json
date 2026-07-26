@@ -1,0 +1,35 @@
+{
+  "id": "human-review",
+  "title": "Human Review",
+  "content": [
+    {
+      "id": "HUMAN-CHECKLIST-001",
+      "kind": "human-checklist",
+      "content": [
+        "linux-x64 VSIX를 설치한 새 Extension Development Host에서 Agent Factory Activity Bar와 두 View가 열리는지 확인",
+        "별도 Web 서버와 첫 실행 다운로드 없이 bundled Codex 실행 경계가 준비되는지 확인",
+        "기존 Codex 로그인 상태에서 Main Agent 세션 메시지 전송과 점진적 assistant 응답을 확인",
+        "새 세션과 기존 provider session resume가 서로 다른 실제 session DOM에 표시되는지 확인",
+        "실행 중 취소가 해당 세션만 중단하고 다른 세션과 Explorer에 영향을 주지 않는지 확인",
+        "View를 닫고 다시 열어 session, message, loading 또는 완료 상태와 draft가 복원되는지 확인",
+        "로그인 부재 또는 fake failure에서 비밀 없는 오류와 복구 안내가 표시되는지 확인",
+        "Workflow 실행, 이미지 첨부, model control, ../web과 workspace 변경이 없는지 확인",
+        "검증 증거와 남은 위험을 확인하고 승인, 재작업, main 병합, 설치·배포 및 후속 플랫폼 확대 여부 결정"
+      ]
+    },
+    {
+      "id": "HUMAN-REVIEW-METHOD-001",
+      "kind": "human-review-method",
+      "content": "Report와 등록 검증 근거를 확인한 뒤 linux-x64 VSIX를 새 Extension Development Host에 설치한다. 기존 Codex 로그인 상태와 인증이 없는 상태에서 Main Agent 신규 세션 전송, JSONL streaming, cancel, View reconnect와 provider session resume를 직접 검사한다. 결과 승인 또는 구체적인 재작업을 결정하며 main 병합, worktree cleanup, 설치·배포, push와 PR 승격은 별도로 결정한다."
+    },
+    {
+      "id": "HUMAN-REVIEW-RESULT-001",
+      "kind": "human-review-result",
+      "content": "Human 검토 대기",
+      "attributes": {
+        "status": "pending"
+      }
+    }
+  ],
+  "subsections": []
+}

@@ -1,0 +1,32 @@
+{
+  "id": "ai-review",
+  "title": "AI Review",
+  "content": [
+    {
+      "id": "AI-CHECKLIST-001",
+      "kind": "ai-checklist",
+      "content": [
+        "ready Intake와 Work Unit 범위 및 Human 결정 준수",
+        "TDD 순서와 Specification 추적성",
+        "Web과 VS Code 확장 제품 및 런타임 분리",
+        "Extension Host process ownership과 Webview message allowlist",
+        "실제 session id 기반 Session -> DOM -> State 소유권",
+        "shell 없는 argv 실행, bundled binary path와 child process cancellation 안전성",
+        "JSONL parsing, resume, reconnect, 오류 및 인증 비밀 비노출",
+        "기존 Explorer, tabs, keyboard, accessibility, CSP와 SVG 경계 보존",
+        "linux-x64 VSIX reproducibility, contents 및 bundled executable 검증",
+        "단위, integration 및 E2E 검증 통과와 범위 밖 파일 미변경"
+      ]
+    },
+    {
+      "id": "AI-REVIEW-RESULT-001",
+      "kind": "ai-review-result",
+      "content": "실행 전",
+      "attributes": {
+        "result": "not-run",
+        "checklistResult": "not-run"
+      }
+    }
+  ],
+  "subsections": []
+}
