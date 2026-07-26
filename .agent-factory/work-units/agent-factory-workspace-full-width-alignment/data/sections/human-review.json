@@ -7,7 +7,15 @@
       "kind": "human-review-result",
       "content": "Human 검토 대기",
       "attributes": {
-        "status": "pending"
+        "status": "approved",
+        "approvedAt": "2026-07-26T09:35:03+00:00",
+        "executionTarget": {
+          "contractVersion": "1.0.0",
+          "revision": 2,
+          "attempt": 2,
+          "invocationId": "codex-20260726-full-width-gutter-review-003",
+          "headCommit": "0cba6cd19de492f5bd63976a9c3289758199fd6d"
+        }
       }
     },
     {
