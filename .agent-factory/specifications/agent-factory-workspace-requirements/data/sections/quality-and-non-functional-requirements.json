@@ -59,6 +59,14 @@
         "manager 오류는 내부 명령 경로와 민감 정보를 노출하지 않는 구조화 오류로 표시한다.",
         "Editor 변경은 기존 Kanban controller, capability, DnD와 Action 계약을 변경하지 않는다."
       ]
+    },
+    {
+      "id": "quality-tab-header-web-alignment",
+      "kind": "non-functional-requirement",
+      "content": [
+        "Agents와 Workspace의 탭 및 선택 헤더 geometry는 하나의 검증 기준으로 관리해 두 확장 사이 drift를 방지한다.",
+        "Web 참조는 설계 근거이며 확장 런타임 또는 설치 의존성이 아니다."
+      ]
     }
   ],
   "subsections": []

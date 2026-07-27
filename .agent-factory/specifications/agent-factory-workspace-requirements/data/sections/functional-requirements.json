@@ -61,6 +61,15 @@
         "저장 직전 package identity, artifact type, documentVersion과 경로 안전성을 재검증한다.",
         "저장 성공 또는 manager validation 실패 후 authoritative package 상태와 결과를 Webview에 반환한다."
       ]
+    },
+    {
+      "id": "functional-tab-header-web-alignment",
+      "kind": "functional-requirement",
+      "content": [
+        "Agents와 Workspace는 상단 탭과 선택 헤더의 두 행 geometry를 동일하게 제공한다.",
+        "두 확장의 두 행 geometry는 저장된 Web 참조와 정합해야 한다.",
+        "이 geometry 변경은 탭 이름, 순서, DOM, 이벤트, 키보드와 상태 계약을 변경하지 않는다."
+      ]
     }
   ],
   "subsections": []
