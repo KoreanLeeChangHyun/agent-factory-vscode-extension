@@ -53,11 +53,17 @@ async function run() {
     nonce: "e2e-nonce",
   });
   assert.equal((html.match(/data-kanban-column="/g) || []).length, 6);
-  assert.equal((html.match(/data-kanban-column-toggle="/g) || []).length, 6);
+  assert.equal((html.match(/data-kanban-column-toggle="/g) || []).length, 0);
+  assert.equal(
+    (html.match(/data-kanban-visibility-toggle(?:\s|>)/g) || []).length,
+    1,
+  );
   assert.doesNotMatch(html, /data-kanban-board-selector/);
+  assert.doesNotMatch(html, /data-kanban-updated/);
   assert.doesNotMatch(html, /data-kanban-refresh/);
   assert.doesNotMatch(html, /data-kanban-filter/);
-  assert.match(html, /collapsedKanbanColumns/);
+  assert.match(html, /kanbanOpen/);
+  assert.match(html, /kanbanBoard\.hidden = !open/);
   assert.match(html, /scrollbar-width:\s*none/);
   assert.match(html, /kanban\.snapshot/);
   assert.deepEqual(

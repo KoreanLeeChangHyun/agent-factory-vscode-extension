@@ -15,6 +15,38 @@
         "branch": "work-unit/agent-factory-workspace-kanban-board-visibility-and-spacing",
         "worktreePath": "/home/deus/workspace/agent-factory/vscode-extension/.agent-factory/worktree/agent-factory-workspace-kanban-board-visibility-and-spacing"
       }
+    },
+    {
+      "id": "EXECUTION-STATE-001",
+      "kind": "execution-state",
+      "content": {
+        "contractVersion": "1.0.0",
+        "state": "running",
+        "subject": {
+          "algorithm": "gitCommit",
+          "digest": "3c020cb7b0ee414fe8a2dcfab00fc105a8815982"
+        },
+        "currentRevision": 1,
+        "currentAttempt": 1,
+        "invocationId": "codex-kanban-board-visibility-spacing-20260728-001",
+        "invocationChain": [
+          "codex-kanban-board-visibility-spacing-20260728-001"
+        ],
+        "history": [],
+        "progress": {
+          "completedSteps": [],
+          "pendingStep": null,
+          "lastVerifiedHead": "3c020cb7b0ee414fe8a2dcfab00fc105a8815982",
+          "checkpoints": [],
+          "retry": {}
+        },
+        "recovery": {
+          "status": "running",
+          "ownerInvocationId": "codex-kanban-board-visibility-spacing-20260728-001",
+          "blockerId": null,
+          "evidence": null
+        }
+      }
     }
   ],
   "subsections": []

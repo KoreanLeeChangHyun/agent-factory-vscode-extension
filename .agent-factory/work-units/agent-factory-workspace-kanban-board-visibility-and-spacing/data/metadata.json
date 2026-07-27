@@ -1,15 +1,15 @@
 {
   "schemaVersion": "4.0.0",
-  "documentVersion": "1.0.23",
+  "documentVersion": "1.0.25",
   "id": "agent-factory-workspace-kanban-board-visibility-and-spacing",
   "artifactType": "work-unit",
   "projectId": "agent-factory-workspace",
   "lifecycle": {
     "phase": "work-unit",
-    "status": "ready"
+    "status": "working"
   },
   "createdAt": "2026-07-27T16:24:27+00:00",
-  "updatedAt": "2026-07-27T16:26:14+00:00",
+  "updatedAt": "2026-07-27T16:27:10+00:00",
   "language": "ko",
   "theme": "vscode-native",
   "provenance": {
