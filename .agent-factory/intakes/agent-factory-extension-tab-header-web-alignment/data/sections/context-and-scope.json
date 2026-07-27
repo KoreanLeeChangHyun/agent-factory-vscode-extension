@@ -18,9 +18,9 @@
       "kind": "scope",
       "content": {
         "items": [
-          "agents/src/chatView.js의 mode tab 및 session header geometry",
-          "workspace/src/webviewShell.js의 workspace tab 및 selected header geometry",
-          "두 영역의 대응 단위 및 통합 회귀 테스트"
+          "agents/src/chatView.js의 Web 대비 session header, message area, composer 및 status 표시 구조",
+          "agents/src/chatBackend.js와 agents/src/codexAdapter.js의 현재 지원 세션 및 메시지 경계",
+          "Agents 대응 단위, 통합 및 실제 렌더링 회귀 검증"
         ]
       }
     },
@@ -29,11 +29,9 @@
       "kind": "out-of-scope",
       "content": {
         "items": [
-          "탭 이름과 순서 변경",
-          "아이콘과 보이는 문구 변경",
-          "DOM 구조와 이벤트 및 키보드 동작 변경",
-          "본문과 composer 및 Kanban 내부 layout 변경",
-          "Web 소스 변경"
+          "workspace/src 이하 Workspace 구현, 탭 구성, 기능 및 테스트 변경",
+          "Web 소스와 Web backend 변경",
+          "현재 Agents가 지원하지 않는 Web 전용 기능을 근거 없이 추가하거나 가짜 control로 표시하는 변경"
         ]
       }
     }

@@ -7,7 +7,7 @@
       "kind": "specification-impact",
       "content": {
         "status": "aligned",
-        "reason": "관련 Specification에 Agents와 Workspace의 공통 Web 참조 geometry 규칙과 acceptance criterion을 추가하고 manager validation을 완료했다.",
+        "reason": "기존 agent-factory-workspace-requirements Specification이 Agents의 header, bordered composer, role-based message history, 22px status line, Web runtime 독립성과 unsupported controls 제외를 이미 규정하므로 추가 Specification 변경 없이 정합한다.",
         "target": ".agent-factory/specifications/agent-factory-workspace-requirements"
       },
       "attributes": {
@@ -63,6 +63,34 @@
         ],
         "dependencies": [
           "기존 Web 기준과 Agents/Workspace 통일 Human 결정"
+        ]
+      }
+    },
+    {
+      "id": "BASIS-003",
+      "kind": "work-unit-basis",
+      "content": {
+        "title": "Agents Web runtime 시각 정합성 수정",
+        "goal": "Agents 패널의 session header, message area, composer와 status 표시를 현재 지원 기능 안에서 저장된 Web runtime evidence와 정합한다.",
+        "scope": [
+          "agents/src/chatView.js",
+          "agents/test/unit/chatView.test.js와 agents/test/suite/index.js",
+          "Agents 실제 Chromium layout 및 screenshot 검증"
+        ],
+        "expectedOutputs": [
+          "Web runtime과 정합한 Agents session-open 화면",
+          "실제 40px 및 32px DOM geometry 회귀 검증",
+          "Agents 단위, 통합, package 및 시각 검증 evidence"
+        ],
+        "verification": [
+          "Agents npm run test:unit",
+          "Agents npm run test:integration 및 npm run check",
+          "동일 viewport Chromium getBoundingClientRect와 screenshot 비교",
+          "git diff로 workspace 경로 무변경 확인"
+        ],
+        "dependencies": [
+          "저장된 Web runtime screenshot과 DOM measurement evidence",
+          "기존 agent-factory-workspace-requirements Agents chat 정합성 기준"
         ]
       }
     }

@@ -16,16 +16,18 @@
       "kind": "open-items-status",
       "content": {
         "status": "resolved",
-        "blocking": [],
-        "nonBlocking": []
+        "nonBlocking": [
+          "VS Code host frame을 포함한 최종 설치 화면은 Human Review에서 확인한다."
+        ],
+        "blocking": []
       }
     },
     {
       "id": "RISK-001",
       "kind": "risk",
       "content": {
-        "risk": "한쪽 구현이나 테스트만 바뀌면 Agents와 Workspace 사이 geometry drift가 발생한다.",
-        "mitigation": "두 구현과 대응 테스트를 하나의 Work Unit 범위와 검증 명령에 포함한다."
+        "risk": "source 문자열 assertion만 통과하고 실제 브라우저 layout이 Web과 다를 수 있다.",
+        "mitigation": "동일 viewport의 Chromium DOM 측정과 비교 screenshot을 자동 검증 evidence에 포함한다."
       }
     },
     {
@@ -34,6 +36,24 @@
       "content": {
         "decision": "기존 agent-factory-workspace-requirements Specification의 정합성 변경 4개 파일을 Intake checkpoint 전에 별도 커밋한다.",
         "rationale": "Human이 A를 선택했다. Specification 생성은 필수가 아니지만 기존 관련 Specification의 accepted requirement 정렬은 필요하다.",
+        "status": "accepted"
+      }
+    },
+    {
+      "id": "DECISION-003",
+      "kind": "decision-status",
+      "content": {
+        "decision": "현재 후속 Web 정합성 분석과 변경은 Agents 확장만 대상으로 한다.",
+        "rationale": "Human이 Workspace를 고려 대상에서 제외하고 Agents만 고려하라고 명시했다.",
+        "status": "accepted"
+      }
+    },
+    {
+      "id": "DECISION-004",
+      "kind": "decision-status",
+      "content": {
+        "decision": "Agents 전체 shell의 시각 구조를 현재 지원 기능 안에서 Web runtime evidence에 정합하고 Workspace는 변경하지 않는다.",
+        "rationale": "Human이 Agents만 고려하라는 범위 확정 후 실행을 지시했고, 기존 Specification이 동일한 Agents header, composer, message와 status 경계를 규정한다.",
         "status": "accepted"
       }
     }
