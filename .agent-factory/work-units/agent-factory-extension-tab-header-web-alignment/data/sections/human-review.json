@@ -24,7 +24,15 @@
       "kind": "human-review-result",
       "content": "Human 검토 대기",
       "attributes": {
-        "status": "pending"
+        "status": "approved",
+        "approvedAt": "2026-07-27T14:27:52+00:00",
+        "executionTarget": {
+          "contractVersion": "1.0.0",
+          "revision": 1,
+          "attempt": 1,
+          "invocationId": "019fa3ec-f5ab-7753-89c2-f4247a0ca348",
+          "headCommit": "734f4958ecc1d22b6337c94630d9ce39624cc1b2"
+        }
       }
     }
   ],

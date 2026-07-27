@@ -1,15 +1,15 @@
 {
   "schemaVersion": "4.0.0",
-  "documentVersion": "1.0.30",
+  "documentVersion": "1.0.31",
   "id": "agent-factory-extension-tab-header-web-alignment",
   "artifactType": "work-unit",
   "projectId": "agent-factory-workspace",
   "lifecycle": {
     "phase": "work-unit",
-    "status": "review"
+    "status": "done"
   },
   "createdAt": "2026-07-27T14:03:52+00:00",
-  "updatedAt": "2026-07-27T14:24:04+00:00",
+  "updatedAt": "2026-07-27T14:27:52+00:00",
   "language": "ko",
   "theme": "vscode-native",
   "provenance": {
