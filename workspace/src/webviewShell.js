@@ -59,24 +59,10 @@ function createWebviewHtml({ cspSource, nonce }) {
         data-kanban-column="${id}"
       >
         <header class="kanban-column-header">
-          <button
-            class="kanban-column-toggle"
-            type="button"
-            aria-expanded="true"
-            aria-controls="kanban-card-list-${id}"
-            data-kanban-column-toggle="${id}"
-          >
+          <div class="kanban-column-heading">
             <span class="kanban-column-label">${label}</span>
             <span class="kanban-count" data-column-count aria-label="${label} 항목 수">0</span>
-            <svg
-              class="kanban-column-toggle-icon"
-              viewBox="0 0 16 16"
-              aria-hidden="true"
-              focusable="false"
-            >
-              <path d="m4 6 4 4 4-4"></path>
-            </svg>
-          </button>
+          </div>
         </header>
         <div class="kanban-card-list" id="kanban-card-list-${id}" data-card-list>
           <p class="kanban-column-empty">항목 없음</p>
@@ -91,11 +77,17 @@ function createWebviewHtml({ cspSource, nonce }) {
       content = `
         <div class="kanban-workspace" aria-busy="true">
           <div class="kanban-toolbar">
-            <span class="kanban-updated" data-kanban-updated aria-live="polite">불러오는 중…</span>
+            <button
+              class="secondary-button kanban-visibility-toggle"
+              type="button"
+              aria-controls="kanban-board"
+              aria-expanded="true"
+              data-kanban-visibility-toggle
+            >칸반 닫기</button>
           </div>
           <div class="kanban-notice" data-kanban-notice role="status" aria-live="polite"></div>
           <div class="kanban-errors" data-kanban-errors role="alert" hidden></div>
-          <div class="kanban-board" aria-label="Work Unit lifecycle board">
+          <div class="kanban-board" id="kanban-board" aria-label="Work Unit lifecycle board">
             ${kanbanColumns}
           </div>
         </div>`;
@@ -453,7 +445,7 @@ function createWebviewHtml({ cspSource, nonce }) {
         height: 100%;
         min-height: 0;
         grid-template-rows: auto auto auto minmax(0, 1fr);
-        padding: 12px 16px 0;
+        padding: 0;
         overflow: hidden;
       }
 
@@ -489,17 +481,6 @@ function createWebviewHtml({ cspSource, nonce }) {
         background: var(--vscode-button-secondaryHoverBackground);
       }
 
-      .kanban-updated {
-        min-width: 0;
-        min-height: 28px;
-        padding: 6px 0;
-        overflow: hidden;
-        color: var(--vscode-descriptionForeground);
-        font-size: 12px;
-        text-overflow: ellipsis;
-        white-space: nowrap;
-      }
-
       .kanban-notice,
       .kanban-errors {
         min-height: 20px;
@@ -523,10 +504,14 @@ function createWebviewHtml({ cspSource, nonce }) {
 
       .kanban-board {
         display: flex;
-        gap: 8px;
+        gap: 0;
         min-width: 0;
         min-height: 0;
         overflow: hidden;
+      }
+
+      .kanban-board[hidden] {
+        display: none;
       }
 
       .kanban-column {
@@ -540,11 +525,6 @@ function createWebviewHtml({ cspSource, nonce }) {
         background: var(--vscode-sideBar-background);
       }
 
-      .kanban-column.is-collapsed {
-        flex: 0 0 48px;
-        grid-template-rows: minmax(0, 1fr);
-      }
-
       .kanban-column.is-drop-target {
         outline: 2px solid var(--vscode-focusBorder);
         outline-offset: -2px;
@@ -556,7 +536,7 @@ function createWebviewHtml({ cspSource, nonce }) {
         border-bottom: 1px solid var(--vscode-panel-border);
       }
 
-      .kanban-column-toggle {
+      .kanban-column-heading {
         display: flex;
         width: 100%;
         min-width: 0;
@@ -565,19 +545,7 @@ function createWebviewHtml({ cspSource, nonce }) {
         gap: 6px;
         padding: 7px 8px;
         overflow: hidden;
-        border: 0;
         color: var(--vscode-foreground);
-        background: transparent;
-        cursor: pointer;
-      }
-
-      .kanban-column-toggle:hover {
-        background: var(--vscode-list-hoverBackground);
-      }
-
-      .kanban-column-toggle:focus-visible {
-        outline: 1px solid var(--vscode-focusBorder);
-        outline-offset: -1px;
       }
 
       .kanban-column-label {
@@ -588,43 +556,6 @@ function createWebviewHtml({ cspSource, nonce }) {
         text-overflow: ellipsis;
         text-transform: uppercase;
         white-space: nowrap;
-      }
-
-      .kanban-column-toggle-icon {
-        width: 14px;
-        height: 14px;
-        margin-left: auto;
-        flex: 0 0 auto;
-        fill: none;
-        stroke: currentColor;
-        stroke-linecap: round;
-        stroke-linejoin: round;
-        stroke-width: 1.5;
-        transition: transform 120ms ease;
-      }
-
-      .kanban-column.is-collapsed .kanban-column-header {
-        border-bottom: 0;
-      }
-
-      .kanban-column.is-collapsed .kanban-column-toggle {
-        height: 100%;
-        min-height: 0;
-        flex-direction: column;
-        justify-content: flex-start;
-        padding: 9px 6px;
-      }
-
-      .kanban-column.is-collapsed .kanban-column-label {
-        overflow: visible;
-        text-overflow: clip;
-        white-space: normal;
-        writing-mode: vertical-rl;
-      }
-
-      .kanban-column.is-collapsed .kanban-column-toggle-icon {
-        margin: auto 0 0;
-        transform: rotate(-90deg);
       }
 
       .kanban-count {
@@ -731,10 +662,13 @@ function createWebviewHtml({ cspSource, nonce }) {
         const selectedHeader = document.querySelector('.selected-header');
         const selectedTitle = document.querySelector('[data-selected-title]');
         const workspaceBody = document.querySelector('[data-workspace-body]');
-        const updatedLabel = document.querySelector('[data-kanban-updated]');
         const notice = document.querySelector('[data-kanban-notice]');
         const errors = document.querySelector('[data-kanban-errors]');
         const kanbanWorkspace = document.querySelector('.kanban-workspace');
+        const kanbanBoard = document.querySelector('#kanban-board');
+        const kanbanVisibilityToggle = document.querySelector(
+          '[data-kanban-visibility-toggle]',
+        );
         const kanbanColumns = Array.from(document.querySelectorAll('[data-kanban-column]'));
         const artifactList = document.querySelector('[data-editor-artifacts]');
         const sectionList = document.querySelector('[data-editor-sections]');
@@ -745,26 +679,22 @@ function createWebviewHtml({ cspSource, nonce }) {
         const editorError = document.querySelector('[data-editor-error]');
         const editorRefresh = document.querySelector('[data-editor-refresh]');
         const artifactEditor = document.querySelector('.artifact-editor');
+        const previousState = vscode.getState() || {};
         const state = {
           selectedTab: "dashboard",
-          collapsedKanbanColumns: [],
           selectedArtifactType: "",
           selectedArtifactId: "",
           selectedSectionId: "",
           selectedItemId: "",
-          ...(vscode.getState() || {}),
+          ...previousState,
+          kanbanOpen: previousState.kanbanOpen !== false,
         };
         delete state.kanbanFilter;
+        delete state.collapsedKanbanColumns;
         if (["design", "view"].includes(state.selectedTab)) {
           state.selectedTab = "editor";
         }
         const knownTabs = new Set(tabs.map((tab) => tab.dataset.tabId));
-        const knownKanbanColumns = new Set(
-          kanbanColumns.map((column) => column.dataset.kanbanColumn),
-        );
-        state.collapsedKanbanColumns = Array.isArray(state.collapsedKanbanColumns)
-          ? state.collapsedKanbanColumns.filter((id) => knownKanbanColumns.has(id))
-          : [];
         let snapshot;
         let artifactIndex;
         let artifactDocument;
@@ -804,26 +734,11 @@ function createWebviewHtml({ cspSource, nonce }) {
           persistState();
         }
 
-        function setKanbanColumnCollapsed(columnId, collapsed) {
-          if (!knownKanbanColumns.has(columnId)) {
-            return;
-          }
-
-          const collapsedColumns = new Set(state.collapsedKanbanColumns);
-          collapsed ? collapsedColumns.add(columnId) : collapsedColumns.delete(columnId);
-          state.collapsedKanbanColumns = Array.from(collapsedColumns);
-          const column = kanbanColumns.find(
-            (candidate) => candidate.dataset.kanbanColumn === columnId,
-          );
-          const toggle = column.querySelector('[data-kanban-column-toggle]');
-          const cardList = column.querySelector('[data-card-list]');
-          column.classList.toggle("is-collapsed", collapsed);
-          toggle.setAttribute("aria-expanded", String(!collapsed));
-          const actionLabel =
-            column.dataset.kanbanColumn + (collapsed ? " 칼럼 열기" : " 칼럼 닫기");
-          toggle.setAttribute("aria-label", actionLabel);
-          toggle.title = actionLabel;
-          cardList.hidden = collapsed;
+        function setKanbanOpen(open) {
+          state.kanbanOpen = open;
+          kanbanBoard.hidden = !open;
+          kanbanVisibilityToggle.setAttribute("aria-expanded", String(open));
+          kanbanVisibilityToggle.textContent = open ? "칸반 닫기" : "칸반 열기";
           persistState();
         }
 
@@ -1241,8 +1156,6 @@ function createWebviewHtml({ cspSource, nonce }) {
           errors.textContent = snapshotErrors
             .map((error) => (error.workUnitId ? error.workUnitId + ": " : "") + error.message)
             .join("\\n");
-          updatedLabel.textContent =
-            "갱신 " + new Date(snapshot.generatedAt).toLocaleString("ko-KR");
           kanbanWorkspace.setAttribute("aria-busy", "false");
         }
 
@@ -1271,15 +1184,11 @@ function createWebviewHtml({ cspSource, nonce }) {
           });
         }
 
-        for (const column of kanbanColumns) {
-          const toggle = column.querySelector('[data-kanban-column-toggle]');
-          toggle.addEventListener("click", () => {
-            setKanbanColumnCollapsed(
-              column.dataset.kanbanColumn,
-              !column.classList.contains("is-collapsed"),
-            );
-          });
+        kanbanVisibilityToggle.addEventListener("click", () => {
+          setKanbanOpen(!state.kanbanOpen);
+        });
 
+        for (const column of kanbanColumns) {
           column.addEventListener("dragover", (event) => {
             const allowedTargets = dragState?.allowedTargets || new Set();
             if (allowedTargets.has(column.dataset.kanbanColumn)) {
@@ -1325,7 +1234,6 @@ function createWebviewHtml({ cspSource, nonce }) {
             kanbanWorkspace.setAttribute("aria-busy", "false");
             errors.hidden = false;
             errors.textContent = message.error?.message || "Kanban을 불러오지 못했습니다.";
-            updatedLabel.textContent = "갱신 실패";
           } else if (message.type === "kanban.transitionPending") {
             pendingWorkUnits.add(message.workUnitId);
             notice.textContent =
@@ -1404,12 +1312,7 @@ function createWebviewHtml({ cspSource, nonce }) {
         });
 
         activateTab(knownTabs.has(state.selectedTab) ? state.selectedTab : "dashboard");
-        for (const column of kanbanColumns) {
-          setKanbanColumnCollapsed(
-            column.dataset.kanbanColumn,
-            state.collapsedKanbanColumns.includes(column.dataset.kanbanColumn),
-          );
-        }
+        setKanbanOpen(state.kanbanOpen);
         vscode.postMessage({ type: "kanban.ready" });
         vscode.postMessage({ type: "artifact.ready" });
       })();
