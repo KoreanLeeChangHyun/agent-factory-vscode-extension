@@ -1,0 +1,31 @@
+{
+  "id": "human-review",
+  "title": "Human Review",
+  "content": [
+    {
+      "id": "HUMAN-CHECKLIST-001",
+      "kind": "human-checklist",
+      "content": [
+        "여러 상태 칼럼이 기본 칸반으로 동시에 보이는지 확인한다.",
+        "각 칼럼 열기·닫기와 상태 복원이 의도대로인지 확인한다.",
+        "상태 탭, 수동 새로 고침, 중복 Kanban 제목과 바깥 스크롤이 없는지 확인한다.",
+        "DnD와 Move가 필요한 카드에서 정상인지 확인한다.",
+        "검토 후 승인 또는 rework를 결정하고 재배포는 별도로 결정한다."
+      ]
+    },
+    {
+      "id": "HUMAN-REVIEW-METHOD-001",
+      "kind": "human-review-method",
+      "content": "890x950 실제 Workspace Webview 화면과 좁고 넓은 viewport 캡처에서 다중 칼럼, 열기·닫기, 중복·불필요 UI 부재와 scroll 경계를 확인한 뒤 승인 또는 rework를 결정한다."
+    },
+    {
+      "id": "HUMAN-REVIEW-STATUS",
+      "kind": "human-review-result",
+      "content": "Human 검토 대기",
+      "attributes": {
+        "status": "pending"
+      }
+    }
+  ],
+  "subsections": []
+}
