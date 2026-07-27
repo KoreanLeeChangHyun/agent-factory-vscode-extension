@@ -1,0 +1,43 @@
+Work Unit: agent-factory-extension-tab-header-web-alignment
+Revision: 1
+Attempt: 1
+Invocation: 019fa3ec-f5ab-7753-89c2-f4247a0ca348
+Execution target head: 734f4958ecc1d22b6337c94630d9ce39624cc1b2
+
+Reference evidence
+- .agent-factory/intakes/agent-factory-extension-tab-header-web-alignment/blocks/evidence/web-shell-layout.css
+- Web tab row: 40px
+- Web selected header row: 32px
+
+TDD RED
+- Command: cd agents && node --test test/unit/chatView.test.js
+- Result: exit 1; 6 passed, 1 failed because .mode-tab still used min-height: 34px instead of 40px.
+- Command: cd workspace && node --test test/unit/webviewShell.test.js
+- Result: exit 1; geometry assertion failed because .workspace-tab still used min-height: 34px instead of 40px.
+
+Implementation
+- agents/src/chatView.js: .mode-tab 34px -> 40px; .session-header 44px -> 32px.
+- workspace/src/webviewShell.js: .workspace-tab 34px -> 40px; .selected-header 44px -> 32px.
+- No DOM, visible text, SVG, event, keyboard, state, or data-contract line changed.
+
+Verification
+- Command: cd agents && npm run check
+- Result: exit 0; syntax passed; unit tests 24/24 passed; integration tests 1/1 passed.
+- Command: cd workspace && npm run check
+- Result: exit 0; syntax passed; unit tests 29/29 passed.
+- Command: git diff --check
+- Result: exit 0.
+- Initial command: cd agents && npm run test:e2e
+- Initial result: exit 1 before launch because @vscode/test-electron was not installed in the dedicated worktree.
+- Recovery: cd agents && npm ci --ignore-scripts
+- Recovery result: exit 0; 310 packages installed; audit reported 0 vulnerabilities.
+- Retried command: cd agents && npm run test:e2e
+- Retried result: exit 0 on VS Code 1.129.1; development Agents and Workspace extensions loaded; Extension Host exited 0.
+
+AI review
+- Delivery changes are limited to the two implementation files and three regression-test files named by the Work Unit.
+- Both extensions use the same 40px tab and 32px selected-header minimum heights from the stored Web evidence.
+- The delivery diff contains only four implementation value replacements and six assertion-line changes.
+- Existing inline SVG markup, accessible labels, DOM structure, visible text, event handlers, keyboard handlers, and state code are unchanged.
+- No Web runtime or source dependency was added.
+- Remaining decision: Human visual review, approval or rework, integration, installation, cleanup, push, and PR promotion.

@@ -5,10 +5,24 @@
     {
       "id": "REPORT-RESULT-001",
       "kind": "report-result",
-      "content": "실행 전",
+      "content": "Agents와 Workspace의 상단 탭을 40px로 확대하고 선택 헤더를 32px로 축소해 저장된 Web 참조 geometry로 통일했다. TDD RED를 확인한 뒤 최소 구현을 적용했으며 두 package check와 Agents Extension Host E2E가 통과했다.",
       "attributes": {
-        "verificationResult": "not-run",
-        "evidence": []
+        "verificationResult": "pass",
+        "executionTarget": {
+          "contractVersion": "1.0.0",
+          "invocationId": "019fa3ec-f5ab-7753-89c2-f4247a0ca348",
+          "headCommit": "734f4958ecc1d22b6337c94630d9ce39624cc1b2",
+          "revision": 1,
+          "attempt": 1
+        },
+        "implementationCommit": "e8e1f4840338449511e952ca91d0e143fe9f6a48",
+        "evidence": [
+          "blocks/evidence/verification.txt"
+        ],
+        "remainingRisks": [
+          "실제 설치 또는 실행 화면의 시각적 균형은 Human review가 필요하다.",
+          "승인 또는 재작업, integration, 설치, cleanup, push와 PR promotion은 각각 Human 결정으로 남아 있다."
+        ]
       }
     }
   ],

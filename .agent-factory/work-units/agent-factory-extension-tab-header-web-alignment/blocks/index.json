@@ -1,3 +1,11 @@
 {
-  "blocks": []
+  "blocks": [
+    {
+      "path": "blocks/evidence/verification.txt",
+      "mediaType": "text/plain",
+      "description": "탭 및 선택 헤더 Web geometry TDD, 검증과 AI Review evidence",
+      "sha256": "dbab99a56c1525e6df557eeca212ebf190c2f9c249b075fc19a6f30c2d294e77",
+      "sizeBytes": 2420
+    }
+  ]
 }
