@@ -1,0 +1,34 @@
+{
+  "id": "request-and-goal",
+  "title": "Request and Goal",
+  "content": [
+    {
+      "id": "HUMAN-REQUEST-001",
+      "kind": "human-request",
+      "content": {
+        "request": "탭 높이는 키우고 탭 아래 헤더는 줄이며 Workspace와 Agents를 모두 통일한다.",
+        "clarification": "Web 기준 geometry가 좋다는 Human 확인을 적용한다."
+      },
+      "blockRef": "blocks/evidence/current-tab-header.png"
+    },
+    {
+      "id": "DESIRED-OUTCOME-001",
+      "kind": "desired-outcome",
+      "content": {
+        "outcome": "Agents와 Workspace의 상단 탭 및 선택 헤더가 Web 기준과 동일한 두 행 geometry를 제공한다."
+      }
+    },
+    {
+      "id": "SUCCESS-CRITERION-001",
+      "kind": "success-criterion",
+      "content": {
+        "criteria": [
+          "Agents와 Workspace의 상단 탭 높이가 서로 동일하고 Web 기준과 일치한다.",
+          "Agents와 Workspace의 선택 헤더 높이가 서로 동일하고 Web 기준과 일치한다.",
+          "탭과 선택 헤더 외의 구조와 동작은 유지된다."
+        ]
+      }
+    }
+  ],
+  "subsections": []
+}

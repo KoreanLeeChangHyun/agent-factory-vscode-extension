@@ -1,0 +1,79 @@
+{
+  "id": "evidence-and-findings",
+  "title": "Evidence and Findings",
+  "content": [
+    {
+      "id": "INTERNAL-EVIDENCE-001",
+      "kind": "internal-evidence",
+      "content": {
+        "kind": "code",
+        "source": "agents/src/chatView.js; workspace/src/webviewShell.js; agents/test/unit/chatView.test.js; workspace/test/unit/webviewShell.test.js",
+        "method": "repository inspection",
+        "findings": [
+          "Agents mode tab과 Workspace tab은 동일한 현재 최소 높이를 사용한다.",
+          "Agents session header와 Workspace selected header는 동일한 현재 최소 높이를 사용한다.",
+          "대응 단위 테스트가 Agents의 현재 두 높이를 직접 고정하며 Workspace 테스트는 tab 및 selected header 구조를 고정한다."
+        ],
+        "interpretations": [
+          "두 구현과 대응 테스트를 한 Work Unit에서 함께 변경해야 통일 상태를 검증할 수 있다."
+        ],
+        "limitations": [
+          "실제 설치본 시각 검토는 구현 이후 Human Review에서 수행해야 한다."
+        ]
+      }
+    },
+    {
+      "id": "INTERNAL-EVIDENCE-WEB-001",
+      "kind": "internal-evidence",
+      "content": {
+        "kind": "code",
+        "source": "blocks/evidence/web-shell-layout.css",
+        "method": "Web source inspection",
+        "findings": [
+          "Web chat panel과 workspace panel은 동일한 상단 탭 행과 선택 헤더 행 geometry를 사용한다.",
+          "Web의 상단 탭 행은 현재 확장보다 크고 선택 헤더 행은 현재 확장보다 작다."
+        ],
+        "interpretations": [
+          "Human이 요청한 방향과 Web 기준 적용 결정이 일치한다."
+        ],
+        "limitations": [
+          "Web 소스는 참조 근거이며 VS Code 확장의 런타임 의존성으로 추가하지 않는다."
+        ]
+      },
+      "blockRef": "blocks/evidence/web-shell-layout.css"
+    },
+    {
+      "id": "INTERVIEW-001",
+      "kind": "interview",
+      "content": {
+        "question": "상단 탭과 선택 헤더 높이를 어느 기준으로 조정할지 결정",
+        "choices": [
+          "A: Web 기준 geometry로 Agents와 Workspace 모두 통일",
+          "B: 현재 확장에서 미세 조정",
+          "C: 현재 높이 유지"
+        ],
+        "recommendation": "A",
+        "rationale": "확인된 Web source와 Human이 요청한 방향을 동시에 만족하며 두 확장의 geometry drift를 방지한다.",
+        "answer": "A",
+        "state": "answered"
+      }
+    },
+    {
+      "id": "INTERVIEW-002",
+      "kind": "interview",
+      "content": {
+        "question": "검증된 기존 Specification 정합성 변경을 Work Unit 기준점 전에 커밋할지 결정",
+        "choices": [
+          "A: 기존 Specification 변경 4개 파일만 커밋",
+          "B: 커밋 없이 중단",
+          "C: Specification 변경 철회"
+        ],
+        "recommendation": "A",
+        "rationale": "별도 Specification 생성은 필요하지 않지만 기존 canonical Specification이 해당 UI 요구사항을 소유하므로 accepted change를 정렬하고 실행 기준점에 포함해야 한다.",
+        "answer": "A",
+        "state": "answered"
+      }
+    }
+  ],
+  "subsections": []
+}

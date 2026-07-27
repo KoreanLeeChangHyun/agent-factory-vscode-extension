@@ -1,0 +1,42 @@
+{
+  "id": "decisions-and-open-items",
+  "title": "Decisions and Open Items",
+  "content": [
+    {
+      "id": "DECISION-001",
+      "kind": "decision-status",
+      "content": {
+        "decision": "Web의 확인된 상단 탭 및 선택 헤더 geometry를 Agents와 Workspace 모두에 동일 적용한다.",
+        "rationale": "Human이 Web 기준을 확인한 뒤 양쪽 통일을 명시했다.",
+        "status": "accepted"
+      }
+    },
+    {
+      "id": "OPEN-ITEMS-STATUS-001",
+      "kind": "open-items-status",
+      "content": {
+        "status": "resolved",
+        "blocking": [],
+        "nonBlocking": []
+      }
+    },
+    {
+      "id": "RISK-001",
+      "kind": "risk",
+      "content": {
+        "risk": "한쪽 구현이나 테스트만 바뀌면 Agents와 Workspace 사이 geometry drift가 발생한다.",
+        "mitigation": "두 구현과 대응 테스트를 하나의 Work Unit 범위와 검증 명령에 포함한다."
+      }
+    },
+    {
+      "id": "DECISION-002",
+      "kind": "decision-status",
+      "content": {
+        "decision": "기존 agent-factory-workspace-requirements Specification의 정합성 변경 4개 파일을 Intake checkpoint 전에 별도 커밋한다.",
+        "rationale": "Human이 A를 선택했다. Specification 생성은 필수가 아니지만 기존 관련 Specification의 accepted requirement 정렬은 필요하다.",
+        "status": "accepted"
+      }
+    }
+  ],
+  "subsections": []
+}

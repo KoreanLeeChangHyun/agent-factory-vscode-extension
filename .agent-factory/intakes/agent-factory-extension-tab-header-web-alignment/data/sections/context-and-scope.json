@@ -1,0 +1,42 @@
+{
+  "id": "context-and-scope",
+  "title": "Context and Scope",
+  "content": [
+    {
+      "id": "CONTEXT-001",
+      "kind": "context",
+      "content": {
+        "facts": [
+          "현재 Agents와 Workspace는 서로 같은 탭 및 선택 헤더 높이를 사용한다.",
+          "현재 확장 높이는 Web의 확인된 두 행 geometry와 다르다.",
+          "Human은 Web 기준 적용과 두 확장 통일을 확인했다."
+        ]
+      }
+    },
+    {
+      "id": "SCOPE-001",
+      "kind": "scope",
+      "content": {
+        "items": [
+          "agents/src/chatView.js의 mode tab 및 session header geometry",
+          "workspace/src/webviewShell.js의 workspace tab 및 selected header geometry",
+          "두 영역의 대응 단위 및 통합 회귀 테스트"
+        ]
+      }
+    },
+    {
+      "id": "OUT-OF-SCOPE-001",
+      "kind": "out-of-scope",
+      "content": {
+        "items": [
+          "탭 이름과 순서 변경",
+          "아이콘과 보이는 문구 변경",
+          "DOM 구조와 이벤트 및 키보드 동작 변경",
+          "본문과 composer 및 Kanban 내부 layout 변경",
+          "Web 소스 변경"
+        ]
+      }
+    }
+  ],
+  "subsections": []
+}

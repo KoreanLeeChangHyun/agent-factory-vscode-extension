@@ -1,0 +1,45 @@
+{
+  "id": "work-unit-basis",
+  "title": "Work Unit Basis",
+  "content": [
+    {
+      "id": "SPECIFICATION-IMPACT-001",
+      "kind": "specification-impact",
+      "content": {
+        "status": "aligned",
+        "reason": "관련 Specification에 Agents와 Workspace의 공통 Web 참조 geometry 규칙과 acceptance criterion을 추가하고 manager validation을 완료했다.",
+        "target": ".agent-factory/specifications/agent-factory-workspace-requirements"
+      },
+      "attributes": {
+        "status": "aligned"
+      }
+    },
+    {
+      "id": "BASIS-001",
+      "kind": "work-unit-basis",
+      "content": {
+        "title": "Agents와 Workspace 탭 헤더 Web geometry 통일",
+        "goal": "두 VS Code 확장의 상단 탭과 선택 헤더를 확인된 Web 기준으로 통일한다.",
+        "scope": [
+          "agents/src/chatView.js와 대응 테스트",
+          "workspace/src/webviewShell.js와 대응 테스트",
+          "관련 Specification의 geometry 정합성 문구"
+        ],
+        "expectedOutputs": [
+          "두 확장의 통일된 tab 및 selected header geometry",
+          "명시적 geometry 회귀 테스트",
+          "집중 검증 및 Human 시각 검토 방법"
+        ],
+        "verification": [
+          "Agents 단위 및 통합 테스트",
+          "Workspace 단위 테스트와 package check",
+          "source geometry 비교와 git diff check"
+        ],
+        "dependencies": [
+          "Human이 확정한 Web 기준 적용과 양쪽 통일 결정"
+        ]
+      }
+    }
+  ],
+  "subsections": []
+}
