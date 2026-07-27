@@ -1,0 +1,37 @@
+Workspace Kanban 구조 수정 로컬 VSIX 배포
+
+Human decision
+- request: 배포
+- action: current VS Code Server에 Workspace VSIX force install
+
+Source
+- branch: main
+- main commit before deployment record: c1d0186a0d8268a8fed430d173cec0f840f6ac79
+- workspace/src/webviewShell.js SHA-256: c25872f7000ec3aa69fbfcb7a6fbe661d0e03f6aeae8702a160cc9bc5faff020
+
+Package
+- path: workspace/dist/agent-factory-workspace-linux-x64.vsix
+- target: linux-x64
+- publisher: agent-factory
+- name: agent-factory-workspace
+- version: 0.0.1
+- size: 28566 bytes
+- SHA-256: 9cfb9a32c302ca482acf0aed7174135280b9e3bbaeeae1becca114229df6a5cf
+- packaged extension/src/webviewShell.js SHA-256: c25872f7000ec3aa69fbfcb7a6fbe661d0e03f6aeae8702a160cc9bc5faff020
+
+Installation
+- command: code --install-extension /home/deus/workspace/agent-factory/vscode-extension/workspace/dist/agent-factory-workspace-linux-x64.vsix --force
+- result: success
+- installed extension: agent-factory.agent-factory-workspace@0.0.1
+- installed path: /home/deus/.vscode-server/extensions/agent-factory.agent-factory-workspace-0.0.1
+- installed src/webviewShell.js SHA-256: c25872f7000ec3aa69fbfcb7a6fbe661d0e03f6aeae8702a160cc9bc5faff020
+- installed source cmp: match
+
+Verification
+- npm run check after main integration: pass, unit 30/30
+- VSIX identity and source hash: pass
+- installed identity and source hash: pass
+
+Runtime boundary
+- VS Code window reload: not performed
+- Extension Host restart: not performed

@@ -22,6 +22,13 @@
       "sizeBytes": 112151
     },
     {
+      "path": "blocks/evidence/kanban-local-vsix-deployment.txt",
+      "mediaType": "text/plain",
+      "description": "Human-approved Workspace linux-x64 VSIX package, force install, installed source hash and runtime-boundary evidence",
+      "sha256": "70eaffef7277375675c0c86c05a997c94cc1e074a1350db2e60ec81b0e903d8f",
+      "sizeBytes": 1470
+    },
+    {
       "path": "blocks/evidence/kanban-structure-verification.txt",
       "mediaType": "text/plain",
       "description": "Specification, unit, manager, Extension Host E2E, viewport와 VSIX package 검증 결과",
