@@ -1,0 +1,42 @@
+Work Unit: agent-factory-extension-local-vsix-deployment
+Execution head: 6b921704a5f6720540b857569d3869a649c78083
+
+Quality gates
+- agents: npm run check
+  Result: exit 0; unit 24 passed, integration 1 passed.
+- workspace: npm run check
+  Result: exit 0; unit 29 passed.
+
+Packaging
+- agents: npm run package:linux-x64
+  Result: exit 0; dist/agent-factory-agents-linux-x64.vsix generated.
+- agents: npm run verify:vsix
+  Result: exit 0; 19 files; bundled codex-cli 0.145.0 verified.
+- workspace: ../agents/node_modules/.bin/vsce package --allow-missing-repository --target linux-x64 --out dist/agent-factory-workspace-linux-x64.vsix
+  Result: exit 0 with @vscode/vsce 3.9.2; dist/agent-factory-workspace-linux-x64.vsix generated.
+- Both packaging commands emitted the non-blocking warning: LICENSE, LICENSE.md, or LICENSE.txt not found.
+
+VSIX integrity
+- /home/deus/workspace/agent-factory/vscode-extension/.agent-factory/worktree/agent-factory-extension-local-vsix-deployment/agents/dist/agent-factory-agents-linux-x64.vsix
+  Size: 135986653 bytes
+  SHA-256: d37ab58b4bf562c0f068843a4700473102731a871004791e621efd8420ce4f41
+  Identity from extension/package.json: agent-factory.agent-factory-agents@0.0.1
+- /home/deus/workspace/agent-factory/vscode-extension/.agent-factory/worktree/agent-factory-extension-local-vsix-deployment/workspace/dist/agent-factory-workspace-linux-x64.vsix
+  Size: 28279 bytes
+  SHA-256: 07f986051f40388e1aff55da3d5bc1a7393b0ffac636061013acfb8386a5bcf0
+  Identity from extension/package.json: agent-factory.agent-factory-workspace@0.0.1
+
+Local installation
+- code --install-extension <absolute agents VSIX path> --force
+  Result: exit 0; 'agent-factory-agents-linux-x64.vsix' 확장이 설치되었습니다.
+- code --install-extension <absolute workspace VSIX path> --force
+  Result: exit 0; 'agent-factory-workspace-linux-x64.vsix' 확장이 설치되었습니다.
+- code --list-extensions --show-versions
+  agent-factory.agent-factory-agents@0.0.1
+  agent-factory.agent-factory-workspace@0.0.1
+
+Scope verification
+- git diff --name-only -- agents workspace
+  Result: no output.
+- VS Code window reload: not performed.
+- VS Code or Agent Factory runtime restart: not performed.
