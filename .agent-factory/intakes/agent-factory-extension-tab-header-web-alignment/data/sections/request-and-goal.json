@@ -28,6 +28,14 @@
           "탭과 선택 헤더 외의 구조와 동작은 유지된다."
         ]
       }
+    },
+    {
+      "id": "HUMAN-FEEDBACK-002",
+      "kind": "human-request",
+      "content": {
+        "request": "Workspace도 Agents와 실제 렌더링 높이가 동등해야 한다.",
+        "clarification": "부모 선언만 같고 실제 높이가 다른 결과는 승인된 통일 요구사항을 충족하지 않는다."
+      }
     }
   ],
   "subsections": []

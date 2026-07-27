@@ -1,6 +1,6 @@
 {
   "schemaVersion": "2.0.0",
-  "documentVersion": "1.0.18",
+  "documentVersion": "1.0.24",
   "id": "agent-factory-extension-tab-header-web-alignment",
   "artifactType": "intake",
   "projectId": "agent-factory-workspace",
@@ -9,7 +9,7 @@
     "status": "ready"
   },
   "createdAt": "2026-07-27T13:57:48+00:00",
-  "updatedAt": "2026-07-27T14:00:20+00:00",
+  "updatedAt": "2026-07-27T15:22:29+00:00",
   "language": "ko",
   "theme": "vscode-native",
   "provenance": {
@@ -19,7 +19,7 @@
   },
   "relations": [],
   "readiness": {
-    "reviewedAt": "2026-07-27T23:00:19+09:00",
+    "reviewedAt": "2026-07-27T15:22:21Z",
     "contractValid": true,
     "evidenceComplete": true,
     "requirementsComplete": true,

@@ -73,6 +73,27 @@
         "answer": "A",
         "state": "answered"
       }
+    },
+    {
+      "id": "INTERNAL-EVIDENCE-CORRECTION-001",
+      "kind": "internal-evidence",
+      "content": {
+        "kind": "code-and-runtime",
+        "source": "workspace/src/webviewShell.js; workspace/test/unit/webviewShell.test.js; installed Workspace extension; Web shell-layout.css",
+        "method": "repository, VSIX and installed-extension comparison",
+        "findings": [
+          "Workspace selected header는 최소 높이를 32로 선언하지만 내부 Kanban board tab이 최소 높이 43을 요구한다.",
+          "내부 자식 높이 때문에 Workspace selected header의 실제 렌더링 높이는 Agents header와 동등한 32가 될 수 없다.",
+          "기존 회귀 테스트는 부모의 32 선언만 검사하고 자식의 43 충돌을 검사하지 않는다.",
+          "Web 기준은 두 번째 행의 실제 높이를 32로 고정한다."
+        ],
+        "interpretations": [
+          "Workspace Kanban board tab 높이와 회귀 테스트를 함께 수정해야 기존 Human 요구사항을 실제 렌더링에서 충족한다."
+        ],
+        "limitations": [
+          "수정 설치 후 화면 반영에는 VS Code window reload가 필요할 수 있다."
+        ]
+      }
     }
   ],
   "subsections": []
