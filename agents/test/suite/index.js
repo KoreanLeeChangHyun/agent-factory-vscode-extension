@@ -61,8 +61,8 @@ function verifyChatViewContract() {
     nonce: "e2e-nonce",
   });
 
-  assert.match(html, /\.mode-tab\s*\{[^}]*min-height:\s*34px;/s);
-  assert.match(html, /\.session-header\s*\{[^}]*min-height:\s*44px;/s);
+  assert.match(html, /\.mode-tab\s*\{[^}]*min-height:\s*40px;/s);
+  assert.match(html, /\.session-header\s*\{[^}]*min-height:\s*32px;/s);
   assert.match(html, /class="composer-card"/);
   assert.match(html, /class="composer-action"/);
   assert.match(html, /turn\.className = "message-turn"/);

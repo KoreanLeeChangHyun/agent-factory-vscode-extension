@@ -74,13 +74,13 @@ test("Chat view aligns mode tabs and the session header with Workspace geometry"
   assert.match(html, /body\s*\{[^}]*margin:\s*0;[^}]*padding:\s*0;/s);
   assert.match(html, /\.mode-tabs\s*\{[^}]*padding:\s*0;/s);
   assert.match(html, /\.mode-tab\s*\{[^}]*position:\s*relative;/s);
-  assert.match(html, /\.mode-tab\s*\{[^}]*min-height:\s*34px;/s);
+  assert.match(html, /\.mode-tab\s*\{[^}]*min-height:\s*40px;/s);
   assert.match(
     html,
     /\.mode-tab-indicator\s*\{[^}]*right:\s*8px;[^}]*bottom:\s*0;[^}]*left:\s*8px;[^}]*height:\s*2px;/s,
   );
   assert.match(html, /class="mode-tab-indicator" aria-hidden="true"/);
-  assert.match(html, /\.session-header\s*\{[^}]*min-height:\s*44px;/s);
+  assert.match(html, /\.session-header\s*\{[^}]*min-height:\s*32px;/s);
   assert.match(html, /\.mode-panel\s*\{[^}]*padding:\s*0;/s);
 });
 

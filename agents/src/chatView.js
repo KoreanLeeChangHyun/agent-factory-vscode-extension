@@ -113,7 +113,7 @@ function createChatViewHtml({ cspSource, nonce }) {
         position: relative;
         display: flex;
         min-width: 0;
-        min-height: 34px;
+        min-height: 40px;
         align-items: center;
         justify-content: center;
         gap: 6px;
@@ -174,7 +174,7 @@ function createChatViewHtml({ cspSource, nonce }) {
       .session-header {
         display: flex;
         min-width: 0;
-        min-height: 44px;
+        min-height: 32px;
         border-bottom: 1px solid var(--vscode-panel-border);
         background: var(--vscode-editor-background);
       }

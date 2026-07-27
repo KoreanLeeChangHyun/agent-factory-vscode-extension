@@ -162,7 +162,9 @@ test("shell fills the available width with equal theme-aware tabs and surfaces",
   assert.match(html, /\.workspace-tabs\s*\{[^}]*padding:\s*0;/s);
   assert.match(html, /\.workspace-tab\s*\{[^}]*flex:\s*1 1 0;/s);
   assert.match(html, /\.workspace-tab\s*\{[^}]*min-width:\s*0;/s);
+  assert.match(html, /\.workspace-tab\s*\{[^}]*min-height:\s*40px;/s);
   assert.match(html, /\.workspace-panel\s*\{[^}]*padding:\s*0;/s);
+  assert.match(html, /\.selected-header\s*\{[^}]*min-height:\s*32px;/s);
   assert.match(
     html,
     /\.selected-header\s*\{[^}]*padding:\s*0 clamp\(16px,\s*2\.5vw,\s*32px\);/s,

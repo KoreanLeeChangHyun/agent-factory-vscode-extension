@@ -203,7 +203,7 @@ function createWebviewHtml({ cspSource, nonce }) {
         position: relative;
         flex: 1 1 0;
         min-width: 0;
-        min-height: 34px;
+        min-height: 40px;
         padding: 6px 12px 8px;
         border: 0;
         color: var(--vscode-tab-inactiveForeground);
@@ -241,7 +241,7 @@ function createWebviewHtml({ cspSource, nonce }) {
 
       .selected-header {
         display: flex;
-        min-height: 44px;
+        min-height: 32px;
         align-items: center;
         gap: clamp(12px, 2vw, 24px);
         min-width: 0;
