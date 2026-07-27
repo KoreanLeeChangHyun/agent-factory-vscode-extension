@@ -34,6 +34,27 @@
           "agent-factory-workspace-requirements Specification 정합성"
         ]
       }
+    },
+    {
+      "id": "BASIS-002",
+      "kind": "work-unit-basis",
+      "content": {
+        "workUnitId": "agent-factory-workspace-kanban-board-visibility-and-spacing",
+        "goal": "Workspace Kanban의 전체 보드 visibility 컨트롤과 zero-gap 레이아웃을 구현한다.",
+        "scope": [
+          "갱신 시각 제거와 해당 위치의 전체 보드 열기·닫기",
+          "닫힌 상태에서 보드 전체 숨김 및 상태 복원",
+          "열별 토글 제거",
+          "칸반 좌우 padding 및 열 사이 gap 제거",
+          "Specification 정합성과 회귀 검증"
+        ],
+        "expectedOutputs": [
+          "workspace/src/webviewShell.js",
+          "workspace/test/unit/webviewShell.test.js",
+          "workspace/test/suite/index.js",
+          "agent-factory-workspace-requirements"
+        ]
+      }
     }
   ],
   "subsections": []

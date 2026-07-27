@@ -21,14 +21,12 @@
       "id": "kanban-operations-verification",
       "kind": "verification",
       "content": [
-        "agent-factory-workspace-kanban-viewer와 agent-factory-workspace-kanban-structure-correction Intake 및 Work Unit basis 추적성 검증",
-        "reader, message contract, 6개 동시 상태 열, 열 토글, count, watcher와 reconnect 단위·통합 검증",
-        "상태 탭, 단일 선택 보드, 중복 Kanban 선택 헤더, 수동 Kanban 새로 고침, 검색·필터 DOM과 처리 로직 부재 검증",
-        "890x950 viewport에서 Webview 바깥 스크롤 부재와 열린 열의 독립 카드 스크롤 검증",
-        "접힘 상태 저장·복원과 SVG disclosure 접근성 검증",
+        "agent-factory-workspace-kanban-structure-correction Intake의 BASIS-002와 Work Unit 추적성 검증",
+        "reader, message contract, 6개 동시 상태 열, 전체 보드 visibility state, count, watcher와 reconnect 단위·통합 검증",
+        "갱신 시각, 열별 toggle, 상태 탭, 단일 선택 보드, 중복 Kanban 선택 헤더, 수동 Kanban 새로 고침, 검색·필터 DOM과 처리 로직 부재 검증",
+        "890x950 viewport에서 좌우 padding 0, 열 사이 gap 0과 Webview 바깥 스크롤 부재 검증",
+        "전체 보드 닫힘 상태 저장·복원과 상단 컨트롤 접근성 검증",
         "manager transition, capability, 실제 열 drop target, drag·keyboard negative path 검증",
-        "Goal, checkpoint, worktree, execution progress·failure·recovery 통합 검증",
-        "Human review, rework, integration receipt와 PR 승인·실패 경계 검증",
         "VS Code Extension Host E2E와 Human Kanban workflow 검토"
       ]
     },

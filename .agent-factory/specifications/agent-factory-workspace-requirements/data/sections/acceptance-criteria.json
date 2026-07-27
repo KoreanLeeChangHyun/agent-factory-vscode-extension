@@ -29,14 +29,13 @@
       "kind": "acceptance-criterion",
       "content": [
         "6개 canonical lifecycle 상태 열이 하나의 기본 Kanban 보드에 동시에 표시되고 상태 탭 또는 단일 선택 보드 UI가 존재하지 않는다.",
-        "각 열 헤더 토글로 열을 독립적으로 접고 펼칠 수 있으며 접힘 상태가 Webview 재연결 후 복원된다.",
-        "890x950 viewport에서 Kanban 본문은 가용 영역에 맞고 Webview 바깥 스크롤이 없으며 열린 열의 카드 목록만 독립적으로 스크롤된다.",
+        "갱신 시각 정보가 없고 해당 상단 위치의 컨트롤로 Kanban 보드 전체를 열고 닫으며 상태가 Webview 재연결 후 복원된다.",
+        "닫힌 상태에서 6개 상태 열을 포함한 보드 전체가 보이지 않고 각 열 헤더에는 개별 열기·닫기 컨트롤이 없다.",
+        "Kanban 본문 좌우 padding과 열 사이 gap은 0이며 890x950 viewport에서 Webview 바깥 스크롤이 없다.",
         "Kanban 탭에서 중복 선택 헤더와 수동 새로 고침 컨트롤이 존재하지 않고 filesystem watcher 자동 갱신과 reconnect는 동작한다.",
         "제목·id 검색과 필터 UI 및 저장 상태가 존재하지 않는다.",
         "허용된 실제 상태 열만 dragover와 Move 메뉴에서 활성화되며 manager가 성공한 뒤 카드 위치가 확정된다.",
         "상태 변경은 manager를 통과하고 실패 시 부분 canonical 변경이 남지 않는다.",
-        "실행은 matching Goal, checkpoint와 dedicated worktree를 사용하고 진행·오류·복구 상태를 표시한다.",
-        "Human review, rework, integration과 PR은 각각 별도 확인과 결과 evidence를 가진다.",
         "단위, manager 통합, viewport E2E, 접근성·테마·보안과 Human 검토가 통과한다."
       ]
     },
