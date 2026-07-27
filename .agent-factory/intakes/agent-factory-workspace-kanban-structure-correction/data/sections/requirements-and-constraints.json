@@ -1,0 +1,42 @@
+{
+  "id": "requirements-and-constraints",
+  "title": "Requirements and Constraints",
+  "content": [
+    {
+      "id": "REQUIREMENT-001",
+      "kind": "requirement",
+      "content": {
+        "requirements": [
+          "Kanban은 여러 lifecycle 칼럼을 동시에 표시하는 기본 보드 구조를 사용한다.",
+          "상태 칼럼을 tablist 또는 tab으로 구현하지 않는다.",
+          "각 칼럼은 열기·닫기를 제공하고 상태를 복원한다.",
+          "수동 새로 고침과 중복 Kanban 제목을 제거한다.",
+          "자동 watcher와 reconnect 갱신은 유지한다."
+        ]
+      }
+    },
+    {
+      "id": "CONSTRAINT-001",
+      "kind": "constraint",
+      "content": {
+        "constraints": [
+          "canonical lifecycle와 transition capability 계약을 변경하지 않는다.",
+          "기존 미커밋 Agent Factory 산출물을 덮어쓰지 않는다.",
+          "Webview 바깥 스크롤을 만들지 않는다."
+        ]
+      }
+    },
+    {
+      "id": "ACCEPTANCE-001",
+      "kind": "acceptance-criterion",
+      "content": {
+        "criteria": [
+          "890x950에서 여러 칼럼, 열기·닫기, DnD와 카드가 동작한다.",
+          "상태 탭, selectedKanbanBoard, 수동 새로 고침, 중복 Kanban 제목과 바깥 스크롤이 없다.",
+          "단위, manager integration과 Extension Host E2E가 통과한다."
+        ]
+      }
+    }
+  ],
+  "subsections": []
+}

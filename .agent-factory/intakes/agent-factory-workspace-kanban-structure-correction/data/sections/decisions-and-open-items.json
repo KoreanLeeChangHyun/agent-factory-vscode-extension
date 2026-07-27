@@ -1,0 +1,35 @@
+{
+  "id": "decisions-and-open-items",
+  "title": "Decisions and Open Items",
+  "content": [
+    {
+      "id": "DECISION-001",
+      "kind": "decision-status",
+      "content": {
+        "decision": "단일 보드 탭 구조를 폐기하고 다중 칼럼 칸반과 칼럼 열기·닫기로 수정한다."
+      },
+      "attributes": {
+        "status": "accepted"
+      }
+    },
+    {
+      "id": "OPEN-ITEMS-STATUS-001",
+      "kind": "open-items-status",
+      "content": {
+        "status": "현재 수정 실행을 차단하는 열린 항목 없음"
+      },
+      "attributes": {
+        "blocking": false
+      }
+    },
+    {
+      "id": "RISK-001",
+      "kind": "risk",
+      "content": {
+        "risk": "다중 칼럼 복원 시 좁은 viewport에서 카드 가독성과 DnD target이 회귀할 수 있다.",
+        "mitigation": "실제 제보 viewport와 좁고 넓은 viewport에서 레이아웃 및 interaction을 검증한다."
+      }
+    }
+  ],
+  "subsections": []
+}
