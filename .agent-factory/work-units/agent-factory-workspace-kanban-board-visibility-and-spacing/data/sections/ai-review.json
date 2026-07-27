@@ -1,0 +1,28 @@
+{
+  "id": "ai-review",
+  "title": "AI Review",
+  "content": [
+    {
+      "id": "AI-CHECKLIST-001",
+      "kind": "ai-checklist",
+      "content": [
+        "갱신 시각을 제거했는가",
+        "상단 control이 board 전체만 열고 닫는가",
+        "열별 toggle과 collapsed column state가 완전히 제거됐는가",
+        "좌우 padding과 열 사이 gap이 0인가",
+        "DnD, watcher, reconnect와 accessibility를 보존했는가",
+        "검증 evidence가 실제 결과와 일치하는가"
+      ]
+    },
+    {
+      "id": "AI-REVIEW-STATUS",
+      "kind": "ai-review-result",
+      "content": "AI review 대기",
+      "attributes": {
+        "result": "pending",
+        "checklistResult": "pending"
+      }
+    }
+  ],
+  "subsections": []
+}
