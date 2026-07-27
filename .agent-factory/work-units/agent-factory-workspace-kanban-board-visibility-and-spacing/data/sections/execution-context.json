@@ -21,7 +21,7 @@
       "kind": "execution-state",
       "content": {
         "contractVersion": "1.0.0",
-        "state": "running",
+        "state": "review",
         "subject": {
           "algorithm": "gitCommit",
           "digest": "3c020cb7b0ee414fe8a2dcfab00fc105a8815982"
@@ -34,10 +34,40 @@
         ],
         "history": [],
         "progress": {
-          "completedSteps": [],
+          "completedSteps": [
+            "PLAN-001",
+            "PLAN-002",
+            "PLAN-003",
+            "PLAN-004"
+          ],
           "pendingStep": null,
-          "lastVerifiedHead": "3c020cb7b0ee414fe8a2dcfab00fc105a8815982",
-          "checkpoints": [],
+          "lastVerifiedHead": "e6f318b25c66b6f1028f845ddceff8c3a556ef70",
+          "checkpoints": [
+            {
+              "stepId": "PLAN-001",
+              "state": "completed",
+              "headCommit": "e6f318b25c66b6f1028f845ddceff8c3a556ef70",
+              "idempotencyKey": "kanban-board-visibility-spacing-PLAN-001-r1a1"
+            },
+            {
+              "stepId": "PLAN-002",
+              "state": "completed",
+              "headCommit": "e6f318b25c66b6f1028f845ddceff8c3a556ef70",
+              "idempotencyKey": "kanban-board-visibility-spacing-PLAN-002-r1a1"
+            },
+            {
+              "stepId": "PLAN-003",
+              "state": "completed",
+              "headCommit": "e6f318b25c66b6f1028f845ddceff8c3a556ef70",
+              "idempotencyKey": "kanban-board-visibility-spacing-PLAN-003-r1a1"
+            },
+            {
+              "stepId": "PLAN-004",
+              "state": "completed",
+              "headCommit": "e6f318b25c66b6f1028f845ddceff8c3a556ef70",
+              "idempotencyKey": "kanban-board-visibility-spacing-PLAN-004-r1a1"
+            }
+          ],
           "retry": {}
         },
         "recovery": {

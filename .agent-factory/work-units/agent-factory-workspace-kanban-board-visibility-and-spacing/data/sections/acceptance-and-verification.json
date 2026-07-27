@@ -40,10 +40,22 @@
     {
       "id": "QUALITY-STATUS",
       "kind": "quality-check",
-      "content": "실행 전 품질 검증 대기",
+      "content": "Human 요구사항, syntax, unit 30/30, manager 1/1, Extension Host E2E, open/closed viewport와 VSIX source hash 검증 통과",
       "attributes": {
-        "status": "planned",
-        "evidence": []
+        "status": "pass",
+        "executionTarget": {
+          "contractVersion": "1.0.0",
+          "invocationId": "codex-kanban-board-visibility-spacing-20260728-001",
+          "headCommit": "3c020cb7b0ee414fe8a2dcfab00fc105a8815982",
+          "revision": 1,
+          "attempt": 1
+        },
+        "implementationCommit": "e6f318b25c66b6f1028f845ddceff8c3a556ef70",
+        "evidence": [
+          "blocks/evidence/kanban-board-visibility-spacing-verification.txt",
+          "blocks/evidence/kanban-board-open-890x950.png",
+          "blocks/evidence/kanban-board-closed-890x950.png"
+        ]
       }
     }
   ],

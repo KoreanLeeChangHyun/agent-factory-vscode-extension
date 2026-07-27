@@ -1,0 +1,38 @@
+Workspace Kanban 전체 visibility 및 zero-gap 검증
+
+Execution target
+- implementation commit: e6f318b25c66b6f1028f845ddceff8c3a556ef70
+- branch: work-unit/agent-factory-workspace-kanban-board-visibility-and-spacing
+- revision: 1
+- attempt: 1
+
+Human requirements
+- 갱신 시각 제거: pass
+- 갱신 시각 위치의 전체 Kanban 열기·닫기: pass
+- 닫힌 상태에서 6개 열을 포함한 board 전체 숨김: pass
+- 열 헤더별 개별 toggle 제거: pass
+- Kanban 좌우 padding 0: pass
+- 열 사이 gap 0: pass
+
+Automated verification
+- initial TDD unit run: expected failure 3
+- npm run check: pass, unit 30/30
+- npm run test:manager: pass, 1/1
+- first npm run test:e2e after VS Code download: terminated 143
+- second npm run test:e2e: failed due test selector counting script query
+- corrected E2E assertion followed by npm run test:e2e: pass
+- git diff --check: pass
+- 890x950 open viewport render: pass
+- 890x950 closed viewport render: pass
+
+Package verification
+- VSIX path: /tmp/agent-factory-kanban-board-vsix.3b5qqF/agent-factory-workspace-linux-x64.vsix
+- size: 28022 bytes
+- VSIX SHA-256: bb5bf0f7d783858313d30783d54cf46c502134631137af4bb0456b307ee914fe
+- packaged webviewShell.js SHA-256: 5084c242a3e6dc08bbdb60a723bc653e51254023ab1c6a76c4a2d6d3f04020bd
+- source webviewShell.js SHA-256: 5084c242a3e6dc08bbdb60a723bc653e51254023ab1c6a76c4a2d6d3f04020bd
+
+Approval boundaries
+- main integration: not performed
+- local install/redeployment: not performed
+- VS Code reload/restart: not performed
