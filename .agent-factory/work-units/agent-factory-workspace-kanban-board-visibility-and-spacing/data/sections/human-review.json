@@ -23,7 +23,15 @@
       "kind": "human-review-result",
       "content": "Human 검토 대기",
       "attributes": {
-        "status": "pending"
+        "status": "approved",
+        "approvedAt": "2026-07-27T16:36:11+00:00",
+        "executionTarget": {
+          "contractVersion": "1.0.0",
+          "revision": 1,
+          "attempt": 1,
+          "invocationId": "codex-kanban-board-visibility-spacing-20260728-001",
+          "headCommit": "3c020cb7b0ee414fe8a2dcfab00fc105a8815982"
+        }
       }
     }
   ],
