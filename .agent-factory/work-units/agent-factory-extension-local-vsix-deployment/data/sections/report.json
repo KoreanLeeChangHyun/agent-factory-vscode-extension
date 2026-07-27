@@ -1,0 +1,20 @@
+{
+  "id": "report",
+  "title": "Report",
+  "content": [
+    {
+      "id": "REPORT-RESULT-001",
+      "kind": "report-result",
+      "content": "배포 Report 미작성",
+      "attributes": {
+        "verificationResult": "not-run",
+        "remainingRisks": [
+          "실제 설치 후 VS Code window reload 전까지 실행 중인 Extension Host가 새 패키지 코드를 로드하지 않을 수 있다.",
+          "window reload, runtime 재시작, integration, cleanup, push와 PR promotion은 이 Work Unit 범위 밖의 별도 Human 결정이다."
+        ],
+        "evidence": []
+      }
+    }
+  ],
+  "subsections": []
+}
