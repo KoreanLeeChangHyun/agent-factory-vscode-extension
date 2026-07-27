@@ -1,0 +1,28 @@
+{
+  "id": "ai-review",
+  "title": "AI Review",
+  "content": [
+    {
+      "id": "AI-CHECKLIST-001",
+      "kind": "ai-checklist",
+      "content": [
+        "Intake와 Work Unit 범위 준수",
+        "두 확장의 geometry 값 일치",
+        "Web evidence와 구현 값 정합",
+        "테스트 우선 순서 확인",
+        "DOM, 문구, SVG 아이콘, 이벤트, 키보드와 상태 계약 보존",
+        "집중 검증 및 diff 검토 완료"
+      ]
+    },
+    {
+      "id": "AI-REVIEW-RESULT-001",
+      "kind": "ai-review-result",
+      "content": "AI Review 미실행",
+      "attributes": {
+        "result": "not-run",
+        "checklistResult": "not-run"
+      }
+    }
+  ],
+  "subsections": []
+}
