@@ -26,6 +26,29 @@
           "승인 또는 재작업, integration, 설치, cleanup, push와 PR promotion은 각각 Human 결정으로 남아 있다."
         ]
       }
+    },
+    {
+      "id": "INTEGRATION-78A4C786D40DDC4B",
+      "kind": "integration-result",
+      "content": {
+        "humanDecision": "approved",
+        "operationResult": "already-merged",
+        "relationship": "already-merged",
+        "repository": "/home/deus/workspace/agent-factory/vscode-extension",
+        "sourceBranch": "work-unit/agent-factory-extension-tab-header-web-alignment",
+        "sourceCommit": "022f287eb05097b9976d05e042f90577302188e1",
+        "strategy": "none",
+        "targetAfterCommit": "022f287eb05097b9976d05e042f90577302188e1",
+        "targetBeforeCommit": "022f287eb05097b9976d05e042f90577302188e1",
+        "targetBranch": "main",
+        "workUnitId": "agent-factory-extension-tab-header-web-alignment",
+        "worktreePath": "/home/deus/workspace/agent-factory/vscode-extension/.agent-factory/worktree/agent-factory-extension-tab-header-web-alignment",
+        "receiptSha256": "78a4c786d40ddc4bbbdf27151b02b1a4219579aecab56264ccbf87a83d195e67"
+      },
+      "attributes": {
+        "status": "already-merged"
+      },
+      "blockRef": "blocks/evidence/integration-receipt.json"
     }
   ],
   "subsections": []

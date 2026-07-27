@@ -1,6 +1,13 @@
 {
   "blocks": [
     {
+      "path": "blocks/evidence/integration-receipt.json",
+      "mediaType": "application/json",
+      "description": "Raw Work Unit integration receipt",
+      "sha256": "78a4c786d40ddc4bbbdf27151b02b1a4219579aecab56264ccbf87a83d195e67",
+      "sizeBytes": 792
+    },
+    {
       "path": "blocks/evidence/verification.txt",
       "mediaType": "text/plain",
       "description": "탭 및 선택 헤더 Web geometry TDD, 검증과 AI Review evidence",
