@@ -15,6 +15,13 @@
       "sizeBytes": 11027
     },
     {
+      "path": "blocks/evidence/kanban-board-local-redeployment.txt",
+      "mediaType": "text/plain",
+      "description": "Human-approved no-ff integration, linux-x64 VSIX package, force install and installed source hash evidence",
+      "sha256": "26bd582f89ea3a0bcf47494432f9fd8507e0f84f240248a45a1f2e48c75d09fa",
+      "sizeBytes": 1355
+    },
+    {
       "path": "blocks/evidence/kanban-board-open-890x950.png",
       "mediaType": "image/png",
       "description": "890x950 canonical snapshot: 갱신 시각과 열별 toggle 없이 상단 전체 board 닫기 control, 좌우 padding 0 및 열 gap 0",
