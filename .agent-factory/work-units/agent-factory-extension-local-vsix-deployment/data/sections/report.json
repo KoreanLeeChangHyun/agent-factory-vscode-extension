@@ -27,6 +27,29 @@
           "blocks/execution/worktree-final-inspect.json"
         ]
       }
+    },
+    {
+      "id": "INTEGRATION-43A7F6D5C3FDF2B6",
+      "kind": "integration-result",
+      "content": {
+        "humanDecision": "approved",
+        "operationResult": "already-merged",
+        "relationship": "already-merged",
+        "repository": "/home/deus/workspace/agent-factory/vscode-extension",
+        "sourceBranch": "work-unit/agent-factory-extension-local-vsix-deployment",
+        "sourceCommit": "7688e6388468d1d98119eda9c6554be3246dbbbb",
+        "strategy": "none",
+        "targetAfterCommit": "7688e6388468d1d98119eda9c6554be3246dbbbb",
+        "targetBeforeCommit": "7688e6388468d1d98119eda9c6554be3246dbbbb",
+        "targetBranch": "main",
+        "workUnitId": "agent-factory-extension-local-vsix-deployment",
+        "worktreePath": "/home/deus/workspace/agent-factory/vscode-extension/.agent-factory/worktree/agent-factory-extension-local-vsix-deployment",
+        "receiptSha256": "43a7f6d5c3fdf2b65f65c581c7e21606d92dc0a85c549593ec30c412bbba2f20"
+      },
+      "attributes": {
+        "status": "already-merged"
+      },
+      "blockRef": "blocks/execution/integration-receipt.json"
     }
   ],
   "subsections": []

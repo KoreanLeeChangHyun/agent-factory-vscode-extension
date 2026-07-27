@@ -1,6 +1,6 @@
 {
   "schemaVersion": "4.0.0",
-  "documentVersion": "1.0.41",
+  "documentVersion": "1.0.42",
   "id": "agent-factory-extension-local-vsix-deployment",
   "artifactType": "work-unit",
   "projectId": "agent-factory-workspace",
@@ -9,7 +9,7 @@
     "status": "done"
   },
   "createdAt": "2026-07-27T14:40:54+00:00",
-  "updatedAt": "2026-07-27T15:11:56+00:00",
+  "updatedAt": "2026-07-27T15:15:58+00:00",
   "language": "ko",
   "theme": "default",
   "provenance": {

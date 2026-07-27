@@ -1,6 +1,13 @@
 {
   "blocks": [
     {
+      "path": "blocks/execution/integration-receipt.json",
+      "mediaType": "application/json",
+      "description": "Raw Work Unit integration receipt",
+      "sha256": "43a7f6d5c3fdf2b65f65c581c7e21606d92dc0a85c549593ec30c412bbba2f20",
+      "sizeBytes": 783
+    },
+    {
       "path": "blocks/execution/local-vsix-deployment.txt",
       "mediaType": "text/plain",
       "description": "Local linux-x64 VSIX build, integrity, installation, and scope verification evidence",
