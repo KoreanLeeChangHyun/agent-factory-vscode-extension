@@ -1,0 +1,36 @@
+{
+  "command": "integrate",
+  "context": {
+    "humanDecision": "approved",
+    "operationResult": "fast-forwarded",
+    "relationship": "fast-forwardable",
+    "repository": "/home/deus/workspace/agent-factory/vscode-extension",
+    "sourceBranch": "work-unit/agent-factory-workspace-kanban-structure-correction",
+    "sourceCommit": "c80cb998edb6d1230df39335e328d3296621b62a",
+    "strategy": "ff-only",
+    "targetAfterCommit": "c80cb998edb6d1230df39335e328d3296621b62a",
+    "targetBeforeCommit": "d0b988b7aef5fba034aa932292d881fcab0c04ab",
+    "targetBranch": "main",
+    "workUnitId": "agent-factory-workspace-kanban-structure-correction",
+    "worktreePath": "/home/deus/workspace/agent-factory/vscode-extension/.agent-factory/worktree/agent-factory-workspace-kanban-structure-correction"
+  },
+  "error": null,
+  "ok": true,
+  "operations": [
+    {
+      "args": [
+        "git",
+        "-C",
+        "/home/deus/workspace/agent-factory/vscode-extension",
+        "merge",
+        "--ff-only",
+        "c80cb998edb6d1230df39335e328d3296621b62a"
+      ],
+      "returnCode": 0,
+      "stderr": "",
+      "stdout": "Updating d0b988b..c80cb99\nFast-forward\n .../data/metadata.json                             |   4 +-\n .../data/sections/acceptance-criteria.json         |  10 +-\n .../data/sections/functional-requirements.json     |  12 +-\n .../sections/verification-and-traceability.json    |  11 +-\n .../blocks/evidence/kanban-all-columns-890x950.png | Bin 0 -> 104327 bytes\n .../evidence/kanban-collapsed-columns-890x950.png  | Bin 0 -> 112151 bytes\n .../evidence/kanban-structure-verification.txt     |  28 ++\n .../blocks/evidence/worktree-inspect.json          |  25 ++\n .../blocks/index.json                              |  31 +-\n .../data/metadata.json                             |   6 +-\n .../data/sections/acceptance-and-verification.json |  19 +-\n .../data/sections/ai-review.json                   |  20 +-\n .../data/sections/execution-context.json           |  69 ++++\n .../data/sections/execution.json                   |  18 +-\n .../data/sections/human-review.json                |  10 +-\n .../data/sections/report.json                      |  24 +-\n workspace/src/webviewShell.js                      | 360 ++++++++++-----------\n workspace/test/suite/index.js                      |   7 +-\n workspace/test/unit/webviewShell.test.js           |  54 ++--\n 19 files changed, 469 insertions(+), 239 deletions(-)\n create mode 100644 .agent-factory/work-units/agent-factory-workspace-kanban-structure-correction/blocks/evidence/kanban-all-columns-890x950.png\n create mode 100644 .agent-factory/work-units/agent-factory-workspace-kanban-structure-correction/blocks/evidence/kanban-collapsed-columns-890x950.png\n create mode 100644 .agent-factory/work-units/agent-factory-workspace-kanban-structure-correction/blocks/evidence/kanban-structure-verification.txt\n create mode 100644 .agent-factory/work-units/agent-factory-workspace-kanban-structure-correction/blocks/evidence/worktree-inspect.json"
+    }
+  ],
+  "schemaVersion": "1.0.0",
+  "state": "integrated"
+}

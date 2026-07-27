@@ -28,6 +28,29 @@
           "vsce가 repository field와 LICENSE 부재를 경고했으나 패키징과 source hash 일치 검증은 통과했다."
         ]
       }
+    },
+    {
+      "id": "INTEGRATION-CD7212293DA7BA26",
+      "kind": "integration-result",
+      "content": {
+        "humanDecision": "approved",
+        "operationResult": "fast-forwarded",
+        "relationship": "fast-forwardable",
+        "repository": "/home/deus/workspace/agent-factory/vscode-extension",
+        "sourceBranch": "work-unit/agent-factory-workspace-kanban-structure-correction",
+        "sourceCommit": "c80cb998edb6d1230df39335e328d3296621b62a",
+        "strategy": "ff-only",
+        "targetAfterCommit": "c80cb998edb6d1230df39335e328d3296621b62a",
+        "targetBeforeCommit": "d0b988b7aef5fba034aa932292d881fcab0c04ab",
+        "targetBranch": "main",
+        "workUnitId": "agent-factory-workspace-kanban-structure-correction",
+        "worktreePath": "/home/deus/workspace/agent-factory/vscode-extension/.agent-factory/worktree/agent-factory-workspace-kanban-structure-correction",
+        "receiptSha256": "cd7212293da7ba26aa83231d75e4f5a75571333f69e28a1b52bcc5316454b941"
+      },
+      "attributes": {
+        "status": "integrated"
+      },
+      "blockRef": "blocks/evidence/integration-receipt.json"
     }
   ],
   "subsections": []

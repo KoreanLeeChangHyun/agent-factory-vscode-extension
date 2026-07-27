@@ -1,6 +1,13 @@
 {
   "blocks": [
     {
+      "path": "blocks/evidence/integration-receipt.json",
+      "mediaType": "application/json",
+      "description": "Raw Work Unit integration receipt",
+      "sha256": "cd7212293da7ba26aa83231d75e4f5a75571333f69e28a1b52bcc5316454b941",
+      "sizeBytes": 3099
+    },
+    {
       "path": "blocks/evidence/kanban-all-columns-890x950.png",
       "mediaType": "image/png",
       "description": "canonical Work Unit snapshot을 사용한 890x950 전체 열 화면: 상태 탭, 수동 새로 고침, 중복 Kanban 헤더와 바깥 스크롤 부재 검토",
