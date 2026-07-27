@@ -16,8 +16,10 @@
           "attempt": 1
         },
         "implementationCommit": "e8e1f4840338449511e952ca91d0e143fe9f6a48",
+        "boundedRegistrationDelta": "첫 clean inspect 이후 blocks/evidence/worktree-inspect.json, blocks/index.json, data/metadata.json과 data/sections/report.json만 inspect evidence 등록 및 review 준비를 위해 변경했다.",
         "evidence": [
-          "blocks/evidence/verification.txt"
+          "blocks/evidence/verification.txt",
+          "blocks/evidence/worktree-inspect.json"
         ],
         "remainingRisks": [
           "실제 설치 또는 실행 화면의 시각적 균형은 Human review가 필요하다.",
