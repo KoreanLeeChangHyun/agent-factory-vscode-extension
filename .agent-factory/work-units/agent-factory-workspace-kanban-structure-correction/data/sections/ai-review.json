@@ -17,10 +17,23 @@
     {
       "id": "AI-REVIEW-STATUS",
       "kind": "ai-review-result",
-      "content": "AI review 대기",
+      "content": "Human 피드백, canonical lifecycle 경계, 접근성, 상태 보존, DnD 계약, 자동 검증과 화면 evidence를 대조했으며 승인 범위와 일치한다.",
       "attributes": {
-        "result": "pending",
-        "checklistResult": "pending"
+        "result": "pass",
+        "checklistResult": "pass",
+        "executionTarget": {
+          "contractVersion": "1.0.0",
+          "invocationId": "codex-kanban-structure-correction-20260728-001",
+          "headCommit": "d0b988b7aef5fba034aa932292d881fcab0c04ab",
+          "revision": 1,
+          "attempt": 1
+        },
+        "implementationCommit": "53a0856ed34ce2bb18adb0c835b937d3f1f50e0a",
+        "evidence": [
+          "blocks/evidence/kanban-structure-verification.txt",
+          "blocks/evidence/kanban-all-columns-890x950.png",
+          "blocks/evidence/kanban-collapsed-columns-890x950.png"
+        ]
       }
     }
   ],

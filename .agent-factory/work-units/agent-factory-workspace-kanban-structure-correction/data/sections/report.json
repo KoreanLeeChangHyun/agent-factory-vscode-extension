@@ -5,10 +5,28 @@
     {
       "id": "REPORT-STATUS",
       "kind": "report-result",
-      "content": "실행 전 보고 대기",
+      "content": "Workspace Kanban 구조 수정 구현 및 검증 완료. 설치·integration·push·PR·재배포는 Human 승인 경계에 따라 수행하지 않았다.",
       "attributes": {
-        "verificationResult": "pending",
-        "evidence": []
+        "verificationResult": "pass",
+        "executionTarget": {
+          "contractVersion": "1.0.0",
+          "invocationId": "codex-kanban-structure-correction-20260728-001",
+          "headCommit": "d0b988b7aef5fba034aa932292d881fcab0c04ab",
+          "revision": 1,
+          "attempt": 1
+        },
+        "implementationCommit": "53a0856ed34ce2bb18adb0c835b937d3f1f50e0a",
+        "boundedRegistrationDelta": "구현 commit 이후 변경은 실행 진행, 검증, AI review, report와 evidence index 등록으로 한정된다.",
+        "evidence": [
+          "blocks/evidence/kanban-structure-verification.txt",
+          "blocks/evidence/kanban-all-columns-890x950.png",
+          "blocks/evidence/kanban-collapsed-columns-890x950.png",
+          "blocks/evidence/worktree-inspect.json"
+        ],
+        "remainingRisks": [
+          "실제 VS Code 설치본의 테마별 화면과 직접 상호작용은 Human 검토가 필요하다.",
+          "vsce가 repository field와 LICENSE 부재를 경고했으나 패키징과 source hash 일치 검증은 통과했다."
+        ]
       }
     }
   ],

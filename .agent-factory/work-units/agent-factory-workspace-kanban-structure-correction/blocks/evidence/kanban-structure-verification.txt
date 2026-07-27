@@ -1,0 +1,28 @@
+Workspace Kanban 구조 수정 검증
+
+Execution target
+- commit: 53a0856ed34ce2bb18adb0c835b937d3f1f50e0a
+- branch: work-unit/agent-factory-workspace-kanban-structure-correction
+- revision: 1
+- attempt: 1
+
+검증 결과
+- Specification manager full validation: pass
+- npm run check: pass (syntax 및 unit 30/30)
+- npm run test:manager: pass (1/1)
+- npm run test:e2e: pass (VS Code 1.129.1 Extension Host)
+- git diff --check: pass
+- 890x950 canonical snapshot all-columns render: pass
+- 890x950 backlog/blocked collapsed render: pass
+- 640x950 및 1440x950 layout render: pass
+- VSIX package: pass (12 files, 27.88 KB)
+- packaged extension/src/webviewShell.js SHA-256: c25872f7000ec3aa69fbfcb7a6fbe661d0e03f6aeae8702a160cc9bc5faff020
+- source workspace/src/webviewShell.js SHA-256: c25872f7000ec3aa69fbfcb7a6fbe661d0e03f6aeae8702a160cc9bc5faff020
+
+패키징 경고
+- package.json repository field 없음
+- LICENSE 파일 없음
+
+설치 및 배포
+- Human 검토 전 설치하지 않음
+- integration, push, PR promotion 및 재배포 수행하지 않음

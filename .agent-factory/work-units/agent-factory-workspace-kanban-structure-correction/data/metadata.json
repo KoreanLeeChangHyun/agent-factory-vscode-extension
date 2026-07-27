@@ -1,15 +1,15 @@
 {
   "schemaVersion": "4.0.0",
-  "documentVersion": "1.0.28",
+  "documentVersion": "1.0.46",
   "id": "agent-factory-workspace-kanban-structure-correction",
   "artifactType": "work-unit",
   "projectId": "agent-factory-workspace",
   "lifecycle": {
     "phase": "work-unit",
-    "status": "working"
+    "status": "review"
   },
   "createdAt": "2026-07-27T15:34:43+00:00",
-  "updatedAt": "2026-07-27T15:56:31+00:00",
+  "updatedAt": "2026-07-27T16:00:20+00:00",
   "language": "ko",
   "theme": "vscode-native",
   "provenance": {

@@ -39,10 +39,23 @@
     {
       "id": "QUALITY-STATUS",
       "kind": "quality-check",
-      "content": "실행 전 품질 검증 대기",
+      "content": "Specification full validation, syntax, unit 30/30, manager integration 1/1, VS Code 1.129.1 Extension Host E2E, viewport와 VSIX 내용 검증 통과",
       "attributes": {
-        "status": "planned",
-        "evidence": []
+        "status": "pass",
+        "executionTarget": {
+          "contractVersion": "1.0.0",
+          "invocationId": "codex-kanban-structure-correction-20260728-001",
+          "headCommit": "d0b988b7aef5fba034aa932292d881fcab0c04ab",
+          "revision": 1,
+          "attempt": 1
+        },
+        "implementationCommit": "53a0856ed34ce2bb18adb0c835b937d3f1f50e0a",
+        "evidence": [
+          "blocks/evidence/kanban-structure-verification.txt",
+          "blocks/evidence/kanban-all-columns-890x950.png",
+          "blocks/evidence/kanban-collapsed-columns-890x950.png",
+          "blocks/evidence/worktree-inspect.json"
+        ]
       }
     }
   ],

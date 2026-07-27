@@ -13,6 +13,20 @@
       "description": "backlog와 blocked 열을 접은 890x950 화면: 열기·닫기 구조와 나머지 열 폭 재배치 검토",
       "sha256": "6b8528d12771cfe3e2667d8b2a37687d4e431144d183a4086032543cab413bf0",
       "sizeBytes": 112151
+    },
+    {
+      "path": "blocks/evidence/kanban-structure-verification.txt",
+      "mediaType": "text/plain",
+      "description": "Specification, unit, manager, Extension Host E2E, viewport와 VSIX package 검증 결과",
+      "sha256": "76fd6bbd4237311613acecc4292e42edd222636cb7ce179530aea7ce2c59c050",
+      "sizeBytes": 1054
+    },
+    {
+      "path": "blocks/evidence/worktree-inspect.json",
+      "mediaType": "application/json",
+      "description": "구현 commit 이후 Work Unit evidence 등록으로 한정된 dirty worktree inspect",
+      "sha256": "ee00834e00231cc41f7732de203bc58fc5fd42f50898e49f037ba50547d6b22f",
+      "sizeBytes": 941
     }
   ]
 }
