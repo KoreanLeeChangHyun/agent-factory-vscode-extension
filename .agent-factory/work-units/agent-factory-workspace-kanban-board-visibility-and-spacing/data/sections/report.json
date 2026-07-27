@@ -26,6 +26,29 @@
           "vsce가 LICENSE 부재를 경고했으나 package와 source hash 검증은 통과했다."
         ]
       }
+    },
+    {
+      "id": "INTEGRATION-D583E5D51E3788D7",
+      "kind": "integration-result",
+      "content": {
+        "humanDecision": "approved",
+        "operationResult": "already-merged",
+        "relationship": "already-merged",
+        "repository": "/home/deus/workspace/agent-factory/vscode-extension",
+        "sourceBranch": "work-unit/agent-factory-workspace-kanban-board-visibility-and-spacing",
+        "sourceCommit": "ab6e9d0ea1039bf753e455f49c62585cb510de17",
+        "strategy": "no-ff",
+        "targetAfterCommit": "0ff07c5f4a6db64391eba1990168d281fed2e5b7",
+        "targetBeforeCommit": "0ff07c5f4a6db64391eba1990168d281fed2e5b7",
+        "targetBranch": "main",
+        "workUnitId": "agent-factory-workspace-kanban-board-visibility-and-spacing",
+        "worktreePath": "/home/deus/workspace/agent-factory/vscode-extension/.agent-factory/worktree/agent-factory-workspace-kanban-board-visibility-and-spacing",
+        "receiptSha256": "d583e5d51e3788d79fe5a883484f3aa32ba825001f7b3d5d0ac1d7539910f765"
+      },
+      "attributes": {
+        "status": "already-merged"
+      },
+      "blockRef": "blocks/evidence/integration-receipt.json"
     }
   ],
   "subsections": []

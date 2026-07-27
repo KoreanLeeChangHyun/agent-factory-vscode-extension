@@ -1,0 +1,22 @@
+{
+  "command": "integrate",
+  "context": {
+    "humanDecision": "approved",
+    "operationResult": "already-merged",
+    "relationship": "already-merged",
+    "repository": "/home/deus/workspace/agent-factory/vscode-extension",
+    "sourceBranch": "work-unit/agent-factory-workspace-kanban-board-visibility-and-spacing",
+    "sourceCommit": "ab6e9d0ea1039bf753e455f49c62585cb510de17",
+    "strategy": "no-ff",
+    "targetAfterCommit": "0ff07c5f4a6db64391eba1990168d281fed2e5b7",
+    "targetBeforeCommit": "0ff07c5f4a6db64391eba1990168d281fed2e5b7",
+    "targetBranch": "main",
+    "workUnitId": "agent-factory-workspace-kanban-board-visibility-and-spacing",
+    "worktreePath": "/home/deus/workspace/agent-factory/vscode-extension/.agent-factory/worktree/agent-factory-workspace-kanban-board-visibility-and-spacing"
+  },
+  "error": null,
+  "ok": true,
+  "operations": [],
+  "schemaVersion": "1.0.0",
+  "state": "already-merged"
+}

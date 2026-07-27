@@ -1,6 +1,13 @@
 {
   "blocks": [
     {
+      "path": "blocks/evidence/integration-receipt.json",
+      "mediaType": "application/json",
+      "description": "Raw Work Unit integration receipt",
+      "sha256": "d583e5d51e3788d79fe5a883484f3aa32ba825001f7b3d5d0ac1d7539910f765",
+      "sizeBytes": 930
+    },
+    {
       "path": "blocks/evidence/kanban-board-closed-890x950.png",
       "mediaType": "image/png",
       "description": "890x950 closed state: 상단 열기 control만 남고 6개 열을 포함한 Kanban board 전체가 숨겨진 화면",
