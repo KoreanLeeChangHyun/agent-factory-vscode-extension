@@ -15,6 +15,38 @@
         "branch": "work-unit/agent-factory-workspace-kanban-structure-correction",
         "worktreePath": "/home/deus/workspace/agent-factory/vscode-extension/.agent-factory/worktree/agent-factory-workspace-kanban-structure-correction"
       }
+    },
+    {
+      "id": "EXECUTION-STATE-001",
+      "kind": "execution-state",
+      "content": {
+        "contractVersion": "1.0.0",
+        "state": "running",
+        "subject": {
+          "algorithm": "gitCommit",
+          "digest": "d0b988b7aef5fba034aa932292d881fcab0c04ab"
+        },
+        "currentRevision": 1,
+        "currentAttempt": 1,
+        "invocationId": "codex-kanban-structure-correction-20260728-001",
+        "invocationChain": [
+          "codex-kanban-structure-correction-20260728-001"
+        ],
+        "history": [],
+        "progress": {
+          "completedSteps": [],
+          "pendingStep": null,
+          "lastVerifiedHead": "d0b988b7aef5fba034aa932292d881fcab0c04ab",
+          "checkpoints": [],
+          "retry": {}
+        },
+        "recovery": {
+          "status": "running",
+          "ownerInvocationId": "codex-kanban-structure-correction-20260728-001",
+          "blockerId": null,
+          "evidence": null
+        }
+      }
     }
   ],
   "subsections": []

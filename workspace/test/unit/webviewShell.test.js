@@ -46,8 +46,9 @@ test("shell uses VS Code state APIs and keyboard tab navigation", () => {
   assert.match(html, /vscode\.setState\(state\)/);
   assert.match(html, /state\.selectedTab = tabId/);
   assert.match(html, /\["design", "view"\]\.includes\(state\.selectedTab\)/);
-  assert.match(html, /selectedKanbanBoard:\s*"backlog"/);
-  assert.match(html, /state\.selectedKanbanBoard = boardId/);
+  assert.match(html, /collapsedKanbanColumns:\s*\[\]/);
+  assert.match(html, /state\.collapsedKanbanColumns = Array\.from\(collapsedColumns\)/);
+  assert.doesNotMatch(html, /selectedKanbanBoard/);
   assert.match(html, /delete state\.kanbanFilter/);
   assert.doesNotMatch(html, /state\.kanbanFilter\s*=/);
   assert.match(html, /ArrowLeft/);
@@ -75,7 +76,7 @@ test("Editor renders artifact navigation, structured fields, and read-only JSON"
   assert.doesNotMatch(html, /editorPreview\.innerHTML\s*=/);
 });
 
-test("Kanban renders header board selectors and only the selected board", () => {
+test("Kanban renders simultaneous collapsible lifecycle columns without status tabs", () => {
   const html = createWebviewHtml({
     cspSource: "vscode-webview://test",
     nonce: "test-nonce",
@@ -90,20 +91,26 @@ test("Kanban renders header board selectors and only the selected board", () => 
     "blocked",
   ]) {
     assert.match(html, new RegExp(`data-kanban-column="${status}"`));
-    assert.match(html, new RegExp(`data-kanban-board-target="${status}"`));
+    assert.match(html, new RegExp(`data-kanban-column-toggle="${status}"`));
   }
-  assert.equal((html.match(/data-kanban-board-target="/g) || []).length, 6);
-  assert.match(html, /data-kanban-board-selector/);
-  assert.match(html, /data-board-count/);
-  assert.match(html, /column\.hidden = column\.dataset\.kanbanColumn !== selectedBoard/);
+  assert.equal((html.match(/data-kanban-column="/g) || []).length, 6);
+  assert.doesNotMatch(html, /data-kanban-board-selector/);
+  assert.doesNotMatch(html, /role="tablist"\s+aria-label="Kanban boards"/);
+  assert.doesNotMatch(html, /class="kanban-board-tab"/);
+  assert.match(html, /data-column-count/);
+  assert.match(html, /collapsedKanbanColumns/);
+  assert.match(html, /aria-expanded/);
+  assert.match(html, /class="kanban-column-toggle-icon"/);
+  assert.match(html, /aria-hidden="true"/);
   assert.doesNotMatch(html, /data-kanban-filter/);
   assert.doesNotMatch(html, /Work Unit 필터/);
   assert.doesNotMatch(html, /placeholder="제목 또는 id"/);
+  assert.doesNotMatch(html, /data-kanban-refresh/);
+  assert.doesNotMatch(html, /type:\s*"kanban\.refresh"/);
   assert.match(html, /draggable/);
   assert.match(html, /moveTarget\.dataset\.moveTarget/);
   assert.match(html, /moveButton\.dataset\.moveButton/);
   assert.match(html, /kanban\.ready/);
-  assert.match(html, /kanban\.refresh/);
   assert.match(html, /type:\s*"kanban\.transition"/);
   assert.doesNotMatch(html, /kanban\.(?:create|edit)/);
 });
@@ -115,36 +122,45 @@ test("Kanban drag and Move controls use the same capability and request contract
   });
 
   assert.match(html, /card\.capabilities\.filter\(\(capability\) => capability\.allowed\)/);
-  assert.match(html, /allowedTargets\.has\(boardTab\.dataset\.kanbanBoardTarget\)/);
+  assert.match(html, /allowedTargets\.has\(column\.dataset\.kanbanColumn\)/);
   assert.match(html, /requestTransition\(card,\s*moveTarget\.value\)/);
   assert.match(
     html,
-    /requestTransition\(dragState\.card,\s*boardTab\.dataset\.kanbanBoardTarget\)/,
+    /requestTransition\(dragState\.card,\s*column\.dataset\.kanbanColumn\)/,
   );
   assert.match(html, /snapshotGeneratedAt:\s*snapshot\.generatedAt/);
   assert.match(html, /message\.type === "kanban\.transitionResult"/);
   assert.doesNotMatch(html, /showMovePreview/);
 });
 
-test("Kanban fills the remaining height with hidden independent scrollbars and no board gaps", () => {
+test("Kanban fills the grid-owned remaining height without outer scrolling", () => {
   const html = createWebviewHtml({
     cspSource: "vscode-webview://test",
     nonce: "test-nonce",
   });
 
-  assert.match(html, /\.kanban-board-selector\s*\{[^}]*overflow-x:\s*auto;/s);
-  assert.match(html, /\.kanban-board-selector\s*\{[^}]*scrollbar-width:\s*none;/s);
-  assert.match(html, /\.kanban-board-selector::?-webkit-scrollbar\s*\{[^}]*display:\s*none;/s);
-  assert.match(html, /\.kanban-workspace\s*\{[^}]*height:\s*calc\(100vh - 78px\);/s);
-  assert.match(html, /\.kanban-workspace\s*\{[^}]*grid-template-rows:[^;]*minmax\(0,\s*1fr\);/s);
+  assert.match(html, /\.workspace-shell\s*\{[^}]*height:\s*100vh;/s);
+  assert.match(html, /\.workspace-body\.is-kanban-active\s*\{[^}]*overflow:\s*hidden;/s);
+  assert.match(html, /\.kanban-workspace\s*\{[^}]*height:\s*100%;/s);
+  assert.doesNotMatch(html, /\.kanban-workspace\s*\{[^}]*calc\(100vh\s*-/s);
   assert.match(html, /\.kanban-board\s*\{[^}]*min-height:\s*0;/s);
-  assert.match(html, /\.kanban-board\s*\{[^}]*gap:\s*0;/s);
-  assert.match(html, /\.kanban-column\s*\{[^}]*height:\s*100%;/s);
+  assert.match(html, /\.kanban-board\s*\{[^}]*overflow:\s*hidden;/s);
+  assert.match(html, /\.kanban-column\.is-collapsed\s*\{[^}]*flex:\s*0 0/s);
   assert.match(html, /\.kanban-card-list\s*\{[^}]*overflow-y:\s*auto;/s);
   assert.match(html, /\.kanban-card-list\s*\{[^}]*scrollbar-width:\s*none;/s);
   assert.match(html, /\.kanban-card-list::?-webkit-scrollbar\s*\{[^}]*display:\s*none;/s);
   assert.doesNotMatch(html, /min-width:\s*1430px/);
   assert.doesNotMatch(html, /repeat\(6,\s*minmax\(230px,\s*1fr\)\)/);
+});
+
+test("Kanban hides the redundant selected header while preserving other tab headers", () => {
+  const html = createWebviewHtml({
+    cspSource: "vscode-webview://test",
+    nonce: "test-nonce",
+  });
+
+  assert.match(html, /selectedHeader\.hidden = tabId === "kanban"/);
+  assert.match(html, /workspaceBody\.classList\.toggle\("is-kanban-active", tabId === "kanban"\)/);
 });
 
 test("shell fills the available width with equal theme-aware tabs and surfaces", () => {

@@ -53,10 +53,11 @@ async function run() {
     nonce: "e2e-nonce",
   });
   assert.equal((html.match(/data-kanban-column="/g) || []).length, 6);
-  assert.equal((html.match(/data-kanban-board-target="/g) || []).length, 6);
-  assert.match(html, /data-kanban-board-selector/);
+  assert.equal((html.match(/data-kanban-column-toggle="/g) || []).length, 6);
+  assert.doesNotMatch(html, /data-kanban-board-selector/);
+  assert.doesNotMatch(html, /data-kanban-refresh/);
   assert.doesNotMatch(html, /data-kanban-filter/);
-  assert.match(html, /selectedKanbanBoard/);
+  assert.match(html, /collapsedKanbanColumns/);
   assert.match(html, /scrollbar-width:\s*none/);
   assert.match(html, /kanban\.snapshot/);
   assert.deepEqual(

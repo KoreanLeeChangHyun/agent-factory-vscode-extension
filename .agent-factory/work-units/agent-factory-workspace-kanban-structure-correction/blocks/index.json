@@ -1,3 +1,18 @@
 {
-  "blocks": []
+  "blocks": [
+    {
+      "path": "blocks/evidence/kanban-all-columns-890x950.png",
+      "mediaType": "image/png",
+      "description": "canonical Work Unit snapshot을 사용한 890x950 전체 열 화면: 상태 탭, 수동 새로 고침, 중복 Kanban 헤더와 바깥 스크롤 부재 검토",
+      "sha256": "6faf82a983d8ca0b49f155e5e1a8c42dcac47cedcb07ae685721d724e89b5c62",
+      "sizeBytes": 104327
+    },
+    {
+      "path": "blocks/evidence/kanban-collapsed-columns-890x950.png",
+      "mediaType": "image/png",
+      "description": "backlog와 blocked 열을 접은 890x950 화면: 열기·닫기 구조와 나머지 열 폭 재배치 검토",
+      "sha256": "6b8528d12771cfe3e2667d8b2a37687d4e431144d183a4086032543cab413bf0",
+      "sizeBytes": 112151
+    }
+  ]
 }

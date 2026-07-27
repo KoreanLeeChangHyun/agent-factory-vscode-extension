@@ -8,8 +8,7 @@
       "content": "실행 결과 대기",
       "attributes": {
         "status": "pending",
-        "verificationResult": "pending",
-        "evidence": []
+        "verificationResult": "pending"
       }
     }
   ],
