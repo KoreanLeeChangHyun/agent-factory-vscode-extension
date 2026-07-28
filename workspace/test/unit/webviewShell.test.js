@@ -46,10 +46,9 @@ test("shell uses VS Code state APIs and keyboard tab navigation", () => {
   assert.match(html, /vscode\.setState\(state\)/);
   assert.match(html, /state\.selectedTab = tabId/);
   assert.match(html, /\["design", "view"\]\.includes\(state\.selectedTab\)/);
-  assert.match(html, /kanbanOpen:\s*previousState\.kanbanOpen !== false/);
-  assert.match(html, /state\.kanbanOpen = open/);
-  assert.match(html, /delete state\.collapsedKanbanColumns/);
-  assert.doesNotMatch(html, /state\.collapsedKanbanColumns\s*=/);
+  assert.match(html, /closedKanbanColumns:\s*Array\.isArray\(previousState\.closedKanbanColumns\)/);
+  assert.match(html, /state\.closedKanbanColumns\s*=/);
+  assert.doesNotMatch(html, /kanbanOpen/);
   assert.doesNotMatch(html, /selectedKanbanBoard/);
   assert.match(html, /delete state\.kanbanFilter/);
   assert.doesNotMatch(html, /state\.kanbanFilter\s*=/);
@@ -78,7 +77,7 @@ test("Editor renders artifact navigation, structured fields, and read-only JSON"
   assert.doesNotMatch(html, /editorPreview\.innerHTML\s*=/);
 });
 
-test("Kanban renders simultaneous lifecycle columns with one whole-board visibility control", () => {
+test("Kanban renders six lifecycle columns controlled by one header multi-picklist", () => {
   const html = createWebviewHtml({
     cspSource: "vscode-webview://test",
     nonce: "test-nonce",
@@ -96,15 +95,16 @@ test("Kanban renders simultaneous lifecycle columns with one whole-board visibil
   }
   assert.equal((html.match(/data-kanban-column="/g) || []).length, 6);
   assert.equal((html.match(/data-kanban-column-toggle="/g) || []).length, 0);
+  assert.equal((html.match(/data-kanban-column-option="/g) || []).length, 6);
+  assert.equal((html.match(/<details[^>]*data-kanban-picklist/g) || []).length, 1);
   assert.doesNotMatch(html, /data-kanban-board-selector/);
   assert.doesNotMatch(html, /role="tablist"\s+aria-label="Kanban boards"/);
   assert.doesNotMatch(html, /class="kanban-board-tab"/);
   assert.match(html, /data-column-count/);
-  assert.match(html, /data-kanban-visibility-toggle/);
-  assert.match(html, /aria-controls="kanban-board"/);
+  assert.doesNotMatch(html, /data-kanban-visibility-toggle/);
   assert.match(html, /id="kanban-board"/);
-  assert.match(html, /setKanbanOpen/);
-  assert.match(html, /kanbanBoard\.hidden = !open/);
+  assert.match(html, /setKanbanColumnOpen/);
+  assert.match(html, /column\.hidden = !open/);
   assert.doesNotMatch(html, /data-kanban-updated/);
   assert.doesNotMatch(html, /toLocaleString\("ko-KR"\)/);
   assert.doesNotMatch(html, /data-kanban-filter/);
@@ -152,7 +152,6 @@ test("Kanban fills the grid-owned remaining height without outer scrolling", () 
   assert.match(html, /\.kanban-board\s*\{[^}]*min-height:\s*0;/s);
   assert.match(html, /\.kanban-board\s*\{[^}]*overflow:\s*hidden;/s);
   assert.match(html, /\.kanban-board\s*\{[^}]*gap:\s*0;/s);
-  assert.match(html, /\.kanban-board\[hidden\]\s*\{[^}]*display:\s*none;/s);
   assert.doesNotMatch(html, /\.kanban-column\.is-collapsed/);
   assert.match(html, /\.kanban-card-list\s*\{[^}]*overflow-y:\s*auto;/s);
   assert.match(html, /\.kanban-card-list\s*\{[^}]*scrollbar-width:\s*none;/s);
@@ -161,13 +160,21 @@ test("Kanban fills the grid-owned remaining height without outer scrolling", () 
   assert.doesNotMatch(html, /repeat\(6,\s*minmax\(230px,\s*1fr\)\)/);
 });
 
-test("Kanban hides the redundant selected header while preserving other tab headers", () => {
+test("Kanban keeps the selected header and places the multi-picklist at its right edge", () => {
   const html = createWebviewHtml({
     cspSource: "vscode-webview://test",
     nonce: "test-nonce",
   });
 
-  assert.match(html, /selectedHeader\.hidden = tabId === "kanban"/);
+  assert.match(
+    html,
+    /<header class="selected-header">[\s\S]*data-selected-title[\s\S]*data-kanban-picklist[\s\S]*data-kanban-column-option="backlog"[\s\S]*data-kanban-column-option="blocked"[\s\S]*<\/header>/,
+  );
+  assert.doesNotMatch(html, /<div class="kanban-toolbar">/);
+  assert.doesNotMatch(html, /selectedHeader\.hidden = tabId === "kanban"/);
+  assert.match(html, /kanbanPicklist\.hidden = tabId !== "kanban"/);
+  assert.match(html, /selectedTitle\.hidden = tabId === "kanban"/);
+  assert.match(html, /\.kanban-picklist\s*\{[^}]*margin-left:\s*auto;/s);
   assert.match(html, /workspaceBody\.classList\.toggle\("is-kanban-active", tabId === "kanban"\)/);
 });
 
@@ -186,6 +193,7 @@ test("shell fills the available width with equal theme-aware tabs and surfaces",
   assert.match(html, /\.workspace-tabs\s*\{[^}]*padding:\s*0;/s);
   assert.match(html, /\.workspace-tab\s*\{[^}]*flex:\s*1 1 0;/s);
   assert.match(html, /\.workspace-tab\s*\{[^}]*min-width:\s*0;/s);
+  assert.match(html, /\.workspace-tab\s*\{[^}]*height:\s*40px;/s);
   assert.match(html, /\.workspace-tab\s*\{[^}]*min-height:\s*40px;/s);
   assert.match(html, /\.workspace-panel\s*\{[^}]*padding:\s*0;/s);
   assert.match(html, /\.selected-header\s*\{[^}]*min-height:\s*32px;/s);
