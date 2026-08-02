@@ -32,6 +32,60 @@ const KANBAN_COLUMNS = Object.freeze([
   { id: "blocked", label: "Blocked" },
 ]);
 
+const KANBAN_CLOSED_COLUMNS_STORAGE_KEY =
+  "agentFactory.workspace.kanban.closedColumns";
+
+function normalizeClosedKanbanColumns(value, validColumnIds) {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  const validIds = new Set(validColumnIds);
+  return Array.from(
+    new Set(value.filter((columnId) => validIds.has(columnId))),
+  );
+}
+
+function loadClosedKanbanColumns(
+  windowObject,
+  storageKey,
+  validColumnIds,
+  fallback = [],
+) {
+  const normalizedFallback = normalizeClosedKanbanColumns(
+    fallback,
+    validColumnIds,
+  );
+  try {
+    const stored = windowObject.localStorage.getItem(storageKey);
+    if (stored === null) {
+      return normalizedFallback;
+    }
+    const parsed = JSON.parse(stored);
+    return Array.isArray(parsed)
+      ? normalizeClosedKanbanColumns(parsed, validColumnIds)
+      : normalizedFallback;
+  } catch {
+    return normalizedFallback;
+  }
+}
+
+function storeClosedKanbanColumns(
+  windowObject,
+  storageKey,
+  validColumnIds,
+  value,
+) {
+  try {
+    windowObject.localStorage.setItem(
+      storageKey,
+      JSON.stringify(normalizeClosedKanbanColumns(value, validColumnIds)),
+    );
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 function createWebviewHtml({ cspSource, nonce }) {
   if (!cspSource || !nonce) {
     throw new TypeError("cspSource and nonce are required");
@@ -88,7 +142,6 @@ function createWebviewHtml({ cspSource, nonce }) {
     if (id === "kanban") {
       content = `
         <div class="kanban-workspace" aria-busy="true">
-          <div class="kanban-notice" data-kanban-notice role="status" aria-live="polite"></div>
           <div class="kanban-errors" data-kanban-errors role="alert" hidden></div>
           <div class="kanban-board" id="kanban-board" aria-label="Work Unit lifecycle board">
             ${kanbanColumns}
@@ -511,23 +564,19 @@ function createWebviewHtml({ cspSource, nonce }) {
         display: grid;
         height: 100%;
         min-height: 0;
-        grid-template-rows: auto auto minmax(0, 1fr);
+        grid-template-rows: auto minmax(0, 1fr);
         padding: 0;
         overflow: hidden;
       }
 
-      .kanban-card select:focus-visible,
       .kanban-picklist summary:focus-visible,
       .kanban-picklist-option input:focus-visible,
-      .secondary-button:focus-visible,
-      .move-button:focus-visible,
-      .kanban-card:focus-visible {
+      .secondary-button:focus-visible {
         outline: 1px solid var(--vscode-focusBorder);
         outline-offset: 1px;
       }
 
-      .secondary-button,
-      .move-button {
+      .secondary-button {
         min-height: 28px;
         padding: 4px 10px;
         border: 1px solid var(--vscode-button-border, transparent);
@@ -536,12 +585,10 @@ function createWebviewHtml({ cspSource, nonce }) {
         cursor: pointer;
       }
 
-      .secondary-button:hover,
-      .move-button:hover {
+      .secondary-button:hover {
         background: var(--vscode-button-secondaryHoverBackground);
       }
 
-      .kanban-notice,
       .kanban-errors {
         min-height: 20px;
         margin-bottom: 8px;
@@ -555,11 +602,6 @@ function createWebviewHtml({ cspSource, nonce }) {
         border: 1px solid var(--vscode-inputValidation-warningBorder);
         color: var(--vscode-inputValidation-warningForeground, var(--vscode-foreground));
         background: var(--vscode-inputValidation-warningBackground);
-      }
-
-      .kanban-notice:empty {
-        min-height: 0;
-        margin-bottom: 0;
       }
 
       .kanban-board {
@@ -579,12 +621,6 @@ function createWebviewHtml({ cspSource, nonce }) {
         grid-template-rows: auto minmax(0, 1fr);
         border: 1px solid var(--vscode-panel-border);
         background: var(--vscode-sideBar-background);
-      }
-
-      .kanban-column.is-drop-target {
-        outline: 2px solid var(--vscode-focusBorder);
-        outline-offset: -2px;
-        background: var(--vscode-list-dropBackground);
       }
 
       .kanban-column-header {
@@ -646,20 +682,10 @@ function createWebviewHtml({ cspSource, nonce }) {
 
       .kanban-card {
         display: grid;
-        gap: 7px;
         padding: 10px;
         border: 1px solid var(--vscode-widget-border, var(--vscode-panel-border));
         color: var(--vscode-foreground);
         background: var(--vscode-editor-background);
-      }
-
-      .kanban-card[draggable="true"] {
-        cursor: grab;
-      }
-
-      .kanban-card[aria-grabbed="true"] {
-        opacity: 0.65;
-        cursor: grabbing;
       }
 
       .kanban-card-title {
@@ -667,30 +693,6 @@ function createWebviewHtml({ cspSource, nonce }) {
         overflow-wrap: anywhere;
         font-size: 13px;
         line-height: 1.35;
-      }
-
-      .kanban-card-id,
-      .kanban-card-meta {
-        margin: 0;
-        color: var(--vscode-descriptionForeground);
-        font-size: 11px;
-        line-height: 1.35;
-        overflow-wrap: anywhere;
-      }
-
-      .kanban-card-actions {
-        display: grid;
-        grid-template-columns: minmax(0, 1fr) auto;
-        gap: 6px;
-      }
-
-      .kanban-card select {
-        min-width: 0;
-        min-height: 28px;
-        padding: 3px 5px;
-        border: 1px solid var(--vscode-input-border, transparent);
-        color: var(--vscode-input-foreground);
-        background: var(--vscode-input-background);
       }
 
       [hidden] {
@@ -718,6 +720,10 @@ function createWebviewHtml({ cspSource, nonce }) {
     </main>
     <script nonce="${nonce}">
       (() => {
+        const KANBAN_CLOSED_COLUMNS_STORAGE_KEY = ${JSON.stringify(KANBAN_CLOSED_COLUMNS_STORAGE_KEY)};
+        ${normalizeClosedKanbanColumns.toString()}
+        ${loadClosedKanbanColumns.toString()}
+        ${storeClosedKanbanColumns.toString()}
         const vscode = acquireVsCodeApi();
         const tabs = Array.from(document.querySelectorAll('[data-tab-id]'));
         const panels = Array.from(document.querySelectorAll('[data-panel-id]'));
@@ -728,7 +734,6 @@ function createWebviewHtml({ cspSource, nonce }) {
           document.querySelectorAll('[data-kanban-column-option]'),
         );
         const workspaceBody = document.querySelector('[data-workspace-body]');
-        const notice = document.querySelector('[data-kanban-notice]');
         const errors = document.querySelector('[data-kanban-errors]');
         const kanbanWorkspace = document.querySelector('.kanban-workspace');
         const kanbanColumns = Array.from(document.querySelectorAll('[data-kanban-column]'));
@@ -751,6 +756,13 @@ function createWebviewHtml({ cspSource, nonce }) {
         const editorRefresh = document.querySelector('[data-editor-refresh]');
         const artifactEditor = document.querySelector('.artifact-editor');
         const previousState = vscode.getState() || {};
+        const kanbanColumnIds = Array.from(kanbanColumnsById.keys());
+        const closedKanbanColumns = loadClosedKanbanColumns(
+          window,
+          KANBAN_CLOSED_COLUMNS_STORAGE_KEY,
+          kanbanColumnIds,
+          previousState.closedKanbanColumns,
+        );
         const state = {
           selectedTab: "dashboard",
           selectedArtifactType: "",
@@ -758,9 +770,7 @@ function createWebviewHtml({ cspSource, nonce }) {
           selectedSectionId: "",
           selectedItemId: "",
           ...previousState,
-          closedKanbanColumns: Array.isArray(previousState.closedKanbanColumns)
-            ? previousState.closedKanbanColumns
-            : [],
+          closedKanbanColumns,
         };
         delete state.kanbanFilter;
         if (["design", "view"].includes(state.selectedTab)) {
@@ -770,10 +780,7 @@ function createWebviewHtml({ cspSource, nonce }) {
         let snapshot;
         let artifactIndex;
         let artifactDocument;
-        let dragState;
-        let transitionSequence = 0;
         let editorSaveSequence = 0;
-        const pendingWorkUnits = new Set();
 
         function persistState() {
           vscode.setState(state);
@@ -830,6 +837,12 @@ function createWebviewHtml({ cspSource, nonce }) {
           state.closedKanbanColumns = Array.from(closedColumns);
           if (options.persist !== false) {
             persistState();
+            storeClosedKanbanColumns(
+              window,
+              KANBAN_CLOSED_COLUMNS_STORAGE_KEY,
+              kanbanColumnIds,
+              state.closedKanbanColumns,
+            );
           }
         }
 
@@ -1095,131 +1108,10 @@ function createWebviewHtml({ cspSource, nonce }) {
           renderStructuredFields();
         }
 
-        function formatMeta(card) {
-          const values = [];
-          if (card.execution) {
-            values.push(
-              "실행 " +
-                (card.execution.state || "unknown") +
-                " · r" +
-                (card.execution.revision || "-") +
-                " a" +
-                (card.execution.attempt || "-"),
-            );
-          }
-          if (card.humanReviewStatus) {
-            values.push("Human review " + card.humanReviewStatus);
-          }
-          if (card.integrationStatus) {
-            values.push("Integration " + card.integrationStatus);
-          }
-          if (card.pullRequestStatus) {
-            values.push("PR " + card.pullRequestStatus);
-          }
-          return values.join(" · ");
-        }
-
-        function requestTransition(card, targetStatus) {
-          const capability = card.capabilities.find(
-            (candidate) => candidate.target === targetStatus,
-          );
-          if (!capability?.allowed) {
-            notice.textContent =
-              capability?.reason || "현재 상태에서 허용되지 않는 전이입니다.";
-            return;
-          }
-          if (pendingWorkUnits.has(card.id)) {
-            notice.textContent = card.id + " 상태 전이가 이미 진행 중입니다.";
-            return;
-          }
-          const requestId = "transition-" + Date.now() + "-" + ++transitionSequence;
-          pendingWorkUnits.add(card.id);
-          notice.textContent = card.id + " → " + targetStatus + " 전이 요청 중…";
-          kanbanWorkspace.setAttribute("aria-busy", "true");
-          renderKanban();
-          vscode.postMessage({
-            type: "kanban.transition",
-            requestId,
-            workUnitId: card.id,
-            fromStatus: card.status,
-            targetStatus,
-            snapshotGeneratedAt: snapshot.generatedAt,
-          });
-        }
-
         function createCard(card) {
           const cardElement = document.createElement("article");
           cardElement.className = "kanban-card";
-          cardElement.dataset.workUnitId = card.id;
-          cardElement.tabIndex = 0;
-
-          const allowedCapabilities = card.capabilities.filter((capability) => capability.allowed);
-          const pending = pendingWorkUnits.has(card.id);
-          cardElement.draggable = !pending && allowedCapabilities.length > 0;
-          cardElement.setAttribute("aria-grabbed", "false");
-          cardElement.setAttribute("aria-busy", String(pending));
-
           appendTextElement(cardElement, "h4", "kanban-card-title", card.title);
-          appendTextElement(cardElement, "p", "kanban-card-id", card.id);
-          const meta = formatMeta(card);
-          if (meta) {
-            appendTextElement(cardElement, "p", "kanban-card-meta", meta);
-          }
-
-          const actions = document.createElement("div");
-          actions.className = "kanban-card-actions";
-          const moveTarget = document.createElement("select");
-          moveTarget.dataset.moveTarget = "";
-          moveTarget.setAttribute("aria-label", card.title + " 이동 대상");
-          const placeholder = document.createElement("option");
-          placeholder.value = "";
-          placeholder.textContent = "Move…";
-          moveTarget.append(placeholder);
-          for (const capability of card.capabilities) {
-            if (capability.target === card.status) {
-              continue;
-            }
-            const option = document.createElement("option");
-            option.value = capability.target;
-            option.textContent = capability.allowed
-              ? capability.target
-              : capability.target + " — " + capability.reason;
-            option.title = capability.reason;
-            option.disabled = !capability.allowed;
-            moveTarget.append(option);
-          }
-          moveTarget.disabled = pending || allowedCapabilities.length === 0;
-          const moveButton = document.createElement("button");
-          moveButton.className = "move-button";
-          moveButton.type = "button";
-          moveButton.dataset.moveButton = "";
-          moveButton.textContent = "Move";
-          moveButton.disabled = pending || allowedCapabilities.length === 0;
-          moveButton.addEventListener("click", () => {
-            if (moveTarget.value) {
-              requestTransition(card, moveTarget.value);
-            }
-          });
-          actions.append(moveTarget, moveButton);
-          cardElement.append(actions);
-
-          cardElement.addEventListener("dragstart", (event) => {
-            const allowedTargets = new Set(
-              allowedCapabilities.map((capability) => capability.target),
-            );
-            dragState = { card, allowedTargets };
-            cardElement.setAttribute("aria-grabbed", "true");
-            event.dataTransfer.effectAllowed = "move";
-            event.dataTransfer.setData("text/plain", card.id);
-          });
-          cardElement.addEventListener("dragend", () => {
-            dragState = undefined;
-            cardElement.setAttribute("aria-grabbed", "false");
-            for (const column of kanbanColumns) {
-              column.classList.remove("is-drop-target");
-            }
-          });
-
           return cardElement;
         }
 
@@ -1281,31 +1173,6 @@ function createWebviewHtml({ cspSource, nonce }) {
           });
         }
 
-        for (const column of kanbanColumns) {
-          column.addEventListener("dragover", (event) => {
-            const allowedTargets = dragState?.allowedTargets || new Set();
-            if (allowedTargets.has(column.dataset.kanbanColumn)) {
-              event.preventDefault();
-              event.dataTransfer.dropEffect = "move";
-              column.classList.add("is-drop-target");
-            }
-          });
-          column.addEventListener("dragleave", () => {
-            column.classList.remove("is-drop-target");
-          });
-          column.addEventListener("drop", (event) => {
-            event.preventDefault();
-            column.classList.remove("is-drop-target");
-            const allowedTargets = dragState?.allowedTargets || new Set();
-            if (
-              dragState &&
-              allowedTargets.has(column.dataset.kanbanColumn)
-            ) {
-              requestTransition(dragState.card, column.dataset.kanbanColumn);
-            }
-          });
-        }
-
         editorRefresh.addEventListener("click", () => {
           artifactEditor.setAttribute("aria-busy", "true");
           editorStatus.textContent = "artifact 목록 갱신 중…";
@@ -1321,27 +1188,19 @@ function createWebviewHtml({ cspSource, nonce }) {
             message.snapshot?.schemaVersion === "1.0.0"
           ) {
             snapshot = message.snapshot;
-            notice.textContent = "";
             renderKanban();
           } else if (message.type === "kanban.error") {
             kanbanWorkspace.setAttribute("aria-busy", "false");
             errors.hidden = false;
             errors.textContent = message.error?.message || "Kanban을 불러오지 못했습니다.";
           } else if (message.type === "kanban.transitionPending") {
-            pendingWorkUnits.add(message.workUnitId);
-            notice.textContent =
-              message.workUnitId + " → " + message.targetStatus + " manager 검증 중…";
             kanbanWorkspace.setAttribute("aria-busy", "true");
             renderKanban();
           } else if (message.type === "kanban.transitionResult") {
-            pendingWorkUnits.delete(message.workUnitId);
             kanbanWorkspace.setAttribute("aria-busy", "false");
             if (message.ok) {
-              notice.textContent =
-                message.workUnitId + " → " + message.targetStatus + " 전이가 완료되었습니다.";
               errors.hidden = true;
             } else {
-              notice.textContent = "상태 전이가 적용되지 않았습니다.";
               errors.hidden = false;
               errors.textContent =
                 message.error?.message || "Work Unit manager가 전이를 거부했습니다.";
@@ -1424,7 +1283,10 @@ function createWebviewHtml({ cspSource, nonce }) {
 }
 
 module.exports = {
+  KANBAN_CLOSED_COLUMNS_STORAGE_KEY,
   KANBAN_COLUMNS,
   TAB_DEFINITIONS,
   createWebviewHtml,
+  loadClosedKanbanColumns,
+  storeClosedKanbanColumns,
 };

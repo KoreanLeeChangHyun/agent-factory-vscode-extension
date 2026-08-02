@@ -3,7 +3,13 @@
 const assert = require("node:assert/strict");
 const test = require("node:test");
 
-const { TAB_DEFINITIONS, createWebviewHtml } = require("../../src/webviewShell");
+const {
+  KANBAN_CLOSED_COLUMNS_STORAGE_KEY,
+  TAB_DEFINITIONS,
+  createWebviewHtml,
+  loadClosedKanbanColumns,
+  storeClosedKanbanColumns,
+} = require("../../src/webviewShell");
 
 test("shell defines the four approved tabs in order", () => {
   assert.deepEqual(
@@ -46,7 +52,8 @@ test("shell uses VS Code state APIs and keyboard tab navigation", () => {
   assert.match(html, /vscode\.setState\(state\)/);
   assert.match(html, /state\.selectedTab = tabId/);
   assert.match(html, /\["design", "view"\]\.includes\(state\.selectedTab\)/);
-  assert.match(html, /closedKanbanColumns:\s*Array\.isArray\(previousState\.closedKanbanColumns\)/);
+  assert.match(html, /const closedKanbanColumns = loadClosedKanbanColumns\(/);
+  assert.match(html, /previousState\.closedKanbanColumns/);
   assert.match(html, /state\.closedKanbanColumns\s*=/);
   assert.doesNotMatch(html, /kanbanOpen/);
   assert.doesNotMatch(html, /selectedKanbanBoard/);
@@ -56,6 +63,79 @@ test("shell uses VS Code state APIs and keyboard tab navigation", () => {
   assert.match(html, /ArrowRight/);
   assert.match(html, /Home/);
   assert.match(html, /End/);
+});
+
+test("Kanban column visibility persists only valid column ids", () => {
+  const validIds = ["backlog", "ready", "working"];
+  const writes = [];
+  const storage = {
+    getItem(key) {
+      assert.equal(key, KANBAN_CLOSED_COLUMNS_STORAGE_KEY);
+      return JSON.stringify(["ready", "unknown", "ready"]);
+    },
+    setItem(key, value) {
+      writes.push([key, value]);
+    },
+  };
+
+  assert.deepEqual(
+    loadClosedKanbanColumns(
+      { localStorage: storage },
+      KANBAN_CLOSED_COLUMNS_STORAGE_KEY,
+      validIds,
+      ["backlog"],
+    ),
+    ["ready"],
+  );
+  assert.equal(
+    storeClosedKanbanColumns(
+      { localStorage: storage },
+      KANBAN_CLOSED_COLUMNS_STORAGE_KEY,
+      validIds,
+      ["working", "unknown", "working"],
+    ),
+    true,
+  );
+  assert.deepEqual(writes, [
+    [KANBAN_CLOSED_COLUMNS_STORAGE_KEY, JSON.stringify(["working"])],
+  ]);
+});
+
+test("Kanban column visibility safely falls back when storage is damaged or unavailable", () => {
+  const validIds = ["backlog", "ready"];
+  const fallback = ["backlog", "unknown"];
+
+  assert.deepEqual(
+    loadClosedKanbanColumns(
+      { localStorage: { getItem: () => "not-json" } },
+      KANBAN_CLOSED_COLUMNS_STORAGE_KEY,
+      validIds,
+      fallback,
+    ),
+    ["backlog"],
+  );
+  assert.deepEqual(
+    loadClosedKanbanColumns(
+      {
+        get localStorage() {
+          throw new Error("denied");
+        },
+      },
+      KANBAN_CLOSED_COLUMNS_STORAGE_KEY,
+      validIds,
+      fallback,
+    ),
+    ["backlog"],
+  );
+  assert.equal(
+    storeClosedKanbanColumns(
+      { localStorage: { setItem: () => { throw new Error("quota"); } } },
+      KANBAN_CLOSED_COLUMNS_STORAGE_KEY,
+      validIds,
+      ["ready"],
+    ),
+    false,
+  );
 });
 
 test("Editor renders artifact navigation, structured fields, and read-only JSON", () => {
@@ -112,30 +192,35 @@ test("Kanban renders six lifecycle columns controlled by one header multi-pickli
   assert.doesNotMatch(html, /placeholder="제목 또는 id"/);
   assert.doesNotMatch(html, /data-kanban-refresh/);
   assert.doesNotMatch(html, /type:\s*"kanban\.refresh"/);
-  assert.match(html, /draggable/);
-  assert.match(html, /moveTarget\.dataset\.moveTarget/);
-  assert.match(html, /moveButton\.dataset\.moveButton/);
+  assert.doesNotMatch(html, /data-kanban-notice/);
+  assert.doesNotMatch(html, /kanban-notice/);
+  assert.doesNotMatch(html, /notice\.textContent/);
+  assert.match(html, /localStorage/);
+  assert.match(html, /KANBAN_CLOSED_COLUMNS_STORAGE_KEY/);
   assert.match(html, /kanban\.ready/);
-  assert.match(html, /type:\s*"kanban\.transition"/);
+  assert.doesNotMatch(html, /type:\s*"kanban\.transition"/);
   assert.doesNotMatch(html, /kanban\.(?:create|edit)/);
 });
 
-test("Kanban drag and Move controls use the same capability and request contract", () => {
+test("Kanban cards render only a static title without action affordances", () => {
   const html = createWebviewHtml({
     cspSource: "vscode-webview://test",
     nonce: "test-nonce",
   });
 
-  assert.match(html, /card\.capabilities\.filter\(\(capability\) => capability\.allowed\)/);
-  assert.match(html, /allowedTargets\.has\(column\.dataset\.kanbanColumn\)/);
-  assert.match(html, /requestTransition\(card,\s*moveTarget\.value\)/);
-  assert.match(
-    html,
-    /requestTransition\(dragState\.card,\s*column\.dataset\.kanbanColumn\)/,
-  );
-  assert.match(html, /snapshotGeneratedAt:\s*snapshot\.generatedAt/);
+  assert.match(html, /appendTextElement\(cardElement, "h4", "kanban-card-title", card\.title\)/);
+  assert.doesNotMatch(html, /kanban-card-id/);
+  assert.doesNotMatch(html, /kanban-card-meta/);
+  assert.doesNotMatch(html, /kanban-card-actions/);
+  assert.doesNotMatch(html, /moveTarget/);
+  assert.doesNotMatch(html, /moveButton/);
+  assert.doesNotMatch(html, /draggable/);
+  assert.doesNotMatch(html, /aria-grabbed/);
+  assert.doesNotMatch(html, /cardElement\.tabIndex/);
+  assert.doesNotMatch(html, /cardElement\.addEventListener/);
+  assert.doesNotMatch(html, /column\.addEventListener\("drag/);
+  assert.doesNotMatch(html, /requestTransition/);
   assert.match(html, /message\.type === "kanban\.transitionResult"/);
-  assert.doesNotMatch(html, /showMovePreview/);
 });
 
 test("Kanban fills the grid-owned remaining height without outer scrolling", () => {
