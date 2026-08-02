@@ -1,0 +1,52 @@
+{
+  "id": "work-unit-basis",
+  "title": "Work Unit Basis",
+  "content": [
+    {
+      "id": "SPECIFICATION-IMPACT-001",
+      "kind": "specification-impact",
+      "content": {
+        "summary": "Workspace requirements Specification에 Kanban 일반 notice 부재, 오류 영역 유지와 칼럼 표시 localStorage 영속화 계약을 추가했다."
+      },
+      "attributes": {
+        "status": "aligned"
+      },
+      "sourceRefs": [
+        {
+          "artifactType": "specification",
+          "id": "agent-factory-workspace-requirements",
+          "path": ".agent-factory/specifications/agent-factory-workspace-requirements"
+        }
+      ]
+    },
+    {
+      "id": "WORK-UNIT-BASIS-001",
+      "kind": "work-unit-basis",
+      "content": {
+        "id": "agent-factory-workspace-kanban-notice-visibility-persistence",
+        "goal": "Kanban notice 영역을 제거하고 칼럼 표시 선택을 localStorage에 영속화하며 회귀 검증한다.",
+        "scope": [
+          "notice DOM, CSS와 일반 상태 쓰기 제거",
+          "localStorage 기반 칼럼 표시 저장 및 복원",
+          "requirements Specification 정렬",
+          "focused unit and package checks"
+        ],
+        "expectedOutputs": [
+          "정리된 Kanban Webview UI",
+          "영속화된 칼럼 표시 설정",
+          "정렬된 Specification과 검증 evidence"
+        ],
+        "exclusions": [
+          "헤더 제안 항목 구현",
+          "manager transition 및 error contract 변경",
+          "Human 승인 없는 integration과 배포"
+        ],
+        "evidenceRefs": [
+          "INTERNAL-EVIDENCE-001",
+          "SPECIFICATION-IMPACT-001"
+        ]
+      }
+    }
+  ],
+  "subsections": []
+}

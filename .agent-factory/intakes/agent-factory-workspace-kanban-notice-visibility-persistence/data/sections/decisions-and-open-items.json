@@ -1,0 +1,30 @@
+{
+  "id": "decisions-and-open-items",
+  "title": "Decisions and Open Items",
+  "content": [
+    {
+      "id": "DECISION-STATUS-001",
+      "kind": "decision-status",
+      "content": {
+        "state": "approved",
+        "decisions": [
+          "notice 영역 자체를 제거한다.",
+          "칸반 표시 선택값은 localStorage에 저장해 유지한다.",
+          "기존 manager 전이와 오류 표시는 유지한다."
+        ]
+      }
+    },
+    {
+      "id": "OPEN-ITEMS-STATUS-001",
+      "kind": "open-items-status",
+      "content": {
+        "nonBlocking": [
+          "Kanban 헤더에는 현재 보이는 칼럼 수 요약을 둘 수 있으나 이번 구현에는 포함하지 않는다.",
+          "실행 결과의 Human 시각 검토와 별도 integration 결정"
+        ],
+        "blocking": []
+      }
+    }
+  ],
+  "subsections": []
+}

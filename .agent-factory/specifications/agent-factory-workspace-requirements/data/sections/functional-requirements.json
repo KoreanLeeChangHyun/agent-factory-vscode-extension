@@ -72,6 +72,16 @@
         "두 확장의 두 행 geometry는 저장된 Web 참조와 정합해야 한다.",
         "이 geometry 변경은 탭 이름, 순서, DOM, 이벤트, 키보드와 상태 계약을 변경하지 않는다."
       ]
+    },
+    {
+      "id": "functional-kanban-notice-visibility-persistence",
+      "kind": "functional-requirement",
+      "content": [
+        "Kanban은 지속적인 전이 요청, 검증 또는 성공 문구를 위한 일반 notice 영역을 표시하지 않는다.",
+        "Kanban manager 또는 snapshot 오류는 기존 오류 영역에 표시한다.",
+        "칸반 표시 선택기의 닫힌 칼럼 ID 목록은 localStorage에 저장하고 Webview 초기화 시 유효한 칼럼 ID만 복원한다.",
+        "localStorage 접근 또는 저장 실패는 Kanban 렌더링과 상태 전이를 중단하지 않는다."
+      ]
     }
   ],
   "subsections": []
