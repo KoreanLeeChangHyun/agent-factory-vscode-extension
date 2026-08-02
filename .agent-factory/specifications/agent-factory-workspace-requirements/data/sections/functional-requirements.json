@@ -32,13 +32,13 @@
         "Kanban 본문과 보드는 좌우 padding과 열 사이 gap 없이 가용 영역을 채우고 Webview 바깥 스크롤을 만들지 않으며 카드 목록만 독립적으로 세로 스크롤된다.",
         "Kanban 탭에서는 중복 선택 헤더와 수동 새로 고침 컨트롤을 표시하지 않는다.",
         "Kanban은 제목 또는 id 검색과 필터 UI 및 필터 상태를 제공하지 않는다.",
-        "카드는 제목, id, updatedAt과 존재하는 실행·review·Human 승인·integration·PR 상태를 표시한다.",
+        "카드는 타이틀만 표시한다.",
+        "카드는 정적 정보 항목이며 id, updatedAt, 실행·review·Human 승인·integration·PR 상태, Move 선택기, 버튼 또는 기타 액션을 표시하지 않는다.",
+        "카드는 draggable, click, tap, focus 또는 keyboard Move 상호작용을 제공하지 않는다.",
         "보드는 상태별 항목 수, filesystem 변경 자동 갱신과 Webview 재연결 복원을 제공한다.",
-        "확장 호스트는 카드별 target lifecycle capability와 거절 사유를 계산한다.",
-        "허용된 실제 상태 열은 drag and drop target으로 동작하고 동일한 click, tap, keyboard Move 작업을 제공한다.",
         "Work Unit 상태 변경은 canonical manager 명령을 통해 수행한다.",
-        "Work Unit 실행은 Goal, checkpoint, dedicated worktree와 execution state 계약을 통해 수행한다.",
-        "Human review 승인·rework, Git integration과 PR 생성은 각각 독립적인 Human 확인을 요구한다."
+        "Work Unit 실행은 Goal, dedicated worktree와 execution state 계약을 통해 수행한다.",
+        "Human review, rework, Git integration과 PR 생성은 Agent Factory lifecycle의 명시적 Human 결정으로 수행한다."
       ]
     },
     {

@@ -10,7 +10,9 @@
         "decisions": [
           "notice 영역 자체를 제거한다.",
           "칸반 표시 선택값은 localStorage에 저장해 유지한다.",
-          "기존 manager 전이와 오류 표시는 유지한다."
+          "기존 오류 영역은 유지한다.",
+          "카드는 정적인 타이틀만 표시한다.",
+          "Move UI, DnD, click, tap, focus와 keyboard Move를 포함한 모든 카드 액션을 우선 제거한다."
         ]
       }
     },
@@ -19,10 +21,20 @@
       "kind": "open-items-status",
       "content": {
         "nonBlocking": [
-          "Kanban 헤더에는 현재 보이는 칼럼 수 요약을 둘 수 있으나 이번 구현에는 포함하지 않는다.",
+          "카드 액션 재도입은 DnD affordance, keyboard 동등 경로와 대체 메뉴를 함께 설계하는 후속 Intake로 다룬다.",
           "실행 결과의 Human 시각 검토와 별도 integration 결정"
         ],
         "blocking": []
+      }
+    },
+    {
+      "id": "EXECUTION-DECISION-001",
+      "kind": "decision-status",
+      "content": {
+        "state": "approved",
+        "decisions": [
+          "Human은 agent-factory-workspace-kanban-notice-visibility-persistence Work Unit 실행을 요청했다."
+        ]
       }
     }
   ],

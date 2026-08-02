@@ -1,6 +1,6 @@
 {
   "schemaVersion": "2.0.0",
-  "documentVersion": "1.0.20",
+  "documentVersion": "1.0.48",
   "id": "agent-factory-workspace-kanban-notice-visibility-persistence",
   "artifactType": "intake",
   "projectId": "agent-factory-workspace",
@@ -9,7 +9,7 @@
     "status": "ready"
   },
   "createdAt": "2026-07-28T15:54:13+00:00",
-  "updatedAt": "2026-07-28T15:55:09+00:00",
+  "updatedAt": "2026-08-02T10:30:17+00:00",
   "language": "ko",
   "theme": "default",
   "provenance": {
@@ -19,7 +19,7 @@
   },
   "relations": [],
   "readiness": {
-    "reviewedAt": "2026-07-28T15:54:58Z",
+    "reviewedAt": "2026-08-02T10:40:00Z",
     "contractValid": true,
     "evidenceComplete": true,
     "requirementsComplete": true,

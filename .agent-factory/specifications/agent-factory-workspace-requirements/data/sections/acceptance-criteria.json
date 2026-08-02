@@ -29,14 +29,13 @@
       "kind": "acceptance-criterion",
       "content": [
         "6개 canonical lifecycle 상태 열이 하나의 기본 Kanban 보드에 동시에 표시되고 상태 탭 또는 단일 선택 보드 UI가 존재하지 않는다.",
-        "갱신 시각 정보가 없고 해당 상단 위치의 컨트롤로 Kanban 보드 전체를 열고 닫으며 상태가 Webview 재연결 후 복원된다.",
-        "닫힌 상태에서 6개 상태 열을 포함한 보드 전체가 보이지 않고 각 열 헤더에는 개별 열기·닫기 컨트롤이 없다.",
-        "Kanban 본문 좌우 padding과 열 사이 gap은 0이며 890x950 viewport에서 Webview 바깥 스크롤이 없다.",
-        "Kanban 탭에서 중복 선택 헤더와 수동 새로 고침 컨트롤이 존재하지 않고 filesystem watcher 자동 갱신과 reconnect는 동작한다.",
-        "제목·id 검색과 필터 UI 및 저장 상태가 존재하지 않는다.",
-        "허용된 실제 상태 열만 dragover와 Move 메뉴에서 활성화되며 manager가 성공한 뒤 카드 위치가 확정된다.",
-        "상태 변경은 manager를 통과하고 실패 시 부분 canonical 변경이 남지 않는다.",
-        "단위, manager 통합, viewport E2E, 접근성·테마·보안과 Human 검토가 통과한다."
+        "칸반 표시 multi-picklist로 숨긴 상태 열 ID가 고정 localStorage key에 저장되고 다음 Webview 초기화에서 유효한 ID만 복원된다.",
+        "localStorage 손상 데이터, 읽기 실패와 쓰기 실패가 Kanban 렌더링을 중단하지 않는다.",
+        "Kanban 일반 notice DOM과 전이 요청, pending 및 성공 문구가 없고 snapshot 또는 manager 오류는 기존 오류 영역에 표시된다.",
+        "Kanban 본문 좌우 padding과 열 사이 gap은 0이며 Webview 바깥 스크롤이 없고 각 카드 목록만 독립 세로 스크롤된다.",
+        "제목·id 검색, 필터 UI, 갱신 시각과 수동 새로 고침이 존재하지 않는다.",
+        "카드는 타이틀만 표시하고 id, metadata, select, button, draggable, click, tap, focus와 keyboard Move 상호작용이 없다.",
+        "관련 단위 테스트, workspace npm run check, git diff check와 Human 검토가 통과한다."
       ]
     },
     {

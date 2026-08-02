@@ -21,6 +21,8 @@
         "items": [
           "workspace/src/webviewShell.js의 Kanban notice DOM, CSS와 일반 상태 쓰기 제거",
           "칸반 칼럼 표시 선택값의 localStorage 저장 및 복원",
+          "Kanban 카드의 타이틀 외 metadata와 모든 액션 제거",
+          "카드 drag, click, tap, focus와 keyboard Move 상호작용 제거",
           "workspace/test/unit/webviewShell.test.js 회귀 테스트"
         ]
       }
@@ -33,9 +35,9 @@
           "Kanban manager 전이 계약 변경",
           "오류 영역 제거",
           "검색, 필터 또는 수동 새로 고침 추가",
-          "Kanban 헤더 제안 항목 구현",
           "다른 탭의 vscode state 계약 변경",
-          "Human 승인 없는 integration, cleanup, push 또는 배포"
+          "카드 액션, DnD, keyboard Move 또는 대체 메뉴 재도입",
+          "Human 결정 없는 integration, cleanup, push 또는 배포"
         ]
       }
     }

@@ -46,16 +46,13 @@
       "id": "kanban-operations-decisions",
       "kind": "decision-status",
       "content": [
-        "canonical Work Unit의 6개 lifecycle 상태를 헤더 보드 선택기로 사용한다.",
-        "본문은 선택한 상태 보드 하나만 전체 폭과 남은 높이로 표시한다.",
-        "보드 선택기는 가능한 한 한눈에 표시하고 부족한 폭에서만 숨김 가로 스크롤을 사용한다.",
-        "선택 보드 카드 목록은 숨김 세로 스크롤을 사용한다.",
-        "제목·id 검색과 필터는 제공하지 않는다.",
-        "헤더 보드 선택기는 click 선택과 허용된 DnD drop target을 겸한다.",
-        "drag and drop과 동등한 click, tap, keyboard Move 조작을 함께 제공한다.",
-        "확장 호스트 capability가 불가능한 target을 사전 차단하고 actual command가 다시 검증한다.",
-        "생성·편집 UI는 제공하지 않고 실행·Human review·병합·PR은 카드 Action으로 제공한다.",
-        "병합과 PR은 lifecycle 이동과 분리된 Human 승인 action이다."
+        "canonical Work Unit의 6개 lifecycle 상태를 하나의 기본 다중 열 Kanban 보드에 동시에 표시한다.",
+        "Kanban 선택 헤더 우측 칸반 표시 multi-picklist로 개별 상태 열을 표시하거나 숨긴다.",
+        "닫힌 상태 열 ID는 localStorage에 저장하고 Webview 초기화 시 유효한 ID만 복원한다.",
+        "갱신 시각, 검색, 필터와 수동 새로 고침은 제공하지 않는다.",
+        "카드는 정적인 타이틀만 표시하고 id, metadata, Move UI와 기타 액션을 표시하지 않는다.",
+        "카드는 drag and drop, click, tap, focus와 keyboard Move 상호작용을 제공하지 않는다.",
+        "상태 변경은 canonical manager 명령을 통해 수행하며 카드 action 재도입은 후속 Intake에서 결정한다."
       ]
     },
     {

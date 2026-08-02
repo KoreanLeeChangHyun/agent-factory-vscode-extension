@@ -27,6 +27,22 @@
           "오류 표시와 canonical manager 전이는 유지된다."
         ]
       }
+    },
+    {
+      "id": "HUMAN-FEEDBACK-002",
+      "kind": "human-feedback",
+      "content": {
+        "feedback": "Human은 스크린샷의 상태 전이가 적용되지 않았습니다. 라인 제거와 칸반 표시 선택값 유지를 요청했다."
+      },
+      "blockRef": "blocks/evidence/kanban-notice-line.png"
+    },
+    {
+      "id": "HUMAN-FEEDBACK-003",
+      "kind": "human-feedback",
+      "content": {
+        "feedback": "Human은 Kanban 카드에 타이틀만 표시하고 모든 액션을 우선 제거하며 액션은 나중에 다시 넣겠다고 결정했다."
+      },
+      "blockRef": "blocks/evidence/kanban-card-actions.png"
     }
   ],
   "subsections": []

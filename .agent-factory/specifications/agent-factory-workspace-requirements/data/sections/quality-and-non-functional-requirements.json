@@ -25,13 +25,11 @@
       "kind": "non-functional-requirement",
       "content": [
         "Webview는 파일시스템, manager, Codex, Git 또는 GitHub 명령을 직접 실행하지 않는다.",
-        "capability preflight와 실제 command는 확장 호스트가 현재 canonical 상태를 기준으로 각각 검증한다.",
-        "지원하지 않는 schema, unsafe path, symlink, stale 상태와 command failure는 mutation 없이 근거 있는 오류를 표시한다.",
-        "보드 선택기는 가능한 폭에서 한눈에 보이고 좁은 폭에서만 가로 스크롤되며 시각적 스크롤바를 숨긴다.",
-        "선택 보드는 남은 panel 높이를 채우고 카드 목록이 독립 세로 스크롤되며 시각적 스크롤바를 숨긴다.",
-        "숨긴 스크롤바와 무관하게 keyboard focus, 선택 상태, accessible name과 wheel·trackpad scrolling을 유지한다.",
-        "dragging movement에는 click·tap과 keyboard로 수행하는 동등한 Move 대체 조작을 제공한다.",
-        "장시간 action은 request identity, pending 상태, 중복 방지, bounded retry와 authoritative refresh를 사용한다.",
+        "지원하지 않는 schema, unsafe path, symlink와 snapshot 또는 manager failure는 mutation 없이 기존 오류 영역에 표시한다.",
+        "Kanban 본문과 보드는 가용 영역을 채우고 카드 목록만 독립 세로 스크롤되며 시각적 스크롤바를 숨긴다.",
+        "숨긴 스크롤바와 무관하게 칸반 표시 선택기의 keyboard focus, 선택 상태와 accessible name 및 카드 목록의 wheel·trackpad scrolling을 유지한다.",
+        "localStorage 읽기 또는 쓰기 실패와 손상 데이터는 Kanban 렌더링을 중단하지 않고 유효한 상태 열 ID만 상태에 반영한다.",
+        "정적인 Kanban 카드는 타이틀 외 정보나 숨은 interaction affordance를 포함하지 않는다.",
         "강제 Git 작업, dirty worktree 제거, 자동 merge와 자동 PR promotion을 제공하지 않는다."
       ]
     },
@@ -57,7 +55,7 @@
         "package path escape, symlink, unsupported schema 또는 artifact type과 stale documentVersion은 mutation 전에 거부한다.",
         "JSON 미리보기는 실행 가능한 markup이 아니라 textContent로 렌더링한다.",
         "manager 오류는 내부 명령 경로와 민감 정보를 노출하지 않는 구조화 오류로 표시한다.",
-        "Editor 변경은 기존 Kanban controller, capability, DnD와 Action 계약을 변경하지 않는다."
+        "Editor 변경은 현재 Kanban rendering, visibility persistence와 오류 표시 계약을 변경하지 않는다."
       ]
     },
     {
