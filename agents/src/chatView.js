@@ -56,6 +56,13 @@ function shouldSubmitComposerKey(event) {
   );
 }
 
+function resizeComposerInput(element) {
+  element.style.height = "auto";
+  const height = Math.min(Math.max(element.scrollHeight, 20), 144);
+  element.style.height = height + "px";
+  element.style.overflowY = element.scrollHeight > 144 ? "auto" : "hidden";
+}
+
 function createChatViewHtml({ cspSource, nonce }) {
   if (!cspSource || !nonce) {
     throw new TypeError("cspSource and nonce are required");
@@ -277,10 +284,12 @@ function createChatViewHtml({ cspSource, nonce }) {
       }
 
       .session-status {
-        min-height: 20px;
+        height: 22px;
         padding: 0 12px;
+        overflow: hidden;
         color: var(--vscode-descriptionForeground);
         font-size: 0.9em;
+        line-height: 22px;
       }
 
       .session-status[data-error="true"] {
@@ -318,16 +327,17 @@ function createChatViewHtml({ cspSource, nonce }) {
         display: block;
         width: 100%;
         min-width: 0;
+        height: 20px;
         min-height: 20px;
         max-height: 144px;
-        padding: 0 44px 32px 0;
+        padding: 0 44px 0 0;
         border: 0;
         outline: 0;
-        resize: vertical;
+        resize: none;
         color: var(--vscode-input-foreground);
         background: transparent;
         line-height: 20px;
-        overflow-y: auto;
+        overflow-y: hidden;
       }
 
       .composer::placeholder {
@@ -422,6 +432,7 @@ function createChatViewHtml({ cspSource, nonce }) {
       (() => {
         const vscode = acquireVsCodeApi();
         const groupMessagesIntoTurns = ${groupMessagesIntoTurns.toString()};
+        const resizeComposerInput = ${resizeComposerInput.toString()};
         const shouldSubmitComposerKey = ${shouldSubmitComposerKey.toString()};
         const modeTabs = Array.from(document.querySelectorAll('[data-mode]'));
         const modePanels = Array.from(document.querySelectorAll('[data-mode-panel]'));
@@ -500,6 +511,7 @@ function createChatViewHtml({ cspSource, nonce }) {
             tab.addEventListener("click", () => {
               state.activeSessionId = session.id;
               composer.value = activeSession().draft;
+              resizeComposerInput(composer);
               render();
               persist();
             });
@@ -545,7 +557,6 @@ function createChatViewHtml({ cspSource, nonce }) {
           if (value === "running") return "Codex가 응답하고 있습니다…";
           if (value === "cancelling") return "응답을 취소하고 있습니다…";
           if (value === "cancelled") return "응답이 취소되었습니다.";
-          if (value === "complete") return "완료";
           if (value === "interrupted") return "이전 실행이 중단되었습니다.";
           return "";
         }
@@ -566,6 +577,7 @@ function createChatViewHtml({ cspSource, nonce }) {
           });
           session.draft = "";
           composer.value = "";
+          resizeComposerInput(composer);
           persist();
           renderMessages();
         }
@@ -601,12 +613,14 @@ function createChatViewHtml({ cspSource, nonce }) {
           state.sessions.push(session);
           state.activeSessionId = session.id;
           composer.value = "";
+          resizeComposerInput(composer);
           render();
           composer.focus();
           persist();
         });
 
         composer.addEventListener("input", () => {
+          resizeComposerInput(composer);
           activeSession().draft = composer.value;
           sendButton.disabled =
             !composer.value.trim() ||
@@ -636,6 +650,7 @@ function createChatViewHtml({ cspSource, nonce }) {
         });
 
         composer.value = activeSession().draft;
+        resizeComposerInput(composer);
         render();
         activateMode(state.activeMode);
         vscode.postMessage({ type: "chat.ready" });
@@ -649,5 +664,6 @@ module.exports = {
   configureChatWebview,
   createChatViewHtml,
   groupMessagesIntoTurns,
+  resizeComposerInput,
   shouldSubmitComposerKey,
 };

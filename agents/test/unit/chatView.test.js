@@ -6,6 +6,7 @@ const test = require("node:test");
 const {
   createChatViewHtml,
   groupMessagesIntoTurns,
+  resizeComposerInput,
   shouldSubmitComposerKey,
 } = require("../../src/chatView");
 
@@ -94,7 +95,7 @@ test("Chat view renders one Web-aligned composer card with a transparent input a
   );
   assert.match(
     html,
-    /\.composer\s*\{[^}]*max-height:\s*144px;[^}]*padding:\s*0 44px 32px 0;[^}]*border:\s*0;[^}]*background:\s*transparent;/s,
+    /\.composer\s*\{[^}]*height:\s*20px;[^}]*max-height:\s*144px;[^}]*padding:\s*0 44px 0 0;[^}]*border:\s*0;[^}]*resize:\s*none;[^}]*background:\s*transparent;/s,
   );
   assert.match(
     html,
@@ -107,6 +108,29 @@ test("Chat view renders one Web-aligned composer card with a transparent input a
   assert.match(html, /sendButton\.hidden = running/);
   assert.match(html, /cancelButton\.hidden = !running/);
   assert.doesNotMatch(html, /--af-color-|frontend\/src|agent-factory\/web/);
+});
+
+test("Chat composer grows from 20px through 144px and then uses internal scrolling", () => {
+  const composer = { scrollHeight: 12, style: {} };
+
+  resizeComposerInput(composer);
+  assert.equal(composer.style.height, "20px");
+  assert.equal(composer.style.overflowY, "hidden");
+
+  composer.scrollHeight = 92;
+  resizeComposerInput(composer);
+  assert.equal(composer.style.height, "92px");
+  assert.equal(composer.style.overflowY, "hidden");
+
+  composer.scrollHeight = 180;
+  resizeComposerInput(composer);
+  assert.equal(composer.style.height, "144px");
+  assert.equal(composer.style.overflowY, "auto");
+
+  const html = render();
+  assert.match(html, /resizeComposerInput\(composer\)/);
+  assert.match(html, /\.session-status\s*\{[^}]*height:\s*22px;/s);
+  assert.doesNotMatch(html, /if \(value === "complete"\) return "완료"/);
 });
 
 test("Chat view groups messages into turns with user cards and transparent assistant output", () => {

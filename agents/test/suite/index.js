@@ -16,6 +16,7 @@ const { CodexRunner } = require("../../src/codexAdapter");
 const {
   createChatViewHtml,
   groupMessagesIntoTurns,
+  resizeComposerInput,
   shouldSubmitComposerKey,
 } = require("../../src/chatView");
 
@@ -65,6 +66,8 @@ function verifyChatViewContract() {
   assert.match(html, /\.session-header\s*\{[^}]*min-height:\s*32px;/s);
   assert.match(html, /class="composer-card"/);
   assert.match(html, /class="composer-action"/);
+  assert.match(html, /\.composer\s*\{[^}]*height:\s*20px;[^}]*max-height:\s*144px;[^}]*resize:\s*none;/s);
+  assert.match(html, /\.session-status\s*\{[^}]*height:\s*22px;/s);
   assert.match(html, /turn\.className = "message-turn"/);
   assert.match(html, /element\.className = "message message-" \+ item\.role/);
   assert.equal(shouldSubmitComposerKey({ key: "Enter" }), true);
@@ -76,6 +79,11 @@ function verifyChatViewContract() {
     shouldSubmitComposerKey({ key: "Enter", isComposing: true }),
     false,
   );
+  const composer = { scrollHeight: 180, style: {} };
+  resizeComposerInput(composer);
+  assert.equal(composer.style.height, "144px");
+  assert.equal(composer.style.overflowY, "auto");
+  assert.doesNotMatch(html, /if \(value === "complete"\) return "완료"/);
   assert.deepEqual(
     groupMessagesIntoTurns([
       { role: "user", text: "hello" },
