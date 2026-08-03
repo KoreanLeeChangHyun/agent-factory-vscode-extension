@@ -29,6 +29,15 @@
           "단위, 통합, Extension Host E2E와 VSIX 검증이 통과한다."
         ]
       }
+    },
+    {
+      "id": "HUMAN-FEEDBACK-002",
+      "kind": "human-feedback",
+      "content": {
+        "feedback": "우선 제공한 이미지 수준까지만 만들면 된다.",
+        "target": "기존 agents VS Code 확장 화면"
+      },
+      "blockRef": "blocks/evidence/web-session-agents-panel-2026-08-02.png"
     }
   ],
   "subsections": []

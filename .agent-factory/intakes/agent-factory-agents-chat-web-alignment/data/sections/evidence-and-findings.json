@@ -109,6 +109,51 @@
           "C: 현 상태에서 중단 — Git 변경 없음, 구현 진행 불가"
         ]
       }
+    },
+    {
+      "id": "INTERVIEW-IMPLEMENTATION-TARGET-002",
+      "kind": "interview",
+      "content": {
+        "question": "이 화면을 어느 대상으로 구현할지 결정",
+        "recommendation": "A",
+        "answer": "A",
+        "state": "answered",
+        "choices": [
+          "A: 기존 agents VS Code 확장 화면을 이미지 수준으로 구현",
+          "B: 동작 없는 UI 목업만 구현",
+          "C: 별도의 새 에이전트 앱으로 구현"
+        ]
+      }
+    },
+    {
+      "id": "INTERVIEW-WORK-UNIT-RECOVERY-003",
+      "kind": "interview",
+      "content": {
+        "question": "검증 불가한 기존 Work Unit을 어떻게 처리할지 결정",
+        "recommendation": "A",
+        "answer": "A",
+        "state": "answered",
+        "choices": [
+          "A: 기존 것은 보존하고 새 Work Unit을 만든다",
+          "B: Work Unit 관리자 자체를 먼저 수정한다",
+          "C: 여기서 중단한다"
+        ]
+      }
+    },
+    {
+      "id": "INTERVIEW-EXECUTION-004",
+      "kind": "interview",
+      "content": {
+        "question": "agent-factory-agents-chat-web-alignment-v2 Work Unit을 지금 실행할지 결정",
+        "recommendation": "A",
+        "answer": "A",
+        "state": "answered",
+        "choices": [
+          "A: 지금 실행한다",
+          "B: Work Unit 내용만 먼저 검토한다",
+          "C: 실행하지 않고 중단한다"
+        ]
+      }
     }
   ],
   "subsections": []

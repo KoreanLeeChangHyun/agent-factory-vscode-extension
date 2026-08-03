@@ -1,15 +1,15 @@
 {
   "schemaVersion": "2.0.0",
-  "documentVersion": "1.0.52",
-  "id": "agent-factory-agents-chat-web-alignment",
+  "documentVersion": "1.0.21",
+  "id": "workspace-kanban-full-height-restoration",
   "artifactType": "intake",
   "projectId": "agent-factory-workspace",
   "lifecycle": {
     "phase": "intake",
     "status": "ready"
   },
-  "createdAt": "2026-07-26T14:45:28+00:00",
-  "updatedAt": "2026-08-02T14:23:36+00:00",
+  "createdAt": "2026-08-02T14:50:46+00:00",
+  "updatedAt": "2026-08-02T14:54:24+00:00",
   "language": "ko",
   "theme": "default",
   "provenance": {
@@ -19,7 +19,7 @@
   },
   "relations": [],
   "readiness": {
-    "reviewedAt": "2026-08-02T20:38:00+09:00",
+    "reviewedAt": "2026-08-02T14:55:00Z",
     "contractValid": true,
     "evidenceComplete": true,
     "requirementsComplete": true,

@@ -47,6 +47,58 @@
         "state": "approved",
         "interviewRef": "INTERVIEW-SPEC-COMMIT-001"
       }
+    },
+    {
+      "id": "DECISION-IMPLEMENTATION-TARGET-002",
+      "kind": "decision-status",
+      "content": {
+        "decision": "기존 agents VS Code 확장을 대상으로 제공 이미지 수준의 화면과 현재 지원되는 기능 범위만 구현한다.",
+        "state": "accepted",
+        "interviewRef": "INTERVIEW-IMPLEMENTATION-TARGET-002"
+      }
+    },
+    {
+      "id": "OPEN-ITEM-WORK-UNIT-RECOVERY-003",
+      "kind": "open-item",
+      "content": {
+        "item": "기존 Work Unit의 execution-state/v2 불일치로 실행 경로를 선택해야 한다.",
+        "resolution": "기존 Work Unit을 보존하고 agent-factory-agents-chat-web-alignment-v2를 새로 생성한다.",
+        "error": "execution-result must match the current execution target"
+      },
+      "attributes": {
+        "blocking": true,
+        "resolved": true
+      }
+    },
+    {
+      "id": "DECISION-WORK-UNIT-RECOVERY-003",
+      "kind": "decision-status",
+      "content": {
+        "decision": "기존 검증 불가 Work Unit을 보존하고 새 Work Unit을 생성한다.",
+        "state": "accepted",
+        "interviewRef": "INTERVIEW-WORK-UNIT-RECOVERY-003"
+      }
+    },
+    {
+      "id": "OPEN-ITEM-EXECUTION-004",
+      "kind": "open-item",
+      "content": {
+        "item": "agent-factory-agents-chat-web-alignment-v2 실행 여부에 대한 Human 결정이 필요하다.",
+        "resolution": "Human이 선택지 A로 지금 실행을 명시했다."
+      },
+      "attributes": {
+        "blocking": true,
+        "resolved": true
+      }
+    },
+    {
+      "id": "DECISION-EXECUTION-004",
+      "kind": "decision-status",
+      "content": {
+        "decision": "agent-factory-agents-chat-web-alignment-v2 Work Unit을 지금 실행한다.",
+        "state": "accepted",
+        "interviewRef": "INTERVIEW-EXECUTION-004"
+      }
     }
   ],
   "subsections": []

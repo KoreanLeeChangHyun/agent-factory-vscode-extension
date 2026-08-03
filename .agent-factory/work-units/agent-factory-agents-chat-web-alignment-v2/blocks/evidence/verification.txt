@@ -1,0 +1,43 @@
+Work Unit: agent-factory-agents-chat-web-alignment-v2
+Execution target: revision 1, attempt 1, invocation 019fc2dc-2786-7f83-8f3a-e2bd27b7bd67
+Source commit: 30fd8d719acc5045a97608d5d18901e7e0c4ecaf
+
+TDD red phase
+- npm run test:unit -- --test-name-pattern='composer|Chat view renders one Web-aligned'
+- Result: 23 passed, 2 failed as expected before implementation.
+- Failing boundaries: missing 20-144px auto-resize contract and missing resizeComposerInput implementation.
+
+Verification
+- npm run check
+  - syntax: passed
+  - unit: 25 passed, 0 failed
+  - integration: 1 passed, 0 failed
+- npm run test:e2e
+  - first run: dependency precondition failure, @vscode/test-electron missing in the new worktree
+  - npm ci: 310 packages installed, 0 vulnerabilities
+  - retry: VS Code 1.129.1 Extension Host exited with code 0
+- npm run package:linux-x64
+  - passed; dist/agent-factory-agents-linux-x64.vsix created
+  - 19 files, 129.69 MB
+- npm run verify:vsix
+  - passed; bundled binary version codex-cli 0.145.0
+- git diff --check
+  - passed
+- git show --check --stat --oneline 30fd8d719acc5045a97608d5d18901e7e0c4ecaf
+  - passed; 3 files changed, 54 insertions, 6 deletions
+- worktree.py inspect
+  - clean
+  - branch work-unit/agent-factory-agents-chat-web-alignment-v2
+  - head 30fd8d719acc5045a97608d5d18901e7e0c4ecaf
+  - locked true
+  - main is an ancestor of HEAD (fast-forwardable)
+
+Changed paths
+- agents/src/chatView.js
+- agents/test/unit/chatView.test.js
+- agents/test/suite/index.js
+
+Execution note
+- worktree.py prepare refused because attempt-start had already transitioned the canonical Work Unit to working.
+- The canonical state was not edited directly. The dedicated linked worktree was created with the contract's canonical branch/path, --no-checkout, lock, and sparse checkout excluding .agent-factory.
+- Subsequent worktree.py inspect confirmed the registered canonical worktree and clean final state.
