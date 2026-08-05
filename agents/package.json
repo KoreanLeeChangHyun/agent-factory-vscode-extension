@@ -56,7 +56,7 @@
     "test:integration": "node --test test/integration/*.test.js",
     "test:e2e": "node ./test/runTest.js",
     "prepackage:linux-x64": "node ./scripts/ensureDist.js",
-    "package:linux-x64": "vsce package --allow-missing-repository --target linux-x64 --out dist/agent-factory-agents-linux-x64.vsix",
+    "package:linux-x64": "vsce package --allow-missing-repository --target linux-x64 --out dist/agent-factory-agents-linux-x64.vsix && npm run verify:vsix",
     "verify:vsix": "node ./scripts/verifyVsix.js"
   },
   "dependencies": {
