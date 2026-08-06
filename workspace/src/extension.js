@@ -1,6 +1,7 @@
 "use strict";
 
 const { randomBytes } = require("node:crypto");
+const { resolve } = require("node:path");
 const vscode = require("vscode");
 
 const { createArtifactController } = require("./artifactController");
@@ -14,6 +15,7 @@ const VIEW_TYPE = "agentFactoryWorkspace.workspace";
 let workspacePanel;
 let kanbanController;
 let artifactController;
+let developmentProjectRoot;
 
 function openWorkspacePanel() {
   if (workspacePanel) {
@@ -37,7 +39,8 @@ function openWorkspacePanel() {
     nonce: randomBytes(18).toString("base64url"),
   });
 
-  const projectRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+  const projectRoot =
+    vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || developmentProjectRoot;
   kanbanController = createKanbanController({
     vscode,
     panel: workspacePanel,
@@ -62,6 +65,10 @@ function openWorkspacePanel() {
 }
 
 function activate(context) {
+  developmentProjectRoot =
+    context.extensionMode === vscode.ExtensionMode.Development
+      ? resolve(context.extensionPath, "..")
+      : undefined;
   context.subscriptions.push(
     vscode.commands.registerCommand(COMMAND_OPEN_WORKSPACE, openWorkspacePanel),
   );
@@ -74,6 +81,7 @@ function deactivate() {
   artifactController = undefined;
   workspacePanel?.dispose();
   workspacePanel = undefined;
+  developmentProjectRoot = undefined;
 }
 
 module.exports = {

@@ -152,6 +152,14 @@ function createWebviewHtml({ cspSource, nonce }) {
         <div class="artifact-editor" aria-busy="true">
           <aside class="artifact-browser" aria-label="Artifact browser">
             <div class="artifact-browser-header">
+              <button
+                class="artifact-browser-toggle"
+                type="button"
+                data-editor-browser-toggle
+                aria-expanded="true"
+                aria-label="Artifacts 사이드바 접기"
+                title="Artifacts 사이드바 접기"
+              >‹</button>
               <strong>Artifacts</strong>
               <button class="secondary-button" type="button" data-editor-refresh>새로 고침</button>
             </div>
@@ -160,14 +168,20 @@ function createWebviewHtml({ cspSource, nonce }) {
             <div class="item-list" data-editor-items></div>
           </aside>
           <section class="artifact-detail" aria-label="Artifact editor">
-            <div class="artifact-editor-status" data-editor-status role="status" aria-live="polite">
-              artifact를 선택하세요.
+            <div class="artifact-detail-header">
+              <div class="artifact-editor-status" data-editor-status role="status" aria-live="polite">
+                artifact를 선택하세요.
+              </div>
+              <div class="artifact-mode-switch" role="group" aria-label="Artifact mode">
+                <button type="button" data-editor-mode="view" aria-pressed="true">View</button>
+                <button type="button" data-editor-mode="edit" aria-pressed="false">Edit</button>
+              </div>
             </div>
             <div class="artifact-editor-error" data-editor-error role="alert" hidden></div>
             <div class="artifact-fields" data-editor-fields></div>
             <div class="artifact-preview-shell">
-              <h2>Read-only JSON</h2>
-              <pre class="artifact-preview" data-editor-preview tabindex="0"></pre>
+              <h2>Document preview</h2>
+              <article class="artifact-document" data-editor-preview tabindex="0"></article>
             </div>
           </section>
         </div>`;
@@ -418,6 +432,10 @@ function createWebviewHtml({ cspSource, nonce }) {
         grid-template-columns: minmax(220px, 28%) minmax(0, 1fr);
       }
 
+      .artifact-editor.is-browser-collapsed {
+        grid-template-columns: 42px minmax(0, 1fr);
+      }
+
       .artifact-browser {
         min-width: 0;
         padding: 12px;
@@ -432,6 +450,41 @@ function createWebviewHtml({ cspSource, nonce }) {
         justify-content: space-between;
         gap: 8px;
         margin-bottom: 10px;
+      }
+
+      .artifact-browser-toggle {
+        flex: 0 0 auto;
+        width: 26px;
+        height: 26px;
+        padding: 0;
+        border: 0;
+        color: var(--vscode-foreground);
+        background: transparent;
+        font: inherit;
+        font-size: 20px;
+        line-height: 1;
+        cursor: pointer;
+      }
+
+      .artifact-browser-toggle:hover {
+        background: var(--vscode-toolbar-hoverBackground);
+      }
+
+      .artifact-editor.is-browser-collapsed .artifact-browser {
+        padding: 12px 8px;
+        overflow: hidden;
+      }
+
+      .artifact-editor.is-browser-collapsed .artifact-browser-header {
+        justify-content: center;
+      }
+
+      .artifact-editor.is-browser-collapsed .artifact-browser-header strong,
+      .artifact-editor.is-browser-collapsed [data-editor-refresh],
+      .artifact-editor.is-browser-collapsed .artifact-list,
+      .artifact-editor.is-browser-collapsed .section-list,
+      .artifact-editor.is-browser-collapsed .item-list {
+        display: none;
       }
 
       .artifact-list,
@@ -485,6 +538,42 @@ function createWebviewHtml({ cspSource, nonce }) {
         font-size: 12px;
       }
 
+      .artifact-detail-header {
+        display: flex;
+        align-items: flex-start;
+        justify-content: space-between;
+        gap: 12px;
+        margin-bottom: 10px;
+      }
+
+      .artifact-detail-header .artifact-editor-status {
+        margin-bottom: 0;
+      }
+
+      .artifact-mode-switch {
+        display: flex;
+        flex: 0 0 auto;
+        border: 1px solid var(--vscode-panel-border);
+      }
+
+      .artifact-mode-switch button {
+        min-height: 26px;
+        padding: 3px 10px;
+        border: 0;
+        color: var(--vscode-foreground);
+        background: transparent;
+        cursor: pointer;
+      }
+
+      .artifact-mode-switch button + button {
+        border-left: 1px solid var(--vscode-panel-border);
+      }
+
+      .artifact-mode-switch button[aria-pressed="true"] {
+        color: var(--vscode-button-foreground);
+        background: var(--vscode-button-background);
+      }
+
       .artifact-editor-error {
         padding: 8px 10px;
         border: 1px solid var(--vscode-inputValidation-errorBorder);
@@ -498,13 +587,17 @@ function createWebviewHtml({ cspSource, nonce }) {
         margin-bottom: 16px;
       }
 
+      .artifact-fields[hidden] {
+        display: none;
+      }
+
       .artifact-field {
         display: grid;
         gap: 4px;
       }
 
       .artifact-field label,
-      .artifact-preview-shell h2 {
+      .artifact-preview-shell > h2 {
         color: var(--vscode-descriptionForeground);
         font-size: 12px;
         font-weight: 600;
@@ -532,20 +625,113 @@ function createWebviewHtml({ cspSource, nonce }) {
       }
 
       .artifact-preview-shell {
+        padding-top: 14px;
         border-top: 1px solid var(--vscode-panel-border);
       }
 
-      .artifact-preview {
+      .artifact-document {
+        box-sizing: border-box;
+        width: min(100%, 816px);
         min-height: 220px;
-        margin: 0;
-        padding: 12px;
-        overflow: auto;
+        margin: 10px auto 32px;
+        padding: clamp(32px, 7vw, 72px);
         border: 1px solid var(--vscode-panel-border);
         color: var(--vscode-editor-foreground);
-        background: var(--vscode-textCodeBlock-background);
-        font-family: var(--vscode-editor-font-family);
-        font-size: var(--vscode-editor-font-size);
-        white-space: pre;
+        background: var(--vscode-editor-background);
+        box-shadow: 0 3px 14px rgba(0, 0, 0, 0.2);
+        line-height: 1.65;
+      }
+
+      .artifact-document-header {
+        margin-bottom: 36px;
+        padding-bottom: 20px;
+        border-bottom: 2px solid var(--vscode-panel-border);
+      }
+
+      .artifact-document-type,
+      .artifact-item-kind,
+      .artifact-document-meta {
+        color: var(--vscode-descriptionForeground);
+        font-size: 12px;
+      }
+
+      .artifact-document-type,
+      .artifact-item-kind {
+        font-weight: 600;
+        letter-spacing: 0.06em;
+        text-transform: uppercase;
+      }
+
+      .artifact-document-title {
+        margin: 8px 0 10px;
+        font-size: clamp(26px, 4vw, 36px);
+        line-height: 1.2;
+      }
+
+      .artifact-document-section + .artifact-document-section {
+        margin-top: 34px;
+      }
+
+      .artifact-document-section > h2 {
+        margin: 0 0 16px;
+        padding-bottom: 7px;
+        border-bottom: 1px solid var(--vscode-panel-border);
+        font-size: 20px;
+      }
+
+      .artifact-document-item + .artifact-document-item {
+        margin-top: 22px;
+      }
+
+      .artifact-item-kind {
+        margin-bottom: 4px;
+      }
+
+      .artifact-document-item h3 {
+        margin: 0 0 8px;
+        font-size: 14px;
+        overflow-wrap: anywhere;
+      }
+
+      .artifact-value {
+        overflow-wrap: anywhere;
+      }
+
+      .artifact-value p {
+        margin: 0 0 9px;
+        white-space: pre-wrap;
+      }
+
+      .artifact-value ul {
+        margin: 6px 0 12px;
+        padding-left: 24px;
+      }
+
+      .artifact-value li + li {
+        margin-top: 4px;
+      }
+
+      .artifact-property {
+        margin: 9px 0 0;
+        padding-left: 14px;
+        border-left: 2px solid var(--vscode-panel-border);
+      }
+
+      .artifact-property-label {
+        display: block;
+        margin-bottom: 3px;
+        color: var(--vscode-descriptionForeground);
+        font-size: 12px;
+        font-weight: 600;
+      }
+
+      .artifact-value a {
+        color: var(--vscode-textLink-foreground);
+      }
+
+      .artifact-empty-value {
+        color: var(--vscode-descriptionForeground);
+        font-style: italic;
       }
 
       @media (max-width: 720px) {
@@ -553,10 +739,20 @@ function createWebviewHtml({ cspSource, nonce }) {
           grid-template-columns: 1fr;
         }
 
+        .artifact-editor.is-browser-collapsed {
+          grid-template-columns: 1fr;
+          grid-template-rows: 42px minmax(0, 1fr);
+        }
+
         .artifact-browser {
           max-height: 42vh;
           border-right: 0;
           border-bottom: 1px solid var(--vscode-panel-border);
+        }
+
+        .artifact-document {
+          padding: 24px 20px;
+          box-shadow: none;
         }
       }
 
@@ -571,6 +767,8 @@ function createWebviewHtml({ cspSource, nonce }) {
 
       .kanban-picklist summary:focus-visible,
       .kanban-picklist-option input:focus-visible,
+      .artifact-browser-toggle:focus-visible,
+      .artifact-mode-switch button:focus-visible,
       .secondary-button:focus-visible {
         outline: 1px solid var(--vscode-focusBorder);
         outline-offset: 1px;
@@ -754,6 +952,10 @@ function createWebviewHtml({ cspSource, nonce }) {
         const editorStatus = document.querySelector('[data-editor-status]');
         const editorError = document.querySelector('[data-editor-error]');
         const editorRefresh = document.querySelector('[data-editor-refresh]');
+        const editorBrowserToggle = document.querySelector('[data-editor-browser-toggle]');
+        const editorModeButtons = Array.from(
+          document.querySelectorAll('[data-editor-mode]'),
+        );
         const artifactEditor = document.querySelector('.artifact-editor');
         const previousState = vscode.getState() || {};
         const kanbanColumnIds = Array.from(kanbanColumnsById.keys());
@@ -769,12 +971,17 @@ function createWebviewHtml({ cspSource, nonce }) {
           selectedArtifactId: "",
           selectedSectionId: "",
           selectedItemId: "",
+          artifactBrowserCollapsed: false,
+          artifactEditorMode: "view",
           ...previousState,
           closedKanbanColumns,
         };
         delete state.kanbanFilter;
         if (["design", "view"].includes(state.selectedTab)) {
           state.selectedTab = "editor";
+        }
+        if (!new Set(["view", "edit"]).has(state.artifactEditorMode)) {
+          state.artifactEditorMode = "view";
         }
         const knownTabs = new Set(tabs.map((tab) => tab.dataset.tabId));
         let snapshot;
@@ -784,6 +991,37 @@ function createWebviewHtml({ cspSource, nonce }) {
 
         function persistState() {
           vscode.setState(state);
+        }
+
+        function setArtifactBrowserCollapsed(collapsed) {
+          state.artifactBrowserCollapsed = Boolean(collapsed);
+          artifactEditor.classList.toggle(
+            "is-browser-collapsed",
+            state.artifactBrowserCollapsed,
+          );
+          editorBrowserToggle.textContent = state.artifactBrowserCollapsed ? "›" : "‹";
+          editorBrowserToggle.setAttribute(
+            "aria-expanded",
+            String(!state.artifactBrowserCollapsed),
+          );
+          const label = state.artifactBrowserCollapsed
+            ? "Artifacts 사이드바 펼치기"
+            : "Artifacts 사이드바 접기";
+          editorBrowserToggle.setAttribute("aria-label", label);
+          editorBrowserToggle.title = label;
+          persistState();
+        }
+
+        function setArtifactEditorMode(mode) {
+          state.artifactEditorMode = mode === "edit" ? "edit" : "view";
+          editorFields.hidden = state.artifactEditorMode !== "edit";
+          for (const button of editorModeButtons) {
+            button.setAttribute(
+              "aria-pressed",
+              String(button.dataset.editorMode === state.artifactEditorMode),
+            );
+          }
+          persistState();
         }
 
         function activateTab(tabId, options = {}) {
@@ -1052,11 +1290,144 @@ function createWebviewHtml({ cspSource, nonce }) {
           editorFields.append(saveRow);
         }
 
+        function humanizeArtifactLabel(value) {
+          return String(value || "")
+            .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
+            .replace(/[-_]+/g, " ")
+            .replace(/^./, (character) => character.toUpperCase());
+        }
+
+        function appendDocumentValue(parent, value, depth = 0) {
+          const wrapper = document.createElement("div");
+          wrapper.className = "artifact-value";
+          parent.append(wrapper);
+
+          if (value === null || value === undefined || value === "") {
+            const empty = document.createElement("span");
+            empty.className = "artifact-empty-value";
+            empty.textContent = "내용 없음";
+            wrapper.append(empty);
+            return;
+          }
+
+          if (["string", "number", "boolean"].includes(typeof value)) {
+            const paragraph = document.createElement("p");
+            if (
+              typeof value === "string" &&
+              /^https?:\\/\\//i.test(value)
+            ) {
+              const link = document.createElement("a");
+              link.href = value;
+              link.textContent = value;
+              paragraph.append(link);
+            } else {
+              paragraph.textContent = String(value);
+            }
+            wrapper.append(paragraph);
+            return;
+          }
+
+          if (Array.isArray(value)) {
+            if (value.length === 0) {
+              const empty = document.createElement("span");
+              empty.className = "artifact-empty-value";
+              empty.textContent = "항목 없음";
+              wrapper.append(empty);
+              return;
+            }
+            const list = document.createElement("ul");
+            for (const entry of value) {
+              const listItem = document.createElement("li");
+              if (
+                entry !== null &&
+                typeof entry === "object"
+              ) {
+                appendDocumentValue(listItem, entry, depth + 1);
+              } else {
+                listItem.textContent = String(entry);
+              }
+              list.append(listItem);
+            }
+            wrapper.append(list);
+            return;
+          }
+
+          if (typeof value === "object") {
+            for (const [key, entry] of Object.entries(value)) {
+              const property = document.createElement("div");
+              property.className = "artifact-property";
+              const label = document.createElement("span");
+              label.className = "artifact-property-label";
+              label.textContent = humanizeArtifactLabel(key);
+              property.append(label);
+              if (depth >= 5) {
+                const fallback = document.createElement("p");
+                fallback.textContent = JSON.stringify(entry);
+                property.append(fallback);
+              } else {
+                appendDocumentValue(property, entry, depth + 1);
+              }
+              wrapper.append(property);
+            }
+          }
+        }
+
+        function renderDocumentPreview() {
+          editorPreview.replaceChildren();
+          if (!artifactDocument) {
+            return;
+          }
+
+          const typeLabels = {
+            intake: "Intake",
+            specification: "Specification",
+            "work-unit": "Work Unit",
+          };
+          const header = document.createElement("header");
+          header.className = "artifact-document-header";
+          const type = document.createElement("div");
+          type.className = "artifact-document-type";
+          type.textContent = typeLabels[artifactDocument.artifactType] ||
+            humanizeArtifactLabel(artifactDocument.artifactType);
+          const title = document.createElement("h1");
+          title.className = "artifact-document-title";
+          title.textContent = artifactDocument.title;
+          const meta = document.createElement("div");
+          meta.className = "artifact-document-meta";
+          meta.textContent = [
+            artifactDocument.status,
+            "Version " + artifactDocument.documentVersion,
+          ].filter(Boolean).join(" · ");
+          header.append(type, title, meta);
+          editorPreview.append(header);
+
+          for (const section of artifactDocument.sections || []) {
+            const sectionElement = document.createElement("section");
+            sectionElement.className = "artifact-document-section";
+            const sectionTitle = document.createElement("h2");
+            sectionTitle.textContent = section.title;
+            sectionElement.append(sectionTitle);
+            for (const item of section.items || []) {
+              const itemElement = document.createElement("section");
+              itemElement.className = "artifact-document-item";
+              const kind = document.createElement("div");
+              kind.className = "artifact-item-kind";
+              kind.textContent = humanizeArtifactLabel(item.kind);
+              const itemTitle = document.createElement("h3");
+              itemTitle.textContent = item.id;
+              itemElement.append(kind, itemTitle);
+              appendDocumentValue(itemElement, item.content);
+              sectionElement.append(itemElement);
+            }
+            editorPreview.append(sectionElement);
+          }
+        }
+
         function renderArtifactDocument() {
           sectionList.replaceChildren();
           itemList.replaceChildren();
           if (!artifactDocument) {
-            editorPreview.textContent = "";
+            editorPreview.replaceChildren();
             renderStructuredFields();
             return;
           }
@@ -1090,11 +1461,7 @@ function createWebviewHtml({ cspSource, nonce }) {
               ),
             );
           }
-          editorPreview.textContent = JSON.stringify(
-            artifactDocument.preview,
-            null,
-            2,
-          );
+          renderDocumentPreview();
           editorStatus.textContent =
             artifactDocument.title +
             " · " +
@@ -1178,6 +1545,14 @@ function createWebviewHtml({ cspSource, nonce }) {
           editorStatus.textContent = "artifact 목록 갱신 중…";
           vscode.postMessage({ type: "artifact.refresh" });
         });
+        editorBrowserToggle.addEventListener("click", () => {
+          setArtifactBrowserCollapsed(!state.artifactBrowserCollapsed);
+        });
+        for (const button of editorModeButtons) {
+          button.addEventListener("click", () => {
+            setArtifactEditorMode(button.dataset.editorMode);
+          });
+        }
         window.addEventListener("message", (event) => {
           const message = event.data;
           if (!message || typeof message !== "object") {
@@ -1274,6 +1649,8 @@ function createWebviewHtml({ cspSource, nonce }) {
           );
         }
         activateTab(knownTabs.has(state.selectedTab) ? state.selectedTab : "dashboard");
+        setArtifactBrowserCollapsed(state.artifactBrowserCollapsed);
+        setArtifactEditorMode(state.artifactEditorMode);
         vscode.postMessage({ type: "kanban.ready" });
         vscode.postMessage({ type: "artifact.ready" });
       })();

@@ -138,7 +138,7 @@ test("Kanban column visibility safely falls back when storage is damaged or unav
   );
 });
 
-test("Editor renders artifact navigation, structured fields, and read-only JSON", () => {
+test("Editor renders artifact navigation, structured fields, and document preview", () => {
   const html = createWebviewHtml({
     cspSource: "vscode-webview://test",
     nonce: "test-nonce",
@@ -153,8 +153,21 @@ test("Editor renders artifact navigation, structured fields, and read-only JSON"
   assert.match(html, /type:\s*"artifact\.select"/);
   assert.match(html, /type:\s*"artifact\.saveItem"/);
   assert.match(html, /requestArtifact\(\s*state\.selectedArtifactType,\s*state\.selectedArtifactId,\s*false/);
-  assert.match(html, /editorPreview\.textContent\s*=/);
+  assert.match(html, /function renderDocumentPreview\(\)/);
+  assert.match(html, /function appendDocumentValue\(/);
+  assert.match(html, /artifact-document-title/);
+  assert.match(html, /"work-unit": "Work Unit"/);
+  assert.match(html, /data-editor-browser-toggle/);
+  assert.match(html, /function setArtifactBrowserCollapsed\(collapsed\)/);
+  assert.match(html, /is-browser-collapsed/);
+  assert.match(html, /artifactBrowserCollapsed: false/);
+  assert.match(html, /data-editor-mode="view"/);
+  assert.match(html, /data-editor-mode="edit"/);
+  assert.match(html, /artifactEditorMode: "view"/);
+  assert.match(html, /function setArtifactEditorMode\(mode\)/);
+  assert.match(html, /editorPreview\.replaceChildren\(\)/);
   assert.doesNotMatch(html, /editorPreview\.innerHTML\s*=/);
+  assert.doesNotMatch(html, /JSON\.stringify\(\s*artifactDocument\.preview/);
 });
 
 test("Kanban renders six lifecycle columns controlled by one header multi-picklist", () => {

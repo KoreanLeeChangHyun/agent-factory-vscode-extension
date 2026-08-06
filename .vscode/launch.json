@@ -7,9 +7,10 @@
       "request": "launch",
       "runtimeExecutable": "${execPath}",
       "args": [
-        "${workspaceFolder}",
         "--extensionDevelopmentPath=${workspaceFolder}/workspace",
-        "--extensionDevelopmentPath=${workspaceFolder}/agents"
+        "--extensionDevelopmentPath=${workspaceFolder}/agents",
+        "--new-window",
+        "${workspaceFolder}"
       ]
     }
   ]

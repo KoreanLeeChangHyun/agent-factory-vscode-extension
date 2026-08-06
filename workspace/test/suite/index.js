@@ -16,6 +16,11 @@ async function run() {
   );
   assert.ok(extension, "development extension is discoverable");
   await extension.activate();
+  assert.equal(
+    vscode.workspace.workspaceFolders?.length || 0,
+    0,
+    "development host fixture intentionally starts without an open folder",
+  );
 
   const { readKanbanSnapshot } = require(
     join(extension.extensionPath, "src", "kanbanReader"),
