@@ -106,17 +106,31 @@ test("Chat view renders one Web-aligned composer card with a transparent input a
   );
   assert.match(
     html,
-    /class="composer-card"[\s\S]*data-composer[\s\S]*data-send[\s\S]*data-cancel[\s\S]*<\/div>\s*<div class="session-status"/,
+    /class="session-status"[^>]*data-session-status[\s\S]*data-session-status-label[\s\S]*data-session-elapsed[\s\S]*<\/div>\s*<div class="composer-card"[\s\S]*data-composer[\s\S]*data-send[\s\S]*data-cancel/,
   );
   assert.match(html, /sendButton\.hidden = running/);
   assert.match(html, /cancelButton\.hidden = !running/);
+  assert.match(html, /class="loading-spinner"/);
+  assert.match(html, /@keyframes loading-spin/);
+  assert.match(html, /window\.setInterval\(/);
   assert.match(html, /class="composer-toolbar"/);
   assert.match(html, /class="custom-select-trigger"/);
   assert.match(html, /role="listbox" hidden/);
-  assert.match(html, /data-value="GPT-5\.5 · 중간"/);
+  assert.match(html, /data-select-kind="model"/);
+  assert.match(html, /data-select-kind="effort"/);
+  assert.match(html, /data-value="gpt-5\.6-sol"/);
+  assert.match(html, /data-value="gpt-5\.5"/);
+  assert.match(html, /data-value="ultra"/);
+  assert.doesNotMatch(html, /aria-label="Agent"/);
   assert.doesNotMatch(html, /<select\b/);
   assert.match(html, /class="status-strip"/);
-  assert.match(html, />Context 0% used</);
+  assert.match(html, /data-status-usage>Context 0 tokens</);
+  assert.match(html, /data-status-model title="모델 선택"/);
+  assert.match(html, /data-status-effort title="추론 수준 선택"/);
+  assert.match(html, /function syncSelectionControls\(/);
+  assert.match(html, /model: state\.model/);
+  assert.match(html, /reasoningEffort: state\.reasoningEffort/);
+  assert.doesNotMatch(html, /weekly 79% left/);
   assert.doesNotMatch(html, /--af-color-|frontend\/src|agent-factory\/web/);
 });
 

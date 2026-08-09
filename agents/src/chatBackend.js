@@ -3,6 +3,19 @@
 const CHAT_STATE_KEY = "agentFactoryAgents.chat.sessions.v1";
 const MAX_PROMPT_LENGTH = 50_000;
 const SESSION_ID_PATTERN = /^[A-Za-z0-9._:-]{1,128}$/;
+const MODEL_REASONING_LEVELS = {
+  "gpt-5.6-sol": ["low", "medium", "high", "xhigh", "max", "ultra"],
+  "gpt-5.6-terra": ["low", "medium", "high", "xhigh", "max", "ultra"],
+  "gpt-5.6-luna": ["low", "medium", "high", "xhigh", "max"],
+  "gpt-5.5": ["low", "medium", "high", "xhigh"],
+  "gpt-5.4": ["low", "medium", "high", "xhigh"],
+  "gpt-5.4-mini": ["low", "medium", "high", "xhigh"],
+  "gpt-5.3-codex-spark": ["low", "medium", "high", "xhigh"],
+};
+const SUPPORTED_MODELS = new Set(Object.keys(MODEL_REASONING_LEVELS));
+const SUPPORTED_REASONING_EFFORTS = new Set(
+  Object.values(MODEL_REASONING_LEVELS).flat(),
+);
 
 function validateWebviewMessage(message) {
   if (!message || typeof message !== "object" || Array.isArray(message)) {
@@ -23,8 +36,18 @@ function validateWebviewMessage(message) {
     typeof message.prompt === "string"
   ) {
     const prompt = message.prompt.trim();
+    const model = SUPPORTED_MODELS.has(message.model) ? message.model : "gpt-5.5";
+    const reasoningEffort = MODEL_REASONING_LEVELS[model].includes(message.reasoningEffort)
+      ? message.reasoningEffort
+      : "medium";
     if (prompt && prompt.length <= MAX_PROMPT_LENGTH) {
-      return { type: "chat.submit", sessionId: message.sessionId, prompt };
+      return {
+        type: "chat.submit",
+        sessionId: message.sessionId,
+        prompt,
+        model,
+        reasoningEffort,
+      };
     }
   }
   return null;
@@ -63,6 +86,10 @@ function restoreSnapshot(value) {
       : [];
     const interrupted =
       candidate.status === "running" || candidate.status === "cancelling";
+    const model = SUPPORTED_MODELS.has(candidate.model) ? candidate.model : "gpt-5.5";
+    const reasoningEffort = MODEL_REASONING_LEVELS[model].includes(candidate.reasoningEffort)
+      ? candidate.reasoningEffort
+      : "medium";
     restored.sessions[id] = {
       id,
       providerSessionId:
@@ -77,6 +104,13 @@ function restoreSnapshot(value) {
         : typeof candidate.error === "string"
           ? candidate.error
           : null,
+      model,
+      reasoningEffort,
+      usage: candidate.usage && typeof candidate.usage === "object"
+        ? candidate.usage
+        : null,
+      startedAt: Number.isFinite(candidate.startedAt) ? candidate.startedAt : null,
+      completedAt: Number.isFinite(candidate.completedAt) ? candidate.completedAt : null,
     };
   }
   return restored;
@@ -129,7 +163,7 @@ class AgentsChatController {
     return true;
   }
 
-  #submit({ sessionId, prompt }) {
+  #submit({ sessionId, prompt, model, reasoningEffort }) {
     const session = this.#session(sessionId);
     if (session.status === "running" || session.status === "cancelling") {
       return;
@@ -138,6 +172,10 @@ class AgentsChatController {
     session.status = "running";
     session.progress = "Codex 시작 중";
     session.error = null;
+    session.model = model;
+    session.reasoningEffort = reasoningEffort;
+    session.startedAt = Date.now();
+    session.completedAt = null;
     void this.#publish(sessionId);
 
     void this.runner
@@ -146,6 +184,8 @@ class AgentsChatController {
         prompt,
         cwd: this.workspaceRoot,
         providerSessionId: session.providerSessionId,
+        model,
+        reasoningEffort,
         onEvent: (event) => this.#handleRunnerEvent(sessionId, event),
       })
       .then(() => {
@@ -156,6 +196,7 @@ class AgentsChatController {
           current.status = "cancelled";
         }
         current.progress = null;
+        current.completedAt = Date.now();
         return this.#publish(sessionId);
       })
       .catch((error) => {
@@ -163,6 +204,7 @@ class AgentsChatController {
         current.status = "error";
         current.progress = null;
         current.error = safeErrorMessage(error);
+        current.completedAt = Date.now();
         return this.#publish(sessionId);
       });
   }
@@ -198,13 +240,17 @@ class AgentsChatController {
       }
       session.status = "complete";
       session.progress = null;
+      session.completedAt = Date.now();
+      session.usage = event.usage;
     } else if (event.type === "cancelled") {
       session.status = "cancelled";
       session.progress = null;
+      session.completedAt = Date.now();
     } else if (event.type === "error") {
       session.status = "error";
       session.progress = null;
       session.error = event.message;
+      session.completedAt = Date.now();
     }
     void this.#publish(sessionId);
   }
@@ -218,6 +264,11 @@ class AgentsChatController {
         status: "idle",
         progress: null,
         error: null,
+        model: "gpt-5.5",
+        reasoningEffort: "medium",
+        usage: null,
+        startedAt: null,
+        completedAt: null,
       };
     }
     return this.state.sessions[sessionId];

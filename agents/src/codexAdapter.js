@@ -5,6 +5,15 @@ const { existsSync: nodeExistsSync } = require("node:fs");
 const { join } = require("node:path");
 
 const MAX_STDERR_LENGTH = 8_192;
+const MODEL_REASONING_LEVELS = {
+  "gpt-5.6-sol": ["low", "medium", "high", "xhigh", "max", "ultra"],
+  "gpt-5.6-terra": ["low", "medium", "high", "xhigh", "max", "ultra"],
+  "gpt-5.6-luna": ["low", "medium", "high", "xhigh", "max"],
+  "gpt-5.5": ["low", "medium", "high", "xhigh"],
+  "gpt-5.4": ["low", "medium", "high", "xhigh"],
+  "gpt-5.4-mini": ["low", "medium", "high", "xhigh"],
+  "gpt-5.3-codex-spark": ["low", "medium", "high", "xhigh"],
+};
 
 function resolveBundledCodexPath({
   extensionPath,
@@ -44,7 +53,13 @@ function resolveBundledCodexPath({
   return executablePath;
 }
 
-function buildExecArgs({ prompt, cwd, providerSessionId = null }) {
+function buildExecArgs({
+  prompt,
+  cwd,
+  providerSessionId = null,
+  model = "gpt-5.5",
+  reasoningEffort = "medium",
+}) {
   const normalizedPrompt = typeof prompt === "string" ? prompt.trim() : "";
   if (!normalizedPrompt) {
     throw new TypeError("메시지는 비어 있을 수 없습니다.");
@@ -52,16 +67,29 @@ function buildExecArgs({ prompt, cwd, providerSessionId = null }) {
   if (!cwd) {
     throw new TypeError("cwd is required");
   }
+  if (!Object.hasOwn(MODEL_REASONING_LEVELS, model)) {
+    throw new TypeError("지원하지 않는 모델입니다.");
+  }
+  if (!MODEL_REASONING_LEVELS[model].includes(reasoningEffort)) {
+    throw new TypeError("지원하지 않는 추론 수준입니다.");
+  }
+  const configuration = [
+    "--model",
+    model,
+    "--config",
+    `model_reasoning_effort="${reasoningEffort}"`,
+  ];
   if (providerSessionId) {
     return [
       "exec",
       "resume",
       "--json",
+      ...configuration,
       providerSessionId,
       normalizedPrompt,
     ];
   }
-  return ["exec", "--json", "--cd", cwd, normalizedPrompt];
+  return ["exec", "--json", ...configuration, "--cd", cwd, normalizedPrompt];
 }
 
 class JsonLinesParser {
@@ -183,12 +211,20 @@ class CodexRunner {
     prompt,
     cwd,
     providerSessionId = null,
+    model = "gpt-5.5",
+    reasoningEffort = "medium",
     onEvent,
   }) {
     if (this.running.has(sessionId)) {
       return Promise.reject(new Error("이 세션은 이미 실행 중입니다."));
     }
-    const args = buildExecArgs({ prompt, cwd, providerSessionId });
+    const args = buildExecArgs({
+      prompt,
+      cwd,
+      providerSessionId,
+      model,
+      reasoningEffort,
+    });
     let child;
     try {
       child = this.spawn(this.executablePath, args, {
@@ -310,6 +346,7 @@ class CodexRunner {
 module.exports = {
   CodexRunner,
   JsonLinesParser,
+  MODEL_REASONING_LEVELS,
   buildExecArgs,
   normalizeCodexEvent,
   resolveBundledCodexPath,

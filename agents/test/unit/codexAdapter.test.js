@@ -62,7 +62,17 @@ test("buildExecArgs creates exact new and resume argument arrays without a shell
       prompt: "hello",
       cwd: "/workspace",
     }),
-    ["exec", "--json", "--cd", "/workspace", "hello"],
+    [
+      "exec",
+      "--json",
+      "--model",
+      "gpt-5.5",
+      "--config",
+      'model_reasoning_effort="medium"',
+      "--cd",
+      "/workspace",
+      "hello",
+    ],
   );
   assert.deepEqual(
     buildExecArgs({
@@ -74,11 +84,28 @@ test("buildExecArgs creates exact new and resume argument arrays without a shell
       "exec",
       "resume",
       "--json",
+      "--model",
+      "gpt-5.5",
+      "--config",
+      'model_reasoning_effort="medium"',
       "019f-session",
       "again",
     ],
   );
   assert.throws(() => buildExecArgs({ prompt: "  ", cwd: "/workspace" }), /비어/);
+  assert.throws(
+    () => buildExecArgs({ prompt: "hi", cwd: "/workspace", reasoningEffort: "max" }),
+    /추론 수준/,
+  );
+  assert.match(
+    buildExecArgs({
+      prompt: "hi",
+      cwd: "/workspace",
+      model: "gpt-5.6-sol",
+      reasoningEffort: "ultra",
+    }).join(" "),
+    /--model gpt-5\.6-sol.*model_reasoning_effort="ultra"/,
+  );
 });
 
 test("JsonLinesParser handles partial chunks and reports malformed lines", () => {
@@ -161,7 +188,17 @@ test("CodexRunner streams normalized events and binds each child to its owner se
 
   assert.deepEqual(spawnCalls[0], {
     executable: "/extension/codex",
-    args: ["exec", "--json", "--cd", "/workspace", "hello"],
+    args: [
+      "exec",
+      "--json",
+      "--model",
+      "gpt-5.5",
+      "--config",
+      'model_reasoning_effort="medium"',
+      "--cd",
+      "/workspace",
+      "hello",
+    ],
     options: {
       cwd: "/workspace",
       shell: false,

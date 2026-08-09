@@ -313,7 +313,10 @@ function createChatViewHtml({ cspSource, nonce }) {
       }
 
       .session-status {
+        display: flex;
         height: 22px;
+        align-items: center;
+        gap: 6px;
         padding: 0 12px;
         overflow: hidden;
         color: var(--vscode-descriptionForeground);
@@ -322,6 +325,22 @@ function createChatViewHtml({ cspSource, nonce }) {
       }
 
       .session-status:empty { display: none; }
+
+      .loading-spinner {
+        width: 13px;
+        height: 13px;
+        animation: loading-spin 0.85s linear infinite;
+      }
+
+      .loading-spinner-track { opacity: 0.25; }
+      .loading-spinner-head { stroke: var(--vscode-progressBar-background, var(--vscode-textLink-foreground)); }
+      .session-elapsed { color: var(--vscode-descriptionForeground); }
+
+      @keyframes loading-spin { to { transform: rotate(360deg); } }
+
+      @media (prefers-reduced-motion: reduce) {
+        .loading-spinner { animation-duration: 1.8s; }
+      }
 
       .session-status[data-error="true"] {
         color: var(--vscode-errorForeground);
@@ -499,6 +518,15 @@ function createChatViewHtml({ cspSource, nonce }) {
 
       .status-model { color: var(--vscode-symbolIcon-numberForeground, #e5a44b); }
       .status-context, .status-ready { color: var(--vscode-textLink-foreground); }
+      .status-action {
+        height: 20px;
+        padding: 0 2px;
+        border: 0;
+        border-radius: 2px;
+        background: transparent;
+        cursor: pointer;
+      }
+      .status-action:hover { background: var(--vscode-statusBarItem-hoverBackground, var(--vscode-toolbar-hoverBackground)); }
       .status-meter {
         width: 52px;
         height: 3px;
@@ -559,6 +587,14 @@ function createChatViewHtml({ cspSource, nonce }) {
         <p>Workflow 실행 연결은 이번 Work Unit 범위에 포함되지 않습니다.</p>
       </section>
       <footer class="composer-region">
+        <div class="session-status" role="status" data-session-status hidden>
+          <svg class="loading-spinner" viewBox="0 0 16 16" aria-hidden="true" data-loading-spinner>
+            <circle class="loading-spinner-track" cx="8" cy="8" r="5.5"></circle>
+            <path class="loading-spinner-head" d="M8 2.5a5.5 5.5 0 0 1 5.5 5.5"></path>
+          </svg>
+          <span data-session-status-label></span>
+          <span class="session-elapsed" data-session-elapsed></span>
+        </div>
         <div class="composer-card">
           <textarea
             class="composer"
@@ -567,24 +603,33 @@ function createChatViewHtml({ cspSource, nonce }) {
             data-composer
           ></textarea>
           <div class="composer-toolbar" aria-label="Composer options">
-            <div class="custom-select" data-custom-select data-value="Codex">
-              <button class="custom-select-trigger" type="button" aria-label="Agent" aria-haspopup="listbox" aria-expanded="false">
-                <span class="custom-select-label">Codex</span>
+            <div class="custom-select" data-custom-select data-select-kind="model">
+              <button class="custom-select-trigger" type="button" aria-label="Model" aria-haspopup="listbox" aria-expanded="false">
+                <span class="custom-select-label">GPT-5.5</span>
                 <svg class="custom-select-chevron" viewBox="0 0 12 12" aria-hidden="true"><path d="m3 4.5 3 3 3-3"></path></svg>
               </button>
               <ul class="custom-select-menu" role="listbox" hidden>
-                <li><button class="custom-select-option" type="button" role="option" aria-selected="true" data-value="Codex">Codex</button></li>
+                <li><button class="custom-select-option" type="button" role="option" data-value="gpt-5.6-sol" data-default-effort="low" data-efforts="low,medium,high,xhigh,max,ultra">GPT-5.6-Sol</button></li>
+                <li><button class="custom-select-option" type="button" role="option" data-value="gpt-5.6-terra" data-default-effort="medium" data-efforts="low,medium,high,xhigh,max,ultra">GPT-5.6-Terra</button></li>
+                <li><button class="custom-select-option" type="button" role="option" data-value="gpt-5.6-luna" data-default-effort="medium" data-efforts="low,medium,high,xhigh,max">GPT-5.6-Luna</button></li>
+                <li><button class="custom-select-option" type="button" role="option" data-value="gpt-5.5" data-default-effort="medium" data-efforts="low,medium,high,xhigh">GPT-5.5</button></li>
+                <li><button class="custom-select-option" type="button" role="option" data-value="gpt-5.4" data-default-effort="medium" data-efforts="low,medium,high,xhigh">GPT-5.4</button></li>
+                <li><button class="custom-select-option" type="button" role="option" data-value="gpt-5.4-mini" data-default-effort="medium" data-efforts="low,medium,high,xhigh">GPT-5.4-Mini</button></li>
+                <li><button class="custom-select-option" type="button" role="option" data-value="gpt-5.3-codex-spark" data-default-effort="high" data-efforts="low,medium,high,xhigh">GPT-5.3-Codex-Spark</button></li>
               </ul>
             </div>
-            <div class="custom-select" data-custom-select data-value="GPT-5.5 · 중간">
-              <button class="custom-select-trigger" type="button" aria-label="Model and reasoning effort" aria-haspopup="listbox" aria-expanded="false">
-                <span class="custom-select-label">GPT-5.5 · 중간</span>
+            <div class="custom-select" data-custom-select data-select-kind="effort">
+              <button class="custom-select-trigger" type="button" aria-label="Reasoning effort" aria-haspopup="listbox" aria-expanded="false">
+                <span class="custom-select-label">중간</span>
                 <svg class="custom-select-chevron" viewBox="0 0 12 12" aria-hidden="true"><path d="m3 4.5 3 3 3-3"></path></svg>
               </button>
               <ul class="custom-select-menu" role="listbox" hidden>
-                <li><button class="custom-select-option" type="button" role="option" aria-selected="false" data-value="GPT-5.5 · 낮음">GPT-5.5 · 낮음</button></li>
-                <li><button class="custom-select-option" type="button" role="option" aria-selected="true" data-value="GPT-5.5 · 중간">GPT-5.5 · 중간</button></li>
-                <li><button class="custom-select-option" type="button" role="option" aria-selected="false" data-value="GPT-5.5 · 높음">GPT-5.5 · 높음</button></li>
+                <li><button class="custom-select-option" type="button" role="option" data-value="low">낮음</button></li>
+                <li><button class="custom-select-option" type="button" role="option" data-value="medium">중간</button></li>
+                <li><button class="custom-select-option" type="button" role="option" data-value="high">높음</button></li>
+                <li><button class="custom-select-option" type="button" role="option" data-value="xhigh">매우 높음</button></li>
+                <li><button class="custom-select-option" type="button" role="option" data-value="max">최대</button></li>
+                <li><button class="custom-select-option" type="button" role="option" data-value="ultra">울트라</button></li>
               </ul>
             </div>
             <button class="tool-button" type="button" title="Quick action" aria-label="Quick action">
@@ -612,15 +657,13 @@ function createChatViewHtml({ cspSource, nonce }) {
             </svg>
           </button>
         </div>
-        <div class="session-status" role="status" data-session-status></div>
       </footer>
       <div class="status-strip" role="status" aria-label="Agent status">
-        <span class="status-model">gpt-5.5</span>
-        <span class="status-context">Context 0% used</span>
-        <span class="status-meter" aria-hidden="true"><span class="status-meter-fill"></span></span>
-        <span>main</span>
-        <span>weekly 79% left</span>
-        <span class="status-ready">Ready</span>
+        <button class="status-action status-model" type="button" data-status-model title="모델 선택">gpt-5.5</button>
+        <button class="status-action" type="button" data-status-effort title="추론 수준 선택">중간</button>
+        <span class="status-context" data-status-usage>Context 0 tokens</span>
+        <span data-status-session>Local session</span>
+        <span class="status-ready" data-status-ready>Ready</span>
         <button class="tool-button status-settings" type="button" title="Settings" aria-label="Settings">
           <svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="2.5"></circle><path d="M8 2v1.5M8 12.5V14M2 8h1.5M12.5 8H14"></path></svg>
         </button>
@@ -641,7 +684,15 @@ function createChatViewHtml({ cspSource, nonce }) {
         const cancelButton = document.querySelector('[data-cancel]');
         const messages = document.querySelector('[data-messages]');
         const status = document.querySelector('[data-session-status]');
+        const statusLabelElement = document.querySelector('[data-session-status-label]');
+        const statusElapsed = document.querySelector('[data-session-elapsed]');
+        const loadingSpinner = document.querySelector('[data-loading-spinner]');
         const customSelects = Array.from(document.querySelectorAll('[data-custom-select]'));
+        const statusModel = document.querySelector('[data-status-model]');
+        const statusEffort = document.querySelector('[data-status-effort]');
+        const statusUsage = document.querySelector('[data-status-usage]');
+        const statusSession = document.querySelector('[data-status-session]');
+        const statusReady = document.querySelector('[data-status-ready]');
         const storedState = vscode.getState() || {};
         const initialSession = { id: "local-1", title: "web", draft: "" };
         const state = {
@@ -654,6 +705,10 @@ function createChatViewHtml({ cspSource, nonce }) {
             ? storedState.nextSessionNumber
             : 2,
           backendSessions: storedState.backendSessions || {},
+          model: typeof storedState.model === "string" ? storedState.model : "gpt-5.5",
+          reasoningEffort: ["low", "medium", "high", "xhigh", "max", "ultra"].includes(storedState.reasoningEffort)
+            ? storedState.reasoningEffort
+            : "medium",
         };
 
         function activeSession() {
@@ -677,6 +732,8 @@ function createChatViewHtml({ cspSource, nonce }) {
             activeSessionId: state.activeSessionId,
             nextSessionNumber: state.nextSessionNumber,
             backendSessions: state.backendSessions,
+            model: state.model,
+            reasoningEffort: state.reasoningEffort,
           });
         }
 
@@ -792,12 +849,57 @@ function createChatViewHtml({ cspSource, nonce }) {
           sendButton.disabled = running || !composer.value.trim();
           sendButton.hidden = running;
           cancelButton.hidden = !running;
-          status.dataset.error = String(Boolean(session.error));
-          status.textContent =
-            session.error ||
-            (running && session.progress) ||
-            statusLabel(session.status);
+          renderSessionStatus(session);
+          renderStatusLine(session);
           messages.scrollTop = messages.scrollHeight;
+        }
+
+        function renderSessionStatus(session) {
+          const running = session.status === "running" || session.status === "cancelling";
+          const label = session.error
+            || (running && session.progress)
+            || statusLabel(session.status);
+          status.hidden = !label;
+          status.dataset.error = String(Boolean(session.error));
+          loadingSpinner.hidden = !running;
+          statusLabelElement.textContent = label || "";
+          if (running && session.startedAt) {
+            const seconds = Math.max(0, Math.floor((Date.now() - session.startedAt) / 1000));
+            statusElapsed.textContent = "· " + seconds + "s";
+          } else {
+            statusElapsed.textContent = "";
+          }
+        }
+
+        function renderStatusLine(session) {
+          const effortLabels = {
+            low: "낮음",
+            medium: "중간",
+            high: "높음",
+            xhigh: "매우 높음",
+            max: "최대",
+            ultra: "울트라",
+          };
+          statusModel.textContent = state.model;
+          statusEffort.textContent = effortLabels[state.reasoningEffort];
+          const usage = session.usage || {};
+          const inputTokens = Number(usage.input_tokens) || 0;
+          const cachedTokens = Number(usage.cached_input_tokens) || 0;
+          const outputTokens = Number(usage.output_tokens) || 0;
+          statusUsage.textContent = "Context " + inputTokens.toLocaleString() + " tokens";
+          statusUsage.title = "입력 " + inputTokens.toLocaleString()
+            + " · 캐시 " + cachedTokens.toLocaleString()
+            + " · 출력 " + outputTokens.toLocaleString();
+          statusSession.textContent = session.providerSessionId ? "Resumable session" : "Local session";
+          if (session.error) {
+            statusReady.textContent = "Error";
+          } else if (session.status === "running") {
+            statusReady.textContent = session.progress || "Running";
+          } else if (session.status === "cancelling") {
+            statusReady.textContent = "Cancelling";
+          } else {
+            statusReady.textContent = "Ready";
+          }
         }
 
         function statusLabel(value) {
@@ -821,6 +923,8 @@ function createChatViewHtml({ cspSource, nonce }) {
             type: "chat.submit",
             sessionId: session.id,
             prompt,
+            model: state.model,
+            reasoningEffort: state.reasoningEffort,
           });
           session.draft = "";
           composer.value = "";
@@ -837,7 +941,34 @@ function createChatViewHtml({ cspSource, nonce }) {
           }
         }
 
+        function syncSelectionControls() {
+          const modelSelect = customSelects.find((select) => select.dataset.selectKind === 'model');
+          const effortSelect = customSelects.find((select) => select.dataset.selectKind === 'effort');
+          const modelOptions = Array.from(modelSelect.querySelectorAll('.custom-select-option'));
+          const selectedModel = modelOptions.find((option) => option.dataset.value === state.model)
+            || modelOptions.find((option) => option.dataset.value === 'gpt-5.5');
+          state.model = selectedModel.dataset.value;
+          const supportedEfforts = selectedModel.dataset.efforts.split(',');
+          if (!supportedEfforts.includes(state.reasoningEffort)) {
+            state.reasoningEffort = selectedModel.dataset.defaultEffort;
+          }
+          for (const option of modelOptions) {
+            option.setAttribute('aria-selected', String(option === selectedModel));
+          }
+          modelSelect.querySelector('.custom-select-label').textContent = selectedModel.textContent;
+
+          const effortOptions = Array.from(effortSelect.querySelectorAll('.custom-select-option'));
+          const selectedEffort = effortOptions.find((option) => option.dataset.value === state.reasoningEffort);
+          for (const option of effortOptions) {
+            const supported = supportedEfforts.includes(option.dataset.value);
+            option.closest('li').hidden = !supported;
+            option.setAttribute('aria-selected', String(option === selectedEffort));
+          }
+          effortSelect.querySelector('.custom-select-label').textContent = selectedEffort.textContent;
+        }
+
         for (const select of customSelects) {
+          const kind = select.dataset.selectKind;
           const trigger = select.querySelector('.custom-select-trigger');
           const label = select.querySelector('.custom-select-label');
           const menu = select.querySelector('.custom-select-menu');
@@ -852,18 +983,31 @@ function createChatViewHtml({ cspSource, nonce }) {
           });
           for (const option of options) {
             option.addEventListener('click', () => {
-              select.dataset.value = option.dataset.value;
-              label.textContent = option.dataset.value;
-              for (const item of options) item.setAttribute('aria-selected', String(item === option));
+              if (kind === 'model') {
+                state.model = option.dataset.value;
+              } else {
+                state.reasoningEffort = option.dataset.value;
+              }
+              syncSelectionControls();
               menu.hidden = true;
               trigger.setAttribute('aria-expanded', 'false');
               trigger.focus();
+              renderStatusLine(backendSession());
+              persist();
             });
           }
         }
         document.addEventListener('click', () => closeCustomSelects());
         document.addEventListener('keydown', (event) => {
           if (event.key === 'Escape') closeCustomSelects();
+        });
+        statusModel.addEventListener('click', () => {
+          customSelects.find((select) => select.dataset.selectKind === 'model')
+            .querySelector('.custom-select-trigger').click();
+        });
+        statusEffort.addEventListener('click', () => {
+          customSelects.find((select) => select.dataset.selectKind === 'effort')
+            .querySelector('.custom-select-trigger').click();
         });
 
         for (const [index, tab] of modeTabs.entries()) {
@@ -932,8 +1076,15 @@ function createChatViewHtml({ cspSource, nonce }) {
           renderMessages();
           persist();
         });
+        window.setInterval(() => {
+          const session = backendSession();
+          if (session.status === "running" || session.status === "cancelling") {
+            renderSessionStatus(session);
+          }
+        }, 1000);
 
         composer.value = activeSession().draft;
+        syncSelectionControls();
         resizeComposerInput(composer);
         render();
         activateMode(state.activeMode);
