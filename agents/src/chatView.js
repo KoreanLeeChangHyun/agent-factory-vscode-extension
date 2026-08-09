@@ -98,12 +98,12 @@ function createChatViewHtml({ cspSource, nonce }) {
         background: var(--vscode-editor-background);
       }
 
-      button, textarea { font: inherit; }
+      button, select, textarea { font: inherit; }
       button { color: inherit; }
 
       .chat-shell {
         display: grid;
-        grid-template-rows: auto auto minmax(0, 1fr) auto;
+        grid-template-rows: auto auto minmax(0, 1fr) auto auto;
         min-height: 100vh;
       }
 
@@ -195,9 +195,12 @@ function createChatViewHtml({ cspSource, nonce }) {
       }
 
       .session-tab {
+        display: flex;
+        align-items: center;
+        gap: 6px;
         flex: 0 0 auto;
-        min-width: 88px;
-        max-width: 160px;
+        min-width: 104px;
+        max-width: 184px;
         padding: 0 8px;
         overflow: hidden;
         border: 0;
@@ -205,9 +208,33 @@ function createChatViewHtml({ cspSource, nonce }) {
         background: var(--vscode-tab-inactiveBackground);
         color: var(--vscode-tab-inactiveForeground);
         cursor: pointer;
-        text-overflow: ellipsis;
         white-space: nowrap;
       }
+
+      .session-tab-label {
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+
+      .session-kind {
+        color: var(--vscode-descriptionForeground);
+        font-size: 10px;
+      }
+
+      .session-close {
+        width: 18px;
+        height: 18px;
+        margin-left: auto;
+        padding: 0;
+        border: 0;
+        border-radius: 3px;
+        background: transparent;
+        color: var(--vscode-descriptionForeground);
+        cursor: pointer;
+      }
+
+      .session-close:hover { background: var(--vscode-toolbar-hoverBackground); }
 
       .session-tab[aria-selected="true"] {
         background: var(--vscode-tab-activeBackground);
@@ -216,14 +243,16 @@ function createChatViewHtml({ cspSource, nonce }) {
 
       .new-session {
         display: grid;
-        flex: 0 0 44px;
-        width: 44px;
+        flex: 0 0 32px;
+        width: 32px;
         padding: 0;
         place-items: center;
         border: 0;
         background: transparent;
         cursor: pointer;
       }
+
+      .session-menu { margin-left: auto; }
 
       .mode-panel {
         min-height: 0;
@@ -292,6 +321,8 @@ function createChatViewHtml({ cspSource, nonce }) {
         line-height: 22px;
       }
 
+      .session-status:empty { display: none; }
+
       .session-status[data-error="true"] {
         color: var(--vscode-errorForeground);
       }
@@ -305,7 +336,7 @@ function createChatViewHtml({ cspSource, nonce }) {
       .composer-region {
         display: grid;
         gap: 4px;
-        padding: 8px 0 0;
+        padding: 8px 10px 6px;
         border-top: 1px solid var(--vscode-panel-border);
         background: var(--vscode-editor-background);
       }
@@ -315,8 +346,8 @@ function createChatViewHtml({ cspSource, nonce }) {
         display: grid;
         width: 100%;
         min-width: 0;
-        min-height: 72px;
-        padding: 12px;
+        min-height: 88px;
+        padding: 12px 12px 40px;
         border: 1px solid var(--vscode-input-border, var(--vscode-panel-border));
         border-radius: 4px;
         background: var(--vscode-input-background);
@@ -330,7 +361,7 @@ function createChatViewHtml({ cspSource, nonce }) {
         height: 20px;
         min-height: 20px;
         max-height: 144px;
-        padding: 0 44px 0 0;
+        padding: 0;
         border: 0;
         outline: 0;
         resize: none;
@@ -347,7 +378,7 @@ function createChatViewHtml({ cspSource, nonce }) {
       .composer-action {
         position: absolute;
         right: 12px;
-        bottom: 12px;
+        bottom: 10px;
         width: 28px;
         height: 28px;
         display: grid;
@@ -359,6 +390,125 @@ function createChatViewHtml({ cspSource, nonce }) {
         color: var(--vscode-button-foreground);
         cursor: pointer;
       }
+
+      .composer-toolbar {
+        position: absolute;
+        right: 48px;
+        bottom: 10px;
+        left: 12px;
+        display: flex;
+        min-width: 0;
+        height: 28px;
+        align-items: center;
+        gap: 4px;
+      }
+
+      .custom-select {
+        position: relative;
+        flex: 0 0 auto;
+      }
+
+      .custom-select-trigger {
+        display: flex;
+        height: 28px;
+        min-width: 76px;
+        max-width: 132px;
+        align-items: center;
+        gap: 8px;
+        padding: 0 7px 0 8px;
+        border: 1px solid var(--vscode-dropdown-border, var(--vscode-panel-border));
+        border-radius: 3px;
+        outline: 0;
+        background: var(--vscode-dropdown-background);
+        color: var(--vscode-dropdown-foreground);
+        font-size: 11px;
+        cursor: pointer;
+      }
+
+      .custom-select-trigger:hover { background: var(--vscode-list-hoverBackground); }
+      .custom-select-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      .custom-select-chevron { width: 10px; height: 10px; margin-left: auto; }
+
+      .custom-select-menu {
+        position: absolute;
+        z-index: 20;
+        bottom: 32px;
+        left: 0;
+        min-width: max(100%, 132px);
+        margin: 0;
+        padding: 3px;
+        border: 1px solid var(--vscode-widget-border, var(--vscode-panel-border));
+        border-radius: 4px;
+        background: var(--vscode-menu-background, var(--vscode-dropdown-background));
+        color: var(--vscode-menu-foreground, var(--vscode-dropdown-foreground));
+        box-shadow: 0 2px 8px var(--vscode-widget-shadow);
+        list-style: none;
+      }
+
+      .custom-select-option {
+        display: flex;
+        width: 100%;
+        min-height: 26px;
+        align-items: center;
+        padding: 4px 7px;
+        border: 0;
+        border-radius: 2px;
+        background: transparent;
+        color: inherit;
+        text-align: left;
+        cursor: pointer;
+      }
+
+      .custom-select-option:hover,
+      .custom-select-option[aria-selected="true"] {
+        background: var(--vscode-list-activeSelectionBackground);
+        color: var(--vscode-list-activeSelectionForeground);
+      }
+
+      .tool-button {
+        display: grid;
+        flex: 0 0 28px;
+        width: 28px;
+        height: 28px;
+        padding: 0;
+        place-items: center;
+        border: 0;
+        border-radius: 3px;
+        background: transparent;
+        color: var(--vscode-descriptionForeground);
+        cursor: pointer;
+      }
+
+      .tool-button:hover { background: var(--vscode-toolbar-hoverBackground); }
+      .tool-button svg, .session-close svg { width: 14px; height: 14px; }
+      .composer-spacer { flex: 1 1 auto; }
+
+      .status-strip {
+        display: flex;
+        min-width: 0;
+        height: 22px;
+        align-items: center;
+        gap: 7px;
+        padding: 0 8px;
+        border-top: 1px solid var(--vscode-panel-border);
+        background: var(--vscode-statusBar-background, var(--vscode-editor-background));
+        color: var(--vscode-statusBar-foreground, var(--vscode-descriptionForeground));
+        font-size: 11px;
+        white-space: nowrap;
+      }
+
+      .status-model { color: var(--vscode-symbolIcon-numberForeground, #e5a44b); }
+      .status-context, .status-ready { color: var(--vscode-textLink-foreground); }
+      .status-meter {
+        width: 52px;
+        height: 3px;
+        overflow: hidden;
+        border-radius: 2px;
+        background: var(--vscode-progressBar-background);
+        opacity: 0.55;
+      }
+      .status-meter-fill { width: 0%; height: 100%; background: currentColor; }
+      .status-settings { margin-left: auto; }
 
       .composer-action:disabled {
         cursor: default;
@@ -398,6 +548,9 @@ function createChatViewHtml({ cspSource, nonce }) {
             <path d="M10 2.5v3h3M8 7v4M6 9h4"></path>
           </svg>
         </button>
+        <button class="new-session session-menu" type="button" aria-label="Session menu" title="Session menu">
+          <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 4.5h10M3 8h10M3 11.5h10"></path></svg>
+        </button>
       </header>
       <section class="mode-panel" role="tabpanel" data-mode-panel="main">
         <div class="messages" role="log" aria-live="polite" data-messages></div>
@@ -410,13 +563,47 @@ function createChatViewHtml({ cspSource, nonce }) {
           <textarea
             class="composer"
             aria-label="Session draft"
-            placeholder="Codex에 메시지를 보내세요..."
+            placeholder="메시지를 입력하세요..."
             data-composer
           ></textarea>
+          <div class="composer-toolbar" aria-label="Composer options">
+            <div class="custom-select" data-custom-select data-value="Codex">
+              <button class="custom-select-trigger" type="button" aria-label="Agent" aria-haspopup="listbox" aria-expanded="false">
+                <span class="custom-select-label">Codex</span>
+                <svg class="custom-select-chevron" viewBox="0 0 12 12" aria-hidden="true"><path d="m3 4.5 3 3 3-3"></path></svg>
+              </button>
+              <ul class="custom-select-menu" role="listbox" hidden>
+                <li><button class="custom-select-option" type="button" role="option" aria-selected="true" data-value="Codex">Codex</button></li>
+              </ul>
+            </div>
+            <div class="custom-select" data-custom-select data-value="GPT-5.5 · 중간">
+              <button class="custom-select-trigger" type="button" aria-label="Model and reasoning effort" aria-haspopup="listbox" aria-expanded="false">
+                <span class="custom-select-label">GPT-5.5 · 중간</span>
+                <svg class="custom-select-chevron" viewBox="0 0 12 12" aria-hidden="true"><path d="m3 4.5 3 3 3-3"></path></svg>
+              </button>
+              <ul class="custom-select-menu" role="listbox" hidden>
+                <li><button class="custom-select-option" type="button" role="option" aria-selected="false" data-value="GPT-5.5 · 낮음">GPT-5.5 · 낮음</button></li>
+                <li><button class="custom-select-option" type="button" role="option" aria-selected="true" data-value="GPT-5.5 · 중간">GPT-5.5 · 중간</button></li>
+                <li><button class="custom-select-option" type="button" role="option" aria-selected="false" data-value="GPT-5.5 · 높음">GPT-5.5 · 높음</button></li>
+              </ul>
+            </div>
+            <button class="tool-button" type="button" title="Quick action" aria-label="Quick action">
+              <svg viewBox="0 0 16 16" aria-hidden="true"><path d="m9 1.75-5 7h3l-1 5.5 5-7H8l1-5.5Z"></path></svg>
+            </button>
+            <button class="tool-button" type="button" title="Context options" aria-label="Context options">
+              <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M5 3h6M8 3v8M5.5 8.5 8 11l2.5-2.5"></path></svg>
+            </button>
+            <button class="tool-button" type="button" title="Session settings" aria-label="Session settings">
+              <svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="3"></circle><path d="M8 1.75v2M8 12.25v2M1.75 8h2M12.25 8h2"></path></svg>
+            </button>
+            <span class="composer-spacer"></span>
+            <button class="tool-button" type="button" title="Account" aria-label="Account">
+              <svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="5.25" r="2.25"></circle><path d="M3.75 13c.25-2.25 1.7-3.5 4.25-3.5s4 1.25 4.25 3.5"></path></svg>
+            </button>
+          </div>
           <button class="composer-action" type="button" aria-label="Send message" data-send>
             <svg viewBox="0 0 16 16" aria-hidden="true" focusable="false">
-              <path d="m2.5 3 11 5-11 5 2-5-2-5Z"></path>
-              <path d="M4.5 8h5"></path>
+              <path d="M8 13.5v-10M4.5 7 8 3.5 11.5 7"></path>
             </svg>
           </button>
           <button class="composer-action" type="button" aria-label="Cancel response" data-cancel hidden>
@@ -427,6 +614,17 @@ function createChatViewHtml({ cspSource, nonce }) {
         </div>
         <div class="session-status" role="status" data-session-status></div>
       </footer>
+      <div class="status-strip" role="status" aria-label="Agent status">
+        <span class="status-model">gpt-5.5</span>
+        <span class="status-context">Context 0% used</span>
+        <span class="status-meter" aria-hidden="true"><span class="status-meter-fill"></span></span>
+        <span>main</span>
+        <span>weekly 79% left</span>
+        <span class="status-ready">Ready</span>
+        <button class="tool-button status-settings" type="button" title="Settings" aria-label="Settings">
+          <svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="2.5"></circle><path d="M8 2v1.5M8 12.5V14M2 8h1.5M12.5 8H14"></path></svg>
+        </button>
+      </div>
     </main>
     <script nonce="${nonce}">
       (() => {
@@ -443,8 +641,9 @@ function createChatViewHtml({ cspSource, nonce }) {
         const cancelButton = document.querySelector('[data-cancel]');
         const messages = document.querySelector('[data-messages]');
         const status = document.querySelector('[data-session-status]');
+        const customSelects = Array.from(document.querySelectorAll('[data-custom-select]'));
         const storedState = vscode.getState() || {};
-        const initialSession = { id: "local-1", title: "Session 1", draft: "" };
+        const initialSession = { id: "local-1", title: "web", draft: "" };
         const state = {
           activeMode: storedState.activeMode === "workflow" ? "workflow" : "main",
           sessions: Array.isArray(storedState.sessions) && storedState.sessions.length
@@ -481,6 +680,20 @@ function createChatViewHtml({ cspSource, nonce }) {
           });
         }
 
+        function createSvgIcon(pathData, viewBox = "0 0 16 16") {
+          const namespace = "http://www.w3.org/2000/svg";
+          const svg = document.createElementNS(namespace, "svg");
+          svg.setAttribute("viewBox", viewBox);
+          svg.setAttribute("aria-hidden", "true");
+          svg.setAttribute("focusable", "false");
+          for (const data of pathData) {
+            const path = document.createElementNS(namespace, "path");
+            path.setAttribute("d", data);
+            svg.append(path);
+          }
+          return svg;
+        }
+
         function activateMode(mode, options = {}) {
           if (!modeTabs.some((tab) => tab.dataset.mode === mode)) return;
           state.activeMode = mode;
@@ -500,20 +713,54 @@ function createChatViewHtml({ cspSource, nonce }) {
         function renderSessions() {
           sessionTabs.replaceChildren();
           for (const session of state.sessions) {
-            const tab = document.createElement("button");
+            const tab = document.createElement("div");
             const selected = session.id === state.activeSessionId;
             tab.className = "session-tab";
-            tab.type = "button";
             tab.setAttribute("role", "tab");
             tab.setAttribute("aria-selected", String(selected));
             tab.tabIndex = selected ? 0 : -1;
-            tab.textContent = session.title;
+            const icon = createSvgIcon([
+              "M2.5 3.5h8v8h-8z",
+              "M5.5 6.5h5v5",
+            ]);
+            icon.classList.add("session-tab-icon");
+            const label = document.createElement("span");
+            label.className = "session-tab-label";
+            label.textContent = session.title;
+            const kind = document.createElement("span");
+            kind.className = "session-kind";
+            kind.textContent = "· EXEC";
+            const close = document.createElement("button");
+            close.className = "session-close";
+            close.type = "button";
+            close.title = "Close session";
+            close.setAttribute("aria-label", "Close " + session.title);
+            close.append(createSvgIcon([
+              "m4.5 4.5 7 7",
+              "m11.5 4.5-7 7",
+            ]));
+            close.addEventListener("click", (event) => {
+              event.stopPropagation();
+              if (state.sessions.length === 1) return;
+              const index = state.sessions.findIndex((item) => item.id === session.id);
+              state.sessions.splice(index, 1);
+              if (selected) state.activeSessionId = state.sessions[Math.max(0, index - 1)].id;
+              composer.value = activeSession().draft;
+              render();
+              persist();
+            });
+            tab.append(icon, label, kind, close);
             tab.addEventListener("click", () => {
               state.activeSessionId = session.id;
               composer.value = activeSession().draft;
               resizeComposerInput(composer);
               render();
               persist();
+            });
+            tab.addEventListener("keydown", (event) => {
+              if (event.key !== "Enter" && event.key !== " ") return;
+              event.preventDefault();
+              tab.click();
             });
             sessionTabs.append(tab);
           }
@@ -582,6 +829,43 @@ function createChatViewHtml({ cspSource, nonce }) {
           renderMessages();
         }
 
+        function closeCustomSelects(except) {
+          for (const select of customSelects) {
+            if (select === except) continue;
+            select.querySelector('.custom-select-trigger').setAttribute('aria-expanded', 'false');
+            select.querySelector('.custom-select-menu').hidden = true;
+          }
+        }
+
+        for (const select of customSelects) {
+          const trigger = select.querySelector('.custom-select-trigger');
+          const label = select.querySelector('.custom-select-label');
+          const menu = select.querySelector('.custom-select-menu');
+          const options = Array.from(select.querySelectorAll('.custom-select-option'));
+          trigger.addEventListener('click', (event) => {
+            event.stopPropagation();
+            const opening = menu.hidden;
+            closeCustomSelects(select);
+            menu.hidden = !opening;
+            trigger.setAttribute('aria-expanded', String(opening));
+            if (opening) options.find((option) => option.getAttribute('aria-selected') === 'true')?.focus();
+          });
+          for (const option of options) {
+            option.addEventListener('click', () => {
+              select.dataset.value = option.dataset.value;
+              label.textContent = option.dataset.value;
+              for (const item of options) item.setAttribute('aria-selected', String(item === option));
+              menu.hidden = true;
+              trigger.setAttribute('aria-expanded', 'false');
+              trigger.focus();
+            });
+          }
+        }
+        document.addEventListener('click', () => closeCustomSelects());
+        document.addEventListener('keydown', (event) => {
+          if (event.key === 'Escape') closeCustomSelects();
+        });
+
         for (const [index, tab] of modeTabs.entries()) {
           tab.addEventListener("click", () => activateMode(tab.dataset.mode));
           tab.addEventListener("keydown", (event) => {
@@ -606,7 +890,7 @@ function createChatViewHtml({ cspSource, nonce }) {
           const number = state.nextSessionNumber;
           const session = {
             id: "local-" + number,
-            title: "Session " + number,
+            title: "web " + number,
             draft: "",
           };
           state.nextSessionNumber += 1;

@@ -44,6 +44,9 @@ test("Chat view keeps local sessions and per-session drafts in VS Code state", (
   assert.match(html, /ArrowRight/);
   assert.match(html, /Home/);
   assert.match(html, /End/);
+  assert.match(html, /function createSvgIcon\(/);
+  assert.match(html, /icon\.classList\.add\("session-tab-icon"\)/);
+  assert.doesNotMatch(html, /textContent = "[▣×]"/);
 });
 
 test("Chat view enforces CSP and exposes an allowlisted Extension Host boundary", () => {
@@ -88,18 +91,18 @@ test("Chat view aligns mode tabs and the session header with Workspace geometry"
 test("Chat view renders one Web-aligned composer card with a transparent input and bottom action", () => {
   const html = render();
 
-  assert.match(html, /\.composer-region\s*\{[^}]*padding:\s*8px 0 0;/s);
+  assert.match(html, /\.composer-region\s*\{[^}]*padding:\s*8px 10px 6px;/s);
   assert.match(
     html,
-    /\.composer-card\s*\{[^}]*position:\s*relative;[^}]*min-height:\s*72px;[^}]*padding:\s*12px;[^}]*border:\s*1px solid/s,
+    /\.composer-card\s*\{[^}]*position:\s*relative;[^}]*min-height:\s*88px;[^}]*padding:\s*12px 12px 40px;[^}]*border:\s*1px solid/s,
   );
   assert.match(
     html,
-    /\.composer\s*\{[^}]*height:\s*20px;[^}]*max-height:\s*144px;[^}]*padding:\s*0 44px 0 0;[^}]*border:\s*0;[^}]*resize:\s*none;[^}]*background:\s*transparent;/s,
+    /\.composer\s*\{[^}]*height:\s*20px;[^}]*max-height:\s*144px;[^}]*padding:\s*0;[^}]*border:\s*0;[^}]*resize:\s*none;[^}]*background:\s*transparent;/s,
   );
   assert.match(
     html,
-    /\.composer-action\s*\{[^}]*position:\s*absolute;[^}]*right:\s*12px;[^}]*bottom:\s*12px;[^}]*width:\s*28px;[^}]*height:\s*28px;/s,
+    /\.composer-action\s*\{[^}]*position:\s*absolute;[^}]*right:\s*12px;[^}]*bottom:\s*10px;[^}]*width:\s*28px;[^}]*height:\s*28px;/s,
   );
   assert.match(
     html,
@@ -107,6 +110,13 @@ test("Chat view renders one Web-aligned composer card with a transparent input a
   );
   assert.match(html, /sendButton\.hidden = running/);
   assert.match(html, /cancelButton\.hidden = !running/);
+  assert.match(html, /class="composer-toolbar"/);
+  assert.match(html, /class="custom-select-trigger"/);
+  assert.match(html, /role="listbox" hidden/);
+  assert.match(html, /data-value="GPT-5\.5 · 중간"/);
+  assert.doesNotMatch(html, /<select\b/);
+  assert.match(html, /class="status-strip"/);
+  assert.match(html, />Context 0% used</);
   assert.doesNotMatch(html, /--af-color-|frontend\/src|agent-factory\/web/);
 });
 
@@ -130,6 +140,7 @@ test("Chat composer grows from 20px through 144px and then uses internal scrolli
   const html = render();
   assert.match(html, /resizeComposerInput\(composer\)/);
   assert.match(html, /\.session-status\s*\{[^}]*height:\s*22px;/s);
+  assert.match(html, /\.session-status:empty\s*\{\s*display:\s*none;/s);
   assert.doesNotMatch(html, /if \(value === "complete"\) return "완료"/);
 });
 
