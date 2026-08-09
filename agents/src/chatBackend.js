@@ -31,6 +31,12 @@ function validateWebviewMessage(message) {
     return { type: "chat.cancel", sessionId: message.sessionId };
   }
   if (
+    message.type === "chat.session.delete" &&
+    validSessionId(message.sessionId)
+  ) {
+    return { type: "chat.session.delete", sessionId: message.sessionId };
+  }
+  if (
     message.type === "chat.submit" &&
     validSessionId(message.sessionId) &&
     typeof message.prompt === "string"
@@ -157,6 +163,15 @@ class AgentsChatController {
         session.error = null;
         await this.#publish(message.sessionId);
       }
+      return true;
+    }
+    if (message.type === "chat.session.delete") {
+      const session = this.state.sessions[message.sessionId];
+      if (session?.status === "running" || session?.status === "cancelling") {
+        return true;
+      }
+      delete this.state.sessions[message.sessionId];
+      await this.#publish(message.sessionId);
       return true;
     }
     this.#submit(message);

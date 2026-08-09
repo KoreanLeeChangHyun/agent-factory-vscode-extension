@@ -62,6 +62,10 @@ test("validateWebviewMessage allowlists ready, submit and cancel messages", () =
     validateWebviewMessage({ type: "chat.cancel", sessionId: "local-1" }),
     { type: "chat.cancel", sessionId: "local-1" },
   );
+  assert.deepEqual(
+    validateWebviewMessage({ type: "chat.session.delete", sessionId: "local-1" }),
+    { type: "chat.session.delete", sessionId: "local-1" },
+  );
   assert.equal(validateWebviewMessage({ type: "unknown" }), null);
   assert.equal(
     validateWebviewMessage({
@@ -210,6 +214,33 @@ test("controller rejects duplicate submits and marks restored running work inter
   });
   assert.equal(runner.calls.length, 1);
   await runner.finish(0);
+});
+
+test("controller deletes only an idle target session", async () => {
+  const state = createState({
+    version: 1,
+    sessions: {
+      "local-1": { id: "local-1", messages: [], status: "idle" },
+      "local-2": { id: "local-2", messages: [], status: "idle" },
+    },
+  });
+  const controller = new AgentsChatController({
+    runner: createRunner(),
+    workspaceState: state,
+    workspaceRoot: "/workspace",
+    postMessage: async () => {},
+  });
+
+  await controller.handleMessage({ type: "chat.session.delete", sessionId: "local-1" });
+  await controller.handleMessage({
+    type: "chat.submit",
+    sessionId: "local-2",
+    prompt: "keep running",
+  });
+  await controller.handleMessage({ type: "chat.session.delete", sessionId: "local-2" });
+
+  assert.equal(controller.snapshot().sessions["local-1"], undefined);
+  assert.ok(controller.snapshot().sessions["local-2"]);
 });
 
 function createState(initialValue) {

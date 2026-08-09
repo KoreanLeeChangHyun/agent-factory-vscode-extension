@@ -62,6 +62,7 @@ test("Chat view enforces CSP and exposes an allowlisted Extension Host boundary"
   assert.match(html, /type: "chat\.ready"/);
   assert.match(html, /type: "chat\.submit"/);
   assert.match(html, /type: "chat\.cancel"/);
+  assert.match(html, /type: "chat\.session\.delete"/);
   assert.match(html, /data-send/);
   assert.match(html, /aria-label="Send message"/);
   assert.match(html, /data-cancel/);
@@ -128,8 +129,10 @@ test("Chat view renders one Web-aligned composer card with a transparent input a
   assert.match(html, /data-status-model title="모델 선택"/);
   assert.match(html, /data-status-effort title="추론 수준 선택"/);
   assert.match(html, /function syncSelectionControls\(/);
-  assert.match(html, /model: state\.model/);
-  assert.match(html, /reasoningEffort: state\.reasoningEffort/);
+  assert.match(html, /model: session\.model/);
+  assert.match(html, /reasoningEffort: session\.reasoningEffort/);
+  assert.match(html, /activeSession\(\)\.model = option\.dataset\.value/);
+  assert.match(html, /activeSession\(\)\.reasoningEffort = option\.dataset\.value/);
   assert.doesNotMatch(html, /weekly 79% left/);
   assert.doesNotMatch(html, /--af-color-|frontend\/src|agent-factory\/web/);
 });

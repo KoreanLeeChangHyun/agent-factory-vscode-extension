@@ -694,21 +694,32 @@ function createChatViewHtml({ cspSource, nonce }) {
         const statusSession = document.querySelector('[data-status-session]');
         const statusReady = document.querySelector('[data-status-ready]');
         const storedState = vscode.getState() || {};
-        const initialSession = { id: "local-1", title: "web", draft: "" };
+        const initialSession = {
+          id: "local-1",
+          title: "web",
+          draft: "",
+          model: "gpt-5.5",
+          reasoningEffort: "medium",
+        };
+        const restoredSessions = Array.isArray(storedState.sessions) && storedState.sessions.length
+          ? storedState.sessions.map((session) => ({
+              ...session,
+              model: typeof session.model === "string"
+                ? session.model
+                : (storedState.model || "gpt-5.5"),
+              reasoningEffort: ["low", "medium", "high", "xhigh", "max", "ultra"].includes(session.reasoningEffort)
+                ? session.reasoningEffort
+                : (storedState.reasoningEffort || "medium"),
+            }))
+          : [initialSession];
         const state = {
           activeMode: storedState.activeMode === "workflow" ? "workflow" : "main",
-          sessions: Array.isArray(storedState.sessions) && storedState.sessions.length
-            ? storedState.sessions
-            : [initialSession],
+          sessions: restoredSessions,
           activeSessionId: storedState.activeSessionId || initialSession.id,
           nextSessionNumber: Number.isInteger(storedState.nextSessionNumber)
             ? storedState.nextSessionNumber
             : 2,
           backendSessions: storedState.backendSessions || {},
-          model: typeof storedState.model === "string" ? storedState.model : "gpt-5.5",
-          reasoningEffort: ["low", "medium", "high", "xhigh", "max", "ultra"].includes(storedState.reasoningEffort)
-            ? storedState.reasoningEffort
-            : "medium",
         };
 
         function activeSession() {
@@ -732,8 +743,6 @@ function createChatViewHtml({ cspSource, nonce }) {
             activeSessionId: state.activeSessionId,
             nextSessionNumber: state.nextSessionNumber,
             backendSessions: state.backendSessions,
-            model: state.model,
-            reasoningEffort: state.reasoningEffort,
           });
         }
 
@@ -799,10 +808,15 @@ function createChatViewHtml({ cspSource, nonce }) {
             close.addEventListener("click", (event) => {
               event.stopPropagation();
               if (state.sessions.length === 1) return;
+              const backend = state.backendSessions[session.id];
+              if (backend?.status === "running" || backend?.status === "cancelling") return;
               const index = state.sessions.findIndex((item) => item.id === session.id);
               state.sessions.splice(index, 1);
+              delete state.backendSessions[session.id];
+              vscode.postMessage({ type: "chat.session.delete", sessionId: session.id });
               if (selected) state.activeSessionId = state.sessions[Math.max(0, index - 1)].id;
               composer.value = activeSession().draft;
+              syncSelectionControls();
               render();
               persist();
             });
@@ -872,6 +886,7 @@ function createChatViewHtml({ cspSource, nonce }) {
         }
 
         function renderStatusLine(session) {
+          const localSession = activeSession();
           const effortLabels = {
             low: "낮음",
             medium: "중간",
@@ -880,8 +895,8 @@ function createChatViewHtml({ cspSource, nonce }) {
             max: "최대",
             ultra: "울트라",
           };
-          statusModel.textContent = state.model;
-          statusEffort.textContent = effortLabels[state.reasoningEffort];
+          statusModel.textContent = localSession.model;
+          statusEffort.textContent = effortLabels[localSession.reasoningEffort];
           const usage = session.usage || {};
           const inputTokens = Number(usage.input_tokens) || 0;
           const cachedTokens = Number(usage.cached_input_tokens) || 0;
@@ -911,6 +926,7 @@ function createChatViewHtml({ cspSource, nonce }) {
         }
 
         function render() {
+          syncSelectionControls();
           renderSessions();
           renderMessages();
         }
@@ -923,8 +939,8 @@ function createChatViewHtml({ cspSource, nonce }) {
             type: "chat.submit",
             sessionId: session.id,
             prompt,
-            model: state.model,
-            reasoningEffort: state.reasoningEffort,
+            model: session.model,
+            reasoningEffort: session.reasoningEffort,
           });
           session.draft = "";
           composer.value = "";
@@ -944,13 +960,14 @@ function createChatViewHtml({ cspSource, nonce }) {
         function syncSelectionControls() {
           const modelSelect = customSelects.find((select) => select.dataset.selectKind === 'model');
           const effortSelect = customSelects.find((select) => select.dataset.selectKind === 'effort');
+          const session = activeSession();
           const modelOptions = Array.from(modelSelect.querySelectorAll('.custom-select-option'));
-          const selectedModel = modelOptions.find((option) => option.dataset.value === state.model)
+          const selectedModel = modelOptions.find((option) => option.dataset.value === session.model)
             || modelOptions.find((option) => option.dataset.value === 'gpt-5.5');
-          state.model = selectedModel.dataset.value;
+          session.model = selectedModel.dataset.value;
           const supportedEfforts = selectedModel.dataset.efforts.split(',');
-          if (!supportedEfforts.includes(state.reasoningEffort)) {
-            state.reasoningEffort = selectedModel.dataset.defaultEffort;
+          if (!supportedEfforts.includes(session.reasoningEffort)) {
+            session.reasoningEffort = selectedModel.dataset.defaultEffort;
           }
           for (const option of modelOptions) {
             option.setAttribute('aria-selected', String(option === selectedModel));
@@ -958,7 +975,7 @@ function createChatViewHtml({ cspSource, nonce }) {
           modelSelect.querySelector('.custom-select-label').textContent = selectedModel.textContent;
 
           const effortOptions = Array.from(effortSelect.querySelectorAll('.custom-select-option'));
-          const selectedEffort = effortOptions.find((option) => option.dataset.value === state.reasoningEffort);
+          const selectedEffort = effortOptions.find((option) => option.dataset.value === session.reasoningEffort);
           for (const option of effortOptions) {
             const supported = supportedEfforts.includes(option.dataset.value);
             option.closest('li').hidden = !supported;
@@ -984,9 +1001,9 @@ function createChatViewHtml({ cspSource, nonce }) {
           for (const option of options) {
             option.addEventListener('click', () => {
               if (kind === 'model') {
-                state.model = option.dataset.value;
+                activeSession().model = option.dataset.value;
               } else {
-                state.reasoningEffort = option.dataset.value;
+                activeSession().reasoningEffort = option.dataset.value;
               }
               syncSelectionControls();
               menu.hidden = true;
@@ -1032,11 +1049,13 @@ function createChatViewHtml({ cspSource, nonce }) {
 
         newSession.addEventListener("click", () => {
           const number = state.nextSessionNumber;
-          const session = {
-            id: "local-" + number,
-            title: "web " + number,
-            draft: "",
-          };
+              const session = {
+                id: "local-" + number,
+                title: "web " + number,
+                draft: "",
+                model: activeSession().model,
+                reasoningEffort: activeSession().reasoningEffort,
+              };
           state.nextSessionNumber += 1;
           state.sessions.push(session);
           state.activeSessionId = session.id;
