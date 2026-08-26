@@ -151,36 +151,14 @@ function createWebviewHtml({ cspSource, nonce }) {
       content = `
         <div class="artifact-editor" aria-busy="true">
           <aside class="artifact-browser" aria-label="Artifact browser">
-            <div class="artifact-browser-header">
-              <button
-                class="artifact-browser-toggle"
-                type="button"
-                data-editor-browser-toggle
-                aria-expanded="true"
-                aria-label="Artifacts 사이드바 접기"
-                title="Artifacts 사이드바 접기"
-              >‹</button>
-              <strong>Artifacts</strong>
-              <button class="secondary-button" type="button" data-editor-refresh>새로 고침</button>
-            </div>
             <div class="artifact-list" data-editor-artifacts></div>
             <div class="section-list" data-editor-sections></div>
             <div class="item-list" data-editor-items></div>
           </aside>
           <section class="artifact-detail" aria-label="Artifact editor">
-            <div class="artifact-detail-header">
-              <div class="artifact-editor-status" data-editor-status role="status" aria-live="polite">
-                artifact를 선택하세요.
-              </div>
-              <div class="artifact-mode-switch" role="group" aria-label="Artifact mode">
-                <button type="button" data-editor-mode="view" aria-pressed="true">View</button>
-                <button type="button" data-editor-mode="edit" aria-pressed="false">Edit</button>
-              </div>
-            </div>
             <div class="artifact-editor-error" data-editor-error role="alert" hidden></div>
             <div class="artifact-fields" data-editor-fields></div>
-            <div class="artifact-preview-shell">
-              <h2>Document preview</h2>
+            <div class="artifact-preview-shell" data-editor-preview-shell hidden>
               <article class="artifact-document" data-editor-preview tabindex="0"></article>
             </div>
           </section>
@@ -327,6 +305,31 @@ function createWebviewHtml({ cspSource, nonce }) {
         white-space: nowrap;
       }
 
+      .editor-header-tools {
+        display: flex;
+        min-width: 0;
+        align-items: center;
+        gap: 8px;
+        margin-left: auto;
+      }
+
+      .editor-header-toggle {
+        margin-left: -8px;
+      }
+
+      .editor-header-tools[hidden] {
+        display: none;
+      }
+
+      .editor-header-status {
+        min-width: 0;
+        overflow: hidden;
+        color: var(--vscode-descriptionForeground);
+        font-size: 12px;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
       .selected-header.is-kanban-header {
         padding: 0;
       }
@@ -397,12 +400,21 @@ function createWebviewHtml({ cspSource, nonce }) {
         overflow: hidden;
       }
 
+      .workspace-body.is-editor-active {
+        overflow: hidden;
+      }
+
       .workspace-panel {
         min-height: 100%;
         padding: 0;
       }
 
       .workspace-body.is-kanban-active .workspace-panel {
+        height: 100%;
+        min-height: 0;
+      }
+
+      .workspace-body.is-editor-active .workspace-panel {
         height: 100%;
         min-height: 0;
       }
@@ -428,28 +440,27 @@ function createWebviewHtml({ cspSource, nonce }) {
 
       .artifact-editor {
         display: grid;
-        min-height: calc(100vh - 78px);
+        height: 100%;
+        min-height: 0;
         grid-template-columns: minmax(220px, 28%) minmax(0, 1fr);
       }
 
       .artifact-editor.is-browser-collapsed {
-        grid-template-columns: 42px minmax(0, 1fr);
+        grid-template-columns: 0 minmax(0, 1fr);
       }
 
       .artifact-browser {
         min-width: 0;
+        min-height: 0;
         padding: 12px;
         overflow: auto;
         border-right: 1px solid var(--vscode-panel-border);
         background: var(--vscode-sideBar-background);
+        scrollbar-width: none;
       }
 
-      .artifact-browser-header {
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        gap: 8px;
-        margin-bottom: 10px;
+      .artifact-browser::-webkit-scrollbar {
+        display: none;
       }
 
       .artifact-browser-toggle {
@@ -470,21 +481,25 @@ function createWebviewHtml({ cspSource, nonce }) {
         background: var(--vscode-toolbar-hoverBackground);
       }
 
+      .editor-list-icon,
+      .editor-refresh-icon {
+        width: 16px;
+        height: 16px;
+        fill: none;
+        stroke: currentColor;
+        stroke-linecap: round;
+        stroke-linejoin: round;
+        stroke-width: 1.5;
+      }
+
+      .editor-header-toggle[aria-expanded="true"] {
+        background: var(--vscode-toolbar-activeBackground, var(--vscode-toolbar-hoverBackground));
+      }
+
       .artifact-editor.is-browser-collapsed .artifact-browser {
-        padding: 12px 8px;
+        padding: 0;
         overflow: hidden;
-      }
-
-      .artifact-editor.is-browser-collapsed .artifact-browser-header {
-        justify-content: center;
-      }
-
-      .artifact-editor.is-browser-collapsed .artifact-browser-header strong,
-      .artifact-editor.is-browser-collapsed [data-editor-refresh],
-      .artifact-editor.is-browser-collapsed .artifact-list,
-      .artifact-editor.is-browser-collapsed .section-list,
-      .artifact-editor.is-browser-collapsed .item-list {
-        display: none;
+        border-right: 0;
       }
 
       .artifact-list,
@@ -526,28 +541,16 @@ function createWebviewHtml({ cspSource, nonce }) {
 
       .artifact-detail {
         min-width: 0;
+        min-height: 0;
         padding: 16px;
         overflow: auto;
       }
 
-      .artifact-editor-status,
       .artifact-editor-error {
         min-height: 22px;
         margin-bottom: 10px;
         color: var(--vscode-descriptionForeground);
         font-size: 12px;
-      }
-
-      .artifact-detail-header {
-        display: flex;
-        align-items: flex-start;
-        justify-content: space-between;
-        gap: 12px;
-        margin-bottom: 10px;
-      }
-
-      .artifact-detail-header .artifact-editor-status {
-        margin-bottom: 0;
       }
 
       .artifact-mode-switch {
@@ -596,8 +599,7 @@ function createWebviewHtml({ cspSource, nonce }) {
         gap: 4px;
       }
 
-      .artifact-field label,
-      .artifact-preview-shell > h2 {
+      .artifact-field label {
         color: var(--vscode-descriptionForeground);
         font-size: 12px;
         font-weight: 600;
@@ -625,16 +627,15 @@ function createWebviewHtml({ cspSource, nonce }) {
       }
 
       .artifact-preview-shell {
-        padding-top: 14px;
-        border-top: 1px solid var(--vscode-panel-border);
+        min-width: 0;
       }
 
       .artifact-document {
         box-sizing: border-box;
-        width: min(100%, 816px);
+        width: min(100%, 960px);
         min-height: 220px;
         margin: 10px auto 32px;
-        padding: clamp(32px, 7vw, 72px);
+        padding: clamp(24px, 4vw, 48px);
         border: 1px solid var(--vscode-panel-border);
         color: var(--vscode-editor-foreground);
         background: var(--vscode-editor-background);
@@ -737,11 +738,12 @@ function createWebviewHtml({ cspSource, nonce }) {
       @media (max-width: 720px) {
         .artifact-editor {
           grid-template-columns: 1fr;
+          grid-template-rows: minmax(0, 42%) minmax(0, 1fr);
         }
 
         .artifact-editor.is-browser-collapsed {
           grid-template-columns: 1fr;
-          grid-template-rows: 42px minmax(0, 1fr);
+          grid-template-rows: 0 minmax(0, 1fr);
         }
 
         .artifact-browser {
@@ -904,7 +906,45 @@ function createWebviewHtml({ cspSource, nonce }) {
         ${tabs}
       </nav>
       <header class="selected-header">
+        <button
+          class="artifact-browser-toggle editor-header-toggle"
+          type="button"
+          data-editor-browser-toggle
+          aria-expanded="true"
+          aria-label="Artifacts 사이드바 접기"
+          title="Artifacts 사이드바 접기"
+          hidden
+        >
+          <svg class="editor-list-icon" viewBox="0 0 16 16" aria-hidden="true">
+            <path d="M2.5 4h1M6 4h7.5M2.5 8h1M6 8h7.5M2.5 12h1M6 12h7.5" />
+          </svg>
+        </button>
         <h1 data-selected-title>Dashboard</h1>
+        <div
+          class="editor-header-status"
+          data-editor-status
+          role="status"
+          aria-live="polite"
+          hidden
+        >artifact를 선택하세요.</div>
+        <div class="editor-header-tools" data-editor-header-tools hidden>
+          <button
+            class="artifact-browser-toggle"
+            type="button"
+            data-editor-refresh
+            aria-label="Artifacts 새로 고침"
+            title="Artifacts 새로 고침"
+          >
+            <svg class="editor-refresh-icon" viewBox="0 0 16 16" aria-hidden="true">
+              <path d="M13.25 5.75A5.75 5.75 0 1 0 13.5 9" />
+              <path d="M10.5 3.5h3v3" />
+            </svg>
+          </button>
+          <div class="artifact-mode-switch" role="group" aria-label="Artifact mode">
+            <button type="button" data-editor-mode="view" aria-pressed="true">View</button>
+            <button type="button" data-editor-mode="edit" aria-pressed="false">Edit</button>
+          </div>
+        </div>
         <details class="kanban-picklist" data-kanban-picklist hidden>
           <summary>칸반 표시</summary>
           <div class="kanban-picklist-options" role="group" aria-label="표시할 칸반 선택">
@@ -927,6 +967,7 @@ function createWebviewHtml({ cspSource, nonce }) {
         const panels = Array.from(document.querySelectorAll('[data-panel-id]'));
         const selectedHeader = document.querySelector('.selected-header');
         const selectedTitle = document.querySelector('[data-selected-title]');
+        const editorHeaderTools = document.querySelector('[data-editor-header-tools]');
         const kanbanPicklist = document.querySelector('[data-kanban-picklist]');
         const kanbanColumnOptions = Array.from(
           document.querySelectorAll('[data-kanban-column-option]'),
@@ -948,6 +989,7 @@ function createWebviewHtml({ cspSource, nonce }) {
         const sectionList = document.querySelector('[data-editor-sections]');
         const itemList = document.querySelector('[data-editor-items]');
         const editorFields = document.querySelector('[data-editor-fields]');
+        const editorPreviewShell = document.querySelector('[data-editor-preview-shell]');
         const editorPreview = document.querySelector('[data-editor-preview]');
         const editorStatus = document.querySelector('[data-editor-status]');
         const editorError = document.querySelector('[data-editor-error]');
@@ -999,7 +1041,6 @@ function createWebviewHtml({ cspSource, nonce }) {
             "is-browser-collapsed",
             state.artifactBrowserCollapsed,
           );
-          editorBrowserToggle.textContent = state.artifactBrowserCollapsed ? "›" : "‹";
           editorBrowserToggle.setAttribute(
             "aria-expanded",
             String(!state.artifactBrowserCollapsed),
@@ -1045,13 +1086,17 @@ function createWebviewHtml({ cspSource, nonce }) {
 
           const activeTab = tabs.find((tab) => tab.dataset.tabId === tabId);
           selectedTitle.textContent = activeTab.textContent.trim();
-          selectedTitle.hidden = tabId === "kanban";
+          selectedTitle.hidden = tabId === "editor" || tabId === "kanban";
+          editorBrowserToggle.hidden = tabId !== "editor";
+          editorStatus.hidden = tabId !== "editor";
+          editorHeaderTools.hidden = tabId !== "editor";
           kanbanPicklist.hidden = tabId !== "kanban";
           if (tabId !== "kanban") {
             kanbanPicklist.open = false;
           }
           selectedHeader.classList.toggle("is-kanban-header", tabId === "kanban");
           workspaceBody.classList.toggle("is-kanban-active", tabId === "kanban");
+          workspaceBody.classList.toggle("is-editor-active", tabId === "editor");
           state.selectedTab = tabId;
           persistState();
         }
@@ -1374,6 +1419,7 @@ function createWebviewHtml({ cspSource, nonce }) {
 
         function renderDocumentPreview() {
           editorPreview.replaceChildren();
+          editorPreviewShell.hidden = !artifactDocument;
           if (!artifactDocument) {
             return;
           }
@@ -1387,11 +1433,18 @@ function createWebviewHtml({ cspSource, nonce }) {
           header.className = "artifact-document-header";
           const type = document.createElement("div");
           type.className = "artifact-document-type";
-          type.textContent = typeLabels[artifactDocument.artifactType] ||
+          const typeLabel = typeLabels[artifactDocument.artifactType] ||
             humanizeArtifactLabel(artifactDocument.artifactType);
+          type.textContent = typeLabel;
           const title = document.createElement("h1");
           title.className = "artifact-document-title";
-          title.textContent = artifactDocument.title;
+          const artifactTitle = String(artifactDocument.title || "");
+          const duplicateTypeSuffix = " " + typeLabel;
+          title.textContent = artifactTitle.toLocaleLowerCase().endsWith(
+            duplicateTypeSuffix.toLocaleLowerCase(),
+          )
+            ? artifactTitle.slice(0, -duplicateTypeSuffix.length)
+            : artifactTitle;
           const meta = document.createElement("div");
           meta.className = "artifact-document-meta";
           meta.textContent = [

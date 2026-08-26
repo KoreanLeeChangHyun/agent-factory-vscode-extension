@@ -9,6 +9,7 @@ const {
   resolveBundledCodexPath,
 } = require("./codexAdapter");
 const { registerLauncher } = require("./launcher");
+const { StatusMetadataReader } = require("./statusMetadata");
 
 const COMMAND_OPEN_AGENTS = "agentFactoryAgents.open";
 
@@ -18,11 +19,17 @@ function activate(context) {
     extensionPath: context.extensionPath,
   });
   const runner = new CodexRunner({ executablePath });
+  const workspaceRoot =
+    vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || context.extensionPath;
+  const metadataReader = new StatusMetadataReader({
+    executablePath,
+    workspaceRoot,
+  });
   const controller = new AgentsChatController({
     runner,
     workspaceState: context.workspaceState,
-    workspaceRoot:
-      vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || context.extensionPath,
+    workspaceRoot,
+    metadataReader,
   });
   context.subscriptions.push({ dispose: () => runner.dispose() });
   const panelManager = createAgentsPanelManager({ vscode, controller });

@@ -6,3 +6,4 @@ workspace/.vscode-test/
 *.vsix
 uploads/
 feedback/
+.backup/

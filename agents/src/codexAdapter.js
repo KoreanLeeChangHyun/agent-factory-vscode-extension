@@ -12,7 +12,6 @@ const MODEL_REASONING_LEVELS = {
   "gpt-5.5": ["low", "medium", "high", "xhigh"],
   "gpt-5.4": ["low", "medium", "high", "xhigh"],
   "gpt-5.4-mini": ["low", "medium", "high", "xhigh"],
-  "gpt-5.3-codex-spark": ["low", "medium", "high", "xhigh"],
 };
 
 function resolveBundledCodexPath({
@@ -59,6 +58,8 @@ function buildExecArgs({
   providerSessionId = null,
   model = "gpt-5.5",
   reasoningEffort = "medium",
+  fastMode = false,
+  images = [],
 }) {
   const normalizedPrompt = typeof prompt === "string" ? prompt.trim() : "";
   if (!normalizedPrompt) {
@@ -79,17 +80,22 @@ function buildExecArgs({
     "--config",
     `model_reasoning_effort="${reasoningEffort}"`,
   ];
+  if (fastMode) {
+    configuration.push("--config", 'service_tier="priority"');
+  }
+  const imageArgs = images.flatMap((imagePath) => ["--image", imagePath]);
   if (providerSessionId) {
     return [
       "exec",
       "resume",
       "--json",
       ...configuration,
+      ...imageArgs,
       providerSessionId,
       normalizedPrompt,
     ];
   }
-  return ["exec", "--json", ...configuration, "--cd", cwd, normalizedPrompt];
+  return ["exec", "--json", ...configuration, ...imageArgs, "--cd", cwd, normalizedPrompt];
 }
 
 class JsonLinesParser {
@@ -213,6 +219,8 @@ class CodexRunner {
     providerSessionId = null,
     model = "gpt-5.5",
     reasoningEffort = "medium",
+    fastMode = false,
+    images = [],
     onEvent,
   }) {
     if (this.running.has(sessionId)) {
@@ -224,6 +232,8 @@ class CodexRunner {
       providerSessionId,
       model,
       reasoningEffort,
+      fastMode,
+      images,
     });
     let child;
     try {

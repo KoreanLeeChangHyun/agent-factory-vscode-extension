@@ -31,6 +31,7 @@ function createAgentsPanelManager({
       },
     );
     chatBinding = configureChatWebview({
+      vscode,
       webview: panel.webview,
       controller,
       nonce: createNonce(),

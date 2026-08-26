@@ -2,6 +2,7 @@
 
 const CHAT_STATE_KEY = "agentFactoryAgents.chat.sessions.v1";
 const MAX_PROMPT_LENGTH = 50_000;
+const MAX_IMAGES = 10;
 const SESSION_ID_PATTERN = /^[A-Za-z0-9._:-]{1,128}$/;
 const MODEL_REASONING_LEVELS = {
   "gpt-5.6-sol": ["low", "medium", "high", "xhigh", "max", "ultra"],
@@ -10,7 +11,6 @@ const MODEL_REASONING_LEVELS = {
   "gpt-5.5": ["low", "medium", "high", "xhigh"],
   "gpt-5.4": ["low", "medium", "high", "xhigh"],
   "gpt-5.4-mini": ["low", "medium", "high", "xhigh"],
-  "gpt-5.3-codex-spark": ["low", "medium", "high", "xhigh"],
 };
 const SUPPORTED_MODELS = new Set(Object.keys(MODEL_REASONING_LEVELS));
 const SUPPORTED_REASONING_EFFORTS = new Set(
@@ -41,11 +41,16 @@ function validateWebviewMessage(message) {
     validSessionId(message.sessionId) &&
     typeof message.prompt === "string"
   ) {
-    const prompt = message.prompt.trim();
+    const images = Array.isArray(message.images)
+      ? message.images.filter((value) => typeof value === "string").slice(0, MAX_IMAGES)
+      : [];
+    const prompt = message.prompt.trim() || (images.length ? "첨부한 이미지를 분석해 주세요." : "");
     const model = SUPPORTED_MODELS.has(message.model) ? message.model : "gpt-5.5";
     const reasoningEffort = MODEL_REASONING_LEVELS[model].includes(message.reasoningEffort)
       ? message.reasoningEffort
       : "medium";
+    const fastMode = message.fastMode === true;
+    const goal = message.goal === true;
     if (prompt && prompt.length <= MAX_PROMPT_LENGTH) {
       return {
         type: "chat.submit",
@@ -53,6 +58,9 @@ function validateWebviewMessage(message) {
         prompt,
         model,
         reasoningEffort,
+        fastMode,
+        goal,
+        images,
       };
     }
   }
@@ -64,7 +72,7 @@ function validSessionId(value) {
 }
 
 function defaultSnapshot() {
-  return { version: 1, sessions: {} };
+  return { version: 1, sessions: {}, runtime: {} };
 }
 
 function restoreSnapshot(value) {
@@ -72,6 +80,9 @@ function restoreSnapshot(value) {
   if (!value || value.version !== 1 || typeof value.sessions !== "object") {
     return restored;
   }
+  restored.runtime = value.runtime && typeof value.runtime === "object"
+    ? value.runtime
+    : {};
   for (const [id, candidate] of Object.entries(value.sessions)) {
     if (!validSessionId(id) || !candidate || candidate.id !== id) {
       continue;
@@ -112,6 +123,7 @@ function restoreSnapshot(value) {
           : null,
       model,
       reasoningEffort,
+      fastMode: candidate.fastMode === true,
       usage: candidate.usage && typeof candidate.usage === "object"
         ? candidate.usage
         : null,
@@ -127,16 +139,21 @@ class AgentsChatController {
     runner,
     workspaceState,
     workspaceRoot,
+    metadataReader = null,
     postMessage = async () => {},
   }) {
     this.runner = runner;
     this.workspaceState = workspaceState;
     this.workspaceRoot = workspaceRoot;
+    this.metadataReader = metadataReader;
     this.postMessage = postMessage;
     this.publishQueue = Promise.resolve();
     this.state = restoreSnapshot(
       workspaceState.get(CHAT_STATE_KEY, defaultSnapshot()),
     );
+    for (const session of Object.values(this.state.sessions)) {
+      session.cwd = workspaceRoot;
+    }
   }
 
   setPostMessage(postMessage) {
@@ -154,6 +171,7 @@ class AgentsChatController {
     }
     if (message.type === "chat.ready") {
       await this.#publish();
+      void this.#refreshMetadata();
       return true;
     }
     if (message.type === "chat.cancel") {
@@ -178,17 +196,23 @@ class AgentsChatController {
     return true;
   }
 
-  #submit({ sessionId, prompt, model, reasoningEffort }) {
+  #submit({ sessionId, prompt, model, reasoningEffort, fastMode, goal, images }) {
     const session = this.#session(sessionId);
     if (session.status === "running" || session.status === "cancelling") {
       return;
     }
-    session.messages.push({ role: "user", text: prompt, streaming: false });
+    const attachmentLabel = images.length ? `\n\n[이미지 ${images.length}개 첨부]` : "";
+    session.messages.push({
+      role: "user",
+      text: (goal ? "[Goal]\n" : "") + prompt + attachmentLabel,
+      streaming: false,
+    });
     session.status = "running";
     session.progress = "Codex 시작 중";
     session.error = null;
     session.model = model;
     session.reasoningEffort = reasoningEffort;
+    session.fastMode = fastMode;
     session.startedAt = Date.now();
     session.completedAt = null;
     void this.#publish(sessionId);
@@ -196,11 +220,15 @@ class AgentsChatController {
     void this.runner
       .run({
         sessionId,
-        prompt,
+        prompt: goal
+          ? "Create a goal for the following objective and pursue it until it is complete:\n\n" + prompt
+          : prompt,
         cwd: this.workspaceRoot,
         providerSessionId: session.providerSessionId,
         model,
         reasoningEffort,
+        fastMode,
+        images,
         onEvent: (event) => this.#handleRunnerEvent(sessionId, event),
       })
       .then(() => {
@@ -221,6 +249,9 @@ class AgentsChatController {
         current.error = safeErrorMessage(error);
         current.completedAt = Date.now();
         return this.#publish(sessionId);
+      })
+      .finally(() => {
+        void this.#refreshMetadata();
       });
   }
 
@@ -281,6 +312,8 @@ class AgentsChatController {
         error: null,
         model: "gpt-5.5",
         reasoningEffort: "medium",
+        fastMode: false,
+        cwd: this.workspaceRoot,
         usage: null,
         startedAt: null,
         completedAt: null,
@@ -300,6 +333,16 @@ class AgentsChatController {
       });
     });
     return this.publishQueue;
+  }
+
+  async #refreshMetadata() {
+    if (!this.metadataReader) return;
+    try {
+      this.state.runtime = await this.metadataReader.read();
+      await this.#publish();
+    } catch {
+      // Status metadata must never interrupt a chat session.
+    }
   }
 }
 
