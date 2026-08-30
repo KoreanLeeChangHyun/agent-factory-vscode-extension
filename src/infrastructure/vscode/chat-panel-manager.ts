@@ -1,0 +1,290 @@
+import { randomUUID } from "node:crypto";
+import * as vscode from "vscode";
+import type { StatusItemId } from "../../core/config/types";
+import type { AttachmentReference } from "../../common/types/attachment";
+import {
+  createDraftChatState,
+  restoreChatState,
+  type ChatPanelState
+} from "../../modules/chat/chat-state";
+import type { HostMessage } from "../../protocol/messages";
+import { parseClientMessage } from "../../protocol/validator";
+import type { ChatTemplateRenderer } from "./chat-template-renderer";
+
+interface ManagedPanel {
+  readonly panel: vscode.WebviewPanel;
+  state: ChatPanelState;
+  readonly subscriptions: vscode.Disposable[];
+}
+
+export class ChatPanelManager implements vscode.Disposable {
+  public readonly viewType = "agentFactory.mainChat";
+  private readonly panels = new Map<string, ManagedPanel>();
+  private activePanelId: string | undefined;
+
+  public constructor(
+    private readonly context: vscode.ExtensionContext,
+    private readonly templates: ChatTemplateRenderer,
+    private readonly statusItems: () => readonly StatusItemId[]
+  ) {}
+
+  public async openDraft(): Promise<void> {
+    const state = createDraftChatState();
+    const panel = vscode.window.createWebviewPanel(
+      this.viewType,
+      state.title,
+      vscode.ViewColumn.Active,
+      this.webviewOptions()
+    );
+    await this.attach(panel, state);
+  }
+
+  public async revive(panel: vscode.WebviewPanel, serializedState: unknown): Promise<void> {
+    const state = restoreChatState(serializedState);
+    const existing = this.panels.get(state.panelId);
+    if (existing) {
+      existing.panel.reveal(panel.viewColumn, true);
+      panel.dispose();
+      return;
+    }
+    await this.attach(panel, state);
+  }
+
+  public async requestResume(): Promise<void> {
+    const action = await vscode.window.showInformationMessage(
+      "Agent Factory 런타임 연결 후 현재 프로젝트의 Main Agent 세션을 불러올 수 있습니다.",
+      "열린 채팅으로 이동"
+    );
+    if (action === "열린 채팅으로 이동") {
+      const first = this.panels.values().next().value as ManagedPanel | undefined;
+      if (first) {
+        first.panel.reveal(undefined, true);
+      } else {
+        await this.openDraft();
+      }
+    }
+  }
+
+  public async renameActive(): Promise<void> {
+    const managed = this.findActivePanel();
+    if (!managed) {
+      await vscode.window.showInformationMessage("이름을 변경할 Main Agent 채팅 탭을 먼저 선택하세요.");
+      return;
+    }
+
+    const title = await vscode.window.showInputBox({
+      title: "Main Agent 이름 변경",
+      prompt: "이 채팅 탭에 표시할 이름을 입력하세요.",
+      value: managed.state.title,
+      valueSelection: [0, managed.state.title.length],
+      validateInput(value) {
+        const length = value.trim().length;
+        if (length === 0) {
+          return "이름을 입력하세요.";
+        }
+        if (length > 80) {
+          return "이름은 80자 이하여야 합니다.";
+        }
+        return undefined;
+      }
+    });
+    if (title === undefined) {
+      return;
+    }
+
+    const normalizedTitle = title.trim();
+    managed.state = { ...managed.state, title: normalizedTitle };
+    managed.panel.title = normalizedTitle;
+    await this.post(managed.panel, { type: "chat.renamed", title: normalizedTitle });
+  }
+
+  public dispose(): void {
+    for (const managed of this.panels.values()) {
+      for (const subscription of managed.subscriptions) {
+        subscription.dispose();
+      }
+      managed.panel.dispose();
+    }
+    this.panels.clear();
+  }
+
+  private async attach(panel: vscode.WebviewPanel, state: ChatPanelState): Promise<void> {
+    panel.title = state.title;
+    panel.iconPath = vscode.Uri.joinPath(
+      this.context.extensionUri,
+      "static",
+      "images",
+      "agent-factory.svg"
+    );
+    panel.webview.options = this.webviewOptions();
+
+    const subscriptions: vscode.Disposable[] = [];
+    const managed: ManagedPanel = { panel, state, subscriptions };
+    this.panels.set(state.panelId, managed);
+    if (panel.active) {
+      this.activePanelId = state.panelId;
+    }
+
+    subscriptions.push(
+      panel.onDidDispose(() => {
+        this.panels.delete(state.panelId);
+        if (this.activePanelId === state.panelId) {
+          this.activePanelId = undefined;
+        }
+        for (const subscription of subscriptions) {
+          subscription.dispose();
+        }
+      }),
+      panel.onDidChangeViewState((event) => {
+        if (event.webviewPanel.active) {
+          this.activePanelId = state.panelId;
+        }
+      }),
+      panel.webview.onDidReceiveMessage(async (rawMessage: unknown) => {
+        await this.handleMessage(managed, rawMessage);
+      })
+    );
+
+    try {
+      panel.webview.html = await this.templates.render(panel.webview);
+    } catch (error) {
+      this.panels.delete(state.panelId);
+      panel.webview.html = fallbackHtml(error);
+    }
+  }
+
+  private async handleMessage(managed: ManagedPanel, rawMessage: unknown): Promise<void> {
+    const message = parseClientMessage(rawMessage);
+    if (!message) {
+      await this.post(managed.panel, {
+        type: "host.notice",
+        level: "error",
+        text: "채팅 화면에서 올바르지 않은 메시지를 받았습니다."
+      });
+      return;
+    }
+
+    switch (message.type) {
+      case "client.ready":
+        await this.post(managed.panel, {
+          type: "host.initialize",
+          panelId: managed.state.panelId,
+          title: managed.state.title,
+          projectName: workspaceName(),
+          runtimeAvailable: false,
+          running: false,
+          statusItems: this.statusItems()
+        });
+        return;
+      case "chat.send":
+        await this.post(managed.panel, {
+          type: "host.notice",
+          level: "warning",
+          text: "메시지는 아직 실행되지 않았습니다. Agent Factory 런타임 연결이 준비 중입니다."
+        });
+        return;
+      case "run.cancel":
+        await this.post(managed.panel, {
+          type: "host.notice",
+          level: "info",
+          text: "현재 실행 중인 Agent가 없습니다."
+        });
+        return;
+      case "resume.request":
+        await this.requestResume();
+        return;
+      case "attachments.pick":
+        await this.pickAttachments(managed.panel);
+        return;
+      case "settings.open":
+        await vscode.window.showInformationMessage(
+          "모델과 추론 옵션은 Agent Factory Runtime capability 연결 후 선택할 수 있습니다."
+        );
+        return;
+      case "status.reorder":
+        await this.saveStatusItems(managed.panel, message.items);
+        return;
+    }
+  }
+
+  private async pickAttachments(panel: vscode.WebviewPanel): Promise<void> {
+    const uris = await vscode.window.showOpenDialog({
+      canSelectFiles: true,
+      canSelectFolders: true,
+      canSelectMany: true,
+      openLabel: "채팅에 첨부"
+    });
+    if (!uris?.length) {
+      return;
+    }
+
+    const attachments: AttachmentReference[] = await Promise.all(
+      uris.map(async (uri) => {
+        let kind: AttachmentReference["kind"] = "file";
+        try {
+          const stat = await vscode.workspace.fs.stat(uri);
+          if ((stat.type & vscode.FileType.Directory) !== 0) {
+            kind = "folder";
+          }
+        } catch {
+          // The runtime performs the authoritative path validation before use.
+        }
+        return {
+          id: randomUUID(),
+          name: uri.path.split("/").filter(Boolean).at(-1) ?? uri.toString(),
+          kind,
+          uri: uri.toString()
+        };
+      })
+    );
+    await this.post(panel, { type: "attachments.add", attachments });
+  }
+
+  private async saveStatusItems(
+    panel: vscode.WebviewPanel,
+    items: readonly StatusItemId[]
+  ): Promise<void> {
+    const target = vscode.workspace.workspaceFolders?.length
+      ? vscode.ConfigurationTarget.Workspace
+      : vscode.ConfigurationTarget.Global;
+    await vscode.workspace
+      .getConfiguration("agentFactory.mainChat")
+      .update("statusItems", items, target);
+    await this.post(panel, { type: "status.updated", items });
+  }
+
+  private webviewOptions(): vscode.WebviewPanelOptions & vscode.WebviewOptions {
+    return {
+      enableScripts: true,
+      retainContextWhenHidden: true,
+      localResourceRoots: [...this.templates.localResourceRoots]
+    };
+  }
+
+  private async post(panel: vscode.WebviewPanel, message: HostMessage): Promise<void> {
+    await panel.webview.postMessage(message);
+  }
+
+  private findActivePanel(): ManagedPanel | undefined {
+    if (this.activePanelId) {
+      const managed = this.panels.get(this.activePanelId);
+      if (managed?.panel.active) {
+        return managed;
+      }
+    }
+    return [...this.panels.values()].find((managed) => managed.panel.active);
+  }
+}
+
+function workspaceName(): string {
+  return vscode.workspace.name ?? "No workspace";
+}
+
+function fallbackHtml(error: unknown): string {
+  const message = error instanceof Error ? error.message : String(error);
+  const escaped = message
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;");
+  return `<!doctype html><html><body><p>채팅 화면을 불러오지 못했습니다.</p><pre>${escaped}</pre></body></html>`;
+}

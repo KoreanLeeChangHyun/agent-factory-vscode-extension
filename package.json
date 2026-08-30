@@ -1,0 +1,120 @@
+{
+  "name": "agent-factory-main-chat",
+  "displayName": "Agent Factory Main Chat",
+  "description": "Main Agent chat sessions in VS Code editor tabs.",
+  "version": "0.1.0",
+  "publisher": "agent-factory",
+  "license": "UNLICENSED",
+  "private": true,
+  "engines": {
+    "vscode": "^1.96.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "extensionKind": [
+    "workspace"
+  ],
+  "activationEvents": [
+    "onCommand:agentFactory.mainChat.open",
+    "onCommand:agentFactory.mainChat.resume",
+    "onCommand:agentFactory.mainChat.rename",
+    "onWebviewPanel:agentFactory.mainChat"
+  ],
+  "main": "./dist/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "agentFactory.mainChat.open",
+        "title": "Main Agent 채팅 추가",
+        "category": "Agent Factory",
+        "icon": "$(add)"
+      },
+      {
+        "command": "agentFactory.mainChat.resume",
+        "title": "Agent Factory: Resume Main Agent",
+        "category": "Agent Factory"
+      },
+      {
+        "command": "agentFactory.mainChat.rename",
+        "title": "Main Agent 이름 변경",
+        "category": "Agent Factory"
+      }
+    ],
+    "menus": {
+      "editor/title": [
+        {
+          "command": "agentFactory.mainChat.open",
+          "when": "activeWebviewPanelId == agentFactory.mainChat",
+          "group": "navigation@1"
+        }
+      ],
+      "editor/title/context": [
+        {
+          "command": "agentFactory.mainChat.open",
+          "group": "0_new@3"
+        },
+        {
+          "command": "agentFactory.mainChat.rename",
+          "when": "activeWebviewPanelId == agentFactory.mainChat",
+          "group": "2_workspace@1"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "Agent Factory Main Chat",
+      "properties": {
+        "agentFactory.mainChat.statusItems": {
+          "type": "array",
+          "scope": "window",
+          "default": [
+            "status",
+            "agents",
+            "model",
+            "reasoning",
+            "fast",
+            "goal",
+            "project",
+            "queue"
+          ],
+          "items": {
+            "type": "string",
+            "enum": [
+              "agent",
+              "status",
+              "agents",
+              "model",
+              "reasoning",
+              "fast",
+              "goal",
+              "project",
+              "branch",
+              "context",
+              "elapsed",
+              "queue",
+              "runtime"
+            ]
+          },
+          "description": "Items displayed in the chat status bar, in display order."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "watch": "node scripts/build.mjs --watch",
+    "check": "npm run typecheck && npm run check:static && npm run test && npm run build",
+    "check:static": "node --check static/js/chat.js",
+    "typecheck": "tsc --noEmit",
+    "test": "node --test test/unit/*.test.mjs",
+    "package": "npm run check && node --require ./scripts/node-file-polyfill.cjs ./node_modules/@vscode/vsce/vsce package --allow-missing-repository",
+    "vscode:prepublish": "npm run build"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.5",
+    "@types/vscode": "^1.96.0",
+    "@vscode/vsce": "2.32.0",
+    "esbuild": "^0.24.2",
+    "typescript": "^5.7.2"
+  }
+}

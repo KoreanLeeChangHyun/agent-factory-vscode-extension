@@ -1,6 +1,0 @@
-.vscode-test/**
-dist/**
-test/**
-scripts/**
-*.vsix
-.gitignore

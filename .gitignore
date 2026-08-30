@@ -1,9 +1,11 @@
 /.agent-factory/worktree/
-workspace/node_modules/
-workspace/out/
-workspace/dist/
-workspace/.vscode-test/
+node_modules/
+out/
+dist/
+.vscode-test/
 *.vsix
 uploads/
 feedback/
 .backup/
+*.log
+.DS_Store

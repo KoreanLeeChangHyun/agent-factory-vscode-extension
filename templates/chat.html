@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'none'; img-src {{cspSource}} data: blob:; font-src {{cspSource}}; style-src {{cspSource}}; script-src 'nonce-{{nonce}}';"
+    />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <link rel="stylesheet" href="{{styleUri}}" />
+    <title>Main Agent</title>
+  </head>
+  <body>
+    <main class="chat-shell" aria-label="Main Agent 채팅">
+      <section id="timeline" class="timeline" aria-live="polite" aria-label="대화 내용">
+        <div id="empty-state" class="empty-state">
+          <img class="brand-mark" src="{{iconUri}}" alt="" aria-hidden="true" />
+          <h1>Agent Factory</h1>
+          <p>이 탭은 하나의 독립된 Main Agent 세션입니다.</p>
+          <button id="resume-button" class="link-button" type="button">기존 세션 Resume</button>
+        </div>
+      </section>
+
+      <div id="drop-overlay" class="drop-overlay" hidden>
+        <strong>파일 또는 폴더를 놓아 첨부</strong>
+      </div>
+
+      <section class="composer-region" aria-label="메시지 작성">
+        <div id="attachment-list" class="attachment-list" aria-label="첨부 항목"></div>
+        <div class="composer">
+          <textarea
+            id="prompt"
+            rows="1"
+            maxlength="100000"
+            placeholder="Agent Factory에 요청하세요"
+            aria-label="Main Agent에게 보낼 메시지"
+          ></textarea>
+          <div class="composer-actions">
+            <div class="composer-actions-start">
+              <button id="attach-button" class="icon-button" type="button" title="파일 또는 폴더 첨부" aria-label="파일 또는 폴더 첨부">+</button>
+              <button id="model-reasoning-button" class="setting-button" type="button" title="모델 및 추론 수준 선택" aria-label="모델 및 추론 수준 선택">
+                <span id="model-reasoning-label">Model · Reasoning</span>
+                <span aria-hidden="true">⌄</span>
+              </button>
+              <button id="fast-mode-button" class="mode-button" type="button" title="Fast mode off" aria-label="Fast mode off" aria-pressed="false">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M13 2 4 14h7l-1 8 10-13h-7l1-7Z"></path></svg>
+              </button>
+              <button id="goal-mode-button" class="mode-button" type="button" title="Goal mode off" aria-label="Goal mode off" aria-pressed="false">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8"></circle><circle cx="12" cy="12" r="3"></circle><path d="M12 2v3M12 19v3M2 12h3M19 12h3"></path></svg>
+              </button>
+            </div>
+            <div class="composer-actions-end">
+              <button id="stop-button" class="icon-button stop-button" type="button" title="현재 실행 중지 (Esc)" aria-label="현재 실행 중지" hidden>■</button>
+              <button id="send-button" class="send-button" type="button" title="전송 (Enter)" aria-label="메시지 전송">↑</button>
+            </div>
+          </div>
+        </div>
+      </section>
+      <div id="status-bar" class="status-bar" aria-label="Agent 상태"></div>
+    </main>
+    <script nonce="{{nonce}}" src="{{scriptUri}}"></script>
+  </body>
+</html>
