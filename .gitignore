@@ -1,4 +1,4 @@
-/.agent-factory/worktree/
+/.agent-factory/
 node_modules/
 out/
 dist/

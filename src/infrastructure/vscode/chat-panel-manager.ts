@@ -10,11 +10,18 @@ import {
 import type { HostMessage } from "../../protocol/messages";
 import { parseClientMessage } from "../../protocol/validator";
 import type { ChatTemplateRenderer } from "./chat-template-renderer";
+import type { AgentRuntimeClient } from "../agent-factory/agent-client";
+import { ChatSessionController } from "../../modules/chat/session-controller";
+
+type RuntimeConnection =
+  | { readonly available: true; readonly client: AgentRuntimeClient }
+  | { readonly available: false; readonly diagnostic: string };
 
 interface ManagedPanel {
   readonly panel: vscode.WebviewPanel;
   state: ChatPanelState;
   readonly subscriptions: vscode.Disposable[];
+  controller?: ChatSessionController;
 }
 
 export class ChatPanelManager implements vscode.Disposable {
@@ -25,7 +32,8 @@ export class ChatPanelManager implements vscode.Disposable {
   public constructor(
     private readonly context: vscode.ExtensionContext,
     private readonly templates: ChatTemplateRenderer,
-    private readonly statusItems: () => readonly StatusItemId[]
+    private readonly statusItems: () => readonly StatusItemId[],
+    private readonly connectRuntime: () => Promise<RuntimeConnection>
   ) {}
 
   public async openDraft(): Promise<void> {
@@ -166,29 +174,33 @@ export class ChatPanelManager implements vscode.Disposable {
 
     switch (message.type) {
       case "client.ready":
+        const connection = await this.connectRuntime();
         await this.post(managed.panel, {
           type: "host.initialize",
           panelId: managed.state.panelId,
           title: managed.state.title,
           projectName: workspaceName(),
-          runtimeAvailable: false,
-          running: false,
+          runtimeAvailable: connection.available,
+          running: managed.controller?.running ?? false,
           statusItems: this.statusItems()
         });
+        if (!connection.available) {
+          await this.post(managed.panel, {
+            type: "host.notice",
+            level: "error",
+            text: connection.diagnostic
+          });
+        }
         return;
       case "chat.send":
-        await this.post(managed.panel, {
-          type: "host.notice",
-          level: "warning",
-          text: "메시지는 아직 실행되지 않았습니다. Agent Factory 런타임 연결이 준비 중입니다."
-        });
+        await this.sendChat(managed, message.text, message.attachments, message.execution);
         return;
       case "run.cancel":
-        await this.post(managed.panel, {
-          type: "host.notice",
-          level: "info",
-          text: "현재 실행 중인 Agent가 없습니다."
-        });
+        if (!managed.controller) {
+          await this.post(managed.panel, { type: "host.notice", level: "info", text: "현재 실행 중인 Agent가 없습니다." });
+        } else {
+          await managed.controller.cancel();
+        }
         return;
       case "resume.request":
         await this.requestResume();
@@ -196,15 +208,50 @@ export class ChatPanelManager implements vscode.Disposable {
       case "attachments.pick":
         await this.pickAttachments(managed.panel);
         return;
-      case "settings.open":
-        await vscode.window.showInformationMessage(
-          "모델과 추론 옵션은 Agent Factory Runtime capability 연결 후 선택할 수 있습니다."
-        );
-        return;
       case "status.reorder":
         await this.saveStatusItems(managed.panel, message.items);
         return;
     }
+  }
+
+  private async sendChat(
+    managed: ManagedPanel,
+    text: string,
+    attachments: readonly AttachmentReference[],
+    execution: Extract<import("../../protocol/messages").ClientMessage, { type: "chat.send" }>["execution"]
+  ): Promise<void> {
+    if (!managed.controller) {
+      const connection = await this.connectRuntime();
+      if (!connection.available) {
+        await this.post(managed.panel, { type: "host.notice", level: "error", text: connection.diagnostic });
+        await this.post(managed.panel, { type: "run.state", running: false });
+        return;
+      }
+      managed.controller = new ChatSessionController(connection.client, {
+        onBound: (agentId) => {
+          managed.state = { ...managed.state, agentId };
+          void this.post(managed.panel, { type: "session.bound", agentId });
+        },
+        onRunningChanged: (running) => {
+          void this.post(managed.panel, { type: "run.state", running });
+        },
+        onAssistantText: (responseText) => {
+          void this.post(managed.panel, { type: "chat.assistant", text: responseText });
+        },
+        onProgress: (progressText) => {
+          void this.post(managed.panel, { type: "run.progress", text: progressText });
+        },
+        onError: (message) => {
+          void this.post(managed.panel, { type: "host.notice", level: "error", text: message });
+        }
+      }, managed.state.agentId);
+    }
+    void managed.controller.send(text, attachments, {
+      model: execution.model,
+      reasoningEffort: execution.reasoningEffort,
+      fast: execution.fast,
+      goalMode: execution.goal
+    });
   }
 
   private async pickAttachments(panel: vscode.WebviewPanel): Promise<void> {

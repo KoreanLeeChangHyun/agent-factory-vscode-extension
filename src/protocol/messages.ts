@@ -9,6 +9,8 @@ export type ClientMessage =
       readonly text: string;
       readonly attachments: readonly AttachmentReference[];
       readonly execution: {
+        readonly model?: string;
+        readonly reasoningEffort?: "none" | "low" | "medium" | "high" | "xhigh" | "max";
         readonly fast: boolean;
         readonly goal: boolean;
       };
@@ -16,7 +18,6 @@ export type ClientMessage =
   | { readonly type: "run.cancel" }
   | { readonly type: "resume.request" }
   | { readonly type: "attachments.pick" }
-  | { readonly type: "settings.open" }
   | {
       readonly type: "status.reorder";
       readonly items: readonly StatusItemId[];
@@ -49,6 +50,9 @@ export type HostMessage =
       readonly type: "chat.renamed";
       readonly title: string;
     }
+  | { readonly type: "session.bound"; readonly agentId: string }
+  | { readonly type: "chat.assistant"; readonly text: string }
+  | { readonly type: "run.progress"; readonly text: string }
   | {
       readonly type: "run.state";
       readonly running: boolean;

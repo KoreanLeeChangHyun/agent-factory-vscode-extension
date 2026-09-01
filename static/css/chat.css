@@ -33,14 +33,24 @@ button {
 .chat-shell {
   position: relative;
   display: grid;
-  grid-template-rows: minmax(0, 1fr) auto 22px;
+  grid-template-rows: auto minmax(0, 1fr) auto 22px;
   width: 100%;
   height: 100%;
   margin: 0 auto;
   overflow: hidden;
 }
 
+.session-actions {
+  display: flex;
+  min-height: 30px;
+  align-items: center;
+  justify-content: flex-end;
+  padding: 4px 14px 0;
+}
+
 .timeline {
+  display: flex;
+  flex-direction: column;
   min-height: 0;
   overflow-y: auto;
   padding: 32px 12px 28px;
@@ -93,6 +103,11 @@ button {
   text-decoration: underline;
 }
 
+.link-button:focus-visible {
+  outline: 1px solid var(--vscode-focusBorder);
+  outline-offset: 2px;
+}
+
 .message {
   width: 100%;
   margin: 0 auto 22px;
@@ -114,6 +129,130 @@ button {
   overflow-wrap: anywhere;
 }
 
+.message-assistant .message-content {
+  max-width: min(100%, 900px);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.message-assistant .markdown-body {
+  white-space: normal;
+}
+
+.markdown-body > :first-child {
+  margin-top: 0;
+}
+
+.markdown-body > :last-child {
+  margin-bottom: 0;
+}
+
+.markdown-body h1,
+.markdown-body h2,
+.markdown-body h3,
+.markdown-body h4,
+.markdown-body h5,
+.markdown-body h6 {
+  margin: 1.35em 0 0.55em;
+  color: var(--vscode-editor-foreground);
+  line-height: 1.3;
+}
+
+.markdown-body h1 {
+  font-size: 1.55em;
+}
+
+.markdown-body h2 {
+  padding-bottom: 0.28em;
+  border-bottom: 1px solid var(--vscode-panel-border);
+  font-size: 1.3em;
+}
+
+.markdown-body h3 {
+  font-size: 1.12em;
+}
+
+.markdown-body h4,
+.markdown-body h5,
+.markdown-body h6 {
+  font-size: 1em;
+}
+
+.markdown-body p,
+.markdown-body ul,
+.markdown-body ol,
+.markdown-body blockquote,
+.markdown-body pre,
+.markdown-body table {
+  margin: 0 0 0.9em;
+}
+
+.markdown-body ul,
+.markdown-body ol {
+  padding-left: 1.7em;
+}
+
+.markdown-body li + li {
+  margin-top: 0.28em;
+}
+
+.markdown-body a {
+  color: var(--vscode-textLink-foreground);
+  text-decoration: none;
+}
+
+.markdown-body a:hover {
+  color: var(--vscode-textLink-activeForeground);
+  text-decoration: underline;
+}
+
+.markdown-body code {
+  padding: 0.15em 0.35em;
+  border-radius: 4px;
+  background: var(--vscode-textCodeBlock-background);
+  font-family: var(--vscode-editor-font-family, monospace);
+  font-size: 0.92em;
+}
+
+.markdown-body pre {
+  padding: 11px 13px;
+  overflow-x: auto;
+  border: 1px solid var(--vscode-panel-border);
+  border-radius: 7px;
+  background: var(--vscode-textCodeBlock-background);
+}
+
+.markdown-body pre code {
+  padding: 0;
+  background: transparent;
+  white-space: pre;
+}
+
+.markdown-body blockquote {
+  padding-left: 12px;
+  border-left: 3px solid var(--vscode-textBlockQuote-border);
+  color: var(--vscode-descriptionForeground);
+}
+
+.markdown-body table {
+  display: block;
+  max-width: 100%;
+  overflow-x: auto;
+  border-collapse: collapse;
+}
+
+.markdown-body th,
+.markdown-body td {
+  padding: 6px 9px;
+  border: 1px solid var(--vscode-panel-border);
+  text-align: left;
+}
+
+.markdown-body th {
+  background: var(--vscode-editorWidget-background);
+  font-weight: 600;
+}
+
 .message-notice .message-content {
   display: flex;
   gap: 9px;
@@ -122,6 +261,29 @@ button {
   border-radius: 7px;
   color: var(--vscode-descriptionForeground);
   background: color-mix(in srgb, var(--vscode-editorWidget-background) 66%, transparent);
+}
+
+.message-activity {
+  margin-bottom: 8px;
+  color: var(--vscode-descriptionForeground);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.message-activity .message-content {
+  display: flex;
+  min-width: 0;
+  align-items: baseline;
+  gap: 7px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.message-activity .message-content::before {
+  content: "›";
+  flex: 0 0 auto;
+  color: var(--af-color-accent);
+  font-weight: 700;
 }
 
 .message-notice[data-level="warning"] {
@@ -141,6 +303,39 @@ button {
   z-index: 2;
   padding: 8px 12px 10px;
   background: linear-gradient(to bottom, transparent, var(--vscode-editor-background) 16px);
+}
+
+.run-status {
+  display: flex;
+  width: 100%;
+  min-height: 24px;
+  margin: 0 auto 6px;
+  align-items: center;
+  gap: 7px;
+  color: var(--vscode-descriptionForeground);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.run-status[hidden] {
+  display: none;
+}
+
+.run-status-marker {
+  flex: 0 0 auto;
+  color: var(--af-color-accent);
+  font-weight: 700;
+}
+
+.run-status-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.run-status-meta {
+  flex: 0 0 auto;
 }
 
 .attachment-list {
@@ -257,6 +452,21 @@ button {
   cursor: pointer;
 }
 
+.icon-button svg,
+.send-button svg {
+  width: 17px;
+  height: 17px;
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 2;
+}
+
+.send-button svg[hidden] {
+  display: none;
+}
+
 .icon-button {
   color: var(--vscode-descriptionForeground);
   background: transparent;
@@ -268,19 +478,9 @@ button {
   background: var(--vscode-toolbar-hoverBackground);
 }
 
-.stop-button {
-  font-size: 10px;
-}
-
-.stop-button[hidden] {
-  display: none;
-}
-
 .send-button {
   color: #ffffff;
   background: var(--af-color-accent);
-  font-size: 20px;
-  font-weight: 700;
 }
 
 .send-button:hover {
@@ -290,6 +490,15 @@ button {
 .send-button:disabled {
   opacity: 0.42;
   cursor: default;
+}
+
+.send-button.is-running {
+  color: var(--vscode-button-secondaryForeground, var(--vscode-foreground));
+  background: var(--vscode-button-secondaryBackground, var(--vscode-toolbar-hoverBackground));
+}
+
+.send-button.is-running:hover {
+  background: var(--vscode-button-secondaryHoverBackground, var(--vscode-toolbar-activeBackground));
 }
 
 .setting-button,
@@ -303,6 +512,11 @@ button {
   cursor: pointer;
 }
 
+.setting-control {
+  position: relative;
+  min-width: 0;
+}
+
 .setting-button {
   display: flex;
   max-width: 220px;
@@ -313,10 +527,71 @@ button {
   padding: 0 8px;
 }
 
+.setting-menu {
+  position: absolute;
+  z-index: 12;
+  bottom: calc(100% + 6px);
+  left: 0;
+  display: grid;
+  min-width: max(100%, 168px);
+  max-height: min(280px, 45vh);
+  padding: 4px;
+  overflow-y: auto;
+  border: 1px solid var(--vscode-menu-border, var(--vscode-widget-border));
+  border-radius: 7px;
+  color: var(--vscode-menu-foreground, var(--vscode-foreground));
+  background: var(--vscode-menu-background, var(--vscode-editorWidget-background));
+  box-shadow: 0 4px 14px var(--vscode-widget-shadow, rgba(0, 0, 0, 0.3));
+}
+
+.setting-menu[hidden] {
+  display: none;
+}
+
+.setting-option {
+  width: 100%;
+  padding: 5px 8px;
+  border: 0;
+  border-radius: 4px;
+  color: inherit;
+  background: transparent;
+  text-align: left;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.setting-option:hover,
+.setting-option:focus-visible {
+  outline: none;
+  color: var(--vscode-menu-selectionForeground, var(--vscode-list-activeSelectionForeground));
+  background: var(--vscode-menu-selectionBackground, var(--vscode-list-activeSelectionBackground));
+}
+
+.setting-option[aria-checked="true"]::before {
+  content: "✓";
+  display: inline-block;
+  width: 16px;
+}
+
+.setting-option[aria-checked="false"] {
+  padding-left: 24px;
+}
+
 .setting-button span:first-child {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.setting-button .chevron-icon {
+  width: 14px;
+  height: 14px;
+  flex: 0 0 auto;
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 1.5;
 }
 
 .setting-button:hover,
@@ -351,12 +626,13 @@ button {
 }
 
 .status-bar {
+  position: relative;
   display: flex;
   width: 100%;
   height: 22px;
   min-height: 22px;
   margin-top: auto;
-  padding: 0;
+  padding: 0 3px;
   align-items: center;
   gap: 0;
   overflow-x: auto;
@@ -375,14 +651,6 @@ button {
   border-radius: 0;
   cursor: grab;
   user-select: none;
-}
-
-.status-item:first-child {
-  padding-left: 0;
-}
-
-.status-item:last-child {
-  padding-right: 0;
 }
 
 .status-item:hover {
@@ -468,4 +736,5 @@ button:focus-visible,
     scroll-behavior: auto !important;
     transition: none !important;
   }
+
 }

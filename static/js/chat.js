@@ -2,24 +2,41 @@
   "use strict";
 
   const vscode = acquireVsCodeApi();
+  const markdown = typeof globalThis.markdownit === "function"
+    ? globalThis.markdownit({ html: false, linkify: true, typographer: false })
+    : undefined;
   const timeline = document.getElementById("timeline");
   const emptyState = document.getElementById("empty-state");
   const prompt = document.getElementById("prompt");
   const sendButton = document.getElementById("send-button");
-  const stopButton = document.getElementById("stop-button");
+  const sendIcon = document.getElementById("send-icon");
+  const stopIcon = document.getElementById("stop-icon");
   const attachButton = document.getElementById("attach-button");
-  const modelReasoningButton = document.getElementById("model-reasoning-button");
-  const modelReasoningLabel = document.getElementById("model-reasoning-label");
+  const modelButton = document.getElementById("model-button");
+  const modelLabel = document.getElementById("model-label");
+  const modelMenu = document.getElementById("model-menu");
+  const reasoningButton = document.getElementById("reasoning-button");
+  const reasoningLabel = document.getElementById("reasoning-label");
+  const reasoningMenu = document.getElementById("reasoning-menu");
   const fastModeButton = document.getElementById("fast-mode-button");
   const goalModeButton = document.getElementById("goal-mode-button");
   const resumeButton = document.getElementById("resume-button");
+  const runStatus = document.getElementById("run-status");
+  const runStatusLabel = document.getElementById("run-status-label");
+  const runElapsed = document.getElementById("run-elapsed");
   const attachmentList = document.getElementById("attachment-list");
   const statusBar = document.getElementById("status-bar");
   const dropOverlay = document.getElementById("drop-overlay");
+  const settingOptions = {
+    model: ["", "gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna", "gpt-5.5", "gpt-5.4"],
+    reasoning: ["", "none", "low", "medium", "high", "xhigh", "max"]
+  };
+  let openSettingId;
 
   const saved = vscode.getState();
   const state = {
     panelId: typeof saved?.panelId === "string" ? saved.panelId : undefined,
+    agentId: typeof saved?.agentId === "string" ? saved.agentId : undefined,
     title: typeof saved?.title === "string" ? saved.title : "Main Agent",
     draft: typeof saved?.draft === "string" ? saved.draft : "",
     attachments: Array.isArray(saved?.attachments) ? saved.attachments : [],
@@ -28,10 +45,12 @@
     projectName: typeof saved?.projectName === "string" ? saved.projectName : "",
     runtimeAvailable: saved?.runtimeAvailable === true,
     running: saved?.running === true,
-    model: normalizeSettingValue(saved?.model),
-    reasoning: normalizeSettingValue(saved?.reasoning),
+    model: normalizeSettingValue(saved?.model, settingOptions.model),
+    reasoning: normalizeSettingValue(saved?.reasoning, settingOptions.reasoning),
     fastMode: saved?.fastMode === true,
     goalMode: saved?.goalMode === true,
+    runProgress: typeof saved?.runProgress === "string" ? saved.runProgress : "",
+    runStartedAt: Number.isFinite(saved?.runStartedAt) ? saved.runStartedAt : undefined,
     workUnits: {
       activeUnits: Number.isInteger(saved?.workUnits?.activeUnits) ? saved.workUnits.activeUnits : 0,
       workActive: Number.isInteger(saved?.workUnits?.workActive) ? saved.workUnits.workActive : 0,
@@ -39,6 +58,7 @@
       totalCalled: Number.isInteger(saved?.workUnits?.totalCalled) ? saved.workUnits.totalCalled : 0
     }
   };
+  let elapsedTimerId;
 
   prompt.value = state.draft;
   renderAll();
@@ -64,13 +84,21 @@
     }
   });
 
-  sendButton.addEventListener("click", submit);
-  stopButton.addEventListener("click", cancelRun);
+  sendButton.addEventListener("click", function () {
+    if (state.running) {
+      cancelRun();
+    } else {
+      submit();
+    }
+  });
   attachButton.addEventListener("click", function () {
     vscode.postMessage({ type: "attachments.pick" });
   });
-  modelReasoningButton.addEventListener("click", function () {
-    vscode.postMessage({ type: "settings.open" });
+  modelButton.addEventListener("click", function () {
+    openSetting("model");
+  });
+  reasoningButton.addEventListener("click", function () {
+    openSetting("reasoning");
   });
   fastModeButton.addEventListener("click", function () {
     toggleMode("fastMode");
@@ -84,8 +112,19 @@
 
   document.addEventListener("keydown", function (event) {
     if (event.key === "Escape") {
+      if (openSettingId) {
+        event.preventDefault();
+        closeSettingMenu(true);
+        return;
+      }
       event.preventDefault();
       cancelRun();
+    }
+  });
+
+  document.addEventListener("click", function (event) {
+    if (openSettingId && !event.target.closest(".setting-control")) {
+      closeSettingMenu(false);
     }
   });
 
@@ -153,9 +192,15 @@
         state.projectName = message.projectName;
         state.runtimeAvailable = message.runtimeAvailable === true;
         state.running = message.running === true;
+        if (state.running && !state.runStartedAt) {
+          state.runStartedAt = Date.now();
+        } else if (!state.running) {
+          state.runStartedAt = undefined;
+        }
         if (!state.statusItems.length) {
           state.statusItems = Array.isArray(message.statusItems) ? message.statusItems : [];
         }
+        renderTimeline();
         renderStatusBar();
         updateRunControls();
         persist();
@@ -183,11 +228,37 @@
           persist();
         }
         break;
+      case "session.bound":
+        if (typeof message.agentId === "string" && message.agentId) {
+          state.agentId = message.agentId;
+          persist();
+        }
+        break;
+      case "chat.assistant":
+        if (typeof message.text === "string" && message.text) {
+          state.timeline.push({ type: "assistant", id: createId(), text: message.text });
+          renderTimeline();
+          persist();
+        }
+        break;
       case "run.state":
         state.running = message.running === true;
+        state.runProgress = state.running ? (state.runProgress || "Main Agent 시작 중") : "";
+        if (state.running && !state.runStartedAt) {
+          state.runStartedAt = Date.now();
+        } else if (!state.running) {
+          state.runStartedAt = undefined;
+        }
         updateRunControls();
+        renderTimeline();
         renderStatusBar();
         persist();
+        break;
+      case "run.progress":
+        if (typeof message.text === "string" && message.text) {
+          appendActivity(message.text);
+          persist();
+        }
         break;
       case "workUnits.summary":
         state.workUnits = {
@@ -204,7 +275,7 @@
 
   function submit() {
     const text = prompt.value.trim();
-    if (!text) {
+    if (!text || state.running) {
       return;
     }
     const message = {
@@ -212,6 +283,8 @@
       text,
       attachments: state.attachments.slice(),
       execution: {
+        model: state.model || undefined,
+        reasoningEffort: state.reasoning || undefined,
         fast: state.fastMode,
         goal: state.goalMode
       }
@@ -219,6 +292,9 @@
     state.timeline.push({ type: "user", id: message.id, text: message.text });
     state.draft = "";
     state.attachments = [];
+    state.running = true;
+    state.runProgress = "Main Agent 시작 중";
+    state.runStartedAt = Date.now();
     prompt.value = "";
     renderAll();
     resizePrompt();
@@ -246,6 +322,11 @@
     state.timeline.push({ type: "notice", id: createId(), level, text });
     renderTimeline();
     persist();
+  }
+
+  function appendActivity(text) {
+    state.timeline.push({ type: "activity", id: createId(), text });
+    renderTimeline();
   }
 
   function addAttachments(attachments) {
@@ -311,6 +392,7 @@
     renderTimeline();
     renderAttachments();
     renderStatusBar();
+    renderRunStatus();
     updateSendButton();
     updateRunControls();
     updateModeControls();
@@ -335,15 +417,70 @@
         const text = document.createElement("span");
         text.textContent = event.text;
         content.append(mark, text);
+      } else if (event.type === "assistant") {
+        renderAssistantMarkdown(content, event.text);
       } else {
         content.textContent = event.text;
       }
       message.append(content);
       timeline.append(message);
     }
+    timeline.setAttribute("aria-busy", String(state.running));
     requestAnimationFrame(function () {
       timeline.scrollTop = timeline.scrollHeight;
     });
+  }
+
+  function renderAssistantMarkdown(container, text) {
+    if (!markdown) {
+      container.textContent = text;
+      return;
+    }
+    container.classList.add("markdown-body");
+    container.innerHTML = markdown.render(text);
+    for (const link of container.querySelectorAll("a")) {
+      link.target = "_blank";
+      link.rel = "noopener noreferrer";
+    }
+  }
+
+  function renderRunStatus() {
+    runStatus.hidden = !state.running;
+    if (!state.running) {
+      stopElapsedTimer();
+      runStatusLabel.textContent = "";
+      runElapsed.textContent = "0s";
+      return;
+    }
+    if (!state.runStartedAt) {
+      state.runStartedAt = Date.now();
+    }
+    const elapsed = Math.max(0, Date.now() - state.runStartedAt);
+    runStatusLabel.textContent = "작업 중";
+    runStatusLabel.title = "작업 중";
+    runElapsed.textContent = formatElapsed(elapsed);
+    if (!elapsedTimerId) {
+      elapsedTimerId = window.setInterval(renderRunStatus, 1000);
+    }
+  }
+
+  function stopElapsedTimer() {
+    if (elapsedTimerId) {
+      window.clearInterval(elapsedTimerId);
+      elapsedTimerId = undefined;
+    }
+  }
+
+  function formatElapsed(milliseconds) {
+    const totalSeconds = Math.floor(milliseconds / 1000);
+    const seconds = totalSeconds % 60;
+    const totalMinutes = Math.floor(totalSeconds / 60);
+    if (totalMinutes === 0) {
+      return seconds + "s";
+    }
+    const minutes = totalMinutes % 60;
+    const hours = Math.floor(totalMinutes / 60);
+    return (hours ? hours + "h " : "") + minutes + "m " + seconds + "s";
   }
 
   function renderAttachments() {
@@ -375,6 +512,9 @@
   function renderStatusBar() {
     statusBar.replaceChildren();
     for (const itemId of state.statusItems) {
+      if (itemId === "status") {
+        continue;
+      }
       const item = document.createElement("span");
       item.className = "status-item";
       if (itemId === "runtime" && !state.runtimeAvailable) {
@@ -392,7 +532,7 @@
       if (itemId === "model" || itemId === "reasoning") {
         item.classList.add("selectable");
         item.addEventListener("click", function () {
-          vscode.postMessage({ type: "settings.open" });
+          openSetting(itemId);
         });
       }
       if (itemId === "fast" || itemId === "goal") {
@@ -443,7 +583,6 @@
   function statusLabel(itemId) {
     const labels = {
       agent: state.title,
-      status: state.runtimeAvailable ? "대기 중" : "연결 대기",
       agents: "Units " + state.workUnits.activeUnits + " · Work " + state.workUnits.workActive + " · Verify " + state.workUnits.verificationActive,
       model: "Model " + (state.model || "기본값"),
       reasoning: "Reasoning " + (state.reasoning || "기본값"),
@@ -460,11 +599,17 @@
   }
 
   function updateSendButton() {
-    sendButton.disabled = prompt.value.trim().length === 0;
+    sendButton.disabled = !state.running && prompt.value.trim().length === 0;
   }
 
   function updateRunControls() {
-    stopButton.hidden = !state.running;
+    sendButton.classList.toggle("is-running", state.running);
+    sendButton.setAttribute("aria-label", state.running ? "현재 실행 중지" : "메시지 전송");
+    sendButton.title = state.running ? "현재 실행 중지 (Esc)" : "전송 (Enter)";
+    sendIcon.hidden = state.running;
+    stopIcon.hidden = !state.running;
+    renderRunStatus();
+    updateSendButton();
   }
 
   function toggleMode(key) {
@@ -481,9 +626,84 @@
     goalModeButton.setAttribute("aria-pressed", String(state.goalMode));
     goalModeButton.setAttribute("aria-label", state.goalMode ? "Goal mode on" : "Goal mode off");
     goalModeButton.title = state.goalMode ? "Goal mode on" : "Goal mode off";
-    modelReasoningLabel.textContent = state.model || state.reasoning
-      ? (state.model || "Default") + " · " + (state.reasoning || "Default")
-      : "Model · Reasoning";
+    modelLabel.textContent = "Model " + (state.model || "Default");
+    reasoningLabel.textContent = "Reasoning " + (state.reasoning || "Default");
+  }
+
+  function openSetting(setting) {
+    if (openSettingId === setting) {
+      closeSettingMenu(true);
+      return;
+    }
+    closeSettingMenu(false);
+    openSettingId = setting;
+    const button = setting === "model" ? modelButton : reasoningButton;
+    const menu = setting === "model" ? modelMenu : reasoningMenu;
+    renderSettingMenu(setting, menu);
+    menu.hidden = false;
+    button.setAttribute("aria-expanded", "true");
+    const selected = menu.querySelector('[aria-checked="true"]');
+    (selected || menu.querySelector("button"))?.focus();
+  }
+
+  function renderSettingMenu(setting, menu) {
+    const current = setting === "model" ? state.model : state.reasoning;
+    menu.replaceChildren();
+    for (const value of settingOptions[setting]) {
+      const option = document.createElement("button");
+      option.type = "button";
+      option.className = "setting-option";
+      option.setAttribute("role", "menuitemradio");
+      option.setAttribute("aria-checked", String(value === current));
+      option.dataset.value = value;
+      option.textContent = value || "Default";
+      option.addEventListener("click", function () {
+        if (setting === "model") {
+          state.model = value;
+        } else {
+          state.reasoning = value;
+        }
+        updateModeControls();
+        renderStatusBar();
+        persist();
+        closeSettingMenu(true);
+      });
+      option.addEventListener("keydown", handleSettingMenuKeydown);
+      menu.append(option);
+    }
+  }
+
+  function handleSettingMenuKeydown(event) {
+    const options = Array.from(event.currentTarget.parentElement.querySelectorAll(".setting-option"));
+    const index = options.indexOf(event.currentTarget);
+    let target;
+    if (event.key === "ArrowDown") {
+      target = options[(index + 1) % options.length];
+    } else if (event.key === "ArrowUp") {
+      target = options[(index - 1 + options.length) % options.length];
+    } else if (event.key === "Home") {
+      target = options[0];
+    } else if (event.key === "End") {
+      target = options.at(-1);
+    } else {
+      return;
+    }
+    event.preventDefault();
+    target?.focus();
+  }
+
+  function closeSettingMenu(restoreFocus) {
+    if (!openSettingId) {
+      return;
+    }
+    const button = openSettingId === "model" ? modelButton : reasoningButton;
+    const menu = openSettingId === "model" ? modelMenu : reasoningMenu;
+    menu.hidden = true;
+    button.setAttribute("aria-expanded", "false");
+    openSettingId = undefined;
+    if (restoreFocus) {
+      button.focus();
+    }
   }
 
   function resizePrompt() {
@@ -494,6 +714,7 @@
   function persist() {
     vscode.setState({
       panelId: state.panelId,
+      agentId: state.agentId,
       title: state.title,
       draft: state.draft,
       attachments: state.attachments,
@@ -506,6 +727,8 @@
       reasoning: state.reasoning,
       fastMode: state.fastMode,
       goalMode: state.goalMode,
+      runProgress: state.runProgress,
+      runStartedAt: state.runStartedAt,
       workUnits: state.workUnits
     });
   }
@@ -514,8 +737,8 @@
     return Number.isInteger(value) && value >= 0 ? value : 0;
   }
 
-  function normalizeSettingValue(value) {
-    return typeof value === "string" && value !== "—" ? value : "";
+  function normalizeSettingValue(value, allowedValues) {
+    return typeof value === "string" && allowedValues.includes(value) ? value : "";
   }
 
   function createId() {

@@ -6,12 +6,20 @@
       "type": "extensionHost",
       "request": "launch",
       "args": [
+        "${input:agentFactoryTestProject}",
         "--extensionDevelopmentPath=${workspaceFolder}"
       ],
       "outFiles": [
         "${workspaceFolder}/dist/**/*.js"
       ],
       "preLaunchTask": "npm: build"
+    }
+  ],
+  "inputs": [
+    {
+      "id": "agentFactoryTestProject",
+      "type": "promptString",
+      "description": "Extension Development Host에서 열 테스트 프로젝트의 절대 경로"
     }
   ]
 }

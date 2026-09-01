@@ -8,11 +8,11 @@ const clientMessageTypes = new Set([
   "run.cancel",
   "resume.request",
   "attachments.pick",
-  "settings.open",
   "status.reorder"
 ]);
 const attachmentKinds = new Set<AttachmentKind>(["file", "folder", "image"]);
 const statusItemIds = new Set<string>(STATUS_ITEM_IDS);
+const reasoningEfforts = new Set(["none", "low", "medium", "high", "xhigh", "max"]);
 
 export function parseClientMessage(value: unknown): ClientMessage | undefined {
   if (!isRecord(value) || typeof value.type !== "string" || !clientMessageTypes.has(value.type)) {
@@ -24,7 +24,6 @@ export function parseClientMessage(value: unknown): ClientMessage | undefined {
     case "run.cancel":
     case "resume.request":
     case "attachments.pick":
-    case "settings.open":
       return { type: value.type };
     case "chat.send": {
       if (
@@ -34,6 +33,13 @@ export function parseClientMessage(value: unknown): ClientMessage | undefined {
         value.text.length > 100_000 ||
         !Array.isArray(value.attachments) ||
         !isRecord(value.execution) ||
+        (value.execution.model !== undefined && (
+          typeof value.execution.model !== "string" || value.execution.model.length > 100
+        )) ||
+        (value.execution.reasoningEffort !== undefined && (
+          typeof value.execution.reasoningEffort !== "string" ||
+          !reasoningEfforts.has(value.execution.reasoningEffort)
+        )) ||
         typeof value.execution.fast !== "boolean" ||
         typeof value.execution.goal !== "boolean"
       ) {
@@ -51,6 +57,12 @@ export function parseClientMessage(value: unknown): ClientMessage | undefined {
         text: value.text,
         attachments,
         execution: {
+          ...(typeof value.execution.model === "string" && value.execution.model
+            ? { model: value.execution.model }
+            : {}),
+          ...(typeof value.execution.reasoningEffort === "string"
+            ? { reasoningEffort: value.execution.reasoningEffort as "none" | "low" | "medium" | "high" | "xhigh" | "max" }
+            : {}),
           fast: value.execution.fast,
           goal: value.execution.goal
         }

@@ -96,6 +96,12 @@
             ]
           },
           "description": "Items displayed in the chat status bar, in display order."
+        },
+        "agentFactory.mainChat.runtimeExecPath": {
+          "type": "string",
+          "scope": "machine-overridable",
+          "default": "",
+          "description": "Optional absolute path to the installed Agent Factory skills/agent/scripts/exec.py. When empty, the extension searches CODEX_HOME or ~/.codex plugin cache."
         }
       }
     }
@@ -116,5 +122,8 @@
     "@vscode/vsce": "2.32.0",
     "esbuild": "^0.24.2",
     "typescript": "^5.7.2"
+  },
+  "dependencies": {
+    "markdown-it": "^14.3.1"
   }
 }

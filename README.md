@@ -2,8 +2,10 @@
 
 Agent Factory Main Agent sessions in VS Code editor tabs.
 
-The current implementation provides the extension shell and chat UI. Agent execution remains
-disabled until the Agent Factory runtime command contract is connected.
+The current vertical slice connects each draft chat panel to the installed Agent Factory
+managed runtime through `skills/agent/scripts/exec.py`. It submits the first turn as a new
+Main Agent, sends later turns to the same session, polls for the terminal result, and can
+cancel the exact active run.
 
 ## Development
 
@@ -12,5 +14,23 @@ npm install
 npm run check
 ```
 
-Press `F5` in VS Code and run **Agent Factory: Open Main Chat** in the Extension Development
-Host.
+## F5 manual test
+
+1. Install the Agent Factory plugin and confirm `skills/agent/scripts/exec.py` is present in
+   the Codex plugin cache. If it is elsewhere, set
+   `agentFactory.mainChat.runtimeExecPath` to its absolute path.
+2. Open this extension folder in VS Code, run `npm install`, and press `F5`.
+3. When prompted, enter the absolute path of the project to test. The Extension Development
+   Host opens that project directly while keeping this extension loaded from
+   `extensionDevelopmentPath`; do not use **Open Folder** after launch.
+4. Run **Agent Factory: Main Agent 채팅 추가** from the Command Palette.
+5. Enter a request. The footer should show the runtime as connected, the stop control should
+   appear while the turn is running, and the final Main result should appear as assistant
+   text.
+6. Start another request and press `Esc` or the stop button to exercise cancellation.
+
+The slice intentionally does not yet implement full event streaming, a durable message
+queue, approvals, rich Resume/session management, snapshots and restore, settings capability
+negotiation, background notifications, or rich Markdown/tool/diff cards. Attachments are
+currently passed as explicit textual references; browser-only pasted files have no filesystem
+path until a future attachment materialization flow is added.

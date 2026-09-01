@@ -12,12 +12,14 @@
   </head>
   <body>
     <main class="chat-shell" aria-label="Main Agent 채팅">
+      <div class="session-actions" aria-label="세션 작업">
+        <button id="resume-button" class="link-button" type="button">기존 세션 Resume</button>
+      </div>
       <section id="timeline" class="timeline" aria-live="polite" aria-label="대화 내용">
         <div id="empty-state" class="empty-state">
           <img class="brand-mark" src="{{iconUri}}" alt="" aria-hidden="true" />
           <h1>Agent Factory</h1>
           <p>이 탭은 하나의 독립된 Main Agent 세션입니다.</p>
-          <button id="resume-button" class="link-button" type="button">기존 세션 Resume</button>
         </div>
       </section>
 
@@ -26,6 +28,11 @@
       </div>
 
       <section class="composer-region" aria-label="메시지 작성">
+        <div id="run-status" class="run-status" role="status" aria-live="polite" hidden>
+          <span class="run-status-marker" aria-hidden="true">›</span>
+          <span id="run-status-label" class="run-status-label"></span>
+          <span class="run-status-meta" aria-hidden="true">(<span id="run-elapsed">0s</span> · Esc로 중단)</span>
+        </div>
         <div id="attachment-list" class="attachment-list" aria-label="첨부 항목"></div>
         <div class="composer">
           <textarea
@@ -37,11 +44,23 @@
           ></textarea>
           <div class="composer-actions">
             <div class="composer-actions-start">
-              <button id="attach-button" class="icon-button" type="button" title="파일 또는 폴더 첨부" aria-label="파일 또는 폴더 첨부">+</button>
-              <button id="model-reasoning-button" class="setting-button" type="button" title="모델 및 추론 수준 선택" aria-label="모델 및 추론 수준 선택">
-                <span id="model-reasoning-label">Model · Reasoning</span>
-                <span aria-hidden="true">⌄</span>
+              <button id="attach-button" class="icon-button" type="button" title="파일 또는 폴더 첨부" aria-label="파일 또는 폴더 첨부">
+                <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M12 5v14M5 12h14"></path></svg>
               </button>
+              <div class="setting-control">
+                <button id="model-button" class="setting-button" type="button" title="모델 선택" aria-label="모델 선택" aria-haspopup="menu" aria-expanded="false" aria-controls="model-menu">
+                  <span id="model-label">Model</span>
+                  <svg class="chevron-icon" viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="m4 6 4 4 4-4"></path></svg>
+                </button>
+                <div id="model-menu" class="setting-menu" role="menu" aria-label="모델 선택" hidden></div>
+              </div>
+              <div class="setting-control">
+                <button id="reasoning-button" class="setting-button" type="button" title="추론 수준 선택" aria-label="추론 수준 선택" aria-haspopup="menu" aria-expanded="false" aria-controls="reasoning-menu">
+                  <span id="reasoning-label">Reasoning</span>
+                  <svg class="chevron-icon" viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="m4 6 4 4 4-4"></path></svg>
+                </button>
+                <div id="reasoning-menu" class="setting-menu" role="menu" aria-label="추론 수준 선택" hidden></div>
+              </div>
               <button id="fast-mode-button" class="mode-button" type="button" title="Fast mode off" aria-label="Fast mode off" aria-pressed="false">
                 <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M13 2 4 14h7l-1 8 10-13h-7l1-7Z"></path></svg>
               </button>
@@ -50,14 +69,17 @@
               </button>
             </div>
             <div class="composer-actions-end">
-              <button id="stop-button" class="icon-button stop-button" type="button" title="현재 실행 중지 (Esc)" aria-label="현재 실행 중지" hidden>■</button>
-              <button id="send-button" class="send-button" type="button" title="전송 (Enter)" aria-label="메시지 전송">↑</button>
+              <button id="send-button" class="send-button" type="button" title="전송 (Enter)" aria-label="메시지 전송">
+                <svg id="send-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M12 19V5M6.5 10.5 12 5l5.5 5.5"></path></svg>
+                <svg id="stop-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false" hidden><rect x="7" y="7" width="10" height="10" rx="1"></rect></svg>
+              </button>
             </div>
           </div>
         </div>
       </section>
       <div id="status-bar" class="status-bar" aria-label="Agent 상태"></div>
     </main>
+    <script nonce="{{nonce}}" src="{{markdownScriptUri}}"></script>
     <script nonce="{{nonce}}" src="{{scriptUri}}"></script>
   </body>
 </html>

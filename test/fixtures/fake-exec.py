@@ -1,0 +1,47 @@
+#!/usr/bin/env python3
+import json
+import pathlib
+import sys
+
+
+def option(name):
+    return sys.argv[sys.argv.index(name) + 1]
+
+
+command = sys.argv[1]
+project_root = pathlib.Path(option("--project-root"))
+agent_id = option("--agent")
+run_id = option("--run-id") if "--run-id" in sys.argv else "run-fake"
+with (project_root / "fake-invocations.jsonl").open("a", encoding="utf-8") as stream:
+    stream.write(json.dumps(sys.argv[1:]) + "\n")
+
+if command in {"submit", "send"}:
+    print(json.dumps({
+        "schemaVersion": "0.1.0",
+        "kind": "ack",
+        "status": "accepted",
+        "agentId": agent_id,
+        "runId": run_id,
+    }))
+elif command == "status":
+    print(json.dumps({
+        "schemaVersion": "0.1.0",
+        "kind": "status",
+        "run": {"status": "completed"},
+        "heartbeat": {},
+    }))
+elif command == "result":
+    result_path = project_root / ".agent-factory" / "agent" / agent_id / "runs" / run_id / "result.md"
+    print(json.dumps({
+        "schemaVersion": "0.1.0",
+        "kind": "result",
+        "run": {"status": "completed", "resultPath": str(result_path)},
+    }))
+elif command == "cancel":
+    print(json.dumps({
+        "schemaVersion": "0.1.0",
+        "kind": "ack",
+        "status": "cancelling",
+        "agentId": agent_id,
+        "runId": run_id,
+    }))
