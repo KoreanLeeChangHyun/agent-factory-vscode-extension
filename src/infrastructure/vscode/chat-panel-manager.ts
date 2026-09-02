@@ -59,17 +59,14 @@ export class ChatPanelManager implements vscode.Disposable {
   }
 
   public async requestResume(): Promise<void> {
-    const action = await vscode.window.showInformationMessage(
-      "Agent Factory 런타임 연결 후 현재 프로젝트의 Main Agent 세션을 불러올 수 있습니다.",
-      "열린 채팅으로 이동"
-    );
-    if (action === "열린 채팅으로 이동") {
-      const first = this.panels.values().next().value as ManagedPanel | undefined;
-      if (first) {
-        first.panel.reveal(undefined, true);
-      } else {
-        await this.openDraft();
-      }
+    let managed = this.findActivePanel() ?? this.panels.values().next().value as ManagedPanel | undefined;
+    if (!managed) {
+      await this.openDraft();
+      managed = this.findActivePanel() ?? this.panels.values().next().value as ManagedPanel | undefined;
+    }
+    if (managed) {
+      managed.panel.reveal(undefined, true);
+      await this.post(managed.panel, { type: "sessions.open" });
     }
   }
 
@@ -202,8 +199,11 @@ export class ChatPanelManager implements vscode.Disposable {
           await managed.controller.cancel();
         }
         return;
-      case "resume.request":
-        await this.requestResume();
+      case "sessions.request":
+        await this.sendSessionList(managed);
+        return;
+      case "session.select":
+        await this.selectSession(managed, message.agentId);
         return;
       case "attachments.pick":
         await this.pickAttachments(managed.panel);
@@ -211,6 +211,63 @@ export class ChatPanelManager implements vscode.Disposable {
       case "status.reorder":
         await this.saveStatusItems(managed.panel, message.items);
         return;
+    }
+  }
+
+  private async sendSessionList(managed: ManagedPanel): Promise<void> {
+    const connection = await this.connectRuntime();
+    if (!connection.available) {
+      await this.post(managed.panel, { type: "sessions.list", sessions: [] });
+      await this.post(managed.panel, { type: "host.notice", level: "error", text: connection.diagnostic });
+      return;
+    }
+    try {
+      const sessions = await connection.client.listSessions();
+      await this.post(managed.panel, { type: "sessions.list", sessions });
+    } catch (error) {
+      await this.post(managed.panel, { type: "sessions.list", sessions: [] });
+      await this.post(managed.panel, {
+        type: "host.notice",
+        level: "error",
+        text: error instanceof Error ? error.message : String(error)
+      });
+    }
+  }
+
+  private async selectSession(managed: ManagedPanel, agentId: string): Promise<void> {
+    if (managed.controller?.running) {
+      await this.post(managed.panel, {
+        type: "host.notice",
+        level: "warning",
+        text: "현재 실행이 끝난 뒤 다른 세션을 불러오세요."
+      });
+      return;
+    }
+    const connection = await this.connectRuntime();
+    if (!connection.available) {
+      await this.post(managed.panel, { type: "host.notice", level: "error", text: connection.diagnostic });
+      return;
+    }
+    try {
+      const sessions = await connection.client.listSessions();
+      if (!sessions.some((session) => session.agentId === agentId)) {
+        await this.post(managed.panel, {
+          type: "host.notice",
+          level: "warning",
+          text: "선택한 Main Agent 세션을 현재 프로젝트에서 찾을 수 없습니다."
+        });
+        await this.post(managed.panel, { type: "sessions.list", sessions });
+        return;
+      }
+      managed.controller = undefined;
+      managed.state = { ...managed.state, agentId };
+      await this.post(managed.panel, { type: "session.bound", agentId, reset: true });
+    } catch (error) {
+      await this.post(managed.panel, {
+        type: "host.notice",
+        level: "error",
+        text: error instanceof Error ? error.message : String(error)
+      });
     }
   }
 
@@ -240,6 +297,9 @@ export class ChatPanelManager implements vscode.Disposable {
         },
         onProgress: (progressText) => {
           void this.post(managed.panel, { type: "run.progress", text: progressText });
+        },
+        onActivity: (activity) => {
+          void this.post(managed.panel, { type: "run.activity", ...activity });
         },
         onError: (message) => {
           void this.post(managed.panel, { type: "host.notice", level: "error", text: message });

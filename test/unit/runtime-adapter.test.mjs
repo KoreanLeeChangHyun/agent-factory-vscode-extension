@@ -52,6 +52,11 @@ test("runtime client invokes official commands and reads the bounded managed res
   await writeFile(resultPath, "Main result text\n");
   const client = new AgentFactoryClient(fakeExec, projectRoot);
 
+  assert.deepEqual(await client.listSessions(), [
+    { agentId: "main-newer", sessionId: "session-newer", updatedAt: "2026-09-01T09:00:00Z", model: "gpt-5.6-sol" },
+    { agentId: "main-older", sessionId: "session-older", updatedAt: "2026-08-30T10:00:00Z" }
+  ]);
+
   assert.deepEqual(await client.submit("main-test", "hello", {
     model: "gpt-5.6-sol",
     reasoningEffort: "high",
@@ -65,30 +70,47 @@ test("runtime client invokes official commands and reads the bounded managed res
   const eventsPath = join(projectRoot, ".agent-factory/agent/main-test/runs/run-fake/events.jsonl");
   await writeFile(eventsPath, [
     JSON.stringify({ type: "turn.started" }),
-    JSON.stringify({ type: "item.started", item: { type: "command_execution", command: "/usr/bin/zsh -lc 'npm run check'" } }),
-    JSON.stringify({ type: "item.completed", item: { type: "command_execution", command: "/usr/bin/zsh -lc 'npm run check'" } }),
-    JSON.stringify({ type: "item.started", item: { type: "file_change", changes: [
+    JSON.stringify({ type: "item.started", item: { id: "command-1", type: "command_execution", command: "/usr/bin/zsh -lc 'npm run check'" } }),
+    JSON.stringify({ type: "item.completed", item: { id: "command-1", type: "command_execution", command: "/usr/bin/zsh -lc 'npm run check'", exit_code: 0 } }),
+    JSON.stringify({ type: "item.started", item: { id: "change-1", type: "file_change", changes: [
       { path: join(projectRoot, "static/js/chat.js") },
       { path: join(projectRoot, "static/css/chat.css") },
       { path: join(projectRoot, "templates/chat.html") }
     ] } }),
-    JSON.stringify({ type: "item.started", item: { type: "mcp_tool_call", server: "codex", tool: "list_mcp_resources" } }),
+    JSON.stringify({ type: "item.started", item: { id: "runtime-1", type: "file_change", changes: [
+      { path: resultPath }
+    ] } }),
+    JSON.stringify({ type: "item.started", item: { id: "skill-1", type: "command_execution", command: "sed -n '1,240p' /home/test/.codex/plugins/cache/personal/agent-factory/0.1.0/skills/agent/SKILL.md" } }),
+    JSON.stringify({ type: "item.started", item: { id: "request-read-1", type: "command_execution", command: `sed -n '1,260p' ${dirname(resultPath)}/request.md` } }),
+    JSON.stringify({ type: "item.started", item: { id: "result-read-1", type: "command_execution", command: `sed -n '1,20p' ${resultPath}` } }),
+    JSON.stringify({ type: "item.started", item: { id: "mcp-1", type: "mcp_tool_call", server: "codex", tool: "list_mcp_resources" } }),
     ""
   ].join("\n"));
   assert.deepEqual(await client.updates("main-test", "run-fake", 0), {
-    cursor: 5,
-    labels: [
-      "Main Agent가 요청을 분석 중",
-      "명령 실행 중 · npm run check",
-      "명령 결과 분석 중 · npm run check",
-      "파일 변경 중 · static/js/chat.js, static/css/chat.css 외 1개",
-      "연결 도구 실행 중 · codex/list_mcp_resources"
+    cursor: 9,
+    updates: [
+      { kind: "status", text: "Main Agent가 요청을 분석 중" },
+      { kind: "activity", id: "command-1", category: "command", phase: "started", text: "npm run check" },
+      { kind: "status", text: "명령 실행 중" },
+      { kind: "activity", id: "command-1", category: "command", phase: "completed", text: "npm run check" },
+      { kind: "status", text: "결과 분석 중" },
+      { kind: "activity", id: "change-1", category: "file", phase: "started", text: "static/js/chat.js, static/css/chat.css 외 1개" },
+      { kind: "status", text: "Git 변경 중" },
+      { kind: "status", text: "응답 기록 중" },
+      { kind: "activity", id: "skill-1", category: "command", phase: "started", text: "sed -n '1,240p' /home/test/.codex/plugins/cache/personal/agent-factory/0.1.0/skills/agent/SKILL.md", title: "Skill 읽기 · agent-factory:agent" },
+      { kind: "status", text: "명령 실행 중" },
+      { kind: "activity", id: "request-read-1", category: "command", phase: "started", text: `sed -n '1,260p' ${dirname(resultPath)}/request.md`, title: "실행 요청 읽기" },
+      { kind: "status", text: "명령 실행 중" },
+      { kind: "activity", id: "result-read-1", category: "command", phase: "started", text: `sed -n '1,20p' ${resultPath}`, title: "실행 결과 읽기" },
+      { kind: "status", text: "명령 실행 중" },
+      { kind: "activity", id: "mcp-1", category: "tool", phase: "started", text: "codex/list_mcp_resources" },
+      { kind: "status", text: "연결 도구 실행 중" }
     ]
   });
   await appendFile(eventsPath, '{"type":"turn.completed"');
-  assert.deepEqual(await client.updates("main-test", "run-fake", 5), {
-    cursor: 5,
-    labels: []
+  assert.deepEqual(await client.updates("main-test", "run-fake", 9), {
+    cursor: 9,
+    updates: []
   });
   assert.deepEqual(await client.result("main-test", "run-fake"), {
     status: "completed",
@@ -98,13 +120,13 @@ test("runtime client invokes official commands and reads the bounded managed res
 
   const invocations = (await readFile(join(projectRoot, "fake-invocations.jsonl"), "utf8"))
     .trim().split("\n").map(JSON.parse);
-  assert.deepEqual(invocations.map((arguments_) => arguments_[0]), ["submit", "status", "result", "cancel"]);
-  assert.ok(invocations[0].includes("--role"));
-  assert.ok(invocations[0].includes("main"));
-  assert.ok(invocations[0].includes("gpt-5.6-sol"));
-  assert.ok(invocations[0].includes("high"));
-  assert.ok(invocations[0].includes("--fast"));
-  assert.ok(invocations[0].includes("--goal-mode"));
+  assert.deepEqual(invocations.map((arguments_) => arguments_[0]), ["list", "submit", "status", "result", "cancel"]);
+  assert.ok(invocations[1].includes("--role"));
+  assert.ok(invocations[1].includes("main"));
+  assert.ok(invocations[1].includes("gpt-5.6-sol"));
+  assert.ok(invocations[1].includes("high"));
+  assert.ok(invocations[1].includes("--fast"));
+  assert.ok(invocations[1].includes("--goal-mode"));
 });
 
 test("session controller binds once, sends later turns, and retains attachment references", async function () {
@@ -120,7 +142,7 @@ test("session controller binds once, sends later turns, and retains attachment r
       calls.push(["send", agentId, message, execution]);
       return { agentId, runId: "run-two" };
     },
-    async updates(_agentId, _runId, cursor) { return { cursor, labels: [] }; },
+    async updates(_agentId, _runId, cursor) { return { cursor, updates: [] }; },
     async status() { return { status: "completed" }; },
     async result() { return { status: "completed", text: "done" }; },
     async cancel() {}
@@ -130,6 +152,7 @@ test("session controller binds once, sends later turns, and retains attachment r
     onRunningChanged(running) { messages.push(["running", running]); },
     onAssistantText(text) { messages.push(["assistant", text]); },
     onProgress(text) { messages.push(["progress", text]); },
+    onActivity(activity) { messages.push(["activity", activity]); },
     onError(text) { messages.push(["error", text]); }
   }, undefined, { pollIntervalMs: 0, maxPolls: 2 });
 
@@ -153,7 +176,7 @@ test("session controller clearly rejects a concurrent send", async function () {
   const runtime = {
     async submit(agentId) { return { agentId, runId: "run-busy" }; },
     async send() { throw new Error("unexpected send"); },
-    async updates(_agentId, _runId, cursor) { return { cursor, labels: [] }; },
+    async updates(_agentId, _runId, cursor) { return { cursor, updates: [] }; },
     status() { return new Promise((resolve) => { releaseStatus = resolve; }); },
     async result() { return { status: "completed", text: "done" }; },
     async cancel() {}
@@ -163,6 +186,7 @@ test("session controller clearly rejects a concurrent send", async function () {
     onRunningChanged() {},
     onAssistantText() {},
     onProgress() {},
+    onActivity() {},
     onError(message) { errors.push(message); }
   }, undefined, { pollIntervalMs: 0, maxPolls: 2 });
 

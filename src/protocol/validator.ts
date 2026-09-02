@@ -6,7 +6,8 @@ const clientMessageTypes = new Set([
   "client.ready",
   "chat.send",
   "run.cancel",
-  "resume.request",
+  "sessions.request",
+  "session.select",
   "attachments.pick",
   "status.reorder"
 ]);
@@ -22,9 +23,14 @@ export function parseClientMessage(value: unknown): ClientMessage | undefined {
   switch (value.type) {
     case "client.ready":
     case "run.cancel":
-    case "resume.request":
+    case "sessions.request":
     case "attachments.pick":
       return { type: value.type };
+    case "session.select":
+      if (typeof value.agentId !== "string" || !/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(value.agentId)) {
+        return undefined;
+      }
+      return { type: value.type, agentId: value.agentId };
     case "chat.send": {
       if (
         typeof value.id !== "string" ||

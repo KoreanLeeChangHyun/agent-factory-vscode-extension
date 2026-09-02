@@ -9,6 +9,14 @@ export interface SessionControllerEvents {
   readonly onRunningChanged: (running: boolean) => void;
   readonly onAssistantText: (text: string) => void;
   readonly onProgress: (text: string) => void;
+  readonly onActivity: (activity: {
+    readonly id: string;
+    readonly category: "command" | "file" | "tool";
+    readonly phase: "started" | "completed" | "failed";
+    readonly text: string;
+    readonly title?: string;
+    readonly diff?: string;
+  }) => void;
   readonly onError: (message: string) => void;
 }
 
@@ -82,19 +90,28 @@ export class ChatSessionController {
   }
 
   private async pollUntilTerminal(agentId: string, runId: string): Promise<void> {
-    const maxPolls = this.options.maxPolls ?? 2_400;
-    const interval = this.options.pollIntervalMs ?? 750;
+    const maxPolls = this.options.maxPolls ?? 7_200;
+    const interval = this.options.pollIntervalMs ?? 250;
+    const statusPollStride = this.options.pollIntervalMs === undefined ? 3 : 1;
     let cursor = 0;
     for (let poll = 0; poll < maxPolls; poll += 1) {
       const updates = await this.runtime.updates(agentId, runId, cursor);
       cursor = updates.cursor;
-      for (const label of updates.labels) this.events.onProgress(label);
-      const status = await this.runtime.status(agentId, runId);
-      if (TERMINAL_STATES.has(status.status)) {
-        const result = await this.runtime.result(agentId, runId);
-        const text = result.text.trim() || terminalSummary(result.status);
-        this.events.onAssistantText(text);
-        return;
+      for (const update of updates.updates) {
+        if (update.kind === "status") {
+          this.events.onProgress(update.text);
+        } else {
+          this.events.onActivity({ ...update, id: `${runId}:${update.id}` });
+        }
+      }
+      if (poll % statusPollStride === 0) {
+        const status = await this.runtime.status(agentId, runId);
+        if (TERMINAL_STATES.has(status.status)) {
+          const result = await this.runtime.result(agentId, runId);
+          const text = result.text.trim() || terminalSummary(result.status);
+          this.events.onAssistantText(text);
+          return;
+        }
       }
       await delay(interval);
     }

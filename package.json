@@ -70,10 +70,6 @@
           "default": [
             "status",
             "agents",
-            "model",
-            "reasoning",
-            "fast",
-            "goal",
             "project",
             "queue"
           ],
@@ -83,10 +79,6 @@
               "agent",
               "status",
               "agents",
-              "model",
-              "reasoning",
-              "fast",
-              "goal",
               "project",
               "branch",
               "context",
@@ -124,6 +116,7 @@
     "typescript": "^5.7.2"
   },
   "dependencies": {
-    "markdown-it": "^14.3.1"
+    "markdown-it": "^14.3.1",
+    "shiki": "^4.4.3"
   }
 }

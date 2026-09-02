@@ -10,12 +10,22 @@ def option(name):
 
 command = sys.argv[1]
 project_root = pathlib.Path(option("--project-root"))
-agent_id = option("--agent")
+agent_id = option("--agent") if "--agent" in sys.argv else ""
 run_id = option("--run-id") if "--run-id" in sys.argv else "run-fake"
 with (project_root / "fake-invocations.jsonl").open("a", encoding="utf-8") as stream:
     stream.write(json.dumps(sys.argv[1:]) + "\n")
 
-if command in {"submit", "send"}:
+if command == "list":
+    print(json.dumps({
+        "schemaVersion": "0.1.0",
+        "kind": "agent-list",
+        "agents": [
+            {"agentId": "main-older", "sessionId": "session-older", "role": "main", "updatedAt": "2026-08-30T10:00:00Z"},
+            {"agentId": "work-hidden", "sessionId": "session-work", "role": "work", "updatedAt": "2026-09-01T10:00:00Z"},
+            {"agentId": "main-newer", "sessionId": "session-newer", "role": "main", "updatedAt": "2026-09-01T09:00:00Z", "model": "gpt-5.6-sol"},
+        ],
+    }))
+elif command in {"submit", "send"}:
     print(json.dumps({
         "schemaVersion": "0.1.0",
         "kind": "ack",

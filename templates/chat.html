@@ -12,9 +12,6 @@
   </head>
   <body>
     <main class="chat-shell" aria-label="Main Agent 채팅">
-      <div class="session-actions" aria-label="세션 작업">
-        <button id="resume-button" class="link-button" type="button">기존 세션 Resume</button>
-      </div>
       <section id="timeline" class="timeline" aria-live="polite" aria-label="대화 내용">
         <div id="empty-state" class="empty-state">
           <img class="brand-mark" src="{{iconUri}}" alt="" aria-hidden="true" />
@@ -29,9 +26,10 @@
 
       <section class="composer-region" aria-label="메시지 작성">
         <div id="run-status" class="run-status" role="status" aria-live="polite" hidden>
-          <span class="run-status-marker" aria-hidden="true">›</span>
-          <span id="run-status-label" class="run-status-label"></span>
-          <span class="run-status-meta" aria-hidden="true">(<span id="run-elapsed">0s</span> · Esc로 중단)</span>
+          <span class="run-status-copy">
+            <span id="run-status-label" class="run-status-label"></span>
+            <span class="run-status-meta" aria-hidden="true">(<span id="run-elapsed">0s</span> · Esc로 중단)</span>
+          </span>
         </div>
         <div id="attachment-list" class="attachment-list" aria-label="첨부 항목"></div>
         <div class="composer">
@@ -67,6 +65,22 @@
               <button id="goal-mode-button" class="mode-button" type="button" title="Goal mode off" aria-label="Goal mode off" aria-pressed="false">
                 <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8"></circle><circle cx="12" cy="12" r="3"></circle><path d="M12 2v3M12 19v3M2 12h3M19 12h3"></path></svg>
               </button>
+              <div class="utility-picker session-picker">
+                <button id="session-button" class="utility-button" type="button" title="기존 Main Agent 세션 불러오기" aria-label="기존 Main Agent 세션 불러오기" aria-haspopup="listbox" aria-expanded="false" aria-controls="session-menu">
+                  <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M3 12a9 9 0 1 0 3-6.7"></path><path d="M3 4v5h5"></path><path d="M12 7v5l3 2"></path></svg>
+                </button>
+                <div id="session-menu" class="session-menu" role="listbox" aria-label="Main Agent 세션" hidden>
+                  <div id="session-list" class="session-list"></div>
+                </div>
+              </div>
+              <div class="utility-picker question-picker">
+                <button id="question-button" class="utility-button" type="button" title="사용자 질문 목록" aria-label="사용자 질문 목록" aria-haspopup="listbox" aria-expanded="false" aria-controls="question-menu">
+                  <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><circle cx="5" cy="7" r="1"></circle><circle cx="5" cy="12" r="1"></circle><circle cx="5" cy="17" r="1"></circle><path d="M9 7h10M9 12h10M9 17h10"></path></svg>
+                </button>
+                <div id="question-menu" class="question-menu" role="listbox" aria-label="사용자 질문" hidden>
+                  <div id="question-list" class="question-list"></div>
+                </div>
+              </div>
             </div>
             <div class="composer-actions-end">
               <button id="send-button" class="send-button" type="button" title="전송 (Enter)" aria-label="메시지 전송">
@@ -80,6 +94,7 @@
       <div id="status-bar" class="status-bar" aria-label="Agent 상태"></div>
     </main>
     <script nonce="{{nonce}}" src="{{markdownScriptUri}}"></script>
+    <script nonce="{{nonce}}" src="{{syntaxScriptUri}}"></script>
     <script nonce="{{nonce}}" src="{{scriptUri}}"></script>
   </body>
 </html>

@@ -20,7 +20,12 @@
   const reasoningMenu = document.getElementById("reasoning-menu");
   const fastModeButton = document.getElementById("fast-mode-button");
   const goalModeButton = document.getElementById("goal-mode-button");
-  const resumeButton = document.getElementById("resume-button");
+  const sessionButton = document.getElementById("session-button");
+  const sessionMenu = document.getElementById("session-menu");
+  const sessionList = document.getElementById("session-list");
+  const questionButton = document.getElementById("question-button");
+  const questionMenu = document.getElementById("question-menu");
+  const questionList = document.getElementById("question-list");
   const runStatus = document.getElementById("run-status");
   const runStatusLabel = document.getElementById("run-status-label");
   const runElapsed = document.getElementById("run-elapsed");
@@ -31,6 +36,7 @@
     model: ["", "gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna", "gpt-5.5", "gpt-5.4"],
     reasoning: ["", "none", "low", "medium", "high", "xhigh", "max"]
   };
+  const composerStatusItems = new Set(["model", "reasoning", "fast", "goal"]);
   let openSettingId;
 
   const saved = vscode.getState();
@@ -40,8 +46,10 @@
     title: typeof saved?.title === "string" ? saved.title : "Main Agent",
     draft: typeof saved?.draft === "string" ? saved.draft : "",
     attachments: Array.isArray(saved?.attachments) ? saved.attachments : [],
-    timeline: Array.isArray(saved?.timeline) ? saved.timeline : [],
-    statusItems: Array.isArray(saved?.statusItems) ? saved.statusItems : [],
+    timeline: collapseAdjacentReads(Array.isArray(saved?.timeline) ? saved.timeline : []),
+    statusItems: Array.isArray(saved?.statusItems)
+      ? saved.statusItems.filter(function (item) { return !composerStatusItems.has(item); })
+      : [],
     projectName: typeof saved?.projectName === "string" ? saved.projectName : "",
     runtimeAvailable: saved?.runtimeAvailable === true,
     running: saved?.running === true,
@@ -51,6 +59,8 @@
     goalMode: saved?.goalMode === true,
     runProgress: typeof saved?.runProgress === "string" ? saved.runProgress : "",
     runStartedAt: Number.isFinite(saved?.runStartedAt) ? saved.runStartedAt : undefined,
+    sessions: [],
+    sessionsLoading: false,
     workUnits: {
       activeUnits: Number.isInteger(saved?.workUnits?.activeUnits) ? saved.workUnits.activeUnits : 0,
       workActive: Number.isInteger(saved?.workUnits?.workActive) ? saved.workUnits.workActive : 0,
@@ -59,11 +69,20 @@
     }
   };
   let elapsedTimerId;
+  let followLatest = true;
 
   prompt.value = state.draft;
   renderAll();
   resizePrompt();
   vscode.postMessage({ type: "client.ready" });
+
+  let syntaxThemeClass = currentSyntaxThemeClass();
+  new MutationObserver(function () {
+    const nextThemeClass = currentSyntaxThemeClass();
+    if (nextThemeClass === syntaxThemeClass) return;
+    syntaxThemeClass = nextThemeClass;
+    renderTimeline();
+  }).observe(document.body, { attributes: true, attributeFilter: ["class"] });
 
   prompt.addEventListener("input", function () {
     state.draft = prompt.value;
@@ -106,12 +125,37 @@
   goalModeButton.addEventListener("click", function () {
     toggleMode("goalMode");
   });
-  resumeButton.addEventListener("click", function () {
-    vscode.postMessage({ type: "resume.request" });
+  sessionButton.addEventListener("click", function () {
+    if (sessionMenu.hidden) {
+      openSessionMenu();
+    } else {
+      closeSessionMenu(true);
+    }
+  });
+  questionButton.addEventListener("click", function () {
+    if (questionMenu.hidden) {
+      openQuestionMenu();
+    } else {
+      closeQuestionMenu(true);
+    }
+  });
+
+  timeline.addEventListener("scroll", function () {
+    followLatest = timeline.scrollHeight - timeline.scrollTop - timeline.clientHeight < 24;
   });
 
   document.addEventListener("keydown", function (event) {
     if (event.key === "Escape") {
+      if (!sessionMenu.hidden) {
+        event.preventDefault();
+        closeSessionMenu(true);
+        return;
+      }
+      if (!questionMenu.hidden) {
+        event.preventDefault();
+        closeQuestionMenu(true);
+        return;
+      }
       if (openSettingId) {
         event.preventDefault();
         closeSettingMenu(true);
@@ -125,6 +169,12 @@
   document.addEventListener("click", function (event) {
     if (openSettingId && !event.target.closest(".setting-control")) {
       closeSettingMenu(false);
+    }
+    if (!sessionMenu.hidden && !event.target.closest(".session-picker")) {
+      closeSessionMenu(false);
+    }
+    if (!questionMenu.hidden && !event.target.closest(".question-picker")) {
+      closeQuestionMenu(false);
     }
   });
 
@@ -215,7 +265,9 @@
         break;
       case "status.updated":
         if (Array.isArray(message.items)) {
-          state.statusItems = message.items;
+          state.statusItems = message.items.filter(function (item) {
+            return !composerStatusItems.has(item);
+          });
           renderStatusBar();
           persist();
         }
@@ -231,8 +283,25 @@
       case "session.bound":
         if (typeof message.agentId === "string" && message.agentId) {
           state.agentId = message.agentId;
+          if (message.reset === true) {
+            state.timeline = [];
+            followLatest = true;
+            renderTimeline();
+          }
+          updateSessionControl();
+          closeSessionMenu(false);
           persist();
         }
+        break;
+      case "sessions.open":
+        openSessionMenu();
+        break;
+      case "sessions.list":
+        state.sessionsLoading = false;
+        state.sessions = Array.isArray(message.sessions) ? message.sessions.filter(function (session) {
+          return session && typeof session.agentId === "string" && session.agentId;
+        }) : [];
+        renderSessionList();
         break;
       case "chat.assistant":
         if (typeof message.text === "string" && message.text) {
@@ -256,7 +325,21 @@
         break;
       case "run.progress":
         if (typeof message.text === "string" && message.text) {
-          appendActivity(message.text);
+          state.runProgress = message.text;
+          renderRunStatus();
+          persist();
+        }
+        break;
+      case "run.activity":
+        if (
+          typeof message.id === "string" &&
+          typeof message.text === "string" &&
+          (message.title === undefined || (typeof message.title === "string" && message.title.length <= 200)) &&
+          (message.diff === undefined || (typeof message.diff === "string" && message.diff.length <= 262144)) &&
+          ["command", "file", "tool"].includes(message.category) &&
+          ["started", "completed", "failed"].includes(message.phase)
+        ) {
+          upsertActivity(message.id, message.category, message.phase, message.text, message.diff, message.title);
           persist();
         }
         break;
@@ -295,6 +378,7 @@
     state.running = true;
     state.runProgress = "Main Agent 시작 중";
     state.runStartedAt = Date.now();
+    followLatest = true;
     prompt.value = "";
     renderAll();
     resizePrompt();
@@ -324,9 +408,67 @@
     persist();
   }
 
-  function appendActivity(text) {
-    state.timeline.push({ type: "activity", id: createId(), text });
+  function upsertActivity(id, category, phase, text, diff, title) {
+    let existing = state.timeline.find(function (event) {
+      return event.type === "activity" && event.id === id;
+    });
+    if (!existing) {
+      const previous = state.timeline[state.timeline.length - 1];
+      const incoming = { type: "activity", category, title };
+      if (sameReadActivity(previous, incoming)) {
+        existing = previous;
+      }
+    }
+    if (existing) {
+      existing.category = category;
+      existing.phase = phase;
+      existing.text = text;
+      existing.diff = diff;
+      existing.title = title;
+    } else {
+      state.timeline.push({ type: "activity", id, category, phase, text, diff, title });
+    }
     renderTimeline();
+  }
+
+  function collapseAdjacentReads(events) {
+    const collapsed = [];
+    for (const savedEvent of events) {
+      const event = normalizeSavedReadActivity(savedEvent);
+      const previous = collapsed[collapsed.length - 1];
+      if (sameReadActivity(previous, event)) {
+        collapsed[collapsed.length - 1] = { ...event, id: previous.id };
+      } else {
+        collapsed.push(event);
+      }
+    }
+    return collapsed;
+  }
+
+  function normalizeSavedReadActivity(event) {
+    if (event?.type !== "activity" || event.category !== "command" || event.title) return event;
+    const text = event.text || "";
+    if (!/\b(?:cat|head|tail|sed|awk)\b/.test(text)) return event;
+    const runDocument = text.match(/\.agent-factory\/agent\/[^/\s'\"]+\/runs\/[^/\s'\"]+\/(request|result)\.md\b/);
+    if (runDocument?.[1] === "request") return { ...event, title: "실행 요청 읽기" };
+    if (runDocument?.[1] === "result") return { ...event, title: "실행 결과 읽기" };
+    return event;
+  }
+
+  function sameReadActivity(left, right) {
+    return left?.type === "activity" &&
+      right?.type === "activity" &&
+      left.category === "command" &&
+      right.category === "command" &&
+      typeof left.title === "string" &&
+      isReadActivityTitle(left.title) &&
+      left.title === right.title;
+  }
+
+  function isReadActivityTitle(title) {
+    return title.startsWith("Skill 읽기 · ") ||
+      title === "실행 요청 읽기" ||
+      title === "실행 결과 읽기";
   }
 
   function addAttachments(attachments) {
@@ -396,9 +538,12 @@
     updateSendButton();
     updateRunControls();
     updateModeControls();
+    updateSessionControl();
+    updateQuestionControl();
   }
 
   function renderTimeline() {
+    const shouldFollowLatest = followLatest;
     timeline.querySelectorAll(".message").forEach(function (element) {
       element.remove();
     });
@@ -407,6 +552,23 @@
       const message = document.createElement("article");
       message.className = "message message-" + event.type;
       message.dataset.id = event.id;
+      if (event.type === "user") {
+        message.tabIndex = -1;
+      }
+      if (event.type === "activity") {
+        message.classList.add("message-activity-" + (event.category || "tool"));
+        message.dataset.category = event.category || "tool";
+        message.dataset.phase = event.phase || "started";
+      }
+      if (event.type === "activity" && event.category !== "command") {
+        const heading = document.createElement("div");
+        heading.className = "message-heading";
+        const kind = document.createElement("span");
+        kind.className = "message-kind";
+        kind.textContent = event.title || activityKindLabel(event.category);
+        heading.append(createActivityPhase(event.phase), kind);
+        message.append(heading);
+      }
       const content = document.createElement("div");
       content.className = "message-content";
       if (event.type === "notice") {
@@ -419,16 +581,258 @@
         content.append(mark, text);
       } else if (event.type === "assistant") {
         renderAssistantMarkdown(content, event.text);
+      } else if (event.type === "activity" && event.category === "command") {
+        renderTerminalCommand(content, event.text, event.phase, event.title);
+      } else if (event.type === "activity" && event.category === "file" && event.diff) {
+        renderGitDiff(content, event.diff, event.text);
       } else {
         content.textContent = event.text;
       }
       message.append(content);
       timeline.append(message);
     }
+    updateQuestionControl();
     timeline.setAttribute("aria-busy", String(state.running));
-    requestAnimationFrame(function () {
-      timeline.scrollTop = timeline.scrollHeight;
+    if (shouldFollowLatest) {
+      requestAnimationFrame(function () {
+        timeline.scrollTop = timeline.scrollHeight;
+      });
+    }
+  }
+
+  function activityKindLabel(category) {
+    if (category === "file") return "Git 변경";
+    return "도구 실행";
+  }
+
+  function createActivityPhase(phaseValue) {
+    const phase = document.createElement("span");
+    phase.className = "message-phase message-phase-" + (phaseValue || "started");
+    phase.setAttribute("role", "img");
+    phase.setAttribute("aria-label", activityPhaseAccessibleLabel(phaseValue));
+    return phase;
+  }
+
+  function activityPhaseAccessibleLabel(phase) {
+    if (phase === "completed") return "성공";
+    if (phase === "failed") return "실패";
+    return "진행 중";
+  }
+
+  function renderTerminalCommand(container, command, phaseValue, title) {
+    container.classList.add("terminal-command-content");
+    const row = document.createElement("div");
+    row.className = "terminal-command-row";
+    const prompt = document.createElement("span");
+    prompt.className = "terminal-command-prompt";
+    prompt.textContent = ">";
+    prompt.setAttribute("aria-hidden", "true");
+    const text = document.createElement("div");
+    text.className = "bash-command-text";
+    if (title) {
+      const context = document.createElement("span");
+      context.className = "terminal-command-context";
+      context.textContent = readActivityDisplayTitle(title, phaseValue);
+      context.title = command;
+      text.append(context);
+      row.append(createActivityPhase(phaseValue), prompt, text);
+      container.append(row);
+      return;
+    }
+    const commandCode = document.createElement("span");
+    commandCode.className = "syntax-code";
+    commandCode.textContent = command;
+    text.append(commandCode);
+    row.append(createActivityPhase(phaseValue), prompt, text);
+    const toggle = document.createElement("button");
+    toggle.type = "button";
+    toggle.className = "bash-command-toggle";
+    toggle.textContent = "…";
+    toggle.setAttribute("aria-label", "전체 명령 펼치기");
+    toggle.setAttribute("aria-expanded", "false");
+    toggle.hidden = true;
+    toggle.addEventListener("click", function () {
+      const expanded = text.classList.toggle("is-expanded");
+      toggle.classList.toggle("is-expanded", expanded);
+      toggle.textContent = expanded ? "접기" : "…";
+      toggle.setAttribute("aria-label", expanded ? "명령 접기" : "전체 명령 펼치기");
+      toggle.setAttribute("aria-expanded", String(expanded));
     });
+    container.append(row, toggle);
+    requestAnimationFrame(function () {
+      toggle.hidden = text.scrollHeight <= text.clientHeight + 1;
+    });
+    void applySyntaxHighlighting(commandCode, command, "bash").then(function () {
+      requestAnimationFrame(function () {
+        toggle.hidden = text.scrollHeight <= text.clientHeight + 1;
+      });
+    });
+  }
+
+  function readActivityDisplayTitle(title, phase) {
+    if (phase !== "started") return title;
+    if (title.startsWith("Skill 읽기 · ")) return title.replace("Skill 읽기 · ", "Skill 읽는 중 · ");
+    if (title === "실행 요청 읽기") return "실행 요청 읽는 중";
+    if (title === "실행 결과 읽기") return "실행 결과 읽는 중";
+    return title;
+  }
+
+  function renderGitDiff(container, diff, fallbackText) {
+    container.classList.add("git-diff-content");
+    const files = parseGitDiff(diff);
+    const additions = files.reduce(function (sum, file) { return sum + file.additions; }, 0);
+    const deletions = files.reduce(function (sum, file) { return sum + file.deletions; }, 0);
+    const overview = document.createElement("div");
+    overview.className = "git-diff-overview";
+    overview.append(document.createTextNode("Edited " + (files.length || 1) + " file" + (files.length === 1 ? "" : "s") + " "));
+    const stats = document.createElement("span");
+    stats.className = "git-diff-stats";
+    stats.textContent = "(+" + additions + " −" + deletions + ")";
+    overview.append(stats);
+    container.append(overview);
+
+    const list = document.createElement("div");
+    list.className = "git-diff-files";
+    if (files.length === 0) {
+      list.textContent = fallbackText;
+    } else {
+      files.forEach(function (file) {
+        const row = document.createElement("div");
+        row.className = "git-diff-file";
+        const path = document.createElement("span");
+        path.textContent = file.path;
+        const count = document.createElement("span");
+        count.className = "git-diff-file-stats";
+        count.textContent = "+" + file.additions + " −" + file.deletions;
+        row.append(path, count);
+        list.append(row);
+      });
+    }
+    container.append(list);
+
+    const details = document.createElement("details");
+    details.className = "git-diff-preview";
+    details.open = diff.split("\n").length <= 160;
+    const summary = document.createElement("summary");
+    summary.textContent = "Git diff 보기";
+    const pre = document.createElement("pre");
+    const code = document.createElement("code");
+    diff.split("\n").forEach(function (line) {
+      const span = document.createElement("span");
+      span.className = gitDiffLineClass(line);
+      span.textContent = line || " ";
+      code.append(span);
+    });
+    pre.append(code);
+    details.append(summary, pre);
+    container.append(details);
+    void applyDiffSyntaxHighlighting(code, diff);
+  }
+
+  async function applyDiffSyntaxHighlighting(code, diff) {
+    const highlighter = globalThis.agentFactorySyntaxHighlighter;
+    if (!highlighter) return;
+    const elements = Array.from(code.children);
+    const lines = diff.split("\n");
+    const sections = [];
+    let section;
+    lines.forEach(function (line, index) {
+      if (line.startsWith("diff --git ")) {
+        const match = line.match(/^diff --git a\/(.+) b\/(.+)$/);
+        section = { path: match ? match[2] : "", entries: [] };
+        sections.push(section);
+        return;
+      }
+      if (!section || /^(?:index |--- |\+\+\+ |@@|\\ No newline)/.test(line)) return;
+      if (!/^[ +\-]/.test(line)) return;
+      section.entries.push({ index, prefix: line.slice(0, 1), text: line.slice(1) });
+    });
+    await Promise.all(sections.map(async function (item) {
+      const language = highlighter.languageForPath(item.path);
+      if (!language || item.entries.length === 0) return;
+      try {
+        const highlighted = await highlighter.highlight(
+          item.entries.map(function (entry) { return entry.text; }).join("\n"),
+          language,
+          currentSyntaxThemeClass() !== "light"
+        );
+        item.entries.forEach(function (entry, index) {
+          const element = elements[entry.index];
+          const tokens = highlighted[index];
+          if (element && tokens) renderHighlightedTokens(element, tokens, entry.prefix);
+        });
+      } catch {
+        // Plain diff text remains available if a grammar cannot tokenize the input.
+      }
+    }));
+  }
+
+  async function applySyntaxHighlighting(element, code, language) {
+    const highlighter = globalThis.agentFactorySyntaxHighlighter;
+    if (!highlighter) return;
+    try {
+      const highlighted = await highlighter.highlight(
+        code,
+        language,
+        currentSyntaxThemeClass() !== "light"
+      );
+      const fragment = document.createDocumentFragment();
+      highlighted.forEach(function (tokens, index) {
+        if (index > 0) fragment.append(document.createTextNode("\n"));
+        appendHighlightedTokens(fragment, tokens);
+      });
+      element.replaceChildren(fragment);
+    } catch {
+      // The original text is the progressive fallback when highlighting fails.
+    }
+  }
+
+  function renderHighlightedTokens(element, tokens, prefix) {
+    element.replaceChildren(document.createTextNode(prefix));
+    appendHighlightedTokens(element, tokens);
+  }
+
+  function appendHighlightedTokens(container, tokens) {
+    tokens.forEach(function (token) {
+      const span = document.createElement("span");
+      span.textContent = token.content;
+      if (token.color) span.style.color = token.color;
+      if (token.fontStyle & 1) span.style.fontStyle = "italic";
+      if (token.fontStyle & 2) span.style.fontWeight = "bold";
+      if (token.fontStyle & 4) span.style.textDecoration = "underline";
+      container.append(span);
+    });
+  }
+
+  function currentSyntaxThemeClass() {
+    return document.body.classList.contains("vscode-light") ||
+      document.body.classList.contains("vscode-high-contrast-light")
+      ? "light"
+      : "dark";
+  }
+
+  function parseGitDiff(diff) {
+    const files = [];
+    let current;
+    diff.split("\n").forEach(function (line) {
+      if (line.startsWith("diff --git ")) {
+        const match = line.match(/^diff --git a\/(.+) b\/(.+)$/);
+        current = { path: match ? match[2] : line.slice(11), additions: 0, deletions: 0 };
+        files.push(current);
+      } else if (current && line.startsWith("+") && !line.startsWith("+++")) {
+        current.additions += 1;
+      } else if (current && line.startsWith("-") && !line.startsWith("---")) {
+        current.deletions += 1;
+      }
+    });
+    return files;
+  }
+
+  function gitDiffLineClass(line) {
+    if (line.startsWith("+") && !line.startsWith("+++")) return "git-diff-line git-diff-addition";
+    if (line.startsWith("-") && !line.startsWith("---")) return "git-diff-line git-diff-deletion";
+    if (line.startsWith("@@")) return "git-diff-line git-diff-hunk";
+    return "git-diff-line";
   }
 
   function renderAssistantMarkdown(container, text) {
@@ -456,8 +860,8 @@
       state.runStartedAt = Date.now();
     }
     const elapsed = Math.max(0, Date.now() - state.runStartedAt);
-    runStatusLabel.textContent = "작업 중";
-    runStatusLabel.title = "작업 중";
+    runStatusLabel.textContent = state.runProgress || "작업 중";
+    runStatusLabel.title = state.runProgress || "작업 중";
     runElapsed.textContent = formatElapsed(elapsed);
     if (!elapsedTimerId) {
       elapsedTimerId = window.setInterval(renderRunStatus, 1000);
@@ -509,6 +913,158 @@
     }
   }
 
+  function openSessionMenu() {
+    closeSettingMenu(false);
+    closeQuestionMenu(false);
+    sessionMenu.hidden = false;
+    sessionButton.setAttribute("aria-expanded", "true");
+    state.sessionsLoading = true;
+    renderSessionList();
+    vscode.postMessage({ type: "sessions.request" });
+  }
+
+  function closeSessionMenu(restoreFocus) {
+    sessionMenu.hidden = true;
+    sessionButton.setAttribute("aria-expanded", "false");
+    if (restoreFocus) {
+      sessionButton.focus();
+    }
+  }
+
+  function openQuestionMenu() {
+    closeSettingMenu(false);
+    closeSessionMenu(false);
+    renderQuestionList();
+    questionMenu.hidden = false;
+    questionButton.setAttribute("aria-expanded", "true");
+    questionList.querySelector("button")?.focus();
+  }
+
+  function closeQuestionMenu(restoreFocus) {
+    questionMenu.hidden = true;
+    questionButton.setAttribute("aria-expanded", "false");
+    if (restoreFocus) {
+      questionButton.focus();
+    }
+  }
+
+  function renderQuestionList() {
+    questionList.replaceChildren();
+    const questions = state.timeline.filter(function (event) {
+      return event.type === "user";
+    });
+    if (questions.length === 0) {
+      questionList.append(sessionEmpty("아직 사용자 질문이 없습니다."));
+      return;
+    }
+    questions.forEach(function (question, index) {
+      const item = document.createElement("button");
+      item.type = "button";
+      item.className = "question-item";
+      item.setAttribute("role", "option");
+      const number = document.createElement("span");
+      number.className = "question-item-index";
+      number.textContent = "질문 " + (index + 1);
+      const text = document.createElement("span");
+      text.className = "question-item-text";
+      text.textContent = question.text;
+      item.append(number, text);
+      item.addEventListener("click", function () {
+        closeQuestionMenu(false);
+        jumpToQuestion(question.id);
+      });
+      item.addEventListener("keydown", handleSessionListKeydown);
+      questionList.append(item);
+    });
+  }
+
+  function jumpToQuestion(id) {
+    const target = Array.from(timeline.querySelectorAll(".message-user")).find(function (message) {
+      return message.dataset.id === id;
+    });
+    if (!target) {
+      return;
+    }
+    followLatest = false;
+    target.scrollIntoView({ block: "center" });
+    target.focus({ preventScroll: true });
+    target.classList.add("message-jump-target");
+    window.setTimeout(function () {
+      target.classList.remove("message-jump-target");
+    }, 1200);
+  }
+
+  function renderSessionList() {
+    sessionList.replaceChildren();
+    if (state.sessionsLoading) {
+      sessionList.append(sessionEmpty("세션 목록을 불러오는 중…"));
+      return;
+    }
+    if (state.sessions.length === 0) {
+      sessionList.append(sessionEmpty("불러올 Main Agent 세션이 없습니다."));
+      return;
+    }
+    for (const session of state.sessions) {
+      const item = document.createElement("button");
+      item.type = "button";
+      item.className = "session-item";
+      item.setAttribute("role", "option");
+      item.setAttribute("aria-selected", String(session.agentId === state.agentId));
+      const name = document.createElement("span");
+      name.className = "session-item-name";
+      name.textContent = session.agentId;
+      const meta = document.createElement("span");
+      meta.className = "session-item-meta";
+      meta.textContent = [session.model, formatSessionDate(session.updatedAt)].filter(Boolean).join(" · ") || "Main Agent";
+      item.append(name, meta);
+      item.addEventListener("click", function () {
+        vscode.postMessage({ type: "session.select", agentId: session.agentId });
+      });
+      item.addEventListener("keydown", handleSessionListKeydown);
+      sessionList.append(item);
+    }
+  }
+
+  function sessionEmpty(text) {
+    const empty = document.createElement("div");
+    empty.className = "session-empty";
+    empty.textContent = text;
+    return empty;
+  }
+
+  function formatSessionDate(value) {
+    if (typeof value !== "string") {
+      return "";
+    }
+    const date = new Date(value);
+    return Number.isNaN(date.getTime()) ? "" : date.toLocaleString();
+  }
+
+  function handleSessionListKeydown(event) {
+    if (event.key !== "ArrowDown" && event.key !== "ArrowUp") {
+      return;
+    }
+    const items = Array.from(event.currentTarget.parentElement.querySelectorAll('[role="option"]'));
+    const index = items.indexOf(event.currentTarget);
+    const offset = event.key === "ArrowDown" ? 1 : -1;
+    event.preventDefault();
+    items[(index + offset + items.length) % items.length]?.focus();
+  }
+
+  function updateSessionControl() {
+    sessionButton.title = state.agentId ? "현재 세션: " + state.agentId : "기존 Main Agent 세션 불러오기";
+    sessionButton.setAttribute("aria-label", sessionButton.title);
+    sessionButton.disabled = state.running;
+  }
+
+  function updateQuestionControl() {
+    const count = state.timeline.filter(function (event) {
+      return event.type === "user";
+    }).length;
+    questionButton.title = "사용자 질문 목록 (" + count + ")";
+    questionButton.setAttribute("aria-label", questionButton.title);
+  }
+
   function renderStatusBar() {
     statusBar.replaceChildren();
     for (const itemId of state.statusItems) {
@@ -528,18 +1084,6 @@
         item.classList.add("work-unit-activity");
         item.dataset.active = String(state.workUnits.activeUnits > 0);
         item.title = "활성 Work Unit " + state.workUnits.activeUnits + " · 누적 " + state.workUnits.totalCalled;
-      }
-      if (itemId === "model" || itemId === "reasoning") {
-        item.classList.add("selectable");
-        item.addEventListener("click", function () {
-          openSetting(itemId);
-        });
-      }
-      if (itemId === "fast" || itemId === "goal") {
-        item.classList.add("selectable");
-        item.addEventListener("click", function () {
-          toggleMode(itemId === "fast" ? "fastMode" : "goalMode");
-        });
       }
       item.addEventListener("dragstart", function (event) {
         item.classList.add("dragging");
@@ -584,10 +1128,6 @@
     const labels = {
       agent: state.title,
       agents: "Units " + state.workUnits.activeUnits + " · Work " + state.workUnits.workActive + " · Verify " + state.workUnits.verificationActive,
-      model: "Model " + (state.model || "기본값"),
-      reasoning: "Reasoning " + (state.reasoning || "기본값"),
-      fast: "Fast " + (state.fastMode ? "On" : "Off"),
-      goal: "Goal " + (state.goalMode ? "On" : "Off"),
       project: state.projectName || "Project —",
       branch: "Branch —",
       context: "Context —",
@@ -608,6 +1148,7 @@
     sendButton.title = state.running ? "현재 실행 중지 (Esc)" : "전송 (Enter)";
     sendIcon.hidden = state.running;
     stopIcon.hidden = !state.running;
+    updateSessionControl();
     renderRunStatus();
     updateSendButton();
   }
@@ -636,6 +1177,8 @@
       return;
     }
     closeSettingMenu(false);
+    closeSessionMenu(false);
+    closeQuestionMenu(false);
     openSettingId = setting;
     const button = setting === "model" ? modelButton : reasoningButton;
     const menu = setting === "model" ? modelMenu : reasoningMenu;

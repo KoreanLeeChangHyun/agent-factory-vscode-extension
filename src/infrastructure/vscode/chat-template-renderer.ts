@@ -21,6 +21,9 @@ export class ChatTemplateRenderer {
     const markdownScriptUri = webview.asWebviewUri(
       vscode.Uri.joinPath(this.extensionUri, "static", "vendor", "markdown-it.min.js")
     );
+    const syntaxScriptUri = webview.asWebviewUri(
+      vscode.Uri.joinPath(this.extensionUri, "static", "vendor", "syntax-highlighter.js")
+    );
     const iconUri = webview.asWebviewUri(
       vscode.Uri.joinPath(this.extensionUri, "static", "images", "agent-factory.svg")
     );
@@ -31,6 +34,7 @@ export class ChatTemplateRenderer {
       "{{styleUri}}": styleUri.toString(),
       "{{scriptUri}}": scriptUri.toString(),
       "{{markdownScriptUri}}": markdownScriptUri.toString(),
+      "{{syntaxScriptUri}}": syntaxScriptUri.toString(),
       "{{iconUri}}": iconUri.toString()
     };
 

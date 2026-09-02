@@ -16,7 +16,8 @@ export type ClientMessage =
       };
     }
   | { readonly type: "run.cancel" }
-  | { readonly type: "resume.request" }
+  | { readonly type: "sessions.request" }
+  | { readonly type: "session.select"; readonly agentId: string }
   | { readonly type: "attachments.pick" }
   | {
       readonly type: "status.reorder";
@@ -50,9 +51,27 @@ export type HostMessage =
       readonly type: "chat.renamed";
       readonly title: string;
     }
-  | { readonly type: "session.bound"; readonly agentId: string }
+  | { readonly type: "session.bound"; readonly agentId: string; readonly reset?: boolean }
+  | { readonly type: "sessions.open" }
+  | {
+      readonly type: "sessions.list";
+      readonly sessions: readonly {
+        readonly agentId: string;
+        readonly updatedAt?: string;
+        readonly model?: string;
+      }[];
+    }
   | { readonly type: "chat.assistant"; readonly text: string }
   | { readonly type: "run.progress"; readonly text: string }
+  | {
+      readonly type: "run.activity";
+      readonly id: string;
+      readonly category: "command" | "file" | "tool";
+      readonly phase: "started" | "completed" | "failed";
+      readonly text: string;
+      readonly title?: string;
+      readonly diff?: string;
+    }
   | {
       readonly type: "run.state";
       readonly running: boolean;
