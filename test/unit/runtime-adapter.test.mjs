@@ -19,6 +19,58 @@ async function importTypeScript(relativePath) {
   return import(`data:text/javascript;base64,${Buffer.from(source).toString("base64")}`);
 }
 
+test("chat panel restoration preserves composer settings and context usage", async function () {
+  const { restoreChatState } = await importTypeScript("src/modules/chat/chat-state.ts");
+  assert.deepEqual(restoreChatState({
+    panelId: "panel-one",
+    title: "Main Agent",
+    model: "gpt-5.6-terra",
+    reasoning: "high",
+    fastMode: true,
+    goalMode: true,
+    contextUsedTokens: 39_300,
+    contextWindowTokens: 1_050_000
+  }), {
+    panelId: "panel-one",
+    title: "Main Agent",
+    model: "gpt-5.6-terra",
+    reasoning: "high",
+    fastMode: true,
+    goalMode: true,
+    contextUsedTokens: 39_300,
+    contextWindowTokens: 1_050_000
+  });
+});
+
+test("composer settings messages are strictly validated", async function () {
+  const { parseClientMessage } = await importTypeScript("src/protocol/validator.ts");
+  assert.deepEqual(parseClientMessage({
+    type: "composer.settings",
+    model: "gpt-5.6-sol",
+    reasoning: "medium",
+    fastMode: true,
+    goalMode: false
+  }), {
+    type: "composer.settings",
+    model: "gpt-5.6-sol",
+    reasoning: "medium",
+    fastMode: true,
+    goalMode: false
+  });
+  assert.equal(parseClientMessage({
+    type: "composer.settings",
+    reasoning: "extreme",
+    fastMode: true,
+    goalMode: false
+  }), undefined);
+  assert.deepEqual(parseClientMessage({ type: "agents.request" }), { type: "agents.request" });
+  assert.deepEqual(parseClientMessage({ type: "agent.open", agentId: "main-one-work" }), {
+    type: "agent.open",
+    agentId: "main-one-work"
+  });
+  assert.equal(parseClientMessage({ type: "agent.open", agentId: "../work" }), undefined);
+});
+
 test("plugin locator honors an override and discovers the newest install across marketplaces", async function () {
   const { locateAgentFactoryExec } = await importTypeScript("src/infrastructure/agent-factory/plugin-locator.ts");
   const root = await mkdtemp(join(tmpdir(), "agent-factory-locator-"));
@@ -46,11 +98,25 @@ test("plugin locator honors an override and discovers the newest install across 
 test("runtime client invokes official commands and reads the bounded managed result", async function () {
   const { AgentFactoryClient } = await importTypeScript("src/infrastructure/agent-factory/agent-client.ts");
   const projectRoot = await mkdtemp(join(tmpdir(), "agent-factory-client-"));
+  const codexHome = join(projectRoot, "codex-home");
   const fakeExec = new URL("../fixtures/fake-exec.py", import.meta.url).pathname;
   const resultPath = join(projectRoot, ".agent-factory/agent/main-test/runs/run-fake/result.md");
   await mkdir(dirname(resultPath), { recursive: true });
   await writeFile(resultPath, "Main result text\n");
-  const client = new AgentFactoryClient(fakeExec, projectRoot);
+  await writeFile(join(dirname(resultPath), "state.json"), JSON.stringify({ sessionId: "session-context" }));
+  const rolloutPath = join(codexHome, "sessions/2026/09/03/rollout-2026-09-03T00-00-00-session-context.jsonl");
+  await mkdir(dirname(rolloutPath), { recursive: true });
+  await writeFile(rolloutPath, JSON.stringify({
+    type: "event_msg",
+    payload: {
+      type: "token_count",
+      info: {
+        last_token_usage: { input_tokens: 39_300 },
+        model_context_window: 258_400
+      }
+    }
+  }) + "\n");
+  const client = new AgentFactoryClient(fakeExec, projectRoot, "python3", codexHome);
 
   assert.deepEqual(await client.listSessions(), [
     { agentId: "main-newer", sessionId: "session-newer", updatedAt: "2026-09-01T09:00:00Z", model: "gpt-5.6-sol" },
@@ -84,10 +150,11 @@ test("runtime client invokes official commands and reads the bounded managed res
     JSON.stringify({ type: "item.started", item: { id: "request-read-1", type: "command_execution", command: `sed -n '1,260p' ${dirname(resultPath)}/request.md` } }),
     JSON.stringify({ type: "item.started", item: { id: "result-read-1", type: "command_execution", command: `sed -n '1,20p' ${resultPath}` } }),
     JSON.stringify({ type: "item.started", item: { id: "mcp-1", type: "mcp_tool_call", server: "codex", tool: "list_mcp_resources" } }),
+    JSON.stringify({ type: "turn.completed", usage: { input_tokens: 39098, output_tokens: 202 } }),
     ""
   ].join("\n"));
   assert.deepEqual(await client.updates("main-test", "run-fake", 0), {
-    cursor: 9,
+    cursor: 10,
     updates: [
       { kind: "status", text: "Main Agent가 요청을 분석 중" },
       { kind: "activity", id: "command-1", category: "command", phase: "started", text: "npm run check" },
@@ -99,17 +166,18 @@ test("runtime client invokes official commands and reads the bounded managed res
       { kind: "status", text: "응답 기록 중" },
       { kind: "activity", id: "skill-1", category: "command", phase: "started", text: "sed -n '1,240p' /home/test/.codex/plugins/cache/personal/agent-factory/0.1.0/skills/agent/SKILL.md", title: "Skill 읽기 · agent-factory:agent" },
       { kind: "status", text: "명령 실행 중" },
-      { kind: "activity", id: "request-read-1", category: "command", phase: "started", text: `sed -n '1,260p' ${dirname(resultPath)}/request.md`, title: "실행 요청 읽기" },
-      { kind: "status", text: "명령 실행 중" },
+      { kind: "status", text: "Main Agent가 요청을 분석 중" },
       { kind: "activity", id: "result-read-1", category: "command", phase: "started", text: `sed -n '1,20p' ${resultPath}`, title: "실행 결과 읽기" },
       { kind: "status", text: "명령 실행 중" },
       { kind: "activity", id: "mcp-1", category: "tool", phase: "started", text: "codex/list_mcp_resources" },
-      { kind: "status", text: "연결 도구 실행 중" }
+      { kind: "status", text: "연결 도구 실행 중" },
+      { kind: "status", text: "응답 정리 중" },
+      { kind: "usage", usedTokens: 39300, contextWindowTokens: 258400 }
     ]
   });
   await appendFile(eventsPath, '{"type":"turn.completed"');
-  assert.deepEqual(await client.updates("main-test", "run-fake", 9), {
-    cursor: 9,
+  assert.deepEqual(await client.updates("main-test", "run-fake", 10), {
+    cursor: 10,
     updates: []
   });
   assert.deepEqual(await client.result("main-test", "run-fake"), {
@@ -118,9 +186,28 @@ test("runtime client invokes official commands and reads the bounded managed res
   });
   await client.cancel("main-test", "run-fake");
 
+  const parentEvents = join(projectRoot, ".agent-factory/agent/main-parent/runs/run-parent/events.jsonl");
+  await mkdir(dirname(parentEvents), { recursive: true });
+  await writeFile(parentEvents, JSON.stringify({
+    type: "item.completed",
+    item: {
+      type: "command_execution",
+      command: "python3 loop.py start --work-agent work-hidden --verification-agent verification-not-started"
+    }
+  }) + "\n");
+  const childState = join(projectRoot, ".agent-factory/agent/work-hidden/runs/run-child/state.json");
+  await mkdir(dirname(childState), { recursive: true });
+  await writeFile(childState, JSON.stringify({ status: "completed" }));
+  assert.deepEqual(await client.listChildSessions("main-parent"), [{
+    agentId: "work-hidden",
+    role: "work",
+    status: "completed",
+    updatedAt: "2026-09-01T10:00:00Z"
+  }]);
+
   const invocations = (await readFile(join(projectRoot, "fake-invocations.jsonl"), "utf8"))
     .trim().split("\n").map(JSON.parse);
-  assert.deepEqual(invocations.map((arguments_) => arguments_[0]), ["list", "submit", "status", "result", "cancel"]);
+  assert.deepEqual(invocations.map((arguments_) => arguments_[0]), ["list", "submit", "status", "result", "cancel", "list"]);
   assert.ok(invocations[1].includes("--role"));
   assert.ok(invocations[1].includes("main"));
   assert.ok(invocations[1].includes("gpt-5.6-sol"));

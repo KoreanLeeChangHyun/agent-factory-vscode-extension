@@ -71,6 +71,7 @@
             "status",
             "agents",
             "project",
+            "context",
             "queue"
           ],
           "items": {

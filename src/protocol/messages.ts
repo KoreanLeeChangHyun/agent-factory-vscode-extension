@@ -18,7 +18,16 @@ export type ClientMessage =
   | { readonly type: "run.cancel" }
   | { readonly type: "sessions.request" }
   | { readonly type: "session.select"; readonly agentId: string }
+  | { readonly type: "agents.request" }
+  | { readonly type: "agent.open"; readonly agentId: string }
   | { readonly type: "attachments.pick" }
+  | {
+      readonly type: "composer.settings";
+      readonly model?: string;
+      readonly reasoning?: "none" | "low" | "medium" | "high" | "xhigh" | "max";
+      readonly fastMode: boolean;
+      readonly goalMode: boolean;
+    }
   | {
       readonly type: "status.reorder";
       readonly items: readonly StatusItemId[];
@@ -29,10 +38,18 @@ export type HostMessage =
       readonly type: "host.initialize";
       readonly panelId: string;
       readonly title: string;
+      readonly role: "main" | "work" | "verification";
+      readonly verifiedWorkRunId?: string;
       readonly projectName: string;
       readonly runtimeAvailable: boolean;
       readonly running: boolean;
       readonly statusItems: readonly StatusItemId[];
+      readonly model?: string;
+      readonly reasoning?: "none" | "low" | "medium" | "high" | "xhigh" | "max";
+      readonly fastMode: boolean;
+      readonly goalMode: boolean;
+      readonly contextUsedTokens?: number;
+      readonly contextWindowTokens?: number;
     }
   | {
       readonly type: "attachments.add";
@@ -61,8 +78,22 @@ export type HostMessage =
         readonly model?: string;
       }[];
     }
+  | {
+      readonly type: "agents.list";
+      readonly agents: readonly {
+        readonly agentId: string;
+        readonly role: "work" | "verification";
+        readonly status: string;
+        readonly updatedAt?: string;
+      }[];
+    }
   | { readonly type: "chat.assistant"; readonly text: string }
   | { readonly type: "run.progress"; readonly text: string }
+  | {
+      readonly type: "context.usage";
+      readonly usedTokens: number;
+      readonly contextWindowTokens: number;
+    }
   | {
       readonly type: "run.activity";
       readonly id: string;

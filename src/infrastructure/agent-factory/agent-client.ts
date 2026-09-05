@@ -1,6 +1,7 @@
 import { spawn } from "node:child_process";
-import { lstat, readFile } from "node:fs/promises";
-import { relative, resolve, sep } from "node:path";
+import { lstat, open as openFile, readFile, readdir } from "node:fs/promises";
+import { homedir } from "node:os";
+import { join, relative, resolve, sep } from "node:path";
 
 const MAX_PROCESS_OUTPUT_BYTES = 1024 * 1024;
 const MAX_RESULT_BYTES = 1024 * 1024;
@@ -13,6 +14,8 @@ export interface ExecutionOptions {
   readonly reasoningEffort?: "none" | "low" | "medium" | "high" | "xhigh" | "max";
   readonly fast: boolean;
   readonly goalMode: boolean;
+  readonly actor?: "main" | "human";
+  readonly verifiedWorkRunId?: string;
 }
 
 export interface RunAcceptance {
@@ -36,6 +39,11 @@ export interface RunUpdates {
 export type RunUpdate =
   | { readonly kind: "status"; readonly text: string }
   | {
+      readonly kind: "usage";
+      readonly usedTokens: number;
+      readonly contextWindowTokens: number;
+    }
+  | {
       readonly kind: "activity";
       readonly id: string;
       readonly category: "command" | "file" | "tool";
@@ -52,6 +60,14 @@ export interface MainAgentSession {
   readonly model?: string;
 }
 
+export interface ChildAgentSession {
+  readonly agentId: string;
+  readonly role: "work" | "verification";
+  readonly status: string;
+  readonly updatedAt?: string;
+  readonly verifiedWorkRunId?: string;
+}
+
 export interface AgentRuntimeClient {
   submit(agentId: string, message: string, execution: ExecutionOptions): Promise<RunAcceptance>;
   send(agentId: string, message: string, execution: ExecutionOptions): Promise<RunAcceptance>;
@@ -60,13 +76,15 @@ export interface AgentRuntimeClient {
   result(agentId: string, runId: string): Promise<RunResult>;
   cancel(agentId: string, runId: string): Promise<void>;
   listSessions(): Promise<readonly MainAgentSession[]>;
+  listChildSessions(mainAgentId: string): Promise<readonly ChildAgentSession[]>;
 }
 
 export class AgentFactoryClient implements AgentRuntimeClient {
   public constructor(
     private readonly execPath: string,
     private readonly projectRoot: string,
-    private readonly pythonCommand = "python3"
+    private readonly pythonCommand = "python3",
+    private readonly codexHome = process.env.CODEX_HOME ?? join(homedir(), ".codex")
   ) {}
 
   public async diagnose(): Promise<{ readonly available: true } | { readonly available: false; readonly diagnostic: string }> {
@@ -166,10 +184,35 @@ export class AgentFactoryClient implements AgentRuntimeClient {
     const lines = splitLines.filter((line) => line.trim().length > 0);
     const start = Math.min(cursor, lines.length);
     const updates: RunUpdate[] = [];
-    for (const line of lines.slice(start)) {
+    const newLines = lines.slice(start);
+    for (const line of newLines) {
       updates.push(...await progressUpdates(line, this.projectRoot));
     }
+    if (newLines.some(isTurnCompletedLine)) {
+      const usage = await this.readCurrentContextUsage(agentId, runId);
+      if (usage) updates.push({ kind: "usage", ...usage });
+    }
     return { cursor: lines.length, updates };
+  }
+
+  private async readCurrentContextUsage(
+    agentId: string,
+    runId: string
+  ): Promise<{ readonly usedTokens: number; readonly contextWindowTokens: number } | undefined> {
+    const statePath = resolve(this.projectRoot, ".agent-factory", "agent", agentId, "runs", runId, "state.json");
+    try {
+      const info = await lstat(statePath);
+      if (!info.isFile() || info.size > 256 * 1024) return undefined;
+      const state = readRecordOrUndefined(JSON.parse(await readFile(statePath, "utf8")));
+      const sessionId = typeof state?.sessionId === "string" && MANAGED_ID.test(state.sessionId)
+        ? state.sessionId
+        : undefined;
+      if (!sessionId) return undefined;
+      const rolloutPath = await findSessionRollout(join(this.codexHome, "sessions"), sessionId);
+      return rolloutPath ? readLatestTokenCount(rolloutPath) : undefined;
+    } catch {
+      return undefined;
+    }
   }
 
   public async result(agentId: string, runId: string): Promise<RunResult> {
@@ -237,6 +280,108 @@ export class AgentFactoryClient implements AgentRuntimeClient {
     }).sort((left, right) => (right.updatedAt ?? "").localeCompare(left.updatedAt ?? ""));
   }
 
+  public async listChildSessions(mainAgentId: string): Promise<readonly ChildAgentSession[]> {
+    if (!MANAGED_ID.test(mainAgentId)) {
+      throw new Error("Main Agent 식별자가 올바르지 않습니다.");
+    }
+    const referenced = await this.discoverChildAgents(mainAgentId);
+    if (referenced.size === 0) return [];
+    const document = await this.command(["list", "--project-root", this.projectRoot]);
+    if (!Array.isArray(document.agents) || document.agents.length > 1_000) {
+      throw new Error("Agent Factory 세션 목록 응답이 올바르지 않습니다.");
+    }
+    const agents: ChildAgentSession[] = [];
+    for (const value of document.agents) {
+      const agent = readRecordOrUndefined(value);
+      if (
+        !agent ||
+        typeof agent.agentId !== "string" ||
+        !referenced.has(agent.agentId) ||
+        (agent.role !== "work" && agent.role !== "verification")
+      ) {
+        continue;
+      }
+      const latest = await this.latestRunInfo(agent.agentId);
+      agents.push({
+        agentId: agent.agentId,
+        role: agent.role,
+        status: latest.status,
+        ...(latest.verifiedWorkRunId ? { verifiedWorkRunId: latest.verifiedWorkRunId } : {}),
+        ...(typeof agent.updatedAt === "string" ? { updatedAt: agent.updatedAt } : {})
+      });
+    }
+    return agents.sort((left, right) => (right.updatedAt ?? "").localeCompare(left.updatedAt ?? ""));
+  }
+
+  private async discoverChildAgents(mainAgentId: string): Promise<ReadonlySet<string>> {
+    const runsDirectory = resolve(this.projectRoot, ".agent-factory", "agent", mainAgentId, "runs");
+    const childIds = new Set<string>();
+    let runs;
+    try {
+      runs = (await readdir(runsDirectory, { withFileTypes: true }))
+        .filter((entry) => entry.isDirectory() && MANAGED_ID.test(entry.name))
+        .sort((left, right) => right.name.localeCompare(left.name))
+        .slice(0, 500);
+    } catch (error) {
+      if (isMissingFile(error)) return childIds;
+      throw error;
+    }
+    for (const run of runs) {
+      const eventsPath = resolve(runsDirectory, run.name, "events.jsonl");
+      let content: string;
+      try {
+        const info = await lstat(eventsPath);
+        if (!info.isFile() || info.size > MAX_EVENTS_BYTES) continue;
+        content = await readFile(eventsPath, "utf8");
+      } catch (error) {
+        if (isMissingFile(error)) continue;
+        throw error;
+      }
+      for (const line of content.split("\n")) {
+        let event: unknown;
+        try {
+          event = JSON.parse(line);
+        } catch {
+          continue;
+        }
+        const item = readRecordOrUndefined(readRecordOrUndefined(event)?.item);
+        if (item?.type !== "command_execution" || typeof item.command !== "string") continue;
+        for (const childId of childAgentIdsFromCommand(item.command)) childIds.add(childId);
+      }
+    }
+    return childIds;
+  }
+
+  private async latestRunInfo(agentId: string): Promise<{ readonly status: string; readonly verifiedWorkRunId?: string }> {
+    const runsDirectory = resolve(this.projectRoot, ".agent-factory", "agent", agentId, "runs");
+    try {
+      const runs = (await readdir(runsDirectory, { withFileTypes: true }))
+        .filter((entry) => entry.isDirectory() && MANAGED_ID.test(entry.name))
+        .sort((left, right) => right.name.localeCompare(left.name));
+      for (const run of runs.slice(0, 100)) {
+        const statePath = resolve(runsDirectory, run.name, "state.json");
+        try {
+          const info = await lstat(statePath);
+          if (!info.isFile() || info.size > 256 * 1024) continue;
+          const state = readRecordOrUndefined(JSON.parse(await readFile(statePath, "utf8")));
+          if (typeof state?.status === "string" && state.status) {
+            return {
+              status: state.status,
+              ...(typeof state.verifiedWorkRunId === "string" && MANAGED_ID.test(state.verifiedWorkRunId)
+                ? { verifiedWorkRunId: state.verifiedWorkRunId }
+                : {})
+            };
+          }
+        } catch (error) {
+          if (!isMissingFile(error)) continue;
+        }
+      }
+    } catch (error) {
+      if (!isMissingFile(error)) throw error;
+    }
+    return { status: "unknown" };
+  }
+
   private async command(arguments_: readonly string[]): Promise<Record<string, unknown>> {
     const output = await runBoundedProcess(
       this.pythonCommand,
@@ -285,7 +430,21 @@ function executionArguments(execution: ExecutionOptions): string[] {
   if (execution.reasoningEffort) arguments_.push("--reasoning-effort", execution.reasoningEffort);
   if (execution.fast) arguments_.push("--fast");
   if (execution.goalMode) arguments_.push("--goal-mode");
+  if (execution.actor) arguments_.push("--actor", execution.actor);
+  if (execution.verifiedWorkRunId) arguments_.push("--verified-work-run-id", execution.verifiedWorkRunId);
   return arguments_;
+}
+
+function childAgentIdsFromCommand(command: string): readonly string[] {
+  const ids = new Set<string>();
+  for (const flag of ["work-agent", "verification-agent"] as const) {
+    const pattern = new RegExp(`--${flag}(?:=|\\s+)(?:'([^']+)'|\"([^\"]+)\"|([A-Za-z0-9][A-Za-z0-9._-]{0,127}))`, "g");
+    for (const match of command.matchAll(pattern)) {
+      const candidate = match[1] ?? match[2] ?? match[3];
+      if (candidate && MANAGED_ID.test(candidate)) ids.add(candidate);
+    }
+  }
+  return [...ids];
 }
 
 async function progressUpdates(line: string, projectRoot: string): Promise<readonly RunUpdate[]> {
@@ -299,7 +458,9 @@ async function progressUpdates(line: string, projectRoot: string): Promise<reado
   if (!event) return [];
   if (event.type === "thread.started") return [statusUpdate("Main Agent 연결됨")];
   if (event.type === "turn.started") return [statusUpdate("Main Agent가 요청을 분석 중")];
-  if (event.type === "turn.completed") return [statusUpdate("응답 정리 중")];
+  if (event.type === "turn.completed") {
+    return [statusUpdate("응답 정리 중")];
+  }
   const item = readRecordOrUndefined(event.item);
   if (!item || (event.type !== "item.started" && event.type !== "item.completed")) return [];
   const completed = event.type === "item.completed";
@@ -308,6 +469,9 @@ async function progressUpdates(line: string, projectRoot: string): Promise<reado
     const detail = summarizeCommand(item.command) ?? "명령 내용 없음";
     const title = summarizeReadActivity(item.command);
     const failed = completed && typeof item.exit_code === "number" && item.exit_code !== 0;
+    if (title === "실행 요청 읽기") {
+      return [statusUpdate("Main Agent가 요청을 분석 중")];
+    }
     return compactUpdates(
       itemId ? activityUpdate(itemId, "command", failed ? "failed" : completed ? "completed" : "started", detail, undefined, title) : undefined,
       statusUpdate(failed ? "명령 실패 확인 중" : completed ? "결과 분석 중" : "명령 실행 중")
@@ -339,6 +503,73 @@ async function progressUpdates(line: string, projectRoot: string): Promise<reado
 
 function statusUpdate(text: string): RunUpdate {
   return { kind: "status", text };
+}
+
+function readTokenCount(value: unknown): number | undefined {
+  return Number.isSafeInteger(value) && Number(value) >= 0 ? Number(value) : undefined;
+}
+
+function isTurnCompletedLine(line: string): boolean {
+  try {
+    return readRecordOrUndefined(JSON.parse(line))?.type === "turn.completed";
+  } catch {
+    return false;
+  }
+}
+
+async function findSessionRollout(sessionsRoot: string, sessionId: string): Promise<string | undefined> {
+  const stack: Array<{ readonly path: string; readonly depth: number }> = [{ path: sessionsRoot, depth: 0 }];
+  let visited = 0;
+  while (stack.length > 0 && visited < 5_000) {
+    const current = stack.pop();
+    if (!current) break;
+    let entries;
+    try {
+      entries = await readdir(current.path, { withFileTypes: true });
+    } catch {
+      continue;
+    }
+    visited += entries.length;
+    for (const entry of entries) {
+      if (entry.isFile() && entry.name.endsWith(`-${sessionId}.jsonl`)) return join(current.path, entry.name);
+      if (entry.isDirectory() && current.depth < 3) {
+        stack.push({ path: join(current.path, entry.name), depth: current.depth + 1 });
+      }
+    }
+  }
+  return undefined;
+}
+
+async function readLatestTokenCount(
+  rolloutPath: string
+): Promise<{ readonly usedTokens: number; readonly contextWindowTokens: number } | undefined> {
+  const handle = await openFile(rolloutPath, "r");
+  try {
+    const info = await handle.stat();
+    if (!info.isFile()) return undefined;
+    const length = Math.min(info.size, 2 * 1024 * 1024);
+    const bytes = Buffer.alloc(length);
+    await handle.read(bytes, 0, length, info.size - length);
+    for (const line of bytes.toString("utf8").split("\n").reverse()) {
+      let record: Record<string, unknown> | undefined;
+      try {
+        record = readRecordOrUndefined(JSON.parse(line));
+      } catch {
+        continue;
+      }
+      const payload = readRecordOrUndefined(record?.payload);
+      const infoRecord = readRecordOrUndefined(payload?.info);
+      const lastUsage = readRecordOrUndefined(infoRecord?.last_token_usage);
+      const usedTokens = readTokenCount(lastUsage?.input_tokens);
+      const contextWindowTokens = readTokenCount(infoRecord?.model_context_window);
+      if (payload?.type === "token_count" && usedTokens !== undefined && contextWindowTokens !== undefined) {
+        return { usedTokens, contextWindowTokens };
+      }
+    }
+    return undefined;
+  } finally {
+    await handle.close();
+  }
 }
 
 function activityUpdate(

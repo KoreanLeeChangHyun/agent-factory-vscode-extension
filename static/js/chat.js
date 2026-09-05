@@ -31,6 +31,8 @@
   const runElapsed = document.getElementById("run-elapsed");
   const attachmentList = document.getElementById("attachment-list");
   const statusBar = document.getElementById("status-bar");
+  const agentsMenu = document.getElementById("agents-menu");
+  const agentsList = document.getElementById("agents-list");
   const dropOverlay = document.getElementById("drop-overlay");
   const settingOptions = {
     model: ["", "gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna", "gpt-5.5", "gpt-5.4"],
@@ -44,12 +46,12 @@
     panelId: typeof saved?.panelId === "string" ? saved.panelId : undefined,
     agentId: typeof saved?.agentId === "string" ? saved.agentId : undefined,
     title: typeof saved?.title === "string" ? saved.title : "Main Agent",
+    role: ["main", "work", "verification"].includes(saved?.role) ? saved.role : "main",
+    verifiedWorkRunId: typeof saved?.verifiedWorkRunId === "string" ? saved.verifiedWorkRunId : undefined,
     draft: typeof saved?.draft === "string" ? saved.draft : "",
     attachments: Array.isArray(saved?.attachments) ? saved.attachments : [],
     timeline: collapseAdjacentReads(Array.isArray(saved?.timeline) ? saved.timeline : []),
-    statusItems: Array.isArray(saved?.statusItems)
-      ? saved.statusItems.filter(function (item) { return !composerStatusItems.has(item); })
-      : [],
+    statusItems: normalizeStatusItems(saved?.statusItems),
     projectName: typeof saved?.projectName === "string" ? saved.projectName : "",
     runtimeAvailable: saved?.runtimeAvailable === true,
     running: saved?.running === true,
@@ -57,10 +59,14 @@
     reasoning: normalizeSettingValue(saved?.reasoning, settingOptions.reasoning),
     fastMode: saved?.fastMode === true,
     goalMode: saved?.goalMode === true,
+    contextUsedTokens: safeCountOrUndefined(saved?.contextUsedTokens),
+    contextWindowTokens: safeCountOrUndefined(saved?.contextWindowTokens),
     runProgress: typeof saved?.runProgress === "string" ? saved.runProgress : "",
     runStartedAt: Number.isFinite(saved?.runStartedAt) ? saved.runStartedAt : undefined,
     sessions: [],
     sessionsLoading: false,
+    childAgents: Array.isArray(saved?.childAgents) ? saved.childAgents : [],
+    agentsLoading: false,
     workUnits: {
       activeUnits: Number.isInteger(saved?.workUnits?.activeUnits) ? saved.workUnits.activeUnits : 0,
       workActive: Number.isInteger(saved?.workUnits?.workActive) ? saved.workUnits.workActive : 0,
@@ -161,6 +167,11 @@
         closeSettingMenu(true);
         return;
       }
+      if (!agentsMenu.hidden) {
+        event.preventDefault();
+        closeAgentsMenu();
+        return;
+      }
       event.preventDefault();
       cancelRun();
     }
@@ -175,6 +186,9 @@
     }
     if (!questionMenu.hidden && !event.target.closest(".question-picker")) {
       closeQuestionMenu(false);
+    }
+    if (!agentsMenu.hidden && !event.target.closest(".agents-menu") && !event.target.closest(".work-unit-activity")) {
+      closeAgentsMenu();
     }
   });
 
@@ -239,17 +253,27 @@
       case "host.initialize":
         state.panelId = message.panelId;
         state.title = message.title;
+        state.role = ["main", "work", "verification"].includes(message.role) ? message.role : "main";
+        state.verifiedWorkRunId = typeof message.verifiedWorkRunId === "string" ? message.verifiedWorkRunId : undefined;
+        document.body.dataset.agentRole = state.role;
         state.projectName = message.projectName;
         state.runtimeAvailable = message.runtimeAvailable === true;
         state.running = message.running === true;
+        state.model = normalizeSettingValue(message.model, settingOptions.model);
+        state.reasoning = normalizeSettingValue(message.reasoning, settingOptions.reasoning);
+        state.fastMode = message.fastMode === true;
+        state.goalMode = message.goalMode === true;
+        state.contextUsedTokens = safeCountOrUndefined(message.contextUsedTokens);
+        state.contextWindowTokens = safeCountOrUndefined(message.contextWindowTokens);
         if (state.running && !state.runStartedAt) {
           state.runStartedAt = Date.now();
         } else if (!state.running) {
           state.runStartedAt = undefined;
         }
         if (!state.statusItems.length) {
-          state.statusItems = Array.isArray(message.statusItems) ? message.statusItems : [];
+          state.statusItems = normalizeStatusItems(message.statusItems);
         }
+        updateModeControls();
         renderTimeline();
         renderStatusBar();
         updateRunControls();
@@ -265,9 +289,7 @@
         break;
       case "status.updated":
         if (Array.isArray(message.items)) {
-          state.statusItems = message.items.filter(function (item) {
-            return !composerStatusItems.has(item);
-          });
+          state.statusItems = normalizeStatusItems(message.items);
           renderStatusBar();
           persist();
         }
@@ -303,6 +325,14 @@
         }) : [];
         renderSessionList();
         break;
+      case "agents.list":
+        state.agentsLoading = false;
+        state.childAgents = Array.isArray(message.agents) ? message.agents.filter(isChildAgent) : [];
+        state.workUnits = summarizeChildAgents(state.childAgents);
+        renderAgentsList();
+        renderStatusBar();
+        persist();
+        break;
       case "chat.assistant":
         if (typeof message.text === "string" && message.text) {
           state.timeline.push({ type: "assistant", id: createId(), text: message.text });
@@ -327,6 +357,14 @@
         if (typeof message.text === "string" && message.text) {
           state.runProgress = message.text;
           renderRunStatus();
+          persist();
+        }
+        break;
+      case "context.usage":
+        if (Number.isSafeInteger(message.usedTokens) && Number.isSafeInteger(message.contextWindowTokens)) {
+          state.contextUsedTokens = Math.max(0, message.usedTokens);
+          state.contextWindowTokens = Math.max(0, message.contextWindowTokens);
+          renderStatusBar();
           persist();
         }
         break;
@@ -384,12 +422,6 @@
     resizePrompt();
     persist();
     vscode.postMessage({ type: "chat.send", ...message });
-    if (state.goalMode) {
-      state.goalMode = false;
-      updateModeControls();
-      renderStatusBar();
-      persist();
-    }
   }
 
   function cancelRun() {
@@ -435,6 +467,7 @@
     const collapsed = [];
     for (const savedEvent of events) {
       const event = normalizeSavedReadActivity(savedEvent);
+      if (event?.title === "실행 요청 읽기") continue;
       const previous = collapsed[collapsed.length - 1];
       if (sameReadActivity(previous, event)) {
         collapsed[collapsed.length - 1] = { ...event, id: previous.id };
@@ -467,7 +500,6 @@
 
   function isReadActivityTitle(title) {
     return title.startsWith("Skill 읽기 · ") ||
-      title === "실행 요청 읽기" ||
       title === "실행 결과 읽기";
   }
 
@@ -672,7 +704,6 @@
   function readActivityDisplayTitle(title, phase) {
     if (phase !== "started") return title;
     if (title.startsWith("Skill 읽기 · ")) return title.replace("Skill 읽기 · ", "Skill 읽는 중 · ");
-    if (title === "실행 요청 읽기") return "실행 요청 읽는 중";
     if (title === "실행 결과 읽기") return "실행 결과 읽는 중";
     return title;
   }
@@ -1052,6 +1083,7 @@
   }
 
   function updateSessionControl() {
+    sessionButton.hidden = state.role !== "main";
     sessionButton.title = state.agentId ? "현재 세션: " + state.agentId : "기존 Main Agent 세션 불러오기";
     sessionButton.setAttribute("aria-label", sessionButton.title);
     sessionButton.disabled = state.running;
@@ -1068,6 +1100,9 @@
   function renderStatusBar() {
     statusBar.replaceChildren();
     for (const itemId of state.statusItems) {
+      if (itemId === "agents" && state.role !== "main") {
+        continue;
+      }
       if (itemId === "status") {
         continue;
       }
@@ -1083,7 +1118,21 @@
       if (itemId === "agents") {
         item.classList.add("work-unit-activity");
         item.dataset.active = String(state.workUnits.activeUnits > 0);
-        item.title = "활성 Work Unit " + state.workUnits.activeUnits + " · 누적 " + state.workUnits.totalCalled;
+        item.title = "현재 진행 중인 Agent 작업 " + state.workUnits.activeUnits + " · 누적 호출 " + state.workUnits.totalCalled;
+        item.setAttribute("role", "button");
+        item.setAttribute("aria-haspopup", "listbox");
+        item.setAttribute("aria-expanded", String(!agentsMenu.hidden));
+        item.addEventListener("click", openAgentsMenu);
+        item.addEventListener("keydown", function (event) {
+          if (event.key === "Enter" || event.key === " ") {
+            event.preventDefault();
+            openAgentsMenu();
+          }
+        });
+      } else if (itemId === "context" && state.contextUsedTokens !== undefined && state.contextWindowTokens !== undefined) {
+        renderContextStatus(item);
+        item.title = "최근 turn 기준 사용 " + state.contextUsedTokens.toLocaleString("ko-KR") +
+          " / 자동 컴팩트 기준 " + state.contextWindowTokens.toLocaleString("ko-KR") + " tokens";
       }
       item.addEventListener("dragstart", function (event) {
         item.classList.add("dragging");
@@ -1109,6 +1158,97 @@
     }
   }
 
+  function openAgentsMenu() {
+    if (!agentsMenu.hidden) {
+      closeAgentsMenu();
+      return;
+    }
+    state.agentsLoading = true;
+    agentsMenu.hidden = false;
+    renderAgentsList();
+    renderStatusBar();
+    vscode.postMessage({ type: "agents.request" });
+  }
+
+  function closeAgentsMenu() {
+    agentsMenu.hidden = true;
+    renderStatusBar();
+  }
+
+  function renderAgentsList() {
+    agentsList.replaceChildren();
+    if (state.agentsLoading) {
+      agentsList.append(emptyAgentItem("호출된 Agent를 불러오는 중…"));
+      return;
+    }
+    if (state.childAgents.length === 0) {
+      agentsList.append(emptyAgentItem("아직 호출된 작업자나 검증자가 없습니다."));
+      return;
+    }
+    for (const agent of state.childAgents) {
+      const item = document.createElement("button");
+      item.type = "button";
+      item.className = "agent-item";
+      item.setAttribute("role", "option");
+      item.title = agent.agentId + " 세션과 대화하기";
+      const main = document.createElement("span");
+      main.className = "agent-item-main";
+      const role = document.createElement("span");
+      role.className = "agent-role";
+      role.textContent = agent.role === "work" ? "작업" : "검증";
+      const id = document.createElement("span");
+      id.className = "agent-id";
+      id.textContent = agent.agentId;
+      const status = document.createElement("span");
+      status.className = "agent-status";
+      status.textContent = childAgentStatusLabel(agent.status) + " · 클릭하여 대화";
+      main.append(role, id);
+      item.append(main, status);
+      item.addEventListener("click", function () {
+        closeAgentsMenu();
+        vscode.postMessage({ type: "agent.open", agentId: agent.agentId });
+      });
+      agentsList.append(item);
+    }
+  }
+
+  function emptyAgentItem(text) {
+    const item = document.createElement("div");
+    item.className = "session-empty";
+    item.textContent = text;
+    return item;
+  }
+
+  function isChildAgent(agent) {
+    return agent && typeof agent.agentId === "string" &&
+      ["work", "verification"].includes(agent.role) && typeof agent.status === "string";
+  }
+
+  function summarizeChildAgents(agents) {
+    const activeStatuses = new Set(["accepted", "starting", "running", "cancelling"]);
+    return {
+      activeUnits: agents.filter(function (agent) { return activeStatuses.has(agent.status); }).length,
+      workActive: agents.filter(function (agent) { return agent.role === "work" && activeStatuses.has(agent.status); }).length,
+      verificationActive: agents.filter(function (agent) { return agent.role === "verification" && activeStatuses.has(agent.status); }).length,
+      totalCalled: agents.length
+    };
+  }
+
+  function childAgentStatusLabel(status) {
+    const labels = {
+      accepted: "대기 중",
+      starting: "시작 중",
+      running: "실행 중",
+      cancelling: "취소 중",
+      completed: "완료",
+      failed: "실패",
+      cancelled: "취소됨",
+      "needs-human-decision": "사용자 결정 필요",
+      unknown: "상태 미확인"
+    };
+    return labels[status] || status;
+  }
+
   function reorderStatus(sourceId, targetId) {
     const items = state.statusItems.slice();
     const sourceIndex = items.indexOf(sourceId);
@@ -1127,10 +1267,10 @@
   function statusLabel(itemId) {
     const labels = {
       agent: state.title,
-      agents: "Units " + state.workUnits.activeUnits + " · Work " + state.workUnits.workActive + " · Verify " + state.workUnits.verificationActive,
+      agents: "진행 " + state.workUnits.activeUnits + " · 작업 " + state.workUnits.workActive + " · 검증 " + state.workUnits.verificationActive,
       project: state.projectName || "Project —",
       branch: "Branch —",
-      context: "Context —",
+      context: contextStatusLabel(),
       elapsed: "00:00",
       queue: "Queue 0",
       runtime: state.runtimeAvailable ? "Runtime 연결됨" : "Runtime 미연결"
@@ -1158,6 +1298,7 @@
     updateModeControls();
     renderStatusBar();
     persist();
+    saveComposerSettings();
   }
 
   function updateModeControls() {
@@ -1167,8 +1308,8 @@
     goalModeButton.setAttribute("aria-pressed", String(state.goalMode));
     goalModeButton.setAttribute("aria-label", state.goalMode ? "Goal mode on" : "Goal mode off");
     goalModeButton.title = state.goalMode ? "Goal mode on" : "Goal mode off";
-    modelLabel.textContent = "Model " + (state.model || "Default");
-    reasoningLabel.textContent = "Reasoning " + (state.reasoning || "Default");
+    modelLabel.textContent = state.model || "Default";
+    reasoningLabel.textContent = state.reasoning || "Default";
   }
 
   function openSetting(setting) {
@@ -1209,6 +1350,7 @@
         updateModeControls();
         renderStatusBar();
         persist();
+        saveComposerSettings();
         closeSettingMenu(true);
       });
       option.addEventListener("keydown", handleSettingMenuKeydown);
@@ -1259,6 +1401,8 @@
       panelId: state.panelId,
       agentId: state.agentId,
       title: state.title,
+      role: state.role,
+      verifiedWorkRunId: state.verifiedWorkRunId,
       draft: state.draft,
       attachments: state.attachments,
       timeline: state.timeline.slice(-200),
@@ -1270,14 +1414,68 @@
       reasoning: state.reasoning,
       fastMode: state.fastMode,
       goalMode: state.goalMode,
+      contextUsedTokens: state.contextUsedTokens,
+      contextWindowTokens: state.contextWindowTokens,
       runProgress: state.runProgress,
       runStartedAt: state.runStartedAt,
-      workUnits: state.workUnits
+      workUnits: state.workUnits,
+      childAgents: state.childAgents
     });
   }
 
   function safeCount(value) {
     return Number.isInteger(value) && value >= 0 ? value : 0;
+  }
+
+  function safeCountOrUndefined(value) {
+    return Number.isSafeInteger(value) && value >= 0 ? value : undefined;
+  }
+
+  function normalizeStatusItems(value) {
+    if (!Array.isArray(value)) return [];
+    const items = value.filter(function (item) { return !composerStatusItems.has(item); });
+    if (!items.includes("context")) {
+      const queueIndex = items.indexOf("queue");
+      items.splice(queueIndex < 0 ? items.length : queueIndex, 0, "context");
+    }
+    return items;
+  }
+
+  function saveComposerSettings() {
+    vscode.postMessage({
+      type: "composer.settings",
+      model: state.model || undefined,
+      reasoning: state.reasoning || undefined,
+      fastMode: state.fastMode,
+      goalMode: state.goalMode
+    });
+  }
+
+  function contextStatusLabel() {
+    if (state.contextUsedTokens === undefined || state.contextWindowTokens === undefined) return "Tokens —";
+    return "Tokens " + Math.max(0, state.contextWindowTokens - state.contextUsedTokens).toLocaleString("ko-KR") + " 남음";
+  }
+
+  function renderContextStatus(item) {
+    const compactAt = state.contextWindowTokens;
+    const used = Math.min(compactAt, state.contextUsedTokens);
+    const usageRatio = compactAt > 0 ? used / compactAt : 0;
+    const label = document.createElement("span");
+    label.className = "context-token-label";
+    label.textContent = contextStatusLabel();
+    const meter = document.createElement("span");
+    meter.className = "context-token-meter";
+    meter.setAttribute("role", "progressbar");
+    meter.setAttribute("aria-label", "컨텍스트 토큰 사용량");
+    meter.setAttribute("aria-valuemin", "0");
+    meter.setAttribute("aria-valuemax", String(compactAt));
+    meter.setAttribute("aria-valuenow", String(used));
+    const fill = document.createElement("span");
+    fill.className = "context-token-meter-fill";
+    fill.style.width = usageRatio * 100 + "%";
+    fill.style.backgroundColor = "hsl(" + Math.round((1 - usageRatio) * 120) + " 72% 45%)";
+    meter.append(fill);
+    item.replaceChildren(label, meter);
   }
 
   function normalizeSettingValue(value, allowedValues) {

@@ -5,7 +5,8 @@ import type { AttachmentReference } from "../../common/types/attachment";
 import {
   createDraftChatState,
   restoreChatState,
-  type ChatPanelState
+  type ChatPanelState,
+  type ComposerPreferences
 } from "../../modules/chat/chat-state";
 import type { HostMessage } from "../../protocol/messages";
 import { parseClientMessage } from "../../protocol/validator";
@@ -24,6 +25,8 @@ interface ManagedPanel {
   controller?: ChatSessionController;
 }
 
+const COMPOSER_PREFERENCES_KEY = "agentFactory.mainChat.composerPreferences";
+
 export class ChatPanelManager implements vscode.Disposable {
   public readonly viewType = "agentFactory.mainChat";
   private readonly panels = new Map<string, ManagedPanel>();
@@ -37,7 +40,7 @@ export class ChatPanelManager implements vscode.Disposable {
   ) {}
 
   public async openDraft(): Promise<void> {
-    const state = createDraftChatState();
+    const state = { ...createDraftChatState(this.composerPreferences()), role: "main" as const };
     const panel = vscode.window.createWebviewPanel(
       this.viewType,
       state.title,
@@ -48,7 +51,7 @@ export class ChatPanelManager implements vscode.Disposable {
   }
 
   public async revive(panel: vscode.WebviewPanel, serializedState: unknown): Promise<void> {
-    const state = restoreChatState(serializedState);
+    const state = restoreChatState(serializedState, this.composerPreferences());
     const existing = this.panels.get(state.panelId);
     if (existing) {
       existing.panel.reveal(panel.viewColumn, true);
@@ -176,10 +179,18 @@ export class ChatPanelManager implements vscode.Disposable {
           type: "host.initialize",
           panelId: managed.state.panelId,
           title: managed.state.title,
+          role: managed.state.role ?? "main",
+          verifiedWorkRunId: managed.state.verifiedWorkRunId,
           projectName: workspaceName(),
           runtimeAvailable: connection.available,
           running: managed.controller?.running ?? false,
-          statusItems: this.statusItems()
+          statusItems: this.statusItems(),
+          model: managed.state.model,
+          reasoning: managed.state.reasoning,
+          fastMode: managed.state.fastMode === true,
+          goalMode: managed.state.goalMode === true,
+          contextUsedTokens: managed.state.contextUsedTokens,
+          contextWindowTokens: managed.state.contextWindowTokens
         });
         if (!connection.available) {
           await this.post(managed.panel, {
@@ -190,7 +201,25 @@ export class ChatPanelManager implements vscode.Disposable {
         }
         return;
       case "chat.send":
+        managed.state = {
+          ...managed.state,
+          model: message.execution.model,
+          reasoning: message.execution.reasoningEffort,
+          fastMode: message.execution.fast,
+          goalMode: message.execution.goal
+        };
+        await this.saveComposerPreferences(managed.state);
         await this.sendChat(managed, message.text, message.attachments, message.execution);
+        return;
+      case "composer.settings":
+        managed.state = {
+          ...managed.state,
+          model: message.model,
+          reasoning: message.reasoning,
+          fastMode: message.fastMode,
+          goalMode: message.goalMode
+        };
+        await this.saveComposerPreferences(managed.state);
         return;
       case "run.cancel":
         if (!managed.controller) {
@@ -201,6 +230,12 @@ export class ChatPanelManager implements vscode.Disposable {
         return;
       case "sessions.request":
         await this.sendSessionList(managed);
+        return;
+      case "agents.request":
+        await this.sendAgentList(managed);
+        return;
+      case "agent.open":
+        await this.openChildAgent(managed, message.agentId);
         return;
       case "session.select":
         await this.selectSession(managed, message.agentId);
@@ -232,6 +267,88 @@ export class ChatPanelManager implements vscode.Disposable {
         text: error instanceof Error ? error.message : String(error)
       });
     }
+  }
+
+  private async sendAgentList(managed: ManagedPanel): Promise<void> {
+    if (!managed.state.agentId || (managed.state.role ?? "main") !== "main") {
+      await this.post(managed.panel, { type: "agents.list", agents: [] });
+      return;
+    }
+    const connection = await this.connectRuntime();
+    if (!connection.available) {
+      await this.post(managed.panel, { type: "agents.list", agents: [] });
+      await this.post(managed.panel, { type: "host.notice", level: "error", text: connection.diagnostic });
+      return;
+    }
+    try {
+      const agents = await connection.client.listChildSessions(managed.state.agentId);
+      await this.post(managed.panel, { type: "agents.list", agents });
+    } catch (error) {
+      await this.post(managed.panel, { type: "agents.list", agents: [] });
+      await this.post(managed.panel, {
+        type: "host.notice",
+        level: "error",
+        text: error instanceof Error ? error.message : String(error)
+      });
+    }
+  }
+
+  private async openChildAgent(managed: ManagedPanel, agentId: string): Promise<void> {
+    if (!managed.state.agentId || (managed.state.role ?? "main") !== "main") return;
+    const connection = await this.connectRuntime();
+    if (!connection.available) {
+      await this.post(managed.panel, { type: "host.notice", level: "error", text: connection.diagnostic });
+      return;
+    }
+    try {
+      const child = (await connection.client.listChildSessions(managed.state.agentId))
+        .find((candidate) => candidate.agentId === agentId);
+      if (!child) {
+        await this.post(managed.panel, {
+          type: "host.notice",
+          level: "warning",
+          text: "Main Agent가 호출한 작업자 또는 검증자 세션을 찾을 수 없습니다."
+        });
+        return;
+      }
+      const label = child.role === "work" ? "작업자" : "검증자";
+      const state: ChatPanelState = {
+        ...createDraftChatState(this.composerPreferences()),
+        title: `${label} · ${child.agentId}`,
+        agentId: child.agentId,
+        role: child.role,
+        ...(child.verifiedWorkRunId ? { verifiedWorkRunId: child.verifiedWorkRunId } : {})
+      };
+      const panel = vscode.window.createWebviewPanel(
+        this.viewType,
+        state.title,
+        vscode.ViewColumn.Active,
+        this.webviewOptions()
+      );
+      await this.attach(panel, state);
+    } catch (error) {
+      await this.post(managed.panel, {
+        type: "host.notice",
+        level: "error",
+        text: error instanceof Error ? error.message : String(error)
+      });
+    }
+  }
+
+  private composerPreferences(): ComposerPreferences {
+    return restoreChatState(
+      this.context.globalState.get(COMPOSER_PREFERENCES_KEY),
+      {}
+    );
+  }
+
+  private async saveComposerPreferences(state: ChatPanelState): Promise<void> {
+    await this.context.globalState.update(COMPOSER_PREFERENCES_KEY, {
+      model: state.model,
+      reasoning: state.reasoning,
+      fastMode: state.fastMode === true,
+      goalMode: state.goalMode === true
+    } satisfies ComposerPreferences);
   }
 
   private async selectSession(managed: ManagedPanel, agentId: string): Promise<void> {
@@ -298,6 +415,10 @@ export class ChatPanelManager implements vscode.Disposable {
         onProgress: (progressText) => {
           void this.post(managed.panel, { type: "run.progress", text: progressText });
         },
+        onUsage: (usedTokens, contextWindowTokens) => {
+          managed.state = { ...managed.state, contextUsedTokens: usedTokens, contextWindowTokens };
+          void this.post(managed.panel, { type: "context.usage", usedTokens, contextWindowTokens });
+        },
         onActivity: (activity) => {
           void this.post(managed.panel, { type: "run.activity", ...activity });
         },
@@ -310,7 +431,9 @@ export class ChatPanelManager implements vscode.Disposable {
       model: execution.model,
       reasoningEffort: execution.reasoningEffort,
       fast: execution.fast,
-      goalMode: execution.goal
+      goalMode: execution.goal,
+      ...((managed.state.role ?? "main") !== "main" ? { actor: "human" as const } : {}),
+      ...(managed.state.verifiedWorkRunId ? { verifiedWorkRunId: managed.state.verifiedWorkRunId } : {})
     });
   }
 

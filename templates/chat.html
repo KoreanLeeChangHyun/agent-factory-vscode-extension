@@ -47,14 +47,14 @@
               </button>
               <div class="setting-control">
                 <button id="model-button" class="setting-button" type="button" title="모델 선택" aria-label="모델 선택" aria-haspopup="menu" aria-expanded="false" aria-controls="model-menu">
-                  <span id="model-label">Model</span>
+                  <span id="model-label">Default</span>
                   <svg class="chevron-icon" viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="m4 6 4 4 4-4"></path></svg>
                 </button>
                 <div id="model-menu" class="setting-menu" role="menu" aria-label="모델 선택" hidden></div>
               </div>
               <div class="setting-control">
                 <button id="reasoning-button" class="setting-button" type="button" title="추론 수준 선택" aria-label="추론 수준 선택" aria-haspopup="menu" aria-expanded="false" aria-controls="reasoning-menu">
-                  <span id="reasoning-label">Reasoning</span>
+                  <span id="reasoning-label">Default</span>
                   <svg class="chevron-icon" viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="m4 6 4 4 4-4"></path></svg>
                 </button>
                 <div id="reasoning-menu" class="setting-menu" role="menu" aria-label="추론 수준 선택" hidden></div>
@@ -69,7 +69,7 @@
                 <button id="session-button" class="utility-button" type="button" title="기존 Main Agent 세션 불러오기" aria-label="기존 Main Agent 세션 불러오기" aria-haspopup="listbox" aria-expanded="false" aria-controls="session-menu">
                   <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M3 12a9 9 0 1 0 3-6.7"></path><path d="M3 4v5h5"></path><path d="M12 7v5l3 2"></path></svg>
                 </button>
-                <div id="session-menu" class="session-menu" role="listbox" aria-label="Main Agent 세션" hidden>
+                <div id="session-menu" class="utility-list-menu session-menu" role="listbox" aria-label="Main Agent 세션" hidden>
                   <div id="session-list" class="session-list"></div>
                 </div>
               </div>
@@ -77,7 +77,7 @@
                 <button id="question-button" class="utility-button" type="button" title="사용자 질문 목록" aria-label="사용자 질문 목록" aria-haspopup="listbox" aria-expanded="false" aria-controls="question-menu">
                   <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><circle cx="5" cy="7" r="1"></circle><circle cx="5" cy="12" r="1"></circle><circle cx="5" cy="17" r="1"></circle><path d="M9 7h10M9 12h10M9 17h10"></path></svg>
                 </button>
-                <div id="question-menu" class="question-menu" role="listbox" aria-label="사용자 질문" hidden>
+                <div id="question-menu" class="utility-list-menu question-menu" role="listbox" aria-label="사용자 질문" hidden>
                   <div id="question-list" class="question-list"></div>
                 </div>
               </div>
@@ -91,6 +91,9 @@
           </div>
         </div>
       </section>
+      <div id="agents-menu" class="utility-list-menu agents-menu" role="listbox" aria-label="호출된 작업자와 검증자" hidden>
+        <div id="agents-list" class="agents-list"></div>
+      </div>
       <div id="status-bar" class="status-bar" aria-label="Agent 상태"></div>
     </main>
     <script nonce="{{nonce}}" src="{{markdownScriptUri}}"></script>

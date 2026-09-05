@@ -8,7 +8,10 @@ const clientMessageTypes = new Set([
   "run.cancel",
   "sessions.request",
   "session.select",
+  "agents.request",
+  "agent.open",
   "attachments.pick",
+  "composer.settings",
   "status.reorder"
 ]);
 const attachmentKinds = new Set<AttachmentKind>(["file", "folder", "image"]);
@@ -24,13 +27,33 @@ export function parseClientMessage(value: unknown): ClientMessage | undefined {
     case "client.ready":
     case "run.cancel":
     case "sessions.request":
+    case "agents.request":
     case "attachments.pick":
       return { type: value.type };
     case "session.select":
+    case "agent.open":
       if (typeof value.agentId !== "string" || !/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(value.agentId)) {
         return undefined;
       }
       return { type: value.type, agentId: value.agentId };
+    case "composer.settings":
+      if (
+        (value.model !== undefined && (typeof value.model !== "string" || value.model.length > 100)) ||
+        (value.reasoning !== undefined && (typeof value.reasoning !== "string" || !reasoningEfforts.has(value.reasoning))) ||
+        typeof value.fastMode !== "boolean" ||
+        typeof value.goalMode !== "boolean"
+      ) {
+        return undefined;
+      }
+      return {
+        type: value.type,
+        ...(typeof value.model === "string" && value.model ? { model: value.model } : {}),
+        ...(typeof value.reasoning === "string"
+          ? { reasoning: value.reasoning as "none" | "low" | "medium" | "high" | "xhigh" | "max" }
+          : {}),
+        fastMode: value.fastMode,
+        goalMode: value.goalMode
+      };
     case "chat.send": {
       if (
         typeof value.id !== "string" ||

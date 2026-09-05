@@ -9,6 +9,7 @@ export interface SessionControllerEvents {
   readonly onRunningChanged: (running: boolean) => void;
   readonly onAssistantText: (text: string) => void;
   readonly onProgress: (text: string) => void;
+  readonly onUsage: (usedTokens: number, contextWindowTokens: number) => void;
   readonly onActivity: (activity: {
     readonly id: string;
     readonly category: "command" | "file" | "tool";
@@ -100,6 +101,8 @@ export class ChatSessionController {
       for (const update of updates.updates) {
         if (update.kind === "status") {
           this.events.onProgress(update.text);
+        } else if (update.kind === "usage") {
+          this.events.onUsage(update.usedTokens, update.contextWindowTokens);
         } else {
           this.events.onActivity({ ...update, id: `${runId}:${update.id}` });
         }

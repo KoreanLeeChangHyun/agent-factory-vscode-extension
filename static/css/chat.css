@@ -625,8 +625,7 @@ button {
   cursor: default;
 }
 
-.session-menu,
-.question-menu {
+.utility-list-menu {
   position: absolute;
   z-index: 14;
   bottom: calc(100% + 5px);
@@ -642,19 +641,20 @@ button {
   box-shadow: 0 5px 18px var(--vscode-widget-shadow, rgba(0, 0, 0, 0.35));
 }
 
-.session-menu[hidden],
-.question-menu[hidden] {
+.utility-list-menu[hidden] {
   display: none;
 }
 
 .session-list,
-.question-list {
+.question-list,
+.agents-list {
   display: grid;
   gap: 2px;
 }
 
 .session-item,
-.question-item {
+.question-item,
+.agent-item {
   display: grid;
   width: 100%;
   gap: 3px;
@@ -671,10 +671,55 @@ button {
 .session-item:focus-visible,
 .session-item[aria-selected="true"],
 .question-item:hover,
-.question-item:focus-visible {
+.question-item:focus-visible,
+.agent-item:hover,
+.agent-item:focus-visible {
   outline: none;
   color: var(--vscode-menu-selectionForeground, var(--vscode-list-activeSelectionForeground));
   background: var(--vscode-menu-selectionBackground, var(--vscode-list-activeSelectionBackground));
+}
+
+.agents-menu {
+  z-index: 18;
+  right: auto;
+  bottom: 22px;
+  left: 3px;
+}
+
+.agent-item-main {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 7px;
+}
+
+.agent-role {
+  flex: 0 0 auto;
+  padding: 1px 5px;
+  border-radius: 4px;
+  color: var(--vscode-badge-foreground);
+  background: var(--vscode-badge-background);
+  font-size: 10px;
+  line-height: 16px;
+}
+
+.agent-id {
+  overflow: hidden;
+  font-size: 12px;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.agent-status {
+  color: var(--vscode-descriptionForeground);
+  font-size: 11px;
+}
+
+.agent-item:hover .agent-status,
+.agent-item:focus-visible .agent-status {
+  color: inherit;
+  opacity: 0.85;
 }
 
 .session-item-name,
@@ -1009,6 +1054,34 @@ button {
 .status-item.work-unit-activity[data-active="true"]::before {
   background: var(--af-color-accent);
   opacity: 1;
+}
+
+.status-item.work-unit-activity {
+  cursor: pointer;
+}
+
+.status-item[data-item-id="context"] {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.context-token-meter {
+  position: relative;
+  width: 48px;
+  height: 4px;
+  flex: 0 0 auto;
+  overflow: hidden;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--vscode-statusBar-foreground) 22%, transparent);
+}
+
+.context-token-meter-fill {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: hsl(120 72% 45%);
+  transition: width 180ms ease-out;
 }
 
 .drop-overlay {
