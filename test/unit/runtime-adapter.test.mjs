@@ -1,10 +1,19 @@
+import { createHash } from "node:crypto";
 import assert from "node:assert/strict";
-import { appendFile, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { appendFile, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import test from "node:test";
 import { runInNewContext } from "node:vm";
 import { build } from "esbuild";
+
+const runtimeTestHome = await mkdtemp(join(tmpdir(), "af-extension-home-"));
+process.env.AGENT_FACTORY_HOME = runtimeTestHome;
+test.after(() => rm(runtimeTestHome, { recursive: true, force: true }));
+function agentsRoot(root) {
+  const id = "project-" + createHash("sha256").update(root).digest("hex").slice(0, 32);
+  return join(runtimeTestHome, "projects", id, "agents");
+}
 
 async function importTypeScript(relativePath) {
   const sourcePath = new URL(`../../${relativePath}`, import.meta.url).pathname;
@@ -42,11 +51,11 @@ test("event snapshots preserve cursor replay, partial appends and replacement", 
   const { AgentFactoryClient } = await importTypeScript("src/infrastructure/agent-factory/agent-client.ts");
   const root = await mkdtemp(join(tmpdir(), 'agent-factory-events-'));
   t.after(() => rm(root, { recursive: true, force: true }));
-  const path = join(root, '.agent-factory/agent/main-test/runs/run-test/events.jsonl');
+  const path = join(agentsRoot(root), 'main-test/runs/run-test/events.jsonl');
   await mkdir(dirname(path), { recursive: true });
   const line = JSON.stringify({ type: 'turn.started' });
   await writeFile(path, line + '\n');
-  const client = new AgentFactoryClient('unused', root);
+  const client = new AgentFactoryClient(new URL("../fixtures/fake-exec.py", import.meta.url).pathname, root);
   const first = await client.updates('main-test', 'run-test', 0);
   assert.equal(first.cursor, 1);
   assert.equal(first.updates.length, 1);
@@ -93,15 +102,25 @@ test("runtime capability checks respect each command and preserve structured err
   const root = await mkdtemp(join(tmpdir(), "agent-factory-capabilities-"));
   t.after(() => rm(root, { recursive: true, force: true }));
   const script = join(root, "exec.py");
-  await writeFile(script, `import argparse, json
+  await writeFile(script, `import argparse, json, pathlib, os, hashlib
 p = argparse.ArgumentParser()
 s = p.add_subparsers(dest='command')
-for name in ['capabilities', 'submit', 'send', 'list']:
+for name in ['init', 'capabilities', 'submit', 'send', 'list']:
     c = s.add_parser(name)
     c.add_argument('--agent')
     c.add_argument('--project-root')
+    c.add_argument('--runtime-home')
+    c.add_argument('--project-id')
     if name == 'submit': c.add_argument('--model')
 args = p.parse_args()
+if args.command == 'init':
+    home = pathlib.Path(os.environ['AGENT_FACTORY_HOME'])
+    root = pathlib.Path(args.project_root).resolve()
+    identity = 'project-' + hashlib.sha256(str(root).encode()).hexdigest()[:32]
+    runtime = home/'projects'/identity
+    (runtime/'agents').mkdir(parents=True,exist_ok=True)
+    print(json.dumps({'schemaVersion':1,'kind':'runtime-location','home':str(home),'projectRoot':str(root),'projectId':identity,'runtimeRoot':str(runtime),'agentsRoot':str(runtime/'agents'),'registered':True}))
+    raise SystemExit(0)
 if args.command == 'capabilities':
     print(json.dumps({'kind': 'execution-capabilities', 'schemaVersion': '0.1.0', 'submit': {'model': True, 'reasoning': False, 'fast': False, 'goal': False}, 'send': {'model': False, 'reasoning': False, 'fast': False, 'goal': False}}))
     raise SystemExit(0)
@@ -221,7 +240,7 @@ test("runtime client invokes official commands and reads the bounded managed res
   const projectRoot = await mkdtemp(join(tmpdir(), "agent-factory-client-"));
   const codexHome = join(projectRoot, "codex-home");
   const fakeExec = new URL("../fixtures/fake-exec.py", import.meta.url).pathname;
-  const resultPath = join(projectRoot, ".agent-factory/agent/main-test/runs/run-fake/result.md");
+  const resultPath = join(agentsRoot(projectRoot), "main-test/runs/run-fake/result.md");
   await mkdir(dirname(resultPath), { recursive: true });
   await writeFile(resultPath, "Main result text\n");
   await writeFile(join(dirname(resultPath), "state.json"), JSON.stringify({ sessionId: "session-context" }));
@@ -254,7 +273,7 @@ test("runtime client invokes official commands and reads the bounded managed res
     runId: "run-fake"
   });
   assert.deepEqual(await client.status("main-test", "run-fake"), { status: "completed" });
-  const eventsPath = join(projectRoot, ".agent-factory/agent/main-test/runs/run-fake/events.jsonl");
+  const eventsPath = join(agentsRoot(projectRoot), "main-test/runs/run-fake/events.jsonl");
   await writeFile(eventsPath, [
     JSON.stringify({ type: "turn.started" }),
     JSON.stringify({ type: "item.started", item: { id: "command-1", type: "command_execution", command: "/usr/bin/zsh -lc 'npm run check'" } }),
@@ -307,7 +326,7 @@ test("runtime client invokes official commands and reads the bounded managed res
   });
   await client.cancel("main-test", "run-fake");
 
-  const parentEvents = join(projectRoot, ".agent-factory/agent/main-parent/runs/run-parent/events.jsonl");
+  const parentEvents = join(agentsRoot(projectRoot), "main-parent/runs/run-parent/events.jsonl");
   await mkdir(dirname(parentEvents), { recursive: true });
   await writeFile(parentEvents, JSON.stringify({
     type: "item.completed",
@@ -316,7 +335,7 @@ test("runtime client invokes official commands and reads the bounded managed res
       command: "python3 loop.py start --work-agent work-hidden --verification-agent verification-not-started"
     }
   }) + "\n");
-  const childState = join(projectRoot, ".agent-factory/agent/work-hidden/runs/run-child/state.json");
+  const childState = join(agentsRoot(projectRoot), "work-hidden/runs/run-child/state.json");
   await mkdir(dirname(childState), { recursive: true });
   await writeFile(childState, JSON.stringify({ status: "completed" }));
   assert.deepEqual(await client.listChildSessions("main-parent"), [{
@@ -427,7 +446,7 @@ test("native settings preserve explicit off and inherit on exact-session send", 
 test("native Goal events expose status and usage without turning a turn end into goal completion", async () => {
   const { AgentFactoryClient } = await importTypeScript("src/infrastructure/agent-factory/agent-client.ts");
   const root = await mkdtemp(join(tmpdir(), "native-goal-events-"));
-  const path = join(root, ".agent-factory/agent/main-exact/runs/run-one/events.jsonl");
+  const path = join(agentsRoot(root), "main-exact/runs/run-one/events.jsonl");
   await mkdir(dirname(path), { recursive: true });
   const goal = { threadId: "thread-exact", objective: "Finish the migration", status: "active", tokensUsed: 124, timeUsedSeconds: 9 };
   await writeFile(path, [
@@ -523,7 +542,7 @@ test("authoritative terminal failures cannot be hidden by nonempty completion te
 test("framed repeated pause warnings retain the following normal progress event", async () => {
   const { AgentFactoryClient } = await importTypeScript("src/infrastructure/agent-factory/agent-client.ts");
   const root = await mkdtemp(join(tmpdir(), "goal-warning-framing-"));
-  const path = join(root, ".agent-factory/agent/main-exact/runs/run-one/events.jsonl");
+  const path = join(agentsRoot(root), "main-exact/runs/run-one/events.jsonl");
   await mkdir(dirname(path), { recursive: true });
   await writeFile(path, [
     { type: "goal.error", message: "warning one" },
@@ -535,4 +554,21 @@ test("framed repeated pause warnings retain the following normal progress event"
   assert.equal(result.cursor, 3);
   assert.deepEqual(result.updates.filter(value => value.kind === "goal").map(value => value.error), ["warning one", "warning two"]);
   assert.ok(result.updates.some(value => value.kind === "status" && value.text.includes("응답 정리")));
+});
+
+
+test("runtime reads reject symlink ancestors and arbitrary result paths", async function (t) {
+  const { AgentFactoryClient } = await importTypeScript("src/infrastructure/agent-factory/agent-client.ts");
+  const root = await mkdtemp(join(tmpdir(), "af-extension-safe-path-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const client = new AgentFactoryClient(new URL("../fixtures/fake-exec.py", import.meta.url).pathname, root);
+  await client.listSessions();
+  assert.equal(await readFile(join(root, "fake-invocations.jsonl"), "utf8").then((text) => text.includes('"list"')), true);
+  const external = join(root, "external");
+  await mkdir(external);
+  await writeFile(join(external, "result.md"), "outside");
+  await assert.rejects(client.readManagedResult(join(external, "result.md"), "main-test", "run-fake"), /범위 밖/);
+  await symlink(external, join(agentsRoot(root), "main-test"), "dir");
+  await assert.rejects(client.updates("main-test", "run-fake", 0), /안전하지/);
+  await assert.rejects(readFile(join(root, ".agent-factory")), { code: "ENOENT" });
 });

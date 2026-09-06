@@ -42,3 +42,5 @@ controls. Both initial messages and exact-session follow-ups carry on/off
 settings. See the sibling plugin's [native runtime guide](../plugin/docs/native-fast-goal.md)
 for required backend support and recovery limits. Goal continuation belongs to
 Main; Work and Verification remain bounded.
+
+The workspace extension host initializes and discovers the private runtime through `exec.py init`, then pins the returned home/project binding. On SSH/container hosts this uses the executing host’s `AGENT_FACTORY_HOME` or `~/.agent-factory`, not the UI machine’s home. Restart the connection after explicit project rebind. The extension no longer builds checkout-local runtime paths.

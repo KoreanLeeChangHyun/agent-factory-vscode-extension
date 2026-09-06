@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+import hashlib
+import os
 import json
 import pathlib
 import sys
@@ -17,6 +19,15 @@ if "--help" in sys.argv:
     print("--agent --model --reasoning-effort --fast --goal-mode")
     sys.exit(0)
 project_root = pathlib.Path(option("--project-root"))
+runtime_home = pathlib.Path(os.environ['AGENT_FACTORY_HOME'])
+project_id = 'project-' + hashlib.sha256(str(project_root.resolve()).encode()).hexdigest()[:32]
+agents_root = runtime_home / 'projects' / project_id / 'agents'
+if command == 'init':
+    agents_root.mkdir(parents=True, exist_ok=True, mode=0o700)
+    print(json.dumps({'schemaVersion': 1, 'kind': 'runtime-location', 'registered': True,
+        'home': str(runtime_home), 'projectRoot': str(project_root.resolve()), 'projectId': project_id,
+        'runtimeRoot': str(agents_root.parent), 'agentsRoot': str(agents_root)}))
+    sys.exit(0)
 agent_id = option("--agent") if "--agent" in sys.argv else ""
 run_id = option("--run-id") if "--run-id" in sys.argv else "run-fake"
 with (project_root / "fake-invocations.jsonl").open("a", encoding="utf-8") as stream:
@@ -48,7 +59,7 @@ elif command == "status":
         "heartbeat": {},
     }))
 elif command == "result":
-    result_path = project_root / ".agent-factory" / "agent" / agent_id / "runs" / run_id / "result.md"
+    result_path = agents_root / agent_id / "runs" / run_id / "result.md"
     print(json.dumps({
         "schemaVersion": "0.1.0",
         "kind": "result",

@@ -1,7 +1,8 @@
+import { constants as fsConstants } from "node:fs";
 import { spawn } from "node:child_process";
-import { lstat, open as openFile, readFile, readdir } from "node:fs/promises";
+import { lstat, open as openFile, readFile, readdir, realpath } from "node:fs/promises";
 import { homedir } from "node:os";
-import { join, relative, resolve, sep } from "node:path";
+import { isAbsolute, join, relative, resolve, sep } from "node:path";
 import { AsyncCache } from "../../common/async-cache";
 
 const MAX_PROCESS_OUTPUT_BYTES = 1024 * 1024;
@@ -107,6 +108,47 @@ export interface AgentRuntimeClient {
 
 export class AgentFactoryClient implements AgentRuntimeClient {
   private readonly capabilityCache = new AsyncCache<Awaited<ReturnType<AgentRuntimeClient["capabilities"]>>>(30_000);
+  private locationPromise?: Promise<{ home: string; projectId: string; agentsRoot: string }>;
+
+  private async location(): Promise<{ home: string; projectId: string; agentsRoot: string }> {
+    if (!this.locationPromise) {
+      this.locationPromise = this.loadLocation().catch((error) => {
+        this.locationPromise = undefined;
+        this.eventSnapshot = undefined;
+        throw error;
+      });
+    }
+    return this.locationPromise;
+  }
+
+  private async loadLocation(): Promise<{ home: string; projectId: string; agentsRoot: string }> {
+    // Runs on the workspace extension host, including SSH/container hosts.
+    const value = await this.command(["init", "--project-root", this.projectRoot]);
+    if (value.kind !== "runtime-location" || value.schemaVersion !== 1 || value.registered !== true
+        || typeof value.home !== "string" || !isAbsolute(value.home)
+        || typeof value.projectId !== "string" || !/^project-[a-f0-9]{32}$/.test(value.projectId)
+        || value.projectRoot !== await realProjectRoot(this.projectRoot)
+        || value.runtimeRoot !== join(value.home, "projects", value.projectId)
+        || value.agentsRoot !== join(value.home, "projects", value.projectId, "agents")) {
+      throw new Error("Agent Factory 저장소 위치 응답이 올바르지 않습니다.");
+    }
+    const expectedHome = resolve(process.env.AGENT_FACTORY_HOME ?? join(homedir(), ".agent-factory"));
+    if (value.home !== expectedHome) throw new Error("Agent Factory 저장소 홈 결속이 다릅니다.");
+    await checkManagedComponents(value.agentsRoot as string);
+    this.eventSnapshot = undefined;
+    return { home: value.home, projectId: value.projectId, agentsRoot: value.agentsRoot as string };
+  }
+
+  private async managedPath(agentId: string, ...members: string[]): Promise<string> {
+    if (!MANAGED_ID.test(agentId) || members.some((member) => !MANAGED_ID.test(member))) {
+      throw new Error("Agent Factory 관리 경로가 올바르지 않습니다.");
+    }
+    const location = await this.location();
+    const path = join(location.agentsRoot, agentId, ...members);
+    await checkManagedComponents(path);
+    return path;
+  }
+
   private eventSnapshot?: { readonly path: string; readonly signature: string; readonly lines: readonly string[] };
 
   public async capabilities(agentId?: string): ReturnType<AgentRuntimeClient["capabilities"]> {
@@ -161,7 +203,10 @@ export class AgentFactoryClient implements AgentRuntimeClient {
         5_000,
         64 * 1024
       );
-      if (output.exitCode === 0) return { available: true };
+      if (output.exitCode === 0) {
+        await this.location();
+        return { available: true };
+      }
       return {
         available: false,
         diagnostic: output.stderr.trim() || "Agent Factory exec.py를 실행할 수 없습니다."
@@ -221,15 +266,7 @@ export class AgentFactoryClient implements AgentRuntimeClient {
     if (!MANAGED_ID.test(agentId) || !MANAGED_ID.test(runId) || !Number.isInteger(cursor) || cursor < 0) {
       throw new Error("Agent Factory 진행 이벤트 요청이 올바르지 않습니다.");
     }
-    const path = resolve(
-      this.projectRoot,
-      ".agent-factory",
-      "agent",
-      agentId,
-      "runs",
-      runId,
-      "events.jsonl"
-    );
+    const path = await this.managedPath(agentId, "runs", runId, "events.jsonl");
     let lines: readonly string[];
     try {
       const info = await lstat(path);
@@ -240,7 +277,7 @@ export class AgentFactoryClient implements AgentRuntimeClient {
       if (this.eventSnapshot?.path === path && this.eventSnapshot.signature === signature) {
         lines = this.eventSnapshot.lines;
       } else {
-        const bytes = await readFile(path);
+        const bytes = await readManagedBytes(path, MAX_EVENTS_BYTES);
         if (bytes.length > MAX_EVENTS_BYTES) throw new Error("Agent Factory 이벤트 파일이 허용 크기를 초과했습니다.");
         const content = bytes.toString("utf8");
         const splitLines = content.split("\n");
@@ -272,11 +309,11 @@ export class AgentFactoryClient implements AgentRuntimeClient {
     agentId: string,
     runId: string
   ): Promise<{ readonly usedTokens: number; readonly contextWindowTokens: number } | undefined> {
-    const statePath = resolve(this.projectRoot, ".agent-factory", "agent", agentId, "runs", runId, "state.json");
+    const statePath = await this.managedPath(agentId, "runs", runId, "state.json");
     try {
       const info = await lstat(statePath);
       if (!info.isFile() || info.size > 256 * 1024) return undefined;
-      const state = readRecordOrUndefined(JSON.parse(await readFile(statePath, "utf8")));
+      const state = readRecordOrUndefined(JSON.parse((await readManagedBytes(statePath, 256 * 1024)).toString("utf8")));
       const sessionId = typeof state?.sessionId === "string" && MANAGED_ID.test(state.sessionId)
         ? state.sessionId
         : undefined;
@@ -388,7 +425,7 @@ export class AgentFactoryClient implements AgentRuntimeClient {
   }
 
   private async discoverChildAgents(mainAgentId: string): Promise<ReadonlySet<string>> {
-    const runsDirectory = resolve(this.projectRoot, ".agent-factory", "agent", mainAgentId, "runs");
+    const runsDirectory = await this.managedPath(mainAgentId, "runs");
     const childIds = new Set<string>();
     let runs;
     try {
@@ -401,12 +438,12 @@ export class AgentFactoryClient implements AgentRuntimeClient {
       throw error;
     }
     for (const run of runs) {
-      const eventsPath = resolve(runsDirectory, run.name, "events.jsonl");
+      const eventsPath = await this.managedPath(mainAgentId, "runs", run.name, "events.jsonl");
       let content: string;
       try {
         const info = await lstat(eventsPath);
         if (!info.isFile() || info.size > MAX_EVENTS_BYTES) continue;
-        content = await readFile(eventsPath, "utf8");
+        content = (await readManagedBytes(eventsPath, MAX_EVENTS_BYTES)).toString("utf8");
       } catch (error) {
         if (isMissingFile(error)) continue;
         throw error;
@@ -427,17 +464,17 @@ export class AgentFactoryClient implements AgentRuntimeClient {
   }
 
   private async latestRunInfo(agentId: string): Promise<{ readonly status: string; readonly verifiedWorkRunId?: string }> {
-    const runsDirectory = resolve(this.projectRoot, ".agent-factory", "agent", agentId, "runs");
+    const runsDirectory = await this.managedPath(agentId, "runs");
     try {
       const runs = (await readdir(runsDirectory, { withFileTypes: true }))
         .filter((entry) => entry.isDirectory() && MANAGED_ID.test(entry.name))
         .sort((left, right) => right.name.localeCompare(left.name));
       for (const run of runs.slice(0, 100)) {
-        const statePath = resolve(runsDirectory, run.name, "state.json");
+        const statePath = await this.managedPath(agentId, "runs", run.name, "state.json");
         try {
           const info = await lstat(statePath);
           if (!info.isFile() || info.size > 256 * 1024) continue;
-          const state = readRecordOrUndefined(JSON.parse(await readFile(statePath, "utf8")));
+          const state = readRecordOrUndefined(JSON.parse((await readManagedBytes(statePath, 256 * 1024)).toString("utf8")));
           if (typeof state?.status === "string" && state.status) {
             return {
               status: state.status,
@@ -457,9 +494,10 @@ export class AgentFactoryClient implements AgentRuntimeClient {
   }
 
   private async command(arguments_: readonly string[]): Promise<Record<string, unknown>> {
+    const binding = arguments_[0] === "init" ? undefined : await this.location();
     const output = await runBoundedProcess(
       this.pythonCommand,
-      [this.execPath, ...arguments_],
+      [this.execPath, ...arguments_, ...(binding ? ["--runtime-home", binding.home, "--project-id", binding.projectId] : [])],
       COMMAND_TIMEOUT_MS,
       MAX_PROCESS_OUTPUT_BYTES
     );
@@ -479,23 +517,16 @@ export class AgentFactoryClient implements AgentRuntimeClient {
   }
 
   private async readManagedResult(path: string, agentId: string, runId: string): Promise<string> {
-    const expectedDirectory = resolve(
-      this.projectRoot,
-      ".agent-factory",
-      "agent",
-      agentId,
-      "runs",
-      runId
-    );
+    const expectedPath = await this.managedPath(agentId, "runs", runId, "result.md");
     const resolvedPath = resolve(path);
-    if (!resolvedPath.startsWith(`${expectedDirectory}${sep}`)) {
+    if (resolvedPath !== expectedPath) {
       throw new Error("Agent Factory 런타임이 예상 범위 밖의 결과 경로를 반환했습니다.");
     }
     const info = await lstat(resolvedPath);
     if (!info.isFile() || info.size > MAX_RESULT_BYTES) {
       throw new Error("Agent Factory 결과 파일이 없거나 허용 크기를 초과했습니다.");
     }
-    return readFile(resolvedPath, "utf8");
+    return (await readManagedBytes(resolvedPath, MAX_RESULT_BYTES)).toString("utf8");
   }
 }
 
@@ -720,7 +751,7 @@ function summarizeReadActivity(value: unknown): string | undefined {
     }
   }
   if (skills.size > 0) return `Skill 읽기 · ${[...skills].join(", ")}`;
-  const runDocument = value.match(/\.agent-factory\/agent\/[^/\s'\"]+\/runs\/[^/\s'\"]+\/(request|result)\.md\b/);
+  const runDocument = value.match(/(?:\.agent-factory\/agent|projects\/project-[a-f0-9]{32}\/agents)\/[^/\s'\"]+\/runs\/[^/\s'\"]+\/(request|result)\.md\b/);
   if (runDocument?.[1] === "request") return "실행 요청 읽기";
   if (runDocument?.[1] === "result") return "실행 결과 읽기";
   return undefined;
@@ -745,7 +776,7 @@ function changesOnlyManagedRunFiles(value: unknown, projectRoot: string): boolea
     const record = readRecordOrUndefined(change);
     if (!record || typeof record.path !== "string") return false;
     const path = relative(projectRoot, record.path).split(sep).join("/");
-    return path.startsWith(".agent-factory/agent/") && path.includes("/runs/");
+    return (path.startsWith(".agent-factory/agent/") || /(?:^|\/)projects\/project-[a-f0-9]{32}\/agents\//.test(path)) && path.includes("/runs/");
   });
 }
 
@@ -919,4 +950,52 @@ function readRecord(value: unknown, label: string): Record<string, unknown> {
     throw new Error(`Agent Factory ${label} 형식이 올바르지 않습니다.`);
   }
   return value as Record<string, unknown>;
+}
+
+async function realProjectRoot(path: string): Promise<string> {
+  return realpath(path);
+}
+
+async function checkManagedComponents(path: string): Promise<void> {
+  const absolute = resolve(path);
+  const parts = absolute.split(sep).filter(Boolean);
+  let cursor: string = sep;
+  for (const part of parts) {
+    cursor = join(cursor, part);
+    try {
+      const info = await lstat(cursor);
+      if (info.isSymbolicLink() || (cursor !== absolute && !info.isDirectory())) {
+        throw new Error("Agent Factory 관리 경로의 링크 또는 파일 유형이 안전하지 않습니다.");
+      }
+    } catch (error) {
+      if (isMissingFile(error)) return;
+      throw error;
+    }
+  }
+}
+
+async function readManagedBytes(path: string, limit: number): Promise<Buffer> {
+  await checkManagedComponents(path);
+  const file = await openFile(path, fsConstants.O_RDONLY | fsConstants.O_NOFOLLOW | fsConstants.O_NONBLOCK);
+  try {
+    const before = await file.stat();
+    if (!before.isFile() || before.size > limit || await realpath(path) !== resolve(path)) {
+      throw new Error("Agent Factory 파일 경로 또는 크기가 안전하지 않습니다.");
+    }
+    const bytes = Buffer.alloc(limit + 1);
+    let offset = 0;
+    while (offset < bytes.length) {
+      const part = await file.read(bytes, offset, bytes.length - offset, offset);
+      if (part.bytesRead === 0) break;
+      offset += part.bytesRead;
+    }
+    const after = await lstat(path);
+    if (offset > limit || after.isSymbolicLink() || before.dev !== after.dev || before.ino !== after.ino
+        || await realpath(path) !== resolve(path)) {
+      throw new Error("Agent Factory 파일이 읽는 동안 교체되었습니다.");
+    }
+    return bytes.subarray(0, offset);
+  } finally {
+    await file.close();
+  }
 }
