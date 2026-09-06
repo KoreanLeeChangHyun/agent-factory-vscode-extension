@@ -1,8 +1,9 @@
 import assert from "node:assert/strict";
-import { appendFile, mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { appendFile, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import test from "node:test";
+import { runInNewContext } from "node:vm";
 import { build } from "esbuild";
 
 async function importTypeScript(relativePath) {
@@ -18,6 +19,126 @@ async function importTypeScript(relativePath) {
   const source = output.outputFiles[0].text;
   return import(`data:text/javascript;base64,${Buffer.from(source).toString("base64")}`);
 }
+
+test("async cache shares work, expires, isolates keys and retries failures", async function () {
+  const { AsyncCache } = await importTypeScript("src/common/async-cache.ts");
+  let now = 0;
+  let calls = 0;
+  const cache = new AsyncCache(30, 2, () => now);
+  const load = async () => ++calls;
+  assert.deepEqual(await Promise.all([cache.get('a', load), cache.get('a', load)]), [1, 1]);
+  assert.equal(await cache.get('a', load), 1);
+  assert.equal(await cache.get('b', load), 2);
+  now = 30;
+  assert.equal(await cache.get('a', load), 3);
+  await assert.rejects(cache.get('failure', async () => { throw new Error('retry'); }), /retry/);
+  assert.equal(await cache.get('failure', load), 4);
+  assert.equal(await cache.get('unavailable', load, () => false), 5);
+  assert.equal(await cache.get('unavailable', load), 6);
+  assert.equal(await cache.get('b', load), 7);
+});
+
+test("event snapshots preserve cursor replay, partial appends and replacement", async function (t) {
+  const { AgentFactoryClient } = await importTypeScript("src/infrastructure/agent-factory/agent-client.ts");
+  const root = await mkdtemp(join(tmpdir(), 'agent-factory-events-'));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const path = join(root, '.agent-factory/agent/main-test/runs/run-test/events.jsonl');
+  await mkdir(dirname(path), { recursive: true });
+  const line = JSON.stringify({ type: 'turn.started' });
+  await writeFile(path, line + '\n');
+  const client = new AgentFactoryClient('unused', root);
+  const first = await client.updates('main-test', 'run-test', 0);
+  assert.equal(first.cursor, 1);
+  assert.equal(first.updates.length, 1);
+  assert.deepEqual(await client.updates('main-test', 'run-test', 0), first);
+  assert.deepEqual(await client.updates('main-test', 'run-test', 1), { cursor: 1, updates: [] });
+  await appendFile(path, line);
+  assert.deepEqual(await client.updates('main-test', 'run-test', 1), { cursor: 1, updates: [] });
+  await appendFile(path, '\n');
+  assert.equal((await client.updates('main-test', 'run-test', 1)).updates.length, 1);
+  await rm(path);
+  assert.deepEqual(await client.updates('main-test', 'run-test', 2), { cursor: 2, updates: [] });
+  await writeFile(path, line + '\n');
+  assert.deepEqual(await client.updates('main-test', 'run-test', 0), first);
+});
+
+test("model catalog discovers new models and tolerates unavailable caches", async function (t) {
+  const { readCodexModels } = await importTypeScript("src/infrastructure/agent-factory/model-catalog.ts");
+  const root = await mkdtemp(join(tmpdir(), "agent-factory-models-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const cache = join(root, "models_cache.json");
+  assert.equal(await readCodexModels(root), undefined);
+  await writeFile(cache, JSON.stringify({ models: [
+    { slug: "gpt-6-astra", visibility: "list" },
+    { slug: "internal", visibility: "hide" },
+    { slug: "gpt-6-astra", visibility: "list" },
+    { slug: "codex-only", visibility: "list", supported_in_api: false },
+    { slug: "bad model", visibility: "list" }, null
+  ] }));
+  assert.deepEqual(await readCodexModels(root), ["gpt-6-astra", "codex-only"]);
+  await writeFile(cache, JSON.stringify({ models: [{ slug: "future-model", visibility: "list" }] }));
+  assert.deepEqual(await readCodexModels(root), ["future-model"]);
+  for (const content of ['{"models":', '{"models":null}', 'null', ' '.repeat(4 * 1024 * 1024 + 1)]) {
+    await writeFile(cache, content);
+    assert.equal(await readCodexModels(root), undefined);
+  }
+  await writeFile(cache, '{"models":[]}');
+  assert.deepEqual(await readCodexModels(root), []);
+  const { parseClientMessage } = await importTypeScript("src/protocol/validator.ts");
+  assert.deepEqual(parseClientMessage({ type: "models.request" }), { type: "models.request" });
+});
+
+test("runtime capability checks respect each command and preserve structured errors", async function (t) {
+  const { AgentFactoryClient } = await importTypeScript("src/infrastructure/agent-factory/agent-client.ts");
+  const root = await mkdtemp(join(tmpdir(), "agent-factory-capabilities-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const script = join(root, "exec.py");
+  await writeFile(script, `import argparse, json
+p = argparse.ArgumentParser()
+s = p.add_subparsers(dest='command')
+for name in ['capabilities', 'submit', 'send', 'list']:
+    c = s.add_parser(name)
+    c.add_argument('--agent')
+    c.add_argument('--project-root')
+    if name == 'submit': c.add_argument('--model')
+args = p.parse_args()
+if args.command == 'capabilities':
+    print(json.dumps({'kind': 'execution-capabilities', 'schemaVersion': '0.1.0', 'submit': {'model': True, 'reasoning': False, 'fast': False, 'goal': False}, 'send': {'model': False, 'reasoning': False, 'fast': False, 'goal': False}}))
+    raise SystemExit(0)
+print(json.dumps({'kind': 'error', 'error': {'code': 'test', 'message': 'specific runtime failure'}}))
+raise SystemExit(2)
+`);
+  const client = new AgentFactoryClient(script, root);
+  assert.deepEqual(await client.capabilities(), {
+    submit: { model: true, reasoning: false, fast: false, goal: false },
+    send: { model: false, reasoning: false, fast: false, goal: false }
+  });
+  await assert.rejects(client.submit('test', 'test', { reasoningEffort: 'medium', fast: false, goalMode: false }), /추론 수준/);
+  await assert.rejects(client.send('test', 'test', { model: 'gpt-6-astra', fast: false, goalMode: false }), /모델 변경/);
+  await assert.rejects(client.listSessions(), /specific runtime failure/);
+});
+
+test("composer shows only supported controls across draft and bound sessions", async function () {
+  const script = await readFile(new URL('../../static/js/chat.js', import.meta.url), 'utf8');
+  const functions = script.slice(script.indexOf('  function currentCapabilities()'), script.indexOf('  function openSetting(setting)'));
+  const button = () => ({ parentElement: {}, setAttribute() {} });
+  const context = {
+    state: { capabilities: { submit: { model: true }, send: {} }, model: 'gpt-6-astra', reasoning: 'medium', fastMode: true, goalMode: true },
+    modelButton: button(), reasoningButton: button(), fastModeButton: button(), goalModeButton: button(),
+    modelLabel: {}, reasoningLabel: {}, openSettingId: undefined,
+    goalPanel: { querySelectorAll() { return []; } }, goalStatus: {}, nativeGoal: null, goalError: undefined
+  };
+  runInNewContext(functions + '\nupdateModeControls();', context);
+  assert.equal(context.modelButton.parentElement.hidden, false);
+  assert.equal(context.reasoningButton.parentElement.hidden, true);
+  assert.equal(context.fastModeButton.hidden, true);
+  assert.equal(context.goalModeButton.hidden, true);
+  context.state.agentId = 'bound-session';
+  runInNewContext('updateModeControls();', context);
+  assert.equal(context.modelButton.parentElement.hidden, true);
+  assert.equal(context.state.model, 'gpt-6-astra');
+  assert.equal(context.state.reasoning, 'medium');
+});
 
 test("chat panel restoration preserves composer settings and context usage", async function () {
   const { restoreChatState } = await importTypeScript("src/modules/chat/chat-state.ts");
@@ -285,4 +406,133 @@ test("session controller clearly rejects a concurrent send", async function () {
   await first;
 
   assert.match(errors[0], /실행 중/);
+});
+
+test("native settings preserve explicit off and inherit on exact-session send", async () => {
+  const { AgentFactoryClient } = await importTypeScript("src/infrastructure/agent-factory/agent-client.ts");
+  const root = await mkdtemp(join(tmpdir(), "native-settings-"));
+  const client = new AgentFactoryClient(new URL("../fixtures/fake-exec.py", import.meta.url).pathname, root);
+  await client.send("main-exact", "off", { model: "model-one", reasoningEffort: "high", fast: false, goalMode: false });
+  await client.send("main-exact", "inherit", {});
+  const calls = (await readFile(join(root, "fake-invocations.jsonl"), "utf8")).trim().split("\n").map(JSON.parse);
+  assert.equal(calls.length, 2);
+  assert.equal(calls[0][calls[0].indexOf("--agent") + 1], "main-exact");
+  assert.ok(calls[0].includes("--no-fast"));
+  assert.ok(calls[0].includes("--no-goal-mode"));
+  assert.ok(calls[0].includes("model-one"));
+  assert.ok(calls[0].includes("high"));
+  assert.ok(!calls[1].some(value => ["--fast", "--no-fast", "--goal-mode", "--no-goal-mode"].includes(value)));
+});
+
+test("native Goal events expose status and usage without turning a turn end into goal completion", async () => {
+  const { AgentFactoryClient } = await importTypeScript("src/infrastructure/agent-factory/agent-client.ts");
+  const root = await mkdtemp(join(tmpdir(), "native-goal-events-"));
+  const path = join(root, ".agent-factory/agent/main-exact/runs/run-one/events.jsonl");
+  await mkdir(dirname(path), { recursive: true });
+  const goal = { threadId: "thread-exact", objective: "Finish the migration", status: "active", tokensUsed: 124, timeUsedSeconds: 9 };
+  await writeFile(path, [
+    { type: "goal.updated", goal },
+    { type: "turn.completed" },
+    { type: "goal.continuing" },
+    { type: "goal.updated", goal: { ...goal, status: "paused" } }
+  ].map(JSON.stringify).join("\n") + "\n");
+  const client = new AgentFactoryClient(new URL("../fixtures/fake-exec.py", import.meta.url).pathname, root);
+  const updates = await client.updates("main-exact", "run-one", 0);
+  assert.deepEqual(updates.updates.filter(update => update.kind === "goal"), [
+    { kind: "goal", goal }, { kind: "goal", goal: { ...goal, status: "paused" } }
+  ]);
+  assert.ok(updates.updates.some(update => update.kind === "status" && update.text.includes("다음 turn")));
+});
+
+test("Goal control and objective protocol rejects unsupported actions and overlong objectives", async () => {
+  const { parseClientMessage } = await importTypeScript("src/protocol/validator.ts");
+  for (const action of ["get", "refresh", "pause", "cancel", "disable", "reopen"]) {
+    assert.deepEqual(parseClientMessage({ type: "goal.control", action }), { type: "goal.control", action });
+  }
+  assert.equal(parseClientMessage({ type: "goal.control", action: "complete" }), undefined);
+  const message = { type: "chat.send", id: "one", text: "request", attachments: [], execution: { fast: false, goal: true, goalObjective: "finish" } };
+  assert.equal(parseClientMessage(message).execution.goalObjective, "finish");
+  assert.equal(parseClientMessage({ ...message, execution: { ...message.execution, goalObjective: "x".repeat(4001) } }), undefined);
+  assert.equal(parseClientMessage({ ...message, execution: { ...message.execution, goal: false } }), undefined);
+});
+
+test("Goal controls use the bound session and report backend errors", async () => {
+  const { ChatSessionController } = await importTypeScript("src/modules/chat/session-controller.ts");
+  const calls = [], observed = [], errors = [];
+  const goal = { threadId: "thread-exact", objective: "finish", status: "paused", tokensUsed: 9, timeUsedSeconds: 3 };
+  const runtime = { async goal(agentId, action) {
+    calls.push([agentId, action]);
+    if (action === "reopen") throw new Error("native goal unavailable");
+    return { goal };
+  }};
+  const controller = new ChatSessionController(runtime, {
+    onGoal(value) { observed.push(value); }, onError(error) { errors.push(error); },
+    onBound() {}, onRunningChanged() {}, onAssistantText() {}, onProgress() {}, onUsage() {}, onActivity() {}
+  }, "main-exact");
+  await controller.controlGoal("get");
+  await controller.controlGoal("reopen");
+  assert.deepEqual(calls, [["main-exact", "get"], ["main-exact", "reopen"]]);
+  assert.deepEqual(observed, [goal]);
+  assert.deepEqual(errors, ["native goal unavailable"]);
+});
+
+test("Goal UI shows native completion separately and keeps reopen unavailable during execution", async () => {
+  const script = await readFile(new URL("../../static/js/chat.js", import.meta.url), "utf8");
+  const render = script.slice(script.indexOf("  function renderGoal()"), script.indexOf("  function openSetting(setting)"));
+  const buttons = ["refresh", "pause", "reopen", "cancel", "disable"].map(action => ({ dataset: { goalAction: action } }));
+  const context = {
+    state: { role: "main", agentId: "main-exact", goalMode: true, running: true },
+    goalPanel: { querySelectorAll() { return buttons; } }, goalStatus: {}, goalError: undefined,
+    nativeGoal: { objective: "finish", status: "active", tokensUsed: 20, timeUsedSeconds: 3 }
+  };
+  runInNewContext(render + "\nrenderGoal();", context);
+  assert.match(context.goalStatus.textContent, /진행 중/);
+  assert.equal(buttons[2].disabled, true);
+  context.nativeGoal.status = "complete";
+  context.state.running = false;
+  runInNewContext("renderGoal();", context);
+  assert.match(context.goalStatus.textContent, /목표 완료/);
+  assert.equal(buttons[2].disabled, false);
+  context.state.role = "work";
+  runInNewContext("renderGoal();", context);
+  assert.equal(context.goalPanel.hidden, true);
+});
+
+test("authoritative terminal failures cannot be hidden by nonempty completion text", async () => {
+  const { ChatSessionController } = await importTypeScript("src/modules/chat/session-controller.ts");
+  for (const status of ["failed", "cancelled", "needs-human-decision"]) {
+    const text = [], errors = [], goals = [];
+    const runtime = {
+      async submit(agentId) { return { agentId, runId: "run-partial" }; },
+      async updates() { return { cursor: 0, updates: [] }; },
+      async status() { return { status, goalError: "pause unconfirmed" }; },
+      async result() { return { status, text: "Implementation complete.", error: { code: "native_backend_error", message: "native interrupted or blocked" } }; }
+    };
+    const controller = new ChatSessionController(runtime, {
+      onBound() {}, onRunningChanged() {}, onProgress() {}, onActivity() {}, onUsage() {},
+      onGoal(goal, error) { goals.push(error); }, onAssistantText(value) { text.push(value); }, onError(value) { errors.push(value); }
+    }, undefined, { pollIntervalMs: 0, maxPolls: 1 });
+    await controller.send("task", [], {});
+    assert.match(text[0], /보존된 부분 결과/);
+    assert.notEqual(text[0], "Implementation complete.");
+    assert.match(errors[0], /native_backend_error/);
+    assert.deepEqual(goals, ["pause unconfirmed"]);
+  }
+});
+
+test("framed repeated pause warnings retain the following normal progress event", async () => {
+  const { AgentFactoryClient } = await importTypeScript("src/infrastructure/agent-factory/agent-client.ts");
+  const root = await mkdtemp(join(tmpdir(), "goal-warning-framing-"));
+  const path = join(root, ".agent-factory/agent/main-exact/runs/run-one/events.jsonl");
+  await mkdir(dirname(path), { recursive: true });
+  await writeFile(path, [
+    { type: "goal.error", message: "warning one" },
+    { type: "goal.error", message: "warning two" },
+    { type: "turn.completed" }
+  ].map(value => JSON.stringify(value) + "\n").join(""));
+  const client = new AgentFactoryClient(new URL("../fixtures/fake-exec.py", import.meta.url).pathname, root);
+  const result = await client.updates("main-exact", "run-one", 0);
+  assert.equal(result.cursor, 3);
+  assert.deepEqual(result.updates.filter(value => value.kind === "goal").map(value => value.error), ["warning one", "warning two"]);
+  assert.ok(result.updates.some(value => value.kind === "status" && value.text.includes("응답 정리")));
 });

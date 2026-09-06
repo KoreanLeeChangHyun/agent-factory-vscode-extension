@@ -13,10 +13,13 @@ export type ClientMessage =
         readonly reasoningEffort?: "none" | "low" | "medium" | "high" | "xhigh" | "max";
         readonly fast: boolean;
         readonly goal: boolean;
+        readonly goalObjective?: string;
       };
     }
+  | { readonly type: "goal.control"; readonly action: import("../infrastructure/agent-factory/agent-client").GoalAction }
   | { readonly type: "run.cancel" }
   | { readonly type: "sessions.request" }
+  | { readonly type: "models.request" }
   | { readonly type: "session.select"; readonly agentId: string }
   | { readonly type: "agents.request" }
   | { readonly type: "agent.open"; readonly agentId: string }
@@ -34,6 +37,9 @@ export type ClientMessage =
     };
 
 export type HostMessage =
+  | { readonly type: "goal.updated"; readonly goal: import("../infrastructure/agent-factory/agent-client").NativeGoal | null; readonly error?: string }
+  | { readonly type: "capabilities.updated"; readonly capabilities: { readonly submit: import("../infrastructure/agent-factory/agent-client").ExecutionCapabilities; readonly send: import("../infrastructure/agent-factory/agent-client").ExecutionCapabilities } }
+  | { readonly type: "models.list"; readonly models: readonly string[] }
   | {
       readonly type: "host.initialize";
       readonly panelId: string;
@@ -42,6 +48,7 @@ export type HostMessage =
       readonly verifiedWorkRunId?: string;
       readonly projectName: string;
       readonly runtimeAvailable: boolean;
+      readonly capabilities?: { readonly submit: import("../infrastructure/agent-factory/agent-client").ExecutionCapabilities; readonly send: import("../infrastructure/agent-factory/agent-client").ExecutionCapabilities };
       readonly running: boolean;
       readonly statusItems: readonly StatusItemId[];
       readonly model?: string;

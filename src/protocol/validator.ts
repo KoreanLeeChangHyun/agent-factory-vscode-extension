@@ -6,7 +6,9 @@ const clientMessageTypes = new Set([
   "client.ready",
   "chat.send",
   "run.cancel",
+  "goal.control",
   "sessions.request",
+  "models.request",
   "session.select",
   "agents.request",
   "agent.open",
@@ -24,9 +26,13 @@ export function parseClientMessage(value: unknown): ClientMessage | undefined {
   }
 
   switch (value.type) {
+    case "goal.control":
+      if (typeof value.action !== "string" || !["get", "refresh", "pause", "cancel", "disable", "reopen"].includes(value.action)) return undefined;
+      return { type: "goal.control", action: value.action as import("../infrastructure/agent-factory/agent-client").GoalAction };
     case "client.ready":
     case "run.cancel":
     case "sessions.request":
+    case "models.request":
     case "agents.request":
     case "attachments.pick":
       return { type: value.type };
@@ -69,6 +75,8 @@ export function parseClientMessage(value: unknown): ClientMessage | undefined {
           typeof value.execution.reasoningEffort !== "string" ||
           !reasoningEfforts.has(value.execution.reasoningEffort)
         )) ||
+        (value.execution.goalObjective !== undefined && (typeof value.execution.goalObjective !== "string" ||
+          !value.execution.goalObjective.trim() || value.execution.goalObjective.length > 4000 || value.execution.goal !== true)) ||
         typeof value.execution.fast !== "boolean" ||
         typeof value.execution.goal !== "boolean"
       ) {
@@ -93,7 +101,8 @@ export function parseClientMessage(value: unknown): ClientMessage | undefined {
             ? { reasoningEffort: value.execution.reasoningEffort as "none" | "low" | "medium" | "high" | "xhigh" | "max" }
             : {}),
           fast: value.execution.fast,
-          goal: value.execution.goal
+          goal: value.execution.goal,
+          ...(typeof value.execution.goalObjective === "string" ? { goalObjective: value.execution.goalObjective } : {})
         }
       };
     }

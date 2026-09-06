@@ -30,6 +30,10 @@ button {
   color: inherit;
 }
 
+.composer-actions [hidden] {
+  display: none;
+}
+
 .chat-shell {
   position: relative;
   display: grid;
@@ -587,7 +591,6 @@ button {
 }
 
 .utility-picker {
-  position: relative;
   min-width: 0;
 }
 
@@ -643,6 +646,14 @@ button {
 
 .utility-list-menu[hidden] {
   display: none;
+}
+
+.session-menu,
+.question-menu {
+  /* Anchor wide lists to the composer action row, not the small trigger. */
+  left: 0;
+  right: auto;
+  max-width: 100%;
 }
 
 .session-list,
@@ -795,6 +806,7 @@ button {
 }
 
 .composer-actions {
+  position: relative;
   justify-content: space-between;
 }
 
@@ -1140,3 +1152,14 @@ button:focus-visible,
     -webkit-text-fill-color: currentColor;
   }
 }
+
+.goal-panel { padding: 8px 12px; border-top: 1px solid var(--vscode-panel-border); font-size: 12px; }
+.goal-panel[hidden] { display: none; }
+.goal-panel label { display: block; margin-bottom: 4px; }
+.goal-panel label span { opacity: .75; }
+.goal-panel textarea { box-sizing: border-box; width: 100%; resize: vertical; color: var(--vscode-input-foreground); background: var(--vscode-input-background); border: 1px solid var(--vscode-input-border, transparent); }
+.goal-panel p { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 130px; overflow: auto; }
+.goal-actions { display: flex; flex-wrap: wrap; gap: 6px; }
+.goal-actions button { color: var(--vscode-button-secondaryForeground); background: var(--vscode-button-secondaryBackground); border: 0; padding: 4px 8px; cursor: pointer; }
+.goal-actions button:disabled { opacity: .5; cursor: default; }
+.goal-panel :focus-visible { outline: 1px solid var(--vscode-focusBorder); outline-offset: 2px; }

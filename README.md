@@ -34,3 +34,11 @@ queue, approvals, rich Resume/session management, snapshots and restore, setting
 negotiation, background notifications, or rich Markdown/tool/diff cards. Attachments are
 currently passed as explicit textual references; browser-only pasted files have no filesystem
 path until a future attachment materialization flow is added.
+
+Fast and Goal controls use Agent Factory's native local Codex app-server
+adapter. Goal status and usage appear separately from run completion; the
+composer offers a goal objective plus refresh, pause, reopen, cancel, and off
+controls. Both initial messages and exact-session follow-ups carry on/off
+settings. See the sibling plugin's [native runtime guide](../plugin/docs/native-fast-goal.md)
+for required backend support and recovery limits. Goal continuation belongs to
+Main; Work and Verification remain bounded.

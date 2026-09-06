@@ -20,6 +20,15 @@
   const reasoningMenu = document.getElementById("reasoning-menu");
   const fastModeButton = document.getElementById("fast-mode-button");
   const goalModeButton = document.getElementById("goal-mode-button");
+  const goalPanel = document.getElementById("goal-panel");
+  const goalObjective = document.getElementById("goal-objective");
+  const goalStatus = document.getElementById("goal-status");
+  let nativeGoal = null;
+  let goalError;
+  goalPanel.addEventListener("click", function (event) {
+    const action = event.target.closest("[data-goal-action]")?.dataset.goalAction;
+    if (action && state.agentId) vscode.postMessage({ type: "goal.control", action });
+  });
   const sessionButton = document.getElementById("session-button");
   const sessionMenu = document.getElementById("session-menu");
   const sessionList = document.getElementById("session-list");
@@ -35,7 +44,7 @@
   const agentsList = document.getElementById("agents-list");
   const dropOverlay = document.getElementById("drop-overlay");
   const settingOptions = {
-    model: ["", "gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna", "gpt-5.5", "gpt-5.4"],
+    model: [""],
     reasoning: ["", "none", "low", "medium", "high", "xhigh", "max"]
   };
   const composerStatusItems = new Set(["model", "reasoning", "fast", "goal"]);
@@ -53,9 +62,10 @@
     timeline: collapseAdjacentReads(Array.isArray(saved?.timeline) ? saved.timeline : []),
     statusItems: normalizeStatusItems(saved?.statusItems),
     projectName: typeof saved?.projectName === "string" ? saved.projectName : "",
-    runtimeAvailable: saved?.runtimeAvailable === true,
+    runtimeAvailable: false,
+    capabilities: undefined,
     running: saved?.running === true,
-    model: normalizeSettingValue(saved?.model, settingOptions.model),
+    model: normalizeModel(saved?.model),
     reasoning: normalizeSettingValue(saved?.reasoning, settingOptions.reasoning),
     fastMode: saved?.fastMode === true,
     goalMode: saved?.goalMode === true,
@@ -130,6 +140,9 @@
   });
   goalModeButton.addEventListener("click", function () {
     toggleMode("goalMode");
+    if (!state.goalMode && nativeGoal && state.agentId) {
+      vscode.postMessage({ type: "goal.control", action: "disable" });
+    }
   });
   sessionButton.addEventListener("click", function () {
     if (sessionMenu.hidden) {
@@ -258,8 +271,10 @@
         document.body.dataset.agentRole = state.role;
         state.projectName = message.projectName;
         state.runtimeAvailable = message.runtimeAvailable === true;
+        state.capabilities = message.capabilities;
+        if (currentCapabilities().diagnostic) appendNotice("warning", currentCapabilities().diagnostic);
         state.running = message.running === true;
-        state.model = normalizeSettingValue(message.model, settingOptions.model);
+        state.model = normalizeModel(message.model);
         state.reasoning = normalizeSettingValue(message.reasoning, settingOptions.reasoning);
         state.fastMode = message.fastMode === true;
         state.goalMode = message.goalMode === true;
@@ -274,10 +289,37 @@
           state.statusItems = normalizeStatusItems(message.statusItems);
         }
         updateModeControls();
+        if (state.agentId && state.role === "main") vscode.postMessage({ type: "goal.control", action: "get" });
         renderTimeline();
         renderStatusBar();
         updateRunControls();
         persist();
+        break;
+      case "goal.updated":
+        nativeGoal = message.goal || null;
+        goalError = message.error;
+        if (nativeGoal) state.goalMode = true;
+        else if (!goalError) state.goalMode = false;
+        renderGoal();
+        updateModeControls();
+        persist();
+        break;
+      case "capabilities.updated":
+        state.capabilities = message.capabilities;
+        updateModeControls();
+        break;
+      case "models.list":
+        if (Array.isArray(message.models)) {
+          settingOptions.model = ["", ...new Set(message.models.map(normalizeModel).filter(Boolean))];
+          if (openSettingId === "model") {
+            const focused = modelMenu.contains(document.activeElement) ? document.activeElement.dataset.value : undefined;
+            renderSettingMenu("model", modelMenu);
+            if (focused !== undefined) {
+              const options = Array.from(modelMenu.querySelectorAll("button"));
+              (options.find((option) => option.dataset.value === focused) || options[0])?.focus();
+            }
+          }
+        }
         break;
       case "attachments.add":
         if (Array.isArray(message.attachments)) {
@@ -311,6 +353,7 @@
             renderTimeline();
           }
           updateSessionControl();
+          updateModeControls();
           closeSessionMenu(false);
           persist();
         }
@@ -396,7 +439,7 @@
 
   function submit() {
     const text = prompt.value.trim();
-    if (!text || state.running) {
+    if (!text || state.running || !state.capabilities || !state.runtimeAvailable) {
       return;
     }
     const message = {
@@ -404,12 +447,18 @@
       text,
       attachments: state.attachments.slice(),
       execution: {
-        model: state.model || undefined,
-        reasoningEffort: state.reasoning || undefined,
-        fast: state.fastMode,
-        goal: state.goalMode
+        model: currentCapabilities().model ? state.model || undefined : undefined,
+        reasoningEffort: currentCapabilities().reasoning ? state.reasoning || undefined : undefined,
+        fast: currentCapabilities().fast === true && state.fastMode,
+        goal: state.role === "main" && currentCapabilities().goal === true && state.goalMode,
+        ...(state.role === "main" && state.goalMode && goalObjective.value.trim() ? { goalObjective: goalObjective.value.trim() } : {})
       }
     };
+    if (message.execution.goal && !nativeGoal && !message.execution.goalObjective && text.length > 4000) {
+      appendNotice("error", "긴 요청에는 4,000자 이내의 목표를 입력하세요.");
+      return;
+    }
+    goalObjective.value = "";
     state.timeline.push({ type: "user", id: message.id, text: message.text });
     state.draft = "";
     state.attachments = [];
@@ -1279,7 +1328,7 @@
   }
 
   function updateSendButton() {
-    sendButton.disabled = !state.running && prompt.value.trim().length === 0;
+    sendButton.disabled = !state.running && (!state.runtimeAvailable || !state.capabilities || prompt.value.trim().length === 0);
   }
 
   function updateRunControls() {
@@ -1291,6 +1340,7 @@
     updateSessionControl();
     renderRunStatus();
     updateSendButton();
+    renderGoal();
   }
 
   function toggleMode(key) {
@@ -1301,7 +1351,17 @@
     saveComposerSettings();
   }
 
+  function currentCapabilities() {
+    return state.capabilities?.[state.agentId ? "send" : "submit"] || {};
+  }
+
   function updateModeControls() {
+    const supported = currentCapabilities();
+    modelButton.parentElement.hidden = supported.model !== true;
+    reasoningButton.parentElement.hidden = supported.reasoning !== true;
+    fastModeButton.hidden = supported.fast !== true;
+    goalModeButton.hidden = supported.goal !== true || (state.role && state.role !== "main");
+    if (openSettingId && supported[openSettingId] !== true) closeSettingMenu(false);
     fastModeButton.setAttribute("aria-pressed", String(state.fastMode));
     fastModeButton.setAttribute("aria-label", state.fastMode ? "Fast mode on" : "Fast mode off");
     fastModeButton.title = state.fastMode ? "Fast mode on" : "Fast mode off";
@@ -1310,6 +1370,19 @@
     goalModeButton.title = state.goalMode ? "Goal mode on" : "Goal mode off";
     modelLabel.textContent = state.model || "Default";
     reasoningLabel.textContent = state.reasoning || "Default";
+    renderGoal();
+  }
+
+  function renderGoal() {
+    goalPanel.hidden = state.role !== "main" || (!state.goalMode && !nativeGoal && !goalError);
+    const labels = { active: "진행 중", paused: "일시 정지", blocked: "입력 필요", usageLimited: "사용량 한도", budgetLimited: "목표 예산 한도", complete: "목표 완료" };
+    goalStatus.textContent = goalError || (nativeGoal
+      ? `${labels[nativeGoal.status] || nativeGoal.status} · ${nativeGoal.tokensUsed.toLocaleString()} tokens · ${nativeGoal.timeUsedSeconds}초\n${nativeGoal.objective}`
+      : "목표를 켜고 메시지를 보내세요.");
+    for (const button of goalPanel.querySelectorAll("[data-goal-action]")) {
+      const action = button.dataset.goalAction;
+      button.disabled = !state.agentId || (action !== "refresh" && !nativeGoal) || (["reopen"].includes(action) && state.running);
+    }
   }
 
   function openSetting(setting) {
@@ -1321,6 +1394,7 @@
     closeSessionMenu(false);
     closeQuestionMenu(false);
     openSettingId = setting;
+    if (setting === "model") vscode.postMessage({ type: "models.request" });
     const button = setting === "model" ? modelButton : reasoningButton;
     const menu = setting === "model" ? modelMenu : reasoningMenu;
     renderSettingMenu(setting, menu);
@@ -1333,7 +1407,8 @@
   function renderSettingMenu(setting, menu) {
     const current = setting === "model" ? state.model : state.reasoning;
     menu.replaceChildren();
-    for (const value of settingOptions[setting]) {
+    const values = setting === "model" ? [...new Set([...settingOptions.model, state.model])] : settingOptions[setting];
+    for (const value of values) {
       const option = document.createElement("button");
       option.type = "button";
       option.className = "setting-option";
@@ -1476,6 +1551,10 @@
     fill.style.backgroundColor = "hsl(" + Math.round((1 - usageRatio) * 120) + " 72% 45%)";
     meter.append(fill);
     item.replaceChildren(label, meter);
+  }
+
+  function normalizeModel(value) {
+    return typeof value === "string" && /^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$/.test(value) ? value : "";
   }
 
   function normalizeSettingValue(value, allowedValues) {

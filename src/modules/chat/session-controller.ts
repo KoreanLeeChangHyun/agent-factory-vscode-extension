@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import type { AttachmentReference } from "../../common/types/attachment";
-import type { AgentRuntimeClient, ExecutionOptions } from "../../infrastructure/agent-factory/agent-client";
+import type { AgentRuntimeClient, ExecutionOptions, NativeGoal, GoalAction } from "../../infrastructure/agent-factory/agent-client";
 
 const TERMINAL_STATES = new Set(["completed", "needs-human-decision", "failed", "cancelled"]);
 
@@ -18,6 +18,7 @@ export interface SessionControllerEvents {
     readonly title?: string;
     readonly diff?: string;
   }) => void;
+  readonly onGoal?: (goal: NativeGoal | null, error?: string) => void;
   readonly onError: (message: string) => void;
 }
 
@@ -78,6 +79,28 @@ export class ChatSessionController {
     }
   }
 
+  public async controlGoal(action: GoalAction): Promise<void> {
+    if (!this.agentId) return;
+    try {
+      const result = await this.runtime.goal(this.agentId, action);
+      if ("goal" in result) this.events.onGoal?.(result.goal ?? null, result.error);
+      if (result.accepted) {
+        this.busy = true;
+        this.currentRunId = result.accepted.runId;
+        this.events.onRunningChanged(true);
+        try {
+          await this.pollUntilTerminal(result.accepted.agentId, result.accepted.runId);
+        } finally {
+          this.currentRunId = undefined;
+          this.busy = false;
+          this.events.onRunningChanged(false);
+        }
+      }
+    } catch (error) {
+      this.events.onError(errorMessage(error));
+    }
+  }
+
   public async cancel(): Promise<void> {
     if (!this.busy || !this.agentId || !this.currentRunId) {
       this.events.onError("현재 실행 중인 Agent가 없습니다.");
@@ -101,6 +124,8 @@ export class ChatSessionController {
       for (const update of updates.updates) {
         if (update.kind === "status") {
           this.events.onProgress(update.text);
+        } else if (update.kind === "goal") {
+          this.events.onGoal?.(update.goal, update.error);
         } else if (update.kind === "usage") {
           this.events.onUsage(update.usedTokens, update.contextWindowTokens);
         } else {
@@ -111,8 +136,17 @@ export class ChatSessionController {
         const status = await this.runtime.status(agentId, runId);
         if (TERMINAL_STATES.has(status.status)) {
           const result = await this.runtime.result(agentId, runId);
-          const text = result.text.trim() || terminalSummary(result.status);
-          this.events.onAssistantText(text);
+          const diagnostic = result.error ?? status.error;
+          const goalError = result.goalError ?? status.goalError;
+          if (goalError) this.events.onGoal?.(null, goalError);
+          const summary = terminalSummary(result.status);
+          this.events.onProgress(summary);
+          if (result.status !== "completed" || diagnostic || goalError) {
+            this.events.onError([summary, diagnostic ? `${diagnostic.code}: ${diagnostic.message}` : "", goalError ?? ""].filter(Boolean).join("\n"));
+            this.events.onAssistantText(result.text.trim() ? `${summary}\n\n보존된 부분 결과 (완료 확인 아님):\n${result.text.trim()}` : summary);
+          } else {
+            this.events.onAssistantText(result.text.trim() || summary);
+          }
           return;
         }
       }

@@ -9,6 +9,13 @@ def option(name):
 
 
 command = sys.argv[1]
+if command == "capabilities":
+    supported = {key: True for key in ("model", "reasoning", "fast", "goal")}
+    print(json.dumps({"kind": "execution-capabilities", "schemaVersion": "0.1.0", "submit": supported, "send": supported}))
+    sys.exit(0)
+if "--help" in sys.argv:
+    print("--agent --model --reasoning-effort --fast --goal-mode")
+    sys.exit(0)
 project_root = pathlib.Path(option("--project-root"))
 agent_id = option("--agent") if "--agent" in sys.argv else ""
 run_id = option("--run-id") if "--run-id" in sys.argv else "run-fake"

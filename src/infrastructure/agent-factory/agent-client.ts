@@ -2,6 +2,7 @@ import { spawn } from "node:child_process";
 import { lstat, open as openFile, readFile, readdir } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join, relative, resolve, sep } from "node:path";
+import { AsyncCache } from "../../common/async-cache";
 
 const MAX_PROCESS_OUTPUT_BYTES = 1024 * 1024;
 const MAX_RESULT_BYTES = 1024 * 1024;
@@ -9,14 +10,34 @@ const MAX_EVENTS_BYTES = 8 * 1024 * 1024;
 const COMMAND_TIMEOUT_MS = 20_000;
 const MANAGED_ID = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
 
+export interface ExecutionCapabilities {
+  readonly model: boolean;
+  readonly reasoning: boolean;
+  readonly fast: boolean;
+  readonly goal: boolean;
+  readonly diagnostic?: string;
+}
+
 export interface ExecutionOptions {
   readonly model?: string;
   readonly reasoningEffort?: "none" | "low" | "medium" | "high" | "xhigh" | "max";
-  readonly fast: boolean;
-  readonly goalMode: boolean;
+  readonly fast?: boolean;
+  readonly goalMode?: boolean;
+  readonly goalObjective?: string;
   readonly actor?: "main" | "human";
   readonly verifiedWorkRunId?: string;
 }
+
+export interface NativeGoal {
+  readonly threadId: string;
+  readonly objective: string;
+  readonly status: "active" | "paused" | "blocked" | "usageLimited" | "budgetLimited" | "complete";
+  readonly tokensUsed: number;
+  readonly timeUsedSeconds: number;
+  readonly tokenBudget?: number | null;
+}
+
+export type GoalAction = "get" | "refresh" | "pause" | "cancel" | "disable" | "reopen";
 
 export interface RunAcceptance {
   readonly agentId: string;
@@ -24,6 +45,8 @@ export interface RunAcceptance {
 }
 
 export interface RunStatus {
+  readonly error?: { readonly code: string; readonly message: string };
+  readonly goalError?: string;
   readonly status: string;
 }
 
@@ -38,6 +61,7 @@ export interface RunUpdates {
 
 export type RunUpdate =
   | { readonly kind: "status"; readonly text: string }
+  | { readonly kind: "goal"; readonly goal: NativeGoal | null; readonly error?: string }
   | {
       readonly kind: "usage";
       readonly usedTokens: number;
@@ -69,17 +93,59 @@ export interface ChildAgentSession {
 }
 
 export interface AgentRuntimeClient {
+  capabilities(agentId?: string): Promise<{ readonly submit: ExecutionCapabilities; readonly send: ExecutionCapabilities }>;
   submit(agentId: string, message: string, execution: ExecutionOptions): Promise<RunAcceptance>;
   send(agentId: string, message: string, execution: ExecutionOptions): Promise<RunAcceptance>;
   status(agentId: string, runId: string): Promise<RunStatus>;
   updates(agentId: string, runId: string, cursor: number): Promise<RunUpdates>;
   result(agentId: string, runId: string): Promise<RunResult>;
   cancel(agentId: string, runId: string): Promise<void>;
+  goal(agentId: string, action: GoalAction): Promise<{ readonly goal?: NativeGoal | null; readonly accepted?: RunAcceptance; readonly error?: string }>;
   listSessions(): Promise<readonly MainAgentSession[]>;
   listChildSessions(mainAgentId: string): Promise<readonly ChildAgentSession[]>;
 }
 
 export class AgentFactoryClient implements AgentRuntimeClient {
+  private readonly capabilityCache = new AsyncCache<Awaited<ReturnType<AgentRuntimeClient["capabilities"]>>>(30_000);
+  private eventSnapshot?: { readonly path: string; readonly signature: string; readonly lines: readonly string[] };
+
+  public async capabilities(agentId?: string): ReturnType<AgentRuntimeClient["capabilities"]> {
+    return this.capabilityCache.get(agentId ?? "", () => this.readCapabilities(agentId));
+  }
+
+  private async readCapabilities(agentId?: string): ReturnType<AgentRuntimeClient["capabilities"]> {
+    const document = await this.command(["capabilities", "--project-root", this.projectRoot, ...(agentId ? ["--agent", agentId] : [])]);
+    if (document.kind !== "execution-capabilities" || document.schemaVersion !== "0.1.0") {
+      throw new Error("네이티브 기능 정보를 제공하는 Agent Factory 런타임으로 업데이트하세요.");
+    }
+    const readCapabilities = (value: unknown): ExecutionCapabilities => {
+      const record = readRecord(value, "execution capabilities");
+      for (const key of ["model", "reasoning", "fast", "goal"]) {
+        if (typeof record[key] !== "boolean") throw new Error("Codex 기능 응답 형식이 올바르지 않습니다.");
+      }
+      return { ...record, ...(typeof document.diagnostic === "string" ? { diagnostic: document.diagnostic } : {}) } as unknown as ExecutionCapabilities;
+    };
+    return { submit: readCapabilities(document.submit), send: readCapabilities(document.send) };
+  }
+
+  public async goal(agentId: string, action: GoalAction): Promise<{ goal?: NativeGoal | null; accepted?: RunAcceptance; error?: string }> {
+    const document = await this.command(["goal", "--project-root", this.projectRoot, "--agent", agentId, action]);
+    if (document.kind === "ack") return { accepted: readAcceptance(document, agentId) };
+    if (document.kind === "goal-control") return {};
+    return { goal: readNativeGoal(document.goal), ...(typeof document.error === "string" ? { error: document.error } : {}) };
+  }
+
+  private async checkedExecution(command: "submit" | "send", execution: ExecutionOptions, agentId?: string): Promise<string[]> {
+    const supported = (await this.capabilities(agentId))[command];
+    const unsupported = [
+      execution.model && !supported.model ? "모델 변경" : "",
+      execution.reasoningEffort && !supported.reasoning ? "추론 수준" : "",
+      execution.fast && !supported.fast ? "Fast" : "",
+      execution.goalMode && !supported.goal ? "Goal" : ""
+    ].filter(Boolean);
+    if (unsupported.length) throw new Error(`현재 런타임의 ${command} 명령은 ${unsupported.join(", ")} 설정을 지원하지 않습니다.`);
+    return executionArguments(execution);
+  }
   public constructor(
     private readonly execPath: string,
     private readonly projectRoot: string,
@@ -119,7 +185,7 @@ export class AgentFactoryClient implements AgentRuntimeClient {
       "main",
       "--message",
       message,
-      ...executionArguments(execution)
+      ...await this.checkedExecution("submit", execution)
     ]);
     return readAcceptance(document, agentId);
   }
@@ -133,7 +199,7 @@ export class AgentFactoryClient implements AgentRuntimeClient {
       agentId,
       "--message",
       message,
-      ...executionArguments(execution)
+      ...await this.checkedExecution("send", execution, agentId)
     ]);
     return readAcceptance(document, agentId);
   }
@@ -148,7 +214,7 @@ export class AgentFactoryClient implements AgentRuntimeClient {
       "--run-id",
       runId
     ]);
-    return { status: readRunStatus(document) };
+    return { status: readRunStatus(document), ...runDiagnostics(readRecord(document.run, "status run")) };
   }
 
   public async updates(agentId: string, runId: string, cursor: number): Promise<RunUpdates> {
@@ -164,24 +230,31 @@ export class AgentFactoryClient implements AgentRuntimeClient {
       runId,
       "events.jsonl"
     );
-    let bytes: Buffer;
+    let lines: readonly string[];
     try {
       const info = await lstat(path);
       if (!info.isFile() || info.size > MAX_EVENTS_BYTES) {
         throw new Error("Agent Factory 이벤트 파일이 없거나 허용 크기를 초과했습니다.");
       }
-      bytes = await readFile(path);
+      const signature = `${info.dev}:${info.ino}:${info.size}:${info.mtimeMs}:${info.ctimeMs}`;
+      if (this.eventSnapshot?.path === path && this.eventSnapshot.signature === signature) {
+        lines = this.eventSnapshot.lines;
+      } else {
+        const bytes = await readFile(path);
+        if (bytes.length > MAX_EVENTS_BYTES) throw new Error("Agent Factory 이벤트 파일이 허용 크기를 초과했습니다.");
+        const content = bytes.toString("utf8");
+        const splitLines = content.split("\n");
+        if (!content.endsWith("\n")) splitLines.pop();
+        lines = splitLines.filter((line) => line.trim().length > 0);
+        this.eventSnapshot = { path, signature, lines };
+      }
     } catch (error) {
-      if (isMissingFile(error)) return { cursor, updates: [] };
+      if (isMissingFile(error)) {
+        this.eventSnapshot = undefined;
+        return { cursor, updates: [] };
+      }
       throw error;
     }
-    if (bytes.length > MAX_EVENTS_BYTES) {
-      throw new Error("Agent Factory 이벤트 파일이 허용 크기를 초과했습니다.");
-    }
-    const content = bytes.toString("utf8");
-    const splitLines = content.split("\n");
-    if (!content.endsWith("\n")) splitLines.pop();
-    const lines = splitLines.filter((line) => line.trim().length > 0);
     const start = Math.min(cursor, lines.length);
     const updates: RunUpdate[] = [];
     const newLines = lines.slice(start);
@@ -237,6 +310,7 @@ export class AgentFactoryClient implements AgentRuntimeClient {
       }
     }
     return {
+      ...runDiagnostics(run),
       status,
       text
     };
@@ -393,11 +467,12 @@ export class AgentFactoryClient implements AgentRuntimeClient {
     try {
       document = JSON.parse(output.stdout);
     } catch {
-      throw new Error("Agent Factory 런타임이 올바른 JSON 응답을 반환하지 않았습니다.");
+      throw new Error(output.stderr.trim() || "Agent Factory 런타임이 올바른 JSON 응답을 반환하지 않았습니다.");
     }
     const record = readRecord(document, "runtime response");
     if (output.exitCode !== 0 || record.kind === "error") {
-      const message = typeof record.message === "string" ? record.message : output.stderr.trim();
+      const nested = readRecordOrUndefined(record.error);
+      const message = typeof nested?.message === "string" ? nested.message : typeof record.message === "string" ? record.message : output.stderr.trim();
       throw new Error(message || `Agent Factory 런타임 명령이 종료 코드 ${output.exitCode}로 실패했습니다.`);
     }
     return record;
@@ -428,8 +503,9 @@ function executionArguments(execution: ExecutionOptions): string[] {
   const arguments_: string[] = [];
   if (execution.model) arguments_.push("--model", execution.model);
   if (execution.reasoningEffort) arguments_.push("--reasoning-effort", execution.reasoningEffort);
-  if (execution.fast) arguments_.push("--fast");
-  if (execution.goalMode) arguments_.push("--goal-mode");
+  if (execution.fast !== undefined) arguments_.push(execution.fast ? "--fast" : "--no-fast");
+  if (execution.goalMode !== undefined) arguments_.push(execution.goalMode ? "--goal-mode" : "--no-goal-mode");
+  if (execution.goalObjective) arguments_.push("--goal-objective", execution.goalObjective);
   if (execution.actor) arguments_.push("--actor", execution.actor);
   if (execution.verifiedWorkRunId) arguments_.push("--verified-work-run-id", execution.verifiedWorkRunId);
   return arguments_;
@@ -456,6 +532,10 @@ async function progressUpdates(line: string, projectRoot: string): Promise<reado
   }
   const event = readRecordOrUndefined(value);
   if (!event) return [];
+  if (event.type === "goal.updated") return [{ kind: "goal", goal: readNativeGoal(event.goal) }];
+  if (event.type === "goal.error") return [{ kind: "goal", goal: null, error: typeof event.message === "string" ? event.message : "Goal 상태 확인 필요" }];
+  if (event.type === "goal.continuing") return [statusUpdate("목표가 활성 상태입니다. Codex가 다음 turn을 이어갑니다.")];
+  if (event.type === "native.commentary" && typeof event.text === "string") return [statusUpdate(truncate(event.text, 500))];
   if (event.type === "thread.started") return [statusUpdate("Main Agent 연결됨")];
   if (event.type === "turn.started") return [statusUpdate("Main Agent가 요청을 분석 중")];
   if (event.type === "turn.completed") {
@@ -499,6 +579,19 @@ async function progressUpdates(line: string, projectRoot: string): Promise<reado
   if (item.type === "reasoning") return [statusUpdate("추론 중")];
   if (item.type === "agent_message") return [statusUpdate("응답 정리 중")];
   return [];
+}
+
+function readNativeGoal(value: unknown): NativeGoal | null {
+  if (value === null || value === undefined) return null;
+  const goal = readRecord(value, "native goal");
+  if (typeof goal.threadId !== "string" || typeof goal.objective !== "string" || goal.objective.length > 4000 ||
+      !["active", "paused", "blocked", "usageLimited", "budgetLimited", "complete"].includes(String(goal.status)) ||
+      readTokenCount(goal.tokensUsed) === undefined || readTokenCount(goal.timeUsedSeconds) === undefined) {
+    throw new Error("네이티브 Goal 상태가 올바르지 않습니다.");
+  }
+  return { threadId: goal.threadId, objective: goal.objective, status: goal.status as NativeGoal["status"],
+    tokensUsed: Number(goal.tokensUsed), timeUsedSeconds: Number(goal.timeUsedSeconds),
+    ...(goal.tokenBudget === null || readTokenCount(goal.tokenBudget) !== undefined ? { tokenBudget: goal.tokenBudget as number | null } : {}) };
 }
 
 function statusUpdate(text: string): RunUpdate {
@@ -803,6 +896,14 @@ function readAcceptance(document: Record<string, unknown>, expectedAgentId: stri
     throw new Error("Agent Factory 런타임이 올바른 실행 접수 응답을 반환하지 않았습니다.");
   }
   return { agentId: document.agentId, runId: document.runId };
+}
+
+function runDiagnostics(run: Record<string, unknown>): Pick<RunStatus, "error" | "goalError"> {
+  const error = readRecordOrUndefined(run.error);
+  return {
+    ...(error && typeof error.message === "string" ? { error: { code: String(error.code ?? "runtime_error"), message: error.message } } : {}),
+    ...(typeof run.goalError === "string" ? { goalError: run.goalError } : {})
+  };
 }
 
 function readRunStatus(document: Record<string, unknown>): string {

@@ -12,6 +12,7 @@ import type { HostMessage } from "../../protocol/messages";
 import { parseClientMessage } from "../../protocol/validator";
 import type { ChatTemplateRenderer } from "./chat-template-renderer";
 import type { AgentRuntimeClient } from "../agent-factory/agent-client";
+import { readCodexModels } from "../agent-factory/model-catalog";
 import { ChatSessionController } from "../../modules/chat/session-controller";
 
 type RuntimeConnection =
@@ -183,6 +184,7 @@ export class ChatPanelManager implements vscode.Disposable {
           verifiedWorkRunId: managed.state.verifiedWorkRunId,
           projectName: workspaceName(),
           runtimeAvailable: connection.available,
+          capabilities: connection.available ? await connection.client.capabilities(managed.state.agentId) : undefined,
           running: managed.controller?.running ?? false,
           statusItems: this.statusItems(),
           model: managed.state.model,
@@ -199,16 +201,9 @@ export class ChatPanelManager implements vscode.Disposable {
             text: connection.diagnostic
           });
         }
+        await this.sendModelList(managed);
         return;
       case "chat.send":
-        managed.state = {
-          ...managed.state,
-          model: message.execution.model,
-          reasoning: message.execution.reasoningEffort,
-          fastMode: message.execution.fast,
-          goalMode: message.execution.goal
-        };
-        await this.saveComposerPreferences(managed.state);
         await this.sendChat(managed, message.text, message.attachments, message.execution);
         return;
       case "composer.settings":
@@ -221,6 +216,11 @@ export class ChatPanelManager implements vscode.Disposable {
         };
         await this.saveComposerPreferences(managed.state);
         return;
+      case "goal.control":
+        if ((managed.state.role ?? "main") !== "main") return;
+        await this.ensureController(managed);
+        void managed.controller?.controlGoal(message.action);
+        return;
       case "run.cancel":
         if (!managed.controller) {
           await this.post(managed.panel, { type: "host.notice", level: "info", text: "현재 실행 중인 Agent가 없습니다." });
@@ -230,6 +230,9 @@ export class ChatPanelManager implements vscode.Disposable {
         return;
       case "sessions.request":
         await this.sendSessionList(managed);
+        return;
+      case "models.request":
+        await this.sendModelList(managed);
         return;
       case "agents.request":
         await this.sendAgentList(managed);
@@ -267,6 +270,11 @@ export class ChatPanelManager implements vscode.Disposable {
         text: error instanceof Error ? error.message : String(error)
       });
     }
+  }
+
+  private async sendModelList(managed: ManagedPanel): Promise<void> {
+    const models = await readCodexModels();
+    if (models !== undefined) await this.post(managed.panel, { type: "models.list", models });
   }
 
   private async sendAgentList(managed: ManagedPanel): Promise<void> {
@@ -379,6 +387,9 @@ export class ChatPanelManager implements vscode.Disposable {
       managed.controller = undefined;
       managed.state = { ...managed.state, agentId };
       await this.post(managed.panel, { type: "session.bound", agentId, reset: true });
+      await this.post(managed.panel, { type: "capabilities.updated", capabilities: await connection.client.capabilities(agentId) });
+      const observed = await connection.client.goal(agentId, "get");
+      await this.post(managed.panel, { type: "goal.updated", goal: observed.goal ?? null, error: observed.error });
     } catch (error) {
       await this.post(managed.panel, {
         type: "host.notice",
@@ -388,12 +399,7 @@ export class ChatPanelManager implements vscode.Disposable {
     }
   }
 
-  private async sendChat(
-    managed: ManagedPanel,
-    text: string,
-    attachments: readonly AttachmentReference[],
-    execution: Extract<import("../../protocol/messages").ClientMessage, { type: "chat.send" }>["execution"]
-  ): Promise<void> {
+  private async ensureController(managed: ManagedPanel): Promise<void> {
     if (!managed.controller) {
       const connection = await this.connectRuntime();
       if (!connection.available) {
@@ -422,16 +428,30 @@ export class ChatPanelManager implements vscode.Disposable {
         onActivity: (activity) => {
           void this.post(managed.panel, { type: "run.activity", ...activity });
         },
+        onGoal: (goal, error) => {
+          void this.post(managed.panel, { type: "goal.updated", goal, error });
+        },
         onError: (message) => {
           void this.post(managed.panel, { type: "host.notice", level: "error", text: message });
         }
       }, managed.state.agentId);
     }
+  }
+
+  private async sendChat(
+    managed: ManagedPanel,
+    text: string,
+    attachments: readonly AttachmentReference[],
+    execution: Extract<import("../../protocol/messages").ClientMessage, { type: "chat.send" }>["execution"]
+  ): Promise<void> {
+    await this.ensureController(managed);
+    if (!managed.controller) return;
     void managed.controller.send(text, attachments, {
       model: execution.model,
       reasoningEffort: execution.reasoningEffort,
       fast: execution.fast,
       goalMode: execution.goal,
+      goalObjective: execution.goalObjective,
       ...((managed.state.role ?? "main") !== "main" ? { actor: "human" as const } : {}),
       ...(managed.state.verifiedWorkRunId ? { verifiedWorkRunId: managed.state.verifiedWorkRunId } : {})
     });

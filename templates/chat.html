@@ -91,6 +91,18 @@
           </div>
         </div>
       </section>
+      <section id="goal-panel" class="goal-panel" aria-label="지속 목표" hidden>
+        <label for="goal-objective">목표 <span>(새 목표를 지정할 때만 입력, 최대 4,000자)</span></label>
+        <textarea id="goal-objective" rows="2" maxlength="4000" placeholder="비워 두면 기존 목표를 유지합니다. 첫 실행에서는 메시지가 목표가 됩니다."></textarea>
+        <p id="goal-status" role="status" aria-live="polite">목표를 켜고 메시지를 보내세요.</p>
+        <div class="goal-actions">
+          <button type="button" data-goal-action="refresh">상태 새로고침</button>
+          <button type="button" data-goal-action="pause">일시 정지</button>
+          <button type="button" data-goal-action="reopen">다시 시작</button>
+          <button type="button" data-goal-action="cancel">목표 취소</button>
+          <button type="button" data-goal-action="disable">Goal 끄기</button>
+        </div>
+      </section>
       <div id="agents-menu" class="utility-list-menu agents-menu" role="listbox" aria-label="호출된 작업자와 검증자" hidden>
         <div id="agents-list" class="agents-list"></div>
       </div>
