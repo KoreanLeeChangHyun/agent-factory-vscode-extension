@@ -61,6 +61,7 @@ export interface RunUpdates {
 }
 
 export type RunUpdate =
+  | { readonly kind: "commentary"; readonly text: string }
   | { readonly kind: "status"; readonly text: string }
   | { readonly kind: "goal"; readonly goal: NativeGoal | null; readonly error?: string }
   | {
@@ -76,6 +77,7 @@ export type RunUpdate =
       readonly text: string;
       readonly title?: string;
       readonly diff?: string;
+      readonly output?: string;
     };
 
 export interface MainAgentSession {
@@ -566,7 +568,11 @@ async function progressUpdates(line: string, projectRoot: string): Promise<reado
   if (event.type === "goal.updated") return [{ kind: "goal", goal: readNativeGoal(event.goal) }];
   if (event.type === "goal.error") return [{ kind: "goal", goal: null, error: typeof event.message === "string" ? event.message : "Goal 상태 확인 필요" }];
   if (event.type === "goal.continuing") return [statusUpdate("목표가 활성 상태입니다. Codex가 다음 turn을 이어갑니다.")];
-  if (event.type === "native.commentary" && typeof event.text === "string") return [statusUpdate(truncate(event.text, 500))];
+  if (event.type === "native.commentary") {
+    return typeof event.text === "string" && event.text.trim()
+      ? [{ kind: "commentary", text: event.text }, statusUpdate("작업 중")]
+      : [];
+  }
   if (event.type === "thread.started") return [statusUpdate("Main Agent 연결됨")];
   if (event.type === "turn.started") return [statusUpdate("Main Agent가 요청을 분석 중")];
   if (event.type === "turn.completed") {
@@ -579,12 +585,13 @@ async function progressUpdates(line: string, projectRoot: string): Promise<reado
   if (item.type === "command_execution") {
     const detail = summarizeCommand(item.command) ?? "명령 내용 없음";
     const title = summarizeReadActivity(item.command);
+    const output = typeof item.aggregatedOutput === "string" ? item.aggregatedOutput : item.aggregated_output;
     const failed = completed && typeof item.exit_code === "number" && item.exit_code !== 0;
     if (title === "실행 요청 읽기") {
       return [statusUpdate("Main Agent가 요청을 분석 중")];
     }
     return compactUpdates(
-      itemId ? activityUpdate(itemId, "command", failed ? "failed" : completed ? "completed" : "started", detail, undefined, title) : undefined,
+      itemId ? activityUpdate(itemId, "command", failed ? "failed" : completed ? "completed" : "started", detail, undefined, title, typeof output === "string" ? truncate(output, 32768) : undefined) : undefined,
       statusUpdate(failed ? "명령 실패 확인 중" : completed ? "결과 분석 중" : "명령 실행 중")
     );
   }
@@ -702,7 +709,8 @@ function activityUpdate(
   phase: "started" | "completed" | "failed",
   text: string,
   diff?: string,
-  title?: string
+  title?: string,
+  output?: string
 ): RunUpdate {
   return {
     kind: "activity",
@@ -711,7 +719,8 @@ function activityUpdate(
     phase,
     text,
     ...(title ? { title } : {}),
-    ...(diff ? { diff } : {})
+    ...(diff ? { diff } : {}),
+    ...(output !== undefined ? { output } : {})
   };
 }
 

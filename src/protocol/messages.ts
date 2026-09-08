@@ -94,7 +94,7 @@ export type HostMessage =
         readonly updatedAt?: string;
       }[];
     }
-  | { readonly type: "chat.assistant"; readonly text: string }
+  | { readonly type: "chat.assistant"; readonly text: string; readonly phase?: "commentary" | "final" }
   | { readonly type: "run.progress"; readonly text: string }
   | {
       readonly type: "context.usage";
@@ -109,6 +109,7 @@ export type HostMessage =
       readonly text: string;
       readonly title?: string;
       readonly diff?: string;
+      readonly output?: string;
     }
   | {
       readonly type: "run.state";

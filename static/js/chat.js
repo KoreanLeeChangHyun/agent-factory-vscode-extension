@@ -378,7 +378,7 @@
         break;
       case "chat.assistant":
         if (typeof message.text === "string" && message.text) {
-          state.timeline.push({ type: "assistant", id: createId(), text: message.text });
+          state.timeline.push({ type: "assistant", id: createId(), text: message.text, phase: message.phase === "commentary" ? "commentary" : "final" });
           renderTimeline();
           persist();
         }
@@ -416,11 +416,12 @@
           typeof message.id === "string" &&
           typeof message.text === "string" &&
           (message.title === undefined || (typeof message.title === "string" && message.title.length <= 200)) &&
+          (message.output === undefined || (typeof message.output === "string" && message.output.length <= 32768)) &&
           (message.diff === undefined || (typeof message.diff === "string" && message.diff.length <= 262144)) &&
           ["command", "file", "tool"].includes(message.category) &&
           ["started", "completed", "failed"].includes(message.phase)
         ) {
-          upsertActivity(message.id, message.category, message.phase, message.text, message.diff, message.title);
+          upsertActivity(message.id, message.category, message.phase, message.text, message.diff, message.title, message.output);
           persist();
         }
         break;
@@ -489,7 +490,7 @@
     persist();
   }
 
-  function upsertActivity(id, category, phase, text, diff, title) {
+  function upsertActivity(id, category, phase, text, diff, title, output) {
     let existing = state.timeline.find(function (event) {
       return event.type === "activity" && event.id === id;
     });
@@ -506,8 +507,9 @@
       existing.text = text;
       existing.diff = diff;
       existing.title = title;
+      existing.output = output;
     } else {
-      state.timeline.push({ type: "activity", id, category, phase, text, diff, title });
+      state.timeline.push({ type: "activity", id, category, phase, text, diff, title, output });
     }
     renderTimeline();
   }
@@ -633,6 +635,9 @@
       const message = document.createElement("article");
       message.className = "message message-" + event.type;
       message.dataset.id = event.id;
+      if (event.type === "assistant") {
+        message.classList.add(event.phase === "commentary" ? "message-commentary" : "message-final");
+      }
       if (event.type === "user") {
         message.tabIndex = -1;
       }
@@ -641,7 +646,14 @@
         message.dataset.category = event.category || "tool";
         message.dataset.phase = event.phase || "started";
       }
-      if (event.type === "activity" && event.category !== "command") {
+      if (event.type === "user" || event.type === "assistant") {
+        const marker = event.type === "user" ? document.createElement("span") : createTranscriptDot();
+        marker.classList.add("transcript-marker");
+        marker.setAttribute("aria-hidden", "true");
+        if (event.type === "user") marker.textContent = "›";
+        message.append(marker);
+      }
+      if (event.type === "activity" && event.category !== "command" && !(event.category === "file" && event.diff)) {
         const heading = document.createElement("div");
         heading.className = "message-heading";
         const kind = document.createElement("span");
@@ -664,8 +676,9 @@
         renderAssistantMarkdown(content, event.text);
       } else if (event.type === "activity" && event.category === "command") {
         renderTerminalCommand(content, event.text, event.phase, event.title);
+        renderCommandOutput(content, event.output, Boolean(event.title));
       } else if (event.type === "activity" && event.category === "file" && event.diff) {
-        renderGitDiff(content, event.diff, event.text);
+        renderGitDiff(content, event.diff, event.text, event.phase);
       } else {
         content.textContent = event.text;
       }
@@ -686,9 +699,22 @@
     return "도구 실행";
   }
 
+  function createTranscriptDot() {
+    const dot = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+    dot.setAttribute("viewBox", "0 0 16 24");
+    dot.setAttribute("focusable", "false");
+    const circle = document.createElementNS("http://www.w3.org/2000/svg", "circle");
+    circle.setAttribute("cx", "4");
+    circle.setAttribute("cy", "12");
+    circle.setAttribute("r", "2");
+    circle.setAttribute("fill", "currentColor");
+    dot.append(circle);
+    return dot;
+  }
+
   function createActivityPhase(phaseValue) {
-    const phase = document.createElement("span");
-    phase.className = "message-phase message-phase-" + (phaseValue || "started");
+    const phase = createTranscriptDot();
+    phase.setAttribute("class", "message-phase message-phase-" + (phaseValue || "started"));
     phase.setAttribute("role", "img");
     phase.setAttribute("aria-label", activityPhaseAccessibleLabel(phaseValue));
     return phase;
@@ -706,8 +732,7 @@
     row.className = "terminal-command-row";
     const prompt = document.createElement("span");
     prompt.className = "terminal-command-prompt";
-    prompt.textContent = ">";
-    prompt.setAttribute("aria-hidden", "true");
+    prompt.textContent = phaseValue === "failed" ? "Failed " : phaseValue === "completed" ? "Ran " : "Running ";
     const text = document.createElement("div");
     text.className = "bash-command-text";
     if (title) {
@@ -716,30 +741,33 @@
       context.textContent = readActivityDisplayTitle(title, phaseValue);
       context.title = command;
       text.append(context);
-      row.append(createActivityPhase(phaseValue), prompt, text);
+      row.append(createActivityPhase(phaseValue), text);
       container.append(row);
       return;
     }
     const commandCode = document.createElement("span");
     commandCode.className = "syntax-code";
     commandCode.textContent = command;
-    text.append(commandCode);
-    row.append(createActivityPhase(phaseValue), prompt, text);
+    text.append(prompt, commandCode);
+    row.append(createActivityPhase(phaseValue), text);
     const toggle = document.createElement("button");
     toggle.type = "button";
     toggle.className = "bash-command-toggle";
-    toggle.textContent = "…";
+    toggle.textContent = "펼치기";
     toggle.setAttribute("aria-label", "전체 명령 펼치기");
     toggle.setAttribute("aria-expanded", "false");
     toggle.hidden = true;
     toggle.addEventListener("click", function () {
       const expanded = text.classList.toggle("is-expanded");
       toggle.classList.toggle("is-expanded", expanded);
-      toggle.textContent = expanded ? "접기" : "…";
+      toggle.textContent = expanded ? "접기" : "펼치기";
       toggle.setAttribute("aria-label", expanded ? "명령 접기" : "전체 명령 펼치기");
       toggle.setAttribute("aria-expanded", String(expanded));
     });
-    container.append(row, toggle);
+    const commandBlock = document.createElement("div");
+    commandBlock.className = "terminal-command-block";
+    commandBlock.append(row, toggle);
+    container.append(commandBlock);
     requestAnimationFrame(function () {
       toggle.hidden = text.scrollHeight <= text.clientHeight + 1;
     });
@@ -757,18 +785,55 @@
     return title;
   }
 
-  function renderGitDiff(container, diff, fallbackText) {
+  function createCommandOutput(text) {
+    const output = document.createElement("pre");
+    output.className = "terminal-command-output";
+    const marker = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+    marker.setAttribute("viewBox", "0 0 16 24");
+    marker.setAttribute("aria-hidden", "true");
+    marker.setAttribute("focusable", "false");
+    const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+    path.setAttribute("d", "M4 3v9h7");
+    path.setAttribute("fill", "none");
+    path.setAttribute("stroke", "currentColor");
+    marker.append(path);
+    output.append(marker, document.createTextNode(text));
+    return output;
+  }
+
+  function renderCommandOutput(container, output, collapsed) {
+    if (typeof output !== "string") return;
+    const lines = output.replace(/\r\n/g, "\n").trimEnd().split("\n");
+    const preview = createCommandOutput(output.length === 0 ? "(no output)" : lines.slice(0, 3).join("\n"));
+    if (collapsed || lines.length > 3) {
+      const details = document.createElement("details");
+      details.className = "terminal-output-details";
+      const summary = document.createElement("summary");
+      summary.textContent = "실행 결과 보기";
+      const full = createCommandOutput(output || "(no output)");
+      details.append(summary, full);
+      if (!collapsed) container.append(preview);
+      container.append(details);
+    } else {
+      container.append(preview);
+    }
+  }
+
+  function renderGitDiff(container, diff, fallbackText, phaseValue) {
     container.classList.add("git-diff-content");
     const files = parseGitDiff(diff);
     const additions = files.reduce(function (sum, file) { return sum + file.additions; }, 0);
     const deletions = files.reduce(function (sum, file) { return sum + file.deletions; }, 0);
     const overview = document.createElement("div");
     overview.className = "git-diff-overview";
-    overview.append(document.createTextNode("Edited " + (files.length || 1) + " file" + (files.length === 1 ? "" : "s") + " "));
+    overview.append(createActivityPhase(phaseValue));
+    const label = document.createElement("span");
+    label.append(document.createTextNode("Edited " + (files.length === 1 ? files[0].path : (files.length || 1) + " files") + " "));
     const stats = document.createElement("span");
     stats.className = "git-diff-stats";
     stats.textContent = "(+" + additions + " −" + deletions + ")";
-    overview.append(stats);
+    label.append(stats);
+    overview.append(label);
     container.append(overview);
 
     const list = document.createElement("div");
@@ -788,11 +853,12 @@
         list.append(row);
       });
     }
-    container.append(list);
+    if (files.length !== 1) container.append(list);
+    renderInlineDiff(container, diff);
 
     const details = document.createElement("details");
     details.className = "git-diff-preview";
-    details.open = diff.split("\n").length <= 160;
+    details.open = false;
     const summary = document.createElement("summary");
     summary.textContent = "Git diff 보기";
     const pre = document.createElement("pre");
@@ -807,6 +873,55 @@
     details.append(summary, pre);
     container.append(details);
     void applyDiffSyntaxHighlighting(code, diff);
+  }
+
+  function renderInlineDiff(container, diff) {
+    const preview = document.createElement("pre");
+    preview.className = "git-diff-inline";
+    let oldLine = 0;
+    let newLine = 0;
+    let inHunk = false;
+    let shown = 0;
+    const multipleFiles = parseGitDiff(diff).length > 1;
+    for (const line of diff.split("\n")) {
+      const hunk = line.match(/^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@/);
+      if (hunk) {
+        oldLine = Number(hunk[1]);
+        newLine = Number(hunk[2]);
+        inHunk = true;
+        continue;
+      }
+      if (line.startsWith("diff --git ")) {
+        inHunk = false;
+        if (multipleFiles && shown < 12) {
+          const file = document.createElement("span");
+          file.className = "git-diff-inline-file";
+          const match = line.match(/^diff --git a\/(.+) b\/(.+)$/);
+          file.textContent = match ? match[2] : line.slice(11);
+          preview.append(file);
+        }
+        continue;
+      }
+      if (!inHunk || !/^[ +\-]/.test(line)) continue;
+      const number = line.startsWith("-") ? oldLine : newLine;
+      if (!line.startsWith("+")) oldLine++;
+      if (!line.startsWith("-")) newLine++;
+      if (shown++ >= 12) continue;
+      const row = document.createElement("span");
+      row.className = "git-diff-line" + (line.startsWith("+") ? " git-diff-addition" : line.startsWith("-") ? " git-diff-deletion" : "");
+      const gutter = document.createElement("span");
+      gutter.className = "git-diff-line-number";
+      gutter.textContent = String(number);
+      row.append(gutter, document.createTextNode(line));
+      preview.append(row);
+    }
+    if (shown > 12) {
+      const more = document.createElement("span");
+      more.className = "git-diff-more";
+      more.textContent = "… " + (shown - 12) + " more lines";
+      preview.append(more);
+    }
+    if (shown > 0) container.append(preview);
   }
 
   async function applyDiffSyntaxHighlighting(code, diff) {

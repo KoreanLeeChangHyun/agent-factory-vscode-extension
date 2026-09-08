@@ -415,8 +415,8 @@ export class ChatPanelManager implements vscode.Disposable {
         onRunningChanged: (running) => {
           void this.post(managed.panel, { type: "run.state", running });
         },
-        onAssistantText: (responseText) => {
-          void this.post(managed.panel, { type: "chat.assistant", text: responseText });
+        onAssistantText: (responseText, phase) => {
+          void this.post(managed.panel, { type: "chat.assistant", text: responseText, phase });
         },
         onProgress: (progressText) => {
           void this.post(managed.panel, { type: "run.progress", text: progressText });

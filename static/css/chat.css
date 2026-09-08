@@ -49,7 +49,9 @@ button {
   flex-direction: column;
   min-height: 0;
   overflow-y: auto;
-  padding: 32px 12px 28px;
+  padding: 14px 12px 18px;
+  font-family: var(--vscode-editor-font-family, monospace);
+  font-size: var(--vscode-editor-font-size, 13px);
   scrollbar-gutter: stable;
 }
 
@@ -87,62 +89,52 @@ button {
 }
 
 .message {
+  position: relative;
   width: 100%;
-  margin: 0 auto 22px;
-  line-height: 1.6;
+  margin: 0 0 1em;
+  line-height: 1.5;
 }
 
 .message-user {
-  display: flex;
-  justify-content: flex-end;
+  padding: 0.25em 0;
+  background: color-mix(in srgb, var(--vscode-editorWidget-background) 75%, transparent);
 }
 
-.message-user .message-content {
-  max-width: min(78%, 680px);
-  padding: 10px 14px;
-  border: 1px solid var(--vscode-input-border, transparent);
-  border-radius: 15px 15px 4px 15px;
-  background: var(--vscode-editorWidget-background);
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
+.transcript-marker {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 2ch;
+  height: 1.5em;
+  color: var(--vscode-editor-foreground);
 }
 
+.message-user .transcript-marker { top: 0.25em; }
+
+.message-user .message-content,
 .message-assistant .message-content {
-  max-width: min(100%, 900px);
+  min-width: 0;
+  padding-left: 2ch;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
 
 .message-heading {
   display: flex;
-  min-height: 20px;
-  margin-bottom: 5px;
+  min-height: 1.5em;
   align-items: center;
-  gap: 7px;
 }
 
-.message-kind {
-  color: var(--vscode-foreground);
-  font-size: 11px;
-  font-weight: 650;
-  letter-spacing: 0.02em;
-}
+.message-kind { color: var(--vscode-foreground); font: inherit; }
 
 .message-phase {
-  width: 5px;
-  height: 5px;
-  flex: 0 0 5px;
-  border-radius: 50%;
-  background: var(--vscode-descriptionForeground);
+  width: 2ch;
+  height: 1.5em;
+  flex: 0 0 2ch;
+  color: var(--vscode-descriptionForeground);
 }
 
-.message-phase-completed {
-  background: var(--vscode-testing-iconPassed, #73c991);
-}
-
-.message-phase-failed {
-  background: var(--vscode-testing-iconFailed, #f14c4c);
-}
+.message-phase-failed { color: var(--vscode-testing-iconFailed, #f14c4c); }
 
 .message-assistant .markdown-body {
   white-space: normal;
@@ -162,29 +154,10 @@ button {
 .markdown-body h4,
 .markdown-body h5,
 .markdown-body h6 {
-  margin: 1.35em 0 0.55em;
+  margin: 1em 0 0.5em;
   color: var(--vscode-editor-foreground);
-  line-height: 1.3;
-}
-
-.markdown-body h1 {
-  font-size: 1.55em;
-}
-
-.markdown-body h2 {
-  padding-bottom: 0.28em;
-  border-bottom: 1px solid var(--vscode-panel-border);
-  font-size: 1.3em;
-}
-
-.markdown-body h3 {
-  font-size: 1.12em;
-}
-
-.markdown-body h4,
-.markdown-body h5,
-.markdown-body h6 {
   font-size: 1em;
+  line-height: inherit;
 }
 
 .markdown-body p,
@@ -193,7 +166,7 @@ button {
 .markdown-body blockquote,
 .markdown-body pre,
 .markdown-body table {
-  margin: 0 0 0.9em;
+  margin: 0 0 1em;
 }
 
 .markdown-body ul,
@@ -202,7 +175,7 @@ button {
 }
 
 .markdown-body li + li {
-  margin-top: 0.28em;
+  margin-top: 0;
 }
 
 .markdown-body a {
@@ -216,19 +189,16 @@ button {
 }
 
 .markdown-body code {
-  padding: 0.15em 0.35em;
-  border-radius: 4px;
-  background: var(--vscode-textCodeBlock-background);
+  padding: 0;
+  background: transparent;
   font-family: var(--vscode-editor-font-family, monospace);
-  font-size: 0.92em;
+  font-size: 1em;
 }
 
 .markdown-body pre {
-  padding: 11px 13px;
+  padding: 0 0 0 2ch;
   overflow-x: auto;
-  border: 1px solid var(--vscode-panel-border);
-  border-radius: 7px;
-  background: var(--vscode-textCodeBlock-background);
+  background: transparent;
 }
 
 .markdown-body pre code {
@@ -266,18 +236,15 @@ button {
   display: flex;
   gap: 9px;
   align-items: flex-start;
-  padding: 8px 10px;
-  border-radius: 7px;
+  padding: 0;
   color: var(--vscode-descriptionForeground);
-  background: color-mix(in srgb, var(--vscode-editorWidget-background) 66%, transparent);
 }
 
 .message-activity {
-  margin-bottom: 10px;
-  padding: 0 2px;
+  margin-bottom: 0.5em;
   color: var(--vscode-descriptionForeground);
-  font-size: 12px;
-  line-height: 1.45;
+  font-size: inherit;
+  line-height: 1.5;
 }
 
 .message-activity .message-content {
@@ -286,8 +253,8 @@ button {
   overflow-wrap: anywhere;
 }
 
-.message-activity-command {
-  --activity-heading-color: var(--vscode-terminal-ansiCyan, #29b8db);
+.message-activity > .message-content:not(.terminal-command-content):not(.git-diff-content) {
+  padding-left: 2ch;
 }
 
 .message-activity-command .message-content {
@@ -299,34 +266,21 @@ button {
   display: flex;
   min-width: 0;
   align-items: flex-start;
-  gap: 7px;
+  gap: 0;
 }
 
-.terminal-command-content {
+.terminal-command-block {
   position: relative;
 }
 
-.terminal-command-row .message-phase {
-  margin-top: calc((1.45em - 5px) / 2);
-}
+.terminal-command-prompt { color: var(--vscode-foreground); }
 
-.terminal-command-prompt {
-  flex: 0 0 auto;
-  color: var(--vscode-terminal-ansiCyan, #29b8db);
-  font-weight: 650;
-}
-
-.terminal-command-context {
-  color: var(--vscode-terminal-ansiCyan, #29b8db);
-  font-family: var(--vscode-font-family);
-  font-size: 11px;
-  font-weight: 650;
-}
+.terminal-command-context { color: inherit; font: inherit; }
 
 .bash-command-text {
   min-width: 0;
   flex: 1;
-  max-height: calc(1.45em * 3);
+  max-height: calc(1.5em * 3);
   overflow: hidden;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
@@ -353,7 +307,7 @@ button {
 .bash-command-toggle.is-expanded {
   position: static;
   margin-top: 3px;
-  margin-left: 26px;
+  margin-left: 2ch;
   padding-left: 0;
   background: transparent;
 }
@@ -363,42 +317,38 @@ button {
   text-decoration: underline;
 }
 
-.message-activity-file {
-  --activity-heading-color: var(--vscode-gitDecoration-modifiedResourceForeground, #e2c08d);
-  padding: 7px 10px 8px;
-  border: 1px solid var(--vscode-panel-border);
-  border-radius: 6px;
-  background: color-mix(in srgb, var(--vscode-editorWidget-background) 52%, transparent);
-}
-
 .git-diff-overview {
+  display: flex;
+  align-items: flex-start;
   color: var(--vscode-foreground);
-  font-weight: 600;
 }
 
 .git-diff-stats,
 .git-diff-file-stats {
-  color: var(--vscode-gitDecoration-modifiedResourceForeground, #e2c08d);
+  color: var(--vscode-foreground);
 }
 
 .git-diff-files {
   display: grid;
-  margin: 4px 0 6px;
-  gap: 2px;
+  margin: 0 0 0.5em 2ch;
+  gap: 0;
   font-family: var(--vscode-editor-font-family, monospace);
 }
 
 .git-diff-file {
   display: flex;
   min-width: 0;
-  justify-content: space-between;
-  gap: 12px;
+  gap: 1ch;
 }
 
 .git-diff-file > span:first-child {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.git-diff-preview {
+  margin-left: 2ch;
 }
 
 .git-diff-preview summary {
@@ -409,12 +359,10 @@ button {
 
 .git-diff-preview pre {
   max-height: min(420px, 52vh);
-  margin: 7px 0 0;
-  padding: 8px 0;
+  margin: 0.5em 0 0;
+  padding: 0;
   overflow: auto;
-  border: 1px solid var(--vscode-panel-border);
-  border-radius: 5px;
-  background: var(--vscode-textCodeBlock-background);
+  background: transparent;
 }
 
 .git-diff-preview code {
@@ -426,7 +374,7 @@ button {
 
 .git-diff-line {
   display: block;
-  padding: 0 9px;
+  padding: 0;
 }
 
 .git-diff-addition {
@@ -444,7 +392,7 @@ button {
 }
 
 .message-activity-tool {
-  --activity-heading-color: var(--vscode-charts-purple, #b180d7);
+  --activity-heading-color: var(--vscode-foreground);
 }
 
 .message-activity .message-kind {
@@ -1128,9 +1076,6 @@ button:focus-visible,
     padding-inline: 8px;
   }
 
-  .message-user .message-content {
-    max-width: 90%;
-  }
 
   .setting-button {
     max-width: 150px;
@@ -1163,3 +1108,64 @@ button:focus-visible,
 .goal-actions button { color: var(--vscode-button-secondaryForeground); background: var(--vscode-button-secondaryBackground); border: 0; padding: 4px 8px; cursor: pointer; }
 .goal-actions button:disabled { opacity: .5; cursor: default; }
 .goal-panel :focus-visible { outline: 1px solid var(--vscode-focusBorder); outline-offset: 2px; }
+
+.terminal-command-output {
+  position: relative;
+  margin: 0 0 0 2ch;
+  padding-left: 2ch;
+  color: var(--vscode-descriptionForeground);
+  font: inherit;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  max-height: 40vh;
+  overflow-y: auto;
+}
+
+.terminal-output-details { margin-left: 2ch; }
+.terminal-output-details summary { cursor: pointer; color: var(--vscode-descriptionForeground); }
+.terminal-output-details .terminal-command-output { margin-left: 0; }
+
+.git-diff-inline {
+  margin: 0 0 0.5em 2ch;
+  overflow-x: auto;
+  font: inherit;
+  white-space: pre;
+}
+
+.git-diff-inline .git-diff-addition,
+.git-diff-inline .git-diff-deletion { background: transparent; }
+.git-diff-line-number {
+  display: inline-block;
+  min-width: 3ch;
+  margin-right: 1ch;
+  color: var(--vscode-descriptionForeground);
+  text-align: right;
+  user-select: none;
+}
+.git-diff-more { color: var(--vscode-descriptionForeground); }
+
+.terminal-command-output > svg {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 2ch;
+  height: 1.5em;
+}
+
+.git-diff-inline-file {
+  display: block;
+  color: var(--vscode-foreground);
+  margin-top: 0.5em;
+}
+
+.message-final {
+  padding-top: 1em;
+  border-top: 1px solid var(--vscode-panel-border);
+}
+
+.message-final .transcript-marker { top: 1em; }
+
+.vscode-light .git-diff-inline .git-diff-addition,
+.vscode-high-contrast-light .git-diff-inline .git-diff-addition { color: var(--vscode-gitDecoration-addedResourceForeground, #18712c); }
+.vscode-light .git-diff-inline .git-diff-deletion,
+.vscode-high-contrast-light .git-diff-inline .git-diff-deletion { color: var(--vscode-gitDecoration-deletedResourceForeground, #b42318); }

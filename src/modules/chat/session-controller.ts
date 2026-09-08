@@ -7,7 +7,7 @@ const TERMINAL_STATES = new Set(["completed", "needs-human-decision", "failed", 
 export interface SessionControllerEvents {
   readonly onBound: (agentId: string) => void;
   readonly onRunningChanged: (running: boolean) => void;
-  readonly onAssistantText: (text: string) => void;
+  readonly onAssistantText: (text: string, phase?: "commentary" | "final") => void;
   readonly onProgress: (text: string) => void;
   readonly onUsage: (usedTokens: number, contextWindowTokens: number) => void;
   readonly onActivity: (activity: {
@@ -17,6 +17,7 @@ export interface SessionControllerEvents {
     readonly text: string;
     readonly title?: string;
     readonly diff?: string;
+    readonly output?: string;
   }) => void;
   readonly onGoal?: (goal: NativeGoal | null, error?: string) => void;
   readonly onError: (message: string) => void;
@@ -118,17 +119,24 @@ export class ChatSessionController {
     const interval = this.options.pollIntervalMs ?? 250;
     const statusPollStride = this.options.pollIntervalMs === undefined ? 3 : 1;
     let cursor = 0;
+    let lastCommentary: string | undefined;
     for (let poll = 0; poll < maxPolls; poll += 1) {
       const updates = await this.runtime.updates(agentId, runId, cursor);
       cursor = updates.cursor;
       for (const update of updates.updates) {
-        if (update.kind === "status") {
+        if (update.kind === "commentary") {
+          if (update.text.trim() && update.text !== lastCommentary) {
+            this.events.onAssistantText(update.text, "commentary");
+            lastCommentary = update.text;
+          }
+        } else if (update.kind === "status") {
           this.events.onProgress(update.text);
         } else if (update.kind === "goal") {
           this.events.onGoal?.(update.goal, update.error);
         } else if (update.kind === "usage") {
           this.events.onUsage(update.usedTokens, update.contextWindowTokens);
         } else {
+          lastCommentary = undefined;
           this.events.onActivity({ ...update, id: `${runId}:${update.id}` });
         }
       }
@@ -143,9 +151,9 @@ export class ChatSessionController {
           this.events.onProgress(summary);
           if (result.status !== "completed" || diagnostic || goalError) {
             this.events.onError([summary, diagnostic ? `${diagnostic.code}: ${diagnostic.message}` : "", goalError ?? ""].filter(Boolean).join("\n"));
-            this.events.onAssistantText(result.text.trim() ? `${summary}\n\n보존된 부분 결과 (완료 확인 아님):\n${result.text.trim()}` : summary);
+            this.events.onAssistantText(result.text.trim() ? `${summary}\n\n보존된 부분 결과 (완료 확인 아님):\n${result.text.trim()}` : summary, "final");
           } else {
-            this.events.onAssistantText(result.text.trim() || summary);
+            this.events.onAssistantText(result.text.trim() || summary, "final");
           }
           return;
         }

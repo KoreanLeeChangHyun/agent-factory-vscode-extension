@@ -320,6 +320,29 @@ test("runtime client invokes official commands and reads the bounded managed res
     cursor: 10,
     updates: []
   });
+  await writeFile(eventsPath, [
+    { id: "native-output", aggregatedOutput: "native result\n", exit_code: 0 },
+    { id: "legacy-output", aggregated_output: "legacy error\n", exit_code: 1 },
+    { id: "empty-output", aggregatedOutput: "", exit_code: 0 },
+    { id: "bounded-output", aggregatedOutput: "x".repeat(40000), exit_code: 1 }
+  ].map((item) => JSON.stringify({ type: "item.completed", item: { type: "command_execution", command: "pwd", ...item } })).join("\n") + "\n");
+  const outputUpdates = (await client.updates("main-test", "run-fake", 0)).updates.filter((update) => update.kind === "activity");
+  assert.equal(outputUpdates[0].output, "native result\n");
+  assert.equal(outputUpdates[1].output, "legacy error\n");
+  assert.equal(outputUpdates[1].phase, "failed");
+  assert.equal(outputUpdates[2].output, "");
+  assert.equal(outputUpdates[3].output.length, 32768);
+  assert.ok(outputUpdates[3].output.endsWith("…"));
+  const commentary = "전체 진행 설명 ".repeat(100);
+  await writeFile(eventsPath, [
+    { type: "native.commentary", text: "   " },
+    { type: "native.commentary", text: commentary },
+    { type: "item.completed", item: { id: "reasoning", type: "reasoning", text: "private reasoning" } }
+  ].map(JSON.stringify).join("\n") + "\n");
+  const commentaryUpdates = (await client.updates("main-test", "run-fake", 0)).updates;
+  assert.deepEqual(commentaryUpdates.filter((update) => update.kind === "commentary"), [{ kind: "commentary", text: commentary }]);
+  assert.equal(commentaryUpdates[1].text, "작업 중");
+
   assert.deepEqual(await client.result("main-test", "run-fake"), {
     status: "completed",
     text: "Main result text\n"
@@ -571,4 +594,31 @@ test("runtime reads reject symlink ancestors and arbitrary result paths", async 
   await symlink(external, join(agentsRoot(root), "main-test"), "dir");
   await assert.rejects(client.updates("main-test", "run-fake", 0), /안전하지/);
   await assert.rejects(readFile(join(root, ".agent-factory")), { code: "ENOENT" });
+});
+
+
+test("session controller emits complete commentary once and marks final output", async function () {
+  const { ChatSessionController } = await importTypeScript("src/modules/chat/session-controller.ts");
+  const messages = [];
+  const commentary = "긴 진행 설명 ".repeat(100);
+  const runtime = {
+    async submit(agentId) { return { agentId, runId: "commentary-run" }; },
+    async updates() { return { cursor: 3, updates: [
+      { kind: "commentary", text: " " },
+      { kind: "commentary", text: commentary },
+      { kind: "status", text: "작업 중" },
+      { kind: "commentary", text: commentary }
+    ] }; },
+    async status() { return { status: "completed" }; },
+    async result() { return { status: "completed", text: "final result" }; }
+  };
+  const controller = new ChatSessionController(runtime, {
+    onBound() {}, onRunningChanged() {}, onProgress() {}, onActivity() {}, onError() {},
+    onAssistantText(text, phase) { messages.push({ text, phase }); }
+  }, undefined, { pollIntervalMs: 0, maxPolls: 1 });
+  await controller.send("request", [], { fast: false, goalMode: false });
+  assert.deepEqual(messages, [
+    { text: commentary, phase: "commentary" },
+    { text: "final result", phase: "final" }
+  ]);
 });

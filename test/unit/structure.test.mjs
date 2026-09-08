@@ -181,7 +181,7 @@ test("running state appears above the composer with elapsed time and interrupt g
 
 test("runtime status stays in the loader while concrete activity updates the timeline", function () {
   assert.match(chatScript, /case "run\.progress":[\s\S]*state\.runProgress = message\.text/);
-  assert.match(chatScript, /case "run\.activity":[\s\S]*upsertActivity\(message\.id, message\.category, message\.phase, message\.text, message\.diff, message\.title\)/);
+  assert.match(chatScript, /case "run\.activity":[\s\S]*upsertActivity\(message\.id, message\.category, message\.phase, message\.text, message\.diff, message\.title, message\.output\)/);
   assert.match(chatScript, /event\.type === "activity" && event\.id === id/);
   assert.match(chatStyles, /\.message-activity/);
   assert.match(chatScript, /runStatusLabel\.textContent = state\.runProgress \|\| "작업 중"/);
@@ -195,8 +195,8 @@ test("commands, file changes, tools, and assistant responses have distinct prese
   assert.match(chatScript, /if \(category === "file"\) return "Git 변경"/);
   assert.match(chatStyles, /\.message-activity-command \.message-content[\s\S]*font-family/);
   assert.doesNotMatch(chatStyles, /\.message-activity-command\s*\{[^}]*(?:border|background):/);
-  assert.match(chatStyles, /\.message-activity-file/);
-  assert.match(chatStyles, /\.message-activity-file\s*\{[^}]*border: 1px[^}]*background:/);
+  assert.match(chatStyles, /\.git-diff-overview/);
+  assert.doesNotMatch(chatStyles, /\.message-activity-file\s*\{[^}]*(?:border|background):/);
   assert.doesNotMatch(chatScript, /return "런타임 기록"/);
   assert.match(chatStyles, /\.message-activity-tool/);
   assert.doesNotMatch(chatStyles, /\.message-activity-tool\s*\{[^}]*(?:border|background):/);
@@ -240,20 +240,20 @@ test("activity completion uses accessible success and failure dots instead of te
   assert.match(chatScript, /heading\.append\(createActivityPhase\(event\.phase\), kind\)/);
   assert.match(chatScript, /phase\.setAttribute\("aria-label", activityPhaseAccessibleLabel\(phaseValue\)\)/);
   assert.doesNotMatch(chatScript, /return "완료"/);
-  assert.match(chatStyles, /\.message-phase\s*\{[^}]*width: 5px[^}]*height: 5px/);
-  assert.match(chatStyles, /\.message-phase-completed\s*\{[^}]*testing-iconPassed/);
+  assert.match(chatStyles, /\.message-phase\s*\{[^}]*width: 2ch[^}]*height: 1\.5em/);
+  assert.match(chatScript, /createElementNS\("http:\/\/www\.w3\.org\/2000\/svg", "circle"\)/);
   assert.match(chatStyles, /\.message-phase-failed\s*\{[^}]*testing-iconFailed/);
 });
 
-test("terminal commands show three lines before offering an accessible ellipsis expansion", function () {
+test("terminal commands show three lines before offering an accessible command expansion", function () {
   assert.match(chatScript, /renderTerminalCommand\(content, event\.text, event\.phase, event\.title\)/);
-  assert.match(chatScript, /prompt\.textContent = ">"/);
-  assert.match(chatScript, /row\.append\(createActivityPhase\(phaseValue\), prompt, text\)/);
+  assert.match(chatScript, /prompt\.textContent = phaseValue === "failed" \? "Failed " : phaseValue === "completed" \? "Ran " : "Running "/);
+  assert.match(chatScript, /row\.append\(createActivityPhase\(phaseValue\), text\)/);
   assert.match(chatScript, /toggle\.hidden = text\.scrollHeight <= text\.clientHeight \+ 1/);
-  assert.match(chatScript, /toggle\.textContent = expanded \? "접기" : "…"/);
+  assert.match(chatScript, /toggle\.textContent = expanded \? "접기" : "펼치기"/);
   assert.match(chatScript, /toggle\.setAttribute\("aria-label", "전체 명령 펼치기"\)/);
   assert.match(chatScript, /toggle\.setAttribute\("aria-expanded", String\(expanded\)\)/);
-  assert.match(chatStyles, /\.bash-command-text\s*\{[^}]*max-height: calc\(1\.45em \* 3\)/);
+  assert.match(chatStyles, /\.bash-command-text\s*\{[^}]*max-height: calc\(1\.5em \* 3\)/);
   assert.match(chatStyles, /\.bash-command-text\.is-expanded\s*\{[^}]*max-height: none/);
   assert.match(chatStyles, /\.bash-command-toggle\s*\{[^}]*position: absolute[^}]*bottom: 0/);
 });
@@ -273,8 +273,8 @@ test("terminal commands and extension-aware diffs use VS Code TextMate highlight
 });
 
 test("Git changes render a bounded unified diff preview with file statistics", function () {
-  assert.match(chatScript, /renderGitDiff\(content, event\.diff, event\.text\)/);
-  assert.match(chatScript, /Edited " \+ \(files\.length \|\| 1\)/);
+  assert.match(chatScript, /renderGitDiff\(content, event\.diff, event\.text, event\.phase\)/);
+  assert.match(chatScript, /Edited " \+ \(files\.length === 1 \? files\[0\]\.path/);
   assert.match(chatScript, /summary\.textContent = "Git diff 보기"/);
   assert.match(chatScript, /line\.startsWith\("@@"\)/);
   assert.match(chatStyles, /\.git-diff-preview pre/);
