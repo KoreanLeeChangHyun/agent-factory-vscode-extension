@@ -46,9 +46,10 @@ test("an active main chat can be renamed from the tab context menu", function ()
   assert.equal(rename.when, "activeWebviewPanelId == agentFactory.mainChat");
 });
 
-test("chat template uses external static assets and a nonce CSP", function () {
+test("chat template uses external static assets and a nonce CSP with WebAssembly compilation", function () {
   assert.match(template, /Content-Security-Policy/);
-  assert.match(template, /script-src 'nonce-\{\{nonce\}\}'/);
+  assert.match(template, /script-src 'nonce-\{\{nonce\}\}' 'wasm-unsafe-eval';/);
+  assert.doesNotMatch(template, /'(?:unsafe-eval|unsafe-inline)'/);
   assert.match(template, /src="\{\{scriptUri\}\}"/);
   assert.match(template, /src="\{\{markdownScriptUri\}\}"/);
   assert.match(template, /src="\{\{syntaxScriptUri\}\}"/);
