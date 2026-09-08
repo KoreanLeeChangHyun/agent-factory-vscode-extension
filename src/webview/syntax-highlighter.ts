@@ -1,7 +1,7 @@
 import { createHighlighterCore } from "shiki/core";
 import { createOnigurumaEngine } from "shiki/engine/oniguruma";
-import darkPlus from "@shikijs/themes/dark-plus";
-import lightPlus from "@shikijs/themes/light-plus";
+import catppuccinMocha from "@shikijs/themes/catppuccin-mocha";
+import catppuccinLatte from "@shikijs/themes/catppuccin-latte";
 import bash from "@shikijs/langs/bash";
 import c from "@shikijs/langs/c";
 import cpp from "@shikijs/langs/cpp";
@@ -51,8 +51,31 @@ const languages = [
   kotlin, markdown, php, python, ruby, rust, scss, sql, swift, toml, tsx, typescript, xml, yaml
 ];
 
+const cliMocha = {
+  ...catppuccinMocha,
+  tokenColors: [
+    ...(catppuccinMocha.tokenColors ?? []),
+    { scope: ["source.shell entity.name.command.shell", "source.shell support.function.builtin.shell"], settings: { foreground: "#89b4fa", fontStyle: "" } },
+    { scope: "source.shell string.unquoted.argument.shell", settings: { foreground: "#cdd6f4", fontStyle: "" } }
+  ]
+};
+const cliLatte = {
+  ...catppuccinLatte,
+  tokenColors: [
+    ...(catppuccinLatte.tokenColors ?? []).map((rule) => ({
+      ...rule,
+      settings: {
+        ...rule.settings,
+        ...(rule.settings.foreground?.toLowerCase() === "#40a02b" ? { foreground: "#287b1b" } : {})
+      }
+    })),
+    { scope: ["source.shell entity.name.command.shell", "source.shell support.function.builtin.shell"], settings: { foreground: "#1e66f5", fontStyle: "" } },
+    { scope: "source.shell string.unquoted.argument.shell", settings: { foreground: "#4c4f69", fontStyle: "" } }
+  ]
+};
+
 const highlighter = createHighlighterCore({
-  themes: [darkPlus, lightPlus],
+  themes: [cliMocha, cliLatte],
   langs: languages,
   engine: createOnigurumaEngine(import("shiki/wasm"))
 });
@@ -106,7 +129,7 @@ globalThis.agentFactorySyntaxHighlighter = {
     if (!instance.getLoadedLanguages().includes(language)) return [];
     const result = instance.codeToTokens(code, {
       lang: language,
-      theme: dark ? "dark-plus" : "light-plus",
+      theme: dark ? "catppuccin-mocha" : "catppuccin-latte",
       tokenizeMaxLineLength: 20_000,
       tokenizeTimeLimit: 100
     });

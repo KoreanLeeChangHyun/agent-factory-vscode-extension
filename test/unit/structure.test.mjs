@@ -242,7 +242,7 @@ test("activity completion uses accessible success and failure dots instead of te
   assert.doesNotMatch(chatScript, /return "완료"/);
   assert.match(chatStyles, /\.message-phase\s*\{[^}]*width: 2ch[^}]*height: 1\.5em/);
   assert.match(chatScript, /createElementNS\("http:\/\/www\.w3\.org\/2000\/svg", "circle"\)/);
-  assert.match(chatStyles, /\.message-phase-failed\s*\{[^}]*testing-iconFailed/);
+  assert.match(chatStyles, /\.message-phase-failed\s*\{[^}]*af-cli-failure/);
 });
 
 test("terminal commands show three lines before offering an accessible command expansion", function () {
@@ -262,8 +262,8 @@ test("terminal commands and extension-aware diffs use VS Code TextMate highlight
   assert.equal(packageJson.dependencies.shiki, "^4.4.3");
   assert.match(syntaxHighlighter, /createHighlighterCore/);
   assert.match(syntaxHighlighter, /createOnigurumaEngine/);
-  assert.match(syntaxHighlighter, /@shikijs\/themes\/dark-plus/);
-  assert.match(syntaxHighlighter, /@shikijs\/themes\/light-plus/);
+  assert.match(syntaxHighlighter, /@shikijs\/themes\/catppuccin-mocha/);
+  assert.match(syntaxHighlighter, /@shikijs\/themes\/catppuccin-latte/);
   assert.match(syntaxHighlighter, /"\.tsx": "tsx"/);
   assert.match(syntaxHighlighter, /"\.py": "python"/);
   assert.match(chatScript, /applySyntaxHighlighting\(commandCode, command, "bash"\)/);

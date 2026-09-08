@@ -831,7 +831,7 @@
     label.append(document.createTextNode("Edited " + (files.length === 1 ? files[0].path : (files.length || 1) + " files") + " "));
     const stats = document.createElement("span");
     stats.className = "git-diff-stats";
-    stats.textContent = "(+" + additions + " −" + deletions + ")";
+    stats.append("(", createDiffCount("+" + additions, "addition"), " ", createDiffCount("−" + deletions, "deletion"), ")");
     label.append(stats);
     overview.append(label);
     container.append(overview);
@@ -848,7 +848,7 @@
         path.textContent = file.path;
         const count = document.createElement("span");
         count.className = "git-diff-file-stats";
-        count.textContent = "+" + file.additions + " −" + file.deletions;
+        count.append(createDiffCount("+" + file.additions, "addition"), " ", createDiffCount("−" + file.deletions, "deletion"));
         row.append(path, count);
         list.append(row);
       });
@@ -875,6 +875,13 @@
     void applyDiffSyntaxHighlighting(code, diff);
   }
 
+  function createDiffCount(text, kind) {
+    const count = document.createElement("span");
+    count.className = "git-diff-count-" + kind;
+    count.textContent = text;
+    return count;
+  }
+
   function renderInlineDiff(container, diff) {
     const preview = document.createElement("pre");
     preview.className = "git-diff-inline";
@@ -882,6 +889,7 @@
     let newLine = 0;
     let inHunk = false;
     let shown = 0;
+    let currentPath = "";
     const multipleFiles = parseGitDiff(diff).length > 1;
     for (const line of diff.split("\n")) {
       const hunk = line.match(/^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@/);
@@ -893,6 +901,8 @@
       }
       if (line.startsWith("diff --git ")) {
         inHunk = false;
+        const pathMatch = line.match(/^diff --git a\/(.+) b\/(.+)$/);
+        currentPath = pathMatch ? pathMatch[2] : "";
         if (multipleFiles && shown < 12) {
           const file = document.createElement("span");
           file.className = "git-diff-inline-file";
@@ -912,7 +922,15 @@
       const gutter = document.createElement("span");
       gutter.className = "git-diff-line-number";
       gutter.textContent = String(number);
-      row.append(gutter, document.createTextNode(line));
+      const sign = document.createElement("span");
+      sign.className = "git-diff-sign";
+      sign.textContent = line.slice(0, 1);
+      const source = document.createElement("span");
+      source.className = "git-diff-source";
+      source.textContent = line.slice(1);
+      row.append(gutter, sign, source);
+      const language = globalThis.agentFactorySyntaxHighlighter?.languageForPath(currentPath);
+      if (language) void applySyntaxHighlighting(source, line.slice(1), language);
       preview.append(row);
     }
     if (shown > 12) {
@@ -971,6 +989,7 @@
         language,
         currentSyntaxThemeClass() !== "light"
       );
+      if (highlighted.length === 0) return;
       const fragment = document.createDocumentFragment();
       highlighted.forEach(function (tokens, index) {
         if (index > 0) fragment.append(document.createTextNode("\n"));
@@ -1037,6 +1056,10 @@
     }
     container.classList.add("markdown-body");
     container.innerHTML = markdown.render(text);
+    for (const code of container.querySelectorAll("pre > code")) {
+      const languageClass = Array.from(code.classList).find(function (name) { return name.startsWith("language-"); });
+      if (languageClass) void applySyntaxHighlighting(code, code.textContent, languageClass.slice(9));
+    }
     for (const link of container.querySelectorAll("a")) {
       link.target = "_blank";
       link.rel = "noopener noreferrer";

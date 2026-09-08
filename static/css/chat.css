@@ -45,6 +45,21 @@ button {
 }
 
 .timeline {
+  --af-cli-foreground: var(--vscode-terminal-foreground, var(--vscode-editor-foreground, #cdd6f4));
+  --af-cli-background: var(--vscode-terminal-background, var(--vscode-editor-background, #1e1e1e));
+  --af-cli-muted: color-mix(in srgb, var(--af-cli-foreground) 62%, var(--af-cli-background));
+  --af-cli-user-background: color-mix(in srgb, var(--af-cli-background) 88%, white);
+  --af-cli-code: var(--vscode-terminal-ansiCyan, #94e2d5);
+  --af-cli-link: var(--vscode-terminal-ansiCyan, #94e2d5);
+  --af-cli-success: var(--vscode-terminal-ansiGreen, #a6e3a1);
+  --af-cli-failure: var(--vscode-terminal-ansiRed, #f38ba8);
+  --af-cli-addition: var(--vscode-terminal-ansiGreen, #a6e3a1);
+  --af-cli-deletion: var(--vscode-terminal-ansiRed, #f38ba8);
+  --af-cli-addition-background: color-mix(in srgb, var(--vscode-terminal-ansiGreen, #32b56c) 18%, var(--af-cli-background));
+  --af-cli-deletion-background: color-mix(in srgb, var(--vscode-terminal-ansiRed, #ff3824) 20%, var(--af-cli-background));
+  --af-cli-hunk: var(--vscode-terminal-ansiCyan, #94e2d5);
+  color: var(--af-cli-foreground);
+  background: var(--af-cli-background);
   display: flex;
   flex-direction: column;
   min-height: 0;
@@ -97,7 +112,7 @@ button {
 
 .message-user {
   padding: 0.25em 0;
-  background: color-mix(in srgb, var(--vscode-editorWidget-background) 75%, transparent);
+  background: var(--af-cli-user-background);
 }
 
 .transcript-marker {
@@ -106,7 +121,7 @@ button {
   left: 0;
   width: 2ch;
   height: 1.5em;
-  color: var(--vscode-editor-foreground);
+  color: var(--af-cli-muted);
 }
 
 .message-user .transcript-marker { top: 0.25em; }
@@ -125,16 +140,18 @@ button {
   align-items: center;
 }
 
-.message-kind { color: var(--vscode-foreground); font: inherit; }
+.message-kind { color: var(--af-cli-foreground); font: inherit; }
 
 .message-phase {
   width: 2ch;
   height: 1.5em;
   flex: 0 0 2ch;
-  color: var(--vscode-descriptionForeground);
+  color: var(--af-cli-muted);
 }
 
-.message-phase-failed { color: var(--vscode-testing-iconFailed, #f14c4c); }
+.message-phase-completed { color: var(--af-cli-success); }
+
+.message-phase-failed { color: var(--af-cli-failure); }
 
 .message-assistant .markdown-body {
   white-space: normal;
@@ -155,7 +172,7 @@ button {
 .markdown-body h5,
 .markdown-body h6 {
   margin: 1em 0 0.5em;
-  color: var(--vscode-editor-foreground);
+  color: var(--af-cli-foreground);
   font-size: 1em;
   line-height: inherit;
 }
@@ -179,16 +196,17 @@ button {
 }
 
 .markdown-body a {
-  color: var(--vscode-textLink-foreground);
+  color: var(--af-cli-link);
   text-decoration: none;
 }
 
 .markdown-body a:hover {
-  color: var(--vscode-textLink-activeForeground);
+  color: var(--af-cli-link);
   text-decoration: underline;
 }
 
 .markdown-body code {
+  color: var(--af-cli-code);
   padding: 0;
   background: transparent;
   font-family: var(--vscode-editor-font-family, monospace);
@@ -202,6 +220,7 @@ button {
 }
 
 .markdown-body pre code {
+  color: var(--af-cli-foreground);
   padding: 0;
   background: transparent;
   white-space: pre;
@@ -210,7 +229,7 @@ button {
 .markdown-body blockquote {
   padding-left: 12px;
   border-left: 3px solid var(--vscode-textBlockQuote-border);
-  color: var(--vscode-descriptionForeground);
+  color: var(--af-cli-muted);
 }
 
 .markdown-body table {
@@ -237,12 +256,12 @@ button {
   gap: 9px;
   align-items: flex-start;
   padding: 0;
-  color: var(--vscode-descriptionForeground);
+  color: var(--af-cli-muted);
 }
 
 .message-activity {
   margin-bottom: 0.5em;
-  color: var(--vscode-descriptionForeground);
+  color: var(--af-cli-muted);
   font-size: inherit;
   line-height: 1.5;
 }
@@ -258,7 +277,7 @@ button {
 }
 
 .message-activity-command .message-content {
-  color: var(--vscode-terminal-foreground, var(--vscode-foreground));
+  color: var(--af-cli-foreground);
   font-family: var(--vscode-editor-font-family, monospace);
 }
 
@@ -273,7 +292,7 @@ button {
   position: relative;
 }
 
-.terminal-command-prompt { color: var(--vscode-foreground); }
+.terminal-command-prompt { color: var(--af-cli-foreground); }
 
 .terminal-command-context { color: inherit; font: inherit; }
 
@@ -298,8 +317,8 @@ button {
   padding: 0;
   padding-left: 14px;
   border: 0;
-  color: var(--vscode-textLink-foreground);
-  background: linear-gradient(90deg, transparent, var(--vscode-editor-background) 35%);
+  color: var(--af-cli-link);
+  background: linear-gradient(90deg, transparent, var(--af-cli-background) 35%);
   font: inherit;
   cursor: pointer;
 }
@@ -313,19 +332,19 @@ button {
 }
 
 .bash-command-toggle:hover {
-  color: var(--vscode-textLink-activeForeground);
+  color: var(--af-cli-link);
   text-decoration: underline;
 }
 
 .git-diff-overview {
   display: flex;
   align-items: flex-start;
-  color: var(--vscode-foreground);
+  color: var(--af-cli-foreground);
 }
 
 .git-diff-stats,
 .git-diff-file-stats {
-  color: var(--vscode-foreground);
+  color: var(--af-cli-foreground);
 }
 
 .git-diff-files {
@@ -352,7 +371,7 @@ button {
 }
 
 .git-diff-preview summary {
-  color: var(--vscode-textLink-foreground);
+  color: var(--af-cli-link);
   cursor: pointer;
   user-select: none;
 }
@@ -378,25 +397,25 @@ button {
 }
 
 .git-diff-addition {
-  color: var(--vscode-gitDecoration-addedResourceForeground, #81b88b);
-  background: color-mix(in srgb, var(--vscode-gitDecoration-addedResourceForeground, #81b88b) 18%, transparent);
+  color: var(--af-cli-addition);
+  background: var(--af-cli-addition-background);
 }
 
 .git-diff-deletion {
-  color: var(--vscode-gitDecoration-deletedResourceForeground, #c74e39);
-  background: color-mix(in srgb, var(--vscode-gitDecoration-deletedResourceForeground, #c74e39) 18%, transparent);
+  color: var(--af-cli-deletion);
+  background: var(--af-cli-deletion-background);
 }
 
 .git-diff-hunk {
-  color: var(--vscode-symbolIcon-functionForeground, #b180d7);
+  color: var(--af-cli-hunk);
 }
 
 .message-activity-tool {
-  --activity-heading-color: var(--vscode-foreground);
+  --activity-heading-color: var(--af-cli-foreground);
 }
 
 .message-activity .message-kind {
-  color: var(--activity-heading-color, var(--vscode-foreground));
+  color: var(--activity-heading-color, var(--af-cli-foreground));
 }
 
 .message-notice[data-level="warning"] {
@@ -1113,7 +1132,7 @@ button:focus-visible,
   position: relative;
   margin: 0 0 0 2ch;
   padding-left: 2ch;
-  color: var(--vscode-descriptionForeground);
+  color: var(--af-cli-muted);
   font: inherit;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
@@ -1122,7 +1141,7 @@ button:focus-visible,
 }
 
 .terminal-output-details { margin-left: 2ch; }
-.terminal-output-details summary { cursor: pointer; color: var(--vscode-descriptionForeground); }
+.terminal-output-details summary { cursor: pointer; color: var(--af-cli-muted); }
 .terminal-output-details .terminal-command-output { margin-left: 0; }
 
 .git-diff-inline {
@@ -1132,17 +1151,16 @@ button:focus-visible,
   white-space: pre;
 }
 
-.git-diff-inline .git-diff-addition,
-.git-diff-inline .git-diff-deletion { background: transparent; }
+.git-diff-inline .git-diff-source { color: var(--af-cli-foreground); }
 .git-diff-line-number {
   display: inline-block;
   min-width: 3ch;
   margin-right: 1ch;
-  color: var(--vscode-descriptionForeground);
+  color: var(--af-cli-muted);
   text-align: right;
   user-select: none;
 }
-.git-diff-more { color: var(--vscode-descriptionForeground); }
+.git-diff-more { color: var(--af-cli-muted); }
 
 .terminal-command-output > svg {
   position: absolute;
@@ -1154,7 +1172,7 @@ button:focus-visible,
 
 .git-diff-inline-file {
   display: block;
-  color: var(--vscode-foreground);
+  color: var(--af-cli-foreground);
   margin-top: 0.5em;
 }
 
@@ -1165,7 +1183,29 @@ button:focus-visible,
 
 .message-final .transcript-marker { top: 1em; }
 
-.vscode-light .git-diff-inline .git-diff-addition,
-.vscode-high-contrast-light .git-diff-inline .git-diff-addition { color: var(--vscode-gitDecoration-addedResourceForeground, #18712c); }
-.vscode-light .git-diff-inline .git-diff-deletion,
-.vscode-high-contrast-light .git-diff-inline .git-diff-deletion { color: var(--vscode-gitDecoration-deletedResourceForeground, #b42318); }
+
+.vscode-light .timeline,
+.vscode-high-contrast-light .timeline {
+  --af-cli-user-background: color-mix(in srgb, var(--af-cli-background) 94%, black);
+  --af-cli-code: var(--vscode-terminal-ansiCyan, #087e8b);
+  --af-cli-link: var(--vscode-terminal-ansiCyan, #087e8b);
+  --af-cli-success: var(--vscode-terminal-ansiGreen, #18712c);
+  --af-cli-failure: var(--vscode-terminal-ansiRed, #b42318);
+  --af-cli-addition: var(--vscode-terminal-ansiGreen, #18712c);
+  --af-cli-deletion: var(--vscode-terminal-ansiRed, #b42318);
+  --af-cli-hunk: var(--vscode-terminal-ansiCyan, #087e8b);
+}
+
+.vscode-high-contrast .timeline,
+.vscode-high-contrast-light .timeline {
+  --af-cli-muted: var(--af-cli-foreground);
+  --af-cli-user-background: var(--vscode-input-background, var(--af-cli-background));
+}
+
+.git-diff-count-addition,
+.git-diff-addition .git-diff-sign { color: var(--af-cli-addition); }
+.git-diff-count-deletion,
+.git-diff-deletion .git-diff-sign { color: var(--af-cli-deletion); }
+
+.vscode-high-contrast .timeline [style*="color"],
+.vscode-high-contrast-light .timeline [style*="color"] { color: var(--af-cli-foreground) !important; }
