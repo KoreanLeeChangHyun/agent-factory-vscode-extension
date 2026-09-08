@@ -250,7 +250,7 @@ test("terminal commands show three lines before offering an accessible command e
   assert.match(chatScript, /renderTerminalCommand\(content, event\.text, event\.phase, event\.title\)/);
   assert.match(chatScript, /prompt\.textContent = phaseValue === "failed" \? "Failed " : phaseValue === "completed" \? "Ran " : "Running "/);
   assert.match(chatScript, /row\.append\(createActivityPhase\(phaseValue\), text\)/);
-  assert.match(chatScript, /toggle\.hidden = text\.scrollHeight <= text\.clientHeight \+ 1/);
+  assert.match(chatScript, /toggle\.hidden = !text\.classList\.contains\("is-expanded"\) && text\.scrollHeight <= text\.clientHeight \+ 1/);
   assert.match(chatScript, /toggle\.textContent = expanded \? "접기" : "펼치기"/);
   assert.match(chatScript, /toggle\.setAttribute\("aria-label", "전체 명령 펼치기"\)/);
   assert.match(chatScript, /toggle\.setAttribute\("aria-expanded", String\(expanded\)\)/);
@@ -269,7 +269,7 @@ test("terminal commands and extension-aware diffs use VS Code TextMate highlight
   assert.match(syntaxHighlighter, /"\.py": "python"/);
   assert.match(chatScript, /applySyntaxHighlighting\(commandCode, command, "bash"\)/);
   assert.match(chatScript, /highlighter\.languageForPath\(item\.path\)/);
-  assert.match(chatScript, /renderHighlightedTokens\(element, tokens, entry\.prefix\)/);
+  assert.match(chatScript, /renderHighlightedTokens\(element, tokens, inline \? "" : entry\.prefix\)/);
   assert.match(chatScript, /span\.textContent = token\.content/);
 });
 

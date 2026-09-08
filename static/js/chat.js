@@ -627,6 +627,19 @@
 
   function renderTimeline() {
     const shouldFollowLatest = followLatest;
+    const previousScroll = timeline.scrollTop;
+    const displayStates = new Map();
+    let focusedControl;
+    for (const element of timeline.querySelectorAll(".message")) {
+      const controls = Array.from(element.querySelectorAll(".bash-command-toggle, summary"));
+      const focusIndex = controls.indexOf(document.activeElement);
+      if (focusIndex >= 0) focusedControl = { id: element.dataset.id, index: focusIndex };
+      displayStates.set(element.dataset.id, {
+        expanded: element.querySelector(".bash-command-toggle")?.getAttribute("aria-expanded") === "true",
+        details: Array.from(element.querySelectorAll("details")).map(function (details) { return { className: details.className, open: details.open }; }),
+        scroll: Array.from(element.querySelectorAll("pre")).map(function (pre) { return { top: pre.scrollTop, left: pre.scrollLeft }; })
+      });
+    }
     timeline.querySelectorAll(".message").forEach(function (element) {
       element.remove();
     });
@@ -684,7 +697,31 @@
       }
       message.append(content);
       timeline.append(message);
+      const display = displayStates.get(event.id);
+      if (display) {
+        const toggle = message.querySelector(".bash-command-toggle");
+        const command = message.querySelector(".bash-command-text");
+        if (toggle && command && display.expanded) setCommandExpanded(command, toggle, true);
+        for (const details of message.querySelectorAll("details")) {
+          const previous = display.details.find(function (item) { return item.className === details.className; });
+          if (previous) details.open = previous.open;
+        }
+        message.querySelectorAll("pre").forEach(function (pre, index) {
+          if (display.scroll[index]) {
+            pre.scrollTop = display.scroll[index].top;
+            pre.scrollLeft = display.scroll[index].left;
+          }
+        });
+      }
+      if (focusedControl?.id === event.id) {
+        const control = message.querySelectorAll(".bash-command-toggle, summary")[focusedControl.index];
+        if (control) {
+          if (control.classList.contains("bash-command-toggle")) control.hidden = false;
+          control.focus({ preventScroll: true });
+        }
+      }
     }
+    if (!shouldFollowLatest) timeline.scrollTop = previousScroll;
     updateQuestionControl();
     timeline.setAttribute("aria-busy", String(state.running));
     if (shouldFollowLatest) {
@@ -758,24 +795,29 @@
     toggle.setAttribute("aria-expanded", "false");
     toggle.hidden = true;
     toggle.addEventListener("click", function () {
-      const expanded = text.classList.toggle("is-expanded");
-      toggle.classList.toggle("is-expanded", expanded);
-      toggle.textContent = expanded ? "접기" : "펼치기";
-      toggle.setAttribute("aria-label", expanded ? "명령 접기" : "전체 명령 펼치기");
-      toggle.setAttribute("aria-expanded", String(expanded));
+      setCommandExpanded(text, toggle, !text.classList.contains("is-expanded"));
     });
     const commandBlock = document.createElement("div");
     commandBlock.className = "terminal-command-block";
     commandBlock.append(row, toggle);
     container.append(commandBlock);
     requestAnimationFrame(function () {
-      toggle.hidden = text.scrollHeight <= text.clientHeight + 1;
+      toggle.hidden = !text.classList.contains("is-expanded") && text.scrollHeight <= text.clientHeight + 1;
     });
     void applySyntaxHighlighting(commandCode, command, "bash").then(function () {
       requestAnimationFrame(function () {
-        toggle.hidden = text.scrollHeight <= text.clientHeight + 1;
+        toggle.hidden = !text.classList.contains("is-expanded") && text.scrollHeight <= text.clientHeight + 1;
       });
     });
+  }
+
+  function setCommandExpanded(text, toggle, expanded) {
+    text.classList.toggle("is-expanded", expanded);
+    toggle.classList.toggle("is-expanded", expanded);
+    toggle.textContent = expanded ? "접기" : "펼치기";
+    toggle.setAttribute("aria-label", expanded ? "명령 접기" : "전체 명령 펼치기");
+    toggle.setAttribute("aria-expanded", String(expanded));
+    if (expanded) toggle.hidden = false;
   }
 
   function readActivityDisplayTitle(title, phase) {
@@ -889,9 +931,8 @@
     let newLine = 0;
     let inHunk = false;
     let shown = 0;
-    let currentPath = "";
     const multipleFiles = parseGitDiff(diff).length > 1;
-    for (const line of diff.split("\n")) {
+    for (const [lineIndex, line] of diff.split("\n").entries()) {
       const hunk = line.match(/^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@/);
       if (hunk) {
         oldLine = Number(hunk[1]);
@@ -901,8 +942,6 @@
       }
       if (line.startsWith("diff --git ")) {
         inHunk = false;
-        const pathMatch = line.match(/^diff --git a\/(.+) b\/(.+)$/);
-        currentPath = pathMatch ? pathMatch[2] : "";
         if (multipleFiles && shown < 12) {
           const file = document.createElement("span");
           file.className = "git-diff-inline-file";
@@ -929,8 +968,7 @@
       source.className = "git-diff-source";
       source.textContent = line.slice(1);
       row.append(gutter, sign, source);
-      const language = globalThis.agentFactorySyntaxHighlighter?.languageForPath(currentPath);
-      if (language) void applySyntaxHighlighting(source, line.slice(1), language);
+      source.dataset.diffIndex = String(lineIndex);
       preview.append(row);
     }
     if (shown > 12) {
@@ -939,44 +977,52 @@
       more.textContent = "… " + (shown - 12) + " more lines";
       preview.append(more);
     }
-    if (shown > 0) container.append(preview);
+    if (shown > 0) {
+      container.append(preview);
+      void applyDiffSyntaxHighlighting(preview, diff, true);
+    }
   }
 
-  async function applyDiffSyntaxHighlighting(code, diff) {
+  async function applyDiffSyntaxHighlighting(code, diff, inline) {
     const highlighter = globalThis.agentFactorySyntaxHighlighter;
     if (!highlighter) return;
-    const elements = Array.from(code.children);
-    const lines = diff.split("\n");
+    const elements = inline
+      ? new Map(Array.from(code.querySelectorAll("[data-diff-index]")).map(function (element) { return [Number(element.dataset.diffIndex), element]; }))
+      : new Map(Array.from(code.children).map(function (element, index) { return [index, element]; }));
     const sections = [];
+    let path = "";
     let section;
-    lines.forEach(function (line, index) {
+    diff.split("\n").forEach(function (line, index) {
       if (line.startsWith("diff --git ")) {
         const match = line.match(/^diff --git a\/(.+) b\/(.+)$/);
-        section = { path: match ? match[2] : "", entries: [] };
+        path = match ? match[2] : "";
+        section = undefined;
+      } else if (/^@@ -\d+(?:,\d+)? \+\d+(?:,\d+)? @@/.test(line)) {
+        section = { path, entries: [] };
         sections.push(section);
-        return;
+      } else if (section && /^[ +\-]/.test(line)) {
+        section.entries.push({ index, prefix: line.slice(0, 1), text: line.slice(1) });
       }
-      if (!section || /^(?:index |--- |\+\+\+ |@@|\\ No newline)/.test(line)) return;
-      if (!/^[ +\-]/.test(line)) return;
-      section.entries.push({ index, prefix: line.slice(0, 1), text: line.slice(1) });
     });
     await Promise.all(sections.map(async function (item) {
       const language = highlighter.languageForPath(item.path);
-      if (!language || item.entries.length === 0) return;
-      try {
-        const highlighted = await highlighter.highlight(
-          item.entries.map(function (entry) { return entry.text; }).join("\n"),
-          language,
-          currentSyntaxThemeClass() !== "light"
-        );
-        item.entries.forEach(function (entry, index) {
-          const element = elements[entry.index];
-          const tokens = highlighted[index];
-          if (element && tokens) renderHighlightedTokens(element, tokens, entry.prefix);
+      if (!language || !item.entries.some(function (entry) { return elements.has(entry.index); })) return;
+      const lastVisible = inline ? Math.max(...item.entries.filter(function (entry) { return elements.has(entry.index); }).map(function (entry) { return entry.index; })) : Infinity;
+      await Promise.all(["old", "new"].map(async function (side) {
+        const entries = item.entries.filter(function (entry) {
+          return entry.index <= lastVisible && entry.prefix !== (side === "old" ? "+" : "-");
         });
-      } catch {
-        // Plain diff text remains available if a grammar cannot tokenize the input.
-      }
+        if (entries.length === 0) return;
+        try {
+          const highlighted = await highlighter.highlight(entries.map(function (entry) { return entry.text; }).join("\n"), language, currentSyntaxThemeClass() !== "light");
+          entries.forEach(function (entry, index) {
+            const element = elements.get(entry.index);
+            const tokens = highlighted[index];
+            if (element && tokens && (side === "new" || entry.prefix === "-")) renderHighlightedTokens(element, tokens, inline ? "" : entry.prefix);
+          });
+        } catch {
+        }
+      }));
     }));
   }
 
