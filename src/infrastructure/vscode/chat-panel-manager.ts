@@ -28,6 +28,7 @@ interface ManagedPanel {
   state: ChatPanelState;
   readonly subscriptions: vscode.Disposable[];
   controller?: ChatSessionController;
+  executionModeExplicit?: boolean;
   executionMode?: import("../agent-factory/agent-client").ExecutionMode;
   themeRevision?: number;
   themeSignature?: string;
@@ -234,12 +235,16 @@ export class ChatPanelManager implements vscode.Disposable {
 
     switch (message.type) {
       case "client.ready":
-        managed.executionMode ??= this.defaultExecutionMode();
-        await this.post(managed.panel, { type: "execution.updated", mode: managed.executionMode, locked: Boolean(managed.state.agentId) });
+        if (!managed.state.agentId) managed.executionMode ??= this.defaultExecutionMode();
+        await this.post(managed.panel, { type: "execution.updated", mode: managed.executionMode });
         managed.themeReady = true;
         managed.themeSignature = undefined;
         await this.refreshTheme(managed);
         const connection = await this.connectRuntime();
+        const capabilities = connection.available ? await connection.client.capabilities(managed.state.agentId) : undefined;
+        if (managed.state.agentId && !managed.executionMode) {
+          await this.post(managed.panel, { type: "execution.updated", mode: capabilities?.executionMode });
+        }
         await this.post(managed.panel, {
           type: "host.initialize",
           panelId: managed.state.panelId,
@@ -248,7 +253,7 @@ export class ChatPanelManager implements vscode.Disposable {
           verifiedWorkRunId: managed.state.verifiedWorkRunId,
           projectName: workspaceName(),
           runtimeAvailable: connection.available,
-          capabilities: connection.available ? await connection.client.capabilities(managed.state.agentId) : undefined,
+          capabilities,
           running: managed.controller?.running ?? false,
           statusItems: this.statusItems(),
           model: managed.state.model,
@@ -280,6 +285,7 @@ export class ChatPanelManager implements vscode.Disposable {
         return;
       case "decision.approve":
         if (!managed.controller?.approveDecision(message.runId, {
+          ...((managed.state.role ?? "main") === "main" && (!managed.state.agentId || managed.executionModeExplicit) ? { executionMode: managed.executionMode ?? this.defaultExecutionMode() } : {}),
           ...(managed.state.verifiedWorkRunId ? { verifiedWorkRunId: managed.state.verifiedWorkRunId } : {})
         })) {
           await this.post(managed.panel, { type: "decision.pending", runId: null });
@@ -338,18 +344,19 @@ export class ChatPanelManager implements vscode.Disposable {
   }
 
   private async pickExecutionMode(managed: ManagedPanel): Promise<void> {
-    if (managed.state.agentId || managed.controller?.running || (managed.state.role ?? "main") !== "main") return;
+    if (managed.controller?.running || (managed.state.role ?? "main") !== "main") return;
     const choice = await vscode.window.showQuickPick([
-      { label: "CLI 기본값", description: "현재 Codex 설정 사용", mode: "cli-default" as const },
+      { label: managed.state.agentId ? "현재 정책 유지" : "CLI 기본값", description: managed.state.agentId ? "세션에 저장된 실행 권한 사용" : "현재 Codex 설정 사용", mode: "cli-default" as const },
       { label: "작업 공간 쓰기", description: "작업 공간 쓰기 허용 · 추가 승인 없음", mode: "workspace-write" as const },
       { label: "전체 접근", description: "전체 파일 시스템·네트워크 접근 허용 · 추가 승인 없음", mode: "danger-full-access" as const },
       { label: "바이패스", description: "샌드박스·실행 승인 없음 (전체 접근과 동일)", mode: "bypass" as const }
-    ], { title: "새 채팅 실행 권한", placeHolder: "이 채팅과 다음 새 채팅에 적용됩니다. 시작한 세션은 변경되지 않습니다." });
-    if (!choice || managed.state.agentId || managed.controller?.running) return;
+    ], { title: "다음 실행 권한", placeHolder: "다음 메시지부터 적용됩니다. 현재 실행 중인 작업의 권한은 바뀌지 않습니다." });
+    if (!choice || managed.controller?.running) return;
     managed.executionMode = choice.mode;
+    managed.executionModeExplicit = true;
     await vscode.workspace.getConfiguration("agentFactory.mainChat").update("executionMode", choice.mode,
       vscode.ConfigurationTarget.Global);
-    await this.post(managed.panel, { type: "execution.updated", mode: choice.mode, locked: Boolean(managed.state.agentId) });
+    await this.post(managed.panel, { type: "execution.updated", mode: choice.mode });
   }
 
   private async sendSessionList(managed: ManagedPanel): Promise<void> {
@@ -498,10 +505,14 @@ export class ChatPanelManager implements vscode.Disposable {
         return;
       }
       managed.controller = undefined;
-      await this.post(managed.panel, { type: "execution.updated", mode: "cli-default", locked: true });
+      managed.executionMode = undefined;
+      managed.executionModeExplicit = false;
+      await this.post(managed.panel, { type: "execution.updated", mode: managed.executionMode });
       managed.state = { ...managed.state, agentId };
       await this.post(managed.panel, { type: "session.bound", agentId, reset: true });
-      await this.post(managed.panel, { type: "capabilities.updated", capabilities: await connection.client.capabilities(agentId) });
+      const capabilities = await connection.client.capabilities(agentId);
+      await this.post(managed.panel, { type: "capabilities.updated", capabilities });
+      await this.post(managed.panel, { type: "execution.updated", mode: capabilities.executionMode });
       const observed = await connection.client.goal(agentId, "get");
       await this.post(managed.panel, { type: "goal.updated", goal: observed.goal ?? null, error: observed.error });
     } catch (error) {
@@ -524,7 +535,7 @@ export class ChatPanelManager implements vscode.Disposable {
       managed.controller = new ChatSessionController(connection.client, {
         onBound: (agentId) => {
           managed.state = { ...managed.state, agentId };
-          void this.post(managed.panel, { type: "execution.updated", mode: managed.executionMode ?? this.defaultExecutionMode(), locked: true });
+          void this.post(managed.panel, { type: "execution.updated", mode: managed.executionMode ?? this.defaultExecutionMode() });
           void this.post(managed.panel, { type: "session.bound", agentId });
           this.scheduleAgentList(managed, true);
         },
@@ -573,7 +584,7 @@ export class ChatPanelManager implements vscode.Disposable {
     await this.ensureController(managed);
     if (!managed.controller) return;
     void managed.controller.send(text, attachments, {
-      ...(!managed.state.agentId && (managed.state.role ?? "main") === "main" ? { executionMode: managed.executionMode ?? this.defaultExecutionMode() } : {}),
+      ...((managed.state.role ?? "main") === "main" && (!managed.state.agentId || managed.executionModeExplicit) ? { executionMode: managed.executionMode ?? this.defaultExecutionMode() } : {}),
       model: execution.model,
       reasoningEffort: execution.reasoningEffort,
       fast: execution.fast,

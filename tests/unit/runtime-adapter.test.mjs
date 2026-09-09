@@ -739,10 +739,10 @@ test("approval protocol accepts only explicit bounded run identifiers", async ()
   }
 });
 
-test("explicit execution mode applies sandbox and never approval only to root submit", async () => {
-  const { AgentFactoryClient, rootExecutionArguments } = await importTypeScript("src/infrastructure/agent-factory/agent-client.ts");
-  assert.deepEqual(rootExecutionArguments(), []);
-  assert.throws(() => rootExecutionArguments("unsafe-unknown"), /실행 권한/);
+test("explicit execution mode applies sandbox and never approval to submit and send", async () => {
+  const { AgentFactoryClient, executionPolicyArguments } = await importTypeScript("src/infrastructure/agent-factory/agent-client.ts");
+  assert.deepEqual(executionPolicyArguments(), []);
+  assert.throws(() => executionPolicyArguments("unsafe-unknown"), /실행 권한/);
   const root = await mkdtemp(join(tmpdir(), "af-execution-mode-"));
   try {
     const client = new AgentFactoryClient(new URL("../fixtures/fake-exec.py", import.meta.url).pathname, root);
@@ -751,6 +751,7 @@ test("explicit execution mode applies sandbox and never approval only to root su
     await client.submit("main-full", "task", { executionMode: "danger-full-access" });
     await client.submit("main-bypass", "task", { executionMode: "bypass" });
     await client.send("main-full", "next", { executionMode: "bypass" });
+    await client.send("main-full", "keep policy", { executionMode: "cli-default" });
     const calls = (await readFile(join(root, "fake-invocations.jsonl"), "utf8")).trim().split("\n").map(JSON.parse);
     assert.equal(calls[0].includes("--sandbox"), false);
     for (const [index, mode] of [[1, "workspace-write"], [2, "danger-full-access"], [3, "danger-full-access"]]) {
@@ -758,9 +759,22 @@ test("explicit execution mode applies sandbox and never approval only to root su
       assert.equal(calls[index][calls[index].indexOf("--approval-policy") + 1], "never");
     }
     assert.equal(calls[4][0], "send");
-    assert.equal(calls[4].includes("--sandbox"), false);
-    assert.equal(calls[4].includes("--approval-policy"), false);
+    assert.equal(calls[4][calls[4].indexOf("--sandbox") + 1], "danger-full-access");
+    assert.equal(calls[4][calls[4].indexOf("--approval-policy") + 1], "never");
+    assert.equal(calls[5].includes("--sandbox"), false);
+    assert.equal(calls[5].includes("--approval-policy"), false);
   } finally {
     await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("runtime capabilities expose only recognized stored session execution modes", async () => {
+  const { AgentFactoryClient } = await importTypeScript("src/infrastructure/agent-factory/agent-client.ts");
+  const client = new AgentFactoryClient("/unused/exec.py", "/unused/project");
+  const flags = { model: false, reasoning: false, fast: false, goal: false };
+  for (const mode of ["read-only", "workspace-write", "danger-full-access", "unknown", undefined]) {
+    client.command = async () => ({ kind: "execution-capabilities", schemaVersion: "0.1.0", submit: flags, send: flags, executionMode: mode });
+    const observed = await client.capabilities(String(mode));
+    assert.equal(observed.executionMode, mode === "unknown" ? undefined : mode);
   }
 });

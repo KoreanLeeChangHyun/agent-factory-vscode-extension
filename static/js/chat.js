@@ -67,8 +67,7 @@
     projectName: typeof saved?.projectName === "string" ? saved.projectName : "",
     pendingDecisionRunId: undefined,
     decisionSubmitting: false,
-    executionMode: "danger-full-access",
-    executionLocked: Boolean(saved?.agentId),
+    executionMode: saved?.agentId ? undefined : "danger-full-access",
     runtimeAvailable: false,
     branch: undefined,
     capabilities: undefined,
@@ -412,7 +411,6 @@
         break;
       case "execution.updated":
         state.executionMode = message.mode;
-        state.executionLocked = message.locked === true;
         updateExecutionControl();
         break;
       case "chat.assistant":
@@ -1663,9 +1661,9 @@
   function updateExecutionControl() {
     if (!executionModeButton) return;
     executionModeButton.hidden = state.role !== "main";
-    executionModeButton.disabled = state.executionLocked || state.running;
-    executionModeButton.textContent = state.executionLocked ? "권한: 세션 고정" : "권한: " + ({ "workspace-write": "작업 공간 쓰기", "danger-full-access": "전체 접근", "bypass": "바이패스" }[state.executionMode] || "CLI 기본값");
-    executionModeButton.title = state.executionLocked ? "시작한 세션의 실행 권한은 변경할 수 없습니다. 새 채팅을 열어 권한을 선택하세요." : "새 채팅 실행 권한 선택";
+    executionModeButton.disabled = state.running;
+    executionModeButton.textContent = state.executionMode === undefined ? "권한: 현재 세션" : "권한: " + ({ "read-only": "읽기 전용", "workspace-write": "작업 공간 쓰기", "danger-full-access": "전체 접근", "bypass": "바이패스" }[state.executionMode] || (state.agentId ? "현재 정책 유지" : "CLI 기본값"));
+    executionModeButton.title = state.running ? "실행이 끝나면 다음 메시지의 권한을 변경할 수 있습니다." : "다음 메시지에 적용할 실행 권한 선택";
   }
 
   function updateModeControls() {

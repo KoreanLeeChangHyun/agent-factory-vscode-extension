@@ -171,7 +171,7 @@ export class ChatSessionController {
           const summary = terminalSummary(result.status);
           this.events.onProgress(summary);
           if ((result.status !== "completed" && result.status !== "needs-human-decision") || diagnostic || goalError) {
-            this.events.onError([summary, diagnostic ? `${diagnostic.code}: ${diagnostic.message}` : "", diagnostic?.code === "execution_preflight_failed" ? "실행 환경 확인에 실패했습니다. 기존 세션의 권한은 바뀌지 않습니다. 새 채팅을 열어 필요한 실행 권한을 선택한 뒤 다시 시도하세요." : "", goalError ?? ""].filter(Boolean).join("\n"));
+            this.events.onError([summary, diagnostic ? `${diagnostic.code}: ${diagnostic.message}` : "", diagnostic?.code === "execution_preflight_failed" ? "실행 환경 확인에 실패했습니다. 실행이 끝난 뒤 필요한 권한을 선택하고 다음 메시지로 다시 시도하세요." : "", goalError ?? ""].filter(Boolean).join("\n"));
             this.events.onAssistantText(result.text.trim() ? `${summary}\n\n보존된 부분 결과 (완료 확인 아님):\n${result.text.trim()}` : summary, "final", runId);
           } else {
             this.events.onAssistantText(result.text.trim() || summary, "final", runId);

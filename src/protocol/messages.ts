@@ -39,7 +39,7 @@ export type ClientMessage =
     };
 
 export type HostMessage =
-  | { readonly type: "execution.updated"; readonly mode: import("../infrastructure/agent-factory/agent-client").ExecutionMode; readonly locked: boolean }
+  | { readonly type: "execution.updated"; readonly mode?: import("../infrastructure/agent-factory/agent-client").ExecutionMode | "read-only" }
   | { readonly type: "syntax.theme"; readonly selection: import("../infrastructure/agent-factory/cli-theme").CliTheme }
   | { readonly type: "branch.updated"; readonly branch?: string }
   | { readonly type: "goal.updated"; readonly goal: import("../infrastructure/agent-factory/agent-client").NativeGoal | null; readonly error?: string }

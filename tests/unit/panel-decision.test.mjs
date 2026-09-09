@@ -54,7 +54,7 @@ test("host sends approval only to current controller and rejects missing or stal
 });
 
 
-test("execution mode selection is explicit and cannot change bound or running sessions", async () => {
+test("execution mode selection is explicit and supports bound idle sessions but not active runs", async () => {
   const posted = [];
   const manager = new module.exports.ChatPanelManager({}, {}, () => [], async () => { throw new Error("not used"); });
   const managed = {
@@ -68,15 +68,16 @@ test("execution mode selection is explicit and cannot change bound or running se
   await manager.handleMessage(managed, { type: "execution.pick" });
   assert.equal(managed.executionMode, "danger-full-access");
   assert.deepEqual(configUpdates.at(-1), ["executionMode", "danger-full-access", 1]);
-  assert.equal(posted.at(-1).locked, false);
+  assert.equal(posted.at(-1).mode, "danger-full-access");
   managed.state.agentId = "existing-main";
   selectedMode = { mode: "workspace-write" };
   await manager.handleMessage(managed, { type: "execution.pick" });
-  assert.equal(managed.executionMode, "danger-full-access");
+  assert.equal(managed.executionMode, "workspace-write");
   delete managed.state.agentId;
   managed.controller = { running: true };
+  selectedMode = { mode: "bypass" };
   await manager.handleMessage(managed, { type: "execution.pick" });
-  assert.equal(managed.executionMode, "danger-full-access");
+  assert.equal(managed.executionMode, "workspace-write");
 });
 
 
@@ -91,7 +92,7 @@ test("new chat execution defaults to full access while configured restrictions a
   configuredMode = undefined;
 });
 
-test("host forwards full default only for a new root and preserves configured alternatives", async () => {
+test("host forwards chosen execution mode for new and existing Main sessions", async () => {
   const calls = [];
   const manager = new module.exports.ChatPanelManager({}, {}, () => [], async () => { throw new Error("not used"); });
   const managed = {
@@ -111,10 +112,14 @@ test("host forwards full default only for a new root and preserves configured al
   managed.state.agentId = "existing-main";
   await manager.sendChat(managed, "follow up", [], execution);
   assert.equal(calls.at(-1).executionMode, undefined);
+  managed.executionMode = "workspace-write";
+  managed.executionModeExplicit = true;
+  await manager.sendChat(managed, "follow up", [], execution);
+  assert.equal(calls.at(-1).executionMode, "workspace-write");
 });
 
 
-test("bypass selection persists its alias and remains fixed after session binding", async () => {
+test("bypass selection persists its alias and can change after session binding", async () => {
   const posted = [];
   const manager = new module.exports.ChatPanelManager({}, {}, () => [], async () => { throw new Error("not used"); });
   const managed = {
@@ -129,5 +134,24 @@ test("bypass selection persists its alias and remains fixed after session bindin
   managed.state.agentId = "existing-main";
   selectedMode = { mode: "workspace-write" };
   await manager.handleMessage(managed, { type: "execution.pick" });
-  assert.equal(managed.executionMode, "bypass");
+  assert.equal(managed.executionMode, "workspace-write");
+});
+
+test("a run starting while the execution picker is open prevents the selection", async () => {
+  let resolveChoice;
+  selectedMode = new Promise(resolve => { resolveChoice = resolve; });
+  const manager = new module.exports.ChatPanelManager({}, {}, () => [], async () => { throw new Error("not used"); });
+  const managed = {
+    state: { role: "main", agentId: "existing-main" },
+    executionMode: "workspace-write",
+    controller: { running: false },
+    panel: { webview: { async postMessage() { throw new Error("Selection must not apply"); } } }
+  };
+  const pending = manager.handleMessage(managed, { type: "execution.pick" });
+  managed.controller.running = true;
+  resolveChoice({ mode: "bypass" });
+  await pending;
+  assert.equal(managed.executionMode, "workspace-write");
+  assert.equal(managed.executionModeExplicit, undefined);
+  selectedMode = undefined;
 });

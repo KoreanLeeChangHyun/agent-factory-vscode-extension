@@ -99,7 +99,7 @@ export interface ChildAgentSession {
 }
 
 export interface AgentRuntimeClient {
-  capabilities(agentId?: string): Promise<{ readonly submit: ExecutionCapabilities; readonly send: ExecutionCapabilities }>;
+  capabilities(agentId?: string): Promise<{ readonly submit: ExecutionCapabilities; readonly send: ExecutionCapabilities; readonly executionMode?: "read-only" | "workspace-write" | "danger-full-access" }>;
   submit(agentId: string, message: string, execution: ExecutionOptions): Promise<RunAcceptance>;
   send(agentId: string, message: string, execution: ExecutionOptions): Promise<RunAcceptance>;
   status(agentId: string, runId: string): Promise<RunStatus>;
@@ -172,7 +172,11 @@ export class AgentFactoryClient implements AgentRuntimeClient {
       }
       return { ...record, ...(typeof document.diagnostic === "string" ? { diagnostic: document.diagnostic } : {}) } as unknown as ExecutionCapabilities;
     };
-    return { submit: readCapabilities(document.submit), send: readCapabilities(document.send) };
+    return {
+      submit: readCapabilities(document.submit), send: readCapabilities(document.send),
+      ...(document.executionMode === "read-only" || document.executionMode === "workspace-write" || document.executionMode === "danger-full-access"
+        ? { executionMode: document.executionMode } : {})
+    };
   }
 
   public async goal(agentId: string, action: GoalAction): Promise<{ goal?: NativeGoal | null; accepted?: RunAcceptance; error?: string }> {
@@ -231,7 +235,7 @@ export class AgentFactoryClient implements AgentRuntimeClient {
       "main",
       "--message",
       message,
-      ...rootExecutionArguments(execution.executionMode),
+      ...executionPolicyArguments(execution.executionMode),
       ...await this.checkedExecution("submit", execution)
     ]);
     return readAcceptance(document, agentId);
@@ -246,6 +250,7 @@ export class AgentFactoryClient implements AgentRuntimeClient {
       agentId,
       "--message",
       message,
+      ...executionPolicyArguments(execution.executionMode),
       ...await this.checkedExecution("send", execution, agentId)
     ]);
     return readAcceptance(document, agentId);
@@ -502,9 +507,9 @@ export class AgentFactoryClient implements AgentRuntimeClient {
       COMMAND_TIMEOUT_MS,
       MAX_PROCESS_OUTPUT_BYTES
     );
-    if (output.exitCode !== 0 && arguments_[0] === "submit" && arguments_.includes("--approval-policy") &&
+    if (output.exitCode !== 0 && ["submit", "send"].includes(arguments_[0] ?? "") && arguments_.includes("--approval-policy") &&
       /unrecognized arguments|unknown option|no such option/i.test(output.stderr)) {
-      throw new Error("현재 Agent Factory 런타임은 실행 권한 선택을 지원하지 않습니다. 플러그인을 업데이트한 뒤 새 채팅에서 다시 시도하세요.");
+      throw new Error("현재 Agent Factory 런타임은 실행 권한 선택을 지원하지 않습니다. 플러그인을 업데이트한 뒤 다시 시도하세요.");
     }
     let document: unknown;
     try {
@@ -566,7 +571,7 @@ export class AgentFactoryClient implements AgentRuntimeClient {
   }
 }
 
-export function rootExecutionArguments(mode: ExecutionMode = "cli-default"): string[] {
+export function executionPolicyArguments(mode: ExecutionMode = "cli-default"): string[] {
   if (mode === "cli-default") return [];
   if (mode === "bypass") mode = "danger-full-access";
   if (mode !== "workspace-write" && mode !== "danger-full-access") throw new Error("올바르지 않은 실행 권한입니다.");
