@@ -470,12 +470,20 @@ button {
   max-width: 100%;
   min-width: 0;
   gap: 7px;
-  color: transparent;
+  color: var(--vscode-foreground);
+}
+
+.run-status-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--vscode-foreground);
   background-image: linear-gradient(
     90deg,
-    var(--vscode-descriptionForeground) 34%,
-    var(--vscode-foreground) 50%,
-    var(--vscode-descriptionForeground) 66%
+    var(--vscode-foreground) 45%,
+    var(--vscode-terminal-ansiCyan, #94e2d5) 50%,
+    var(--vscode-foreground) 55%
   );
   background-position: 130% 0;
   background-size: 230% 100%;
@@ -485,15 +493,9 @@ button {
   animation: run-status-text-scan 2.4s linear infinite;
 }
 
-.run-status-label {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
 .run-status-meta {
   flex: 0 0 auto;
+  color: var(--vscode-foreground);
 }
 
 .attachment-list {
@@ -1108,8 +1110,8 @@ button:focus-visible,
     transition: none !important;
   }
 
-  .run-status-copy {
-    color: var(--vscode-descriptionForeground);
+  .run-status-label {
+    color: var(--vscode-foreground);
     background-image: none;
     animation: none;
     -webkit-text-fill-color: currentColor;

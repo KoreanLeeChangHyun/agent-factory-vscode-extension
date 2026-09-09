@@ -249,6 +249,67 @@ async function main() {
     assert.ok((await page.locator('.message-assistant').last().innerText()).includes('../invalid'));
     await emit({ type: 'chat.assistant', phase: 'commentary', text: referencesText });
     assert.equal(await page.locator('.message-assistant').last().locator('.execution-references').count(), 0);
+    await page.setViewportSize({ width: 795, height: 900 });
+    await page.emulateMedia({ reducedMotion: 'no-preference' });
+    await page.evaluate(() => { document.body.className = 'vscode-dark'; });
+    await emit({ type: 'run.state', running: true });
+    await emit({ type: 'run.progress', text: '작업 결과를 검증하고 있습니다' });
+    const statusStyle = await page.locator('#run-status').evaluate(element => {
+      const label = getComputedStyle(element.querySelector('.run-status-label'));
+      const meta = getComputedStyle(element.querySelector('.run-status-meta'));
+      const copy = getComputedStyle(element.querySelector('.run-status-copy'));
+      return {
+        labelColor: label.color, gradient: label.backgroundImage, labelAnimation: label.animationName,
+        metaColor: meta.color, metaFill: meta.webkitTextFillColor, metaAnimation: meta.animationName,
+        copyColor: copy.color, copyAnimation: copy.animationName,
+        background: getComputedStyle(element.parentElement).backgroundColor
+      };
+    });
+    assert.equal(statusStyle.labelColor, 'rgb(212, 212, 212)');
+    assert.equal(statusStyle.labelAnimation, 'run-status-text-scan');
+    assert.equal(statusStyle.metaAnimation, 'none');
+    assert.equal(statusStyle.copyAnimation, 'none');
+    assert.equal(statusStyle.metaColor, statusStyle.labelColor);
+    assert.equal(statusStyle.metaFill, statusStyle.metaColor);
+    const luminance = color => {
+      const values = color.match(/[\d.]+/g).slice(0, 3).map(Number).map(value => {
+        value /= 255;
+        return value <= 0.04045 ? value / 12.92 : ((value + 0.055) / 1.055) ** 2.4;
+      });
+      return values[0] * 0.2126 + values[1] * 0.7152 + values[2] * 0.0722;
+    };
+    const contrast = color => {
+      const foreground = luminance(color), background = luminance(statusStyle.background);
+      return (Math.max(foreground, background) + 0.05) / (Math.min(foreground, background) + 0.05);
+    };
+    const gradientColors = statusStyle.gradient.match(/rgb\([^)]*\)/g);
+    assert.deepEqual(gradientColors, ['rgb(212, 212, 212)', 'rgb(148, 226, 213)', 'rgb(212, 212, 212)']);
+    assert.ok(gradientColors.every(color => contrast(color) >= 4.5));
+    assert.ok(contrast(statusStyle.metaColor) >= 4.5);
+    const artifactDir = process.env.AF_RENDERING_ARTIFACT_DIR || path.join(root, 'out/cli-comparison');
+    fs.mkdirSync(artifactDir, { recursive: true });
+    const positions = [];
+    for (const time of [0, 600, 1200, 1800]) {
+      const position = await page.locator('.run-status-label').evaluate((element, time) => {
+        const animation = element.getAnimations()[0];
+        animation.pause();
+        animation.currentTime = time;
+        return getComputedStyle(element).backgroundPosition;
+      }, time);
+      positions.push(position);
+    }
+    assert.equal(new Set(positions).size, 4);
+    await page.locator('.run-status-label').evaluate(element => { element.getAnimations()[0].currentTime = 1200; });
+    await page.locator('.composer-region').screenshot({ path: path.join(artifactDir, 'run-status-dark-scan.png'), animations: 'allow' });
+    await page.emulateMedia({ reducedMotion: 'reduce' });
+    const reducedStyle = await page.locator('.run-status-label').evaluate(element => {
+      const style = getComputedStyle(element);
+      return { animation: style.animationName, color: style.color, fill: style.webkitTextFillColor, background: style.backgroundImage };
+    });
+    assert.deepEqual(reducedStyle, { animation: 'none', color: statusStyle.labelColor, fill: statusStyle.labelColor, background: 'none' });
+    await page.locator('.composer-region').screenshot({ path: path.join(artifactDir, 'run-status-dark-reduced-motion.png') });
+    fs.writeFileSync(path.join(artifactDir, 'run-status-visibility.json'), JSON.stringify({ statusStyle, positions, reducedStyle, minimumGradientContrast: Math.min(...gradientColors.map(contrast)), metaContrast: contrast(statusStyle.metaColor) }, null, 2));
+    await emit({ type: 'run.state', running: false });
     assert.deepEqual(errors, []);
     console.log('Strict CSP, aliases, ANSI, themes/contrast, streaming fences, fallback, live disclosures/focus, and multi-file diff rendering passed.');
   } finally {

@@ -177,8 +177,11 @@ test("running state appears above the composer with elapsed time and interrupt g
   assert.doesNotMatch(chatStyles, /\.run-status-marker/);
   assert.match(chatStyles, /@keyframes run-status-text-scan/);
   assert.match(template, /class="run-status-copy"[\s\S]*run-status-label[\s\S]*run-status-meta/);
-  assert.match(chatStyles, /\.run-status-copy[\s\S]*background-clip: text[\s\S]*animation: run-status-text-scan/);
-  assert.match(chatStyles, /prefers-reduced-motion: reduce[\s\S]*\.run-status-copy[\s\S]*animation: none/);
+  assert.match(chatStyles, /\.run-status-label\s*\{[^}]*color: var\(--vscode-foreground\)[^}]*background-clip: text[^}]*animation: run-status-text-scan/);
+  assert.match(chatStyles, /var\(--vscode-foreground\) 45%,[\s\S]*var\(--vscode-terminal-ansiCyan, #94e2d5\) 50%,[\s\S]*var\(--vscode-foreground\) 55%/);
+  assert.doesNotMatch(chatStyles.match(/\.run-status-copy\s*\{[^}]*\}/)[0], /animation|transparent|background-image/);
+  assert.match(chatStyles, /\.run-status-meta\s*\{[^}]*color: var\(--vscode-foreground\)/);
+  assert.match(chatStyles, /prefers-reduced-motion: reduce[\s\S]*\.run-status-label[\s\S]*color: var\(--vscode-foreground\)[\s\S]*animation: none/);
   assert.doesNotMatch(chatStyles, /\.run-status::after/);
   assert.doesNotMatch(chatStyles, /\.message-running/);
 });
@@ -293,7 +296,7 @@ test("assistant responses render safe local Markdown", function () {
   assert.ok(markdownIndex > 0);
   assert.ok(markdownIndex < chatIndex);
   assert.match(chatScript, /markdownit\(\{ html: false, linkify: true/);
-  assert.match(chatScript, /renderAssistantMarkdown\(content, event\.text\)/);
+  assert.match(chatScript, /renderAssistantMarkdown\(content, extracted\.text\)/);
   assert.match(chatStyles, /\.markdown-body h1/);
   assert.match(chatStyles, /\.markdown-body pre code/);
   assert.doesNotMatch(chatScript, /innerHTML = event\.text/);
