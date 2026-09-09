@@ -277,6 +277,9 @@ export class ChatPanelManager implements vscode.Disposable {
           void this.refreshBranch(managed);
         }
         return;
+      case "reference.copy":
+        await vscode.env.clipboard.writeText(message.id);
+        return;
       case "execution.pick":
         await this.pickExecutionMode(managed);
         return;

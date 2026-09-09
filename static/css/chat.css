@@ -1241,3 +1241,15 @@ button:focus-visible,
 .decision-actions .decision-reply:hover { background: var(--vscode-button-secondaryHoverBackground); }
 .decision-actions button:focus-visible { outline: 1px solid var(--vscode-focusBorder); outline-offset: 2px; }
 .decision-actions button:disabled { opacity: 0.5; cursor: default; }
+
+.markdown-body .execution-references {
+  padding: 0;
+  margin: 12px 0 0;
+  list-style: none;
+}
+.execution-reference { display: flex; min-width: 0; align-items: center; gap: 6px; }
+.execution-reference-main { flex: 1; min-width: 0; }
+.execution-reference-main:not(button) { cursor: text; }
+.execution-reference-main:not(button):hover { color: inherit; background: transparent; }
+.execution-reference-id { overflow-wrap: anywhere; user-select: text; }
+.execution-reference-copy { flex: none; }

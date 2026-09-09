@@ -393,6 +393,7 @@
         state.childAgents = Array.isArray(message.agents) ? message.agents.filter(isChildAgent) : [];
         state.workUnits = summarizeChildAgents(state.childAgents);
         renderAgentsList();
+        renderTimeline();
         renderStatusBar();
         persist();
         break;
@@ -694,7 +695,7 @@
     const displayStates = new Map();
     let focusedControl;
     for (const element of timeline.querySelectorAll(".message")) {
-      const controls = Array.from(element.querySelectorAll(".bash-command-toggle, summary"));
+      const controls = Array.from(element.querySelectorAll(".bash-command-toggle, summary, .execution-reference button"));
       const focusIndex = controls.indexOf(document.activeElement);
       if (focusIndex >= 0) focusedControl = { id: element.dataset.id, index: focusIndex };
       displayStates.set(element.dataset.id, {
@@ -749,7 +750,16 @@
         text.textContent = event.text;
         content.append(mark, text);
       } else if (event.type === "assistant") {
-        renderAssistantMarkdown(content, event.text);
+        const extracted = event.phase !== "commentary" && globalThis.agentFactoryExecutionReferences
+          ? globalThis.agentFactoryExecutionReferences.extract(event.text, markdown)
+          : { text: event.text, references: [] };
+        if (extracted.references.length) {
+          renderAssistantMarkdown(content, extracted.before);
+          renderExecutionReferences(content, extracted.references);
+          appendAssistantMarkdown(content, extracted.after);
+        } else {
+          renderAssistantMarkdown(content, extracted.text);
+        }
         if (event.runId && event.runId === state.pendingDecisionRunId && event.phase !== "commentary") {
           renderDecisionActions(content, event.runId);
         }
@@ -780,7 +790,7 @@
         });
       }
       if (focusedControl?.id === event.id) {
-        const control = message.querySelectorAll(".bash-command-toggle, summary")[focusedControl.index];
+        const control = message.querySelectorAll(".bash-command-toggle, summary, .execution-reference button")[focusedControl.index];
         if (control) {
           if (control.classList.contains("bash-command-toggle")) control.hidden = false;
           control.focus({ preventScroll: true });
@@ -1213,6 +1223,47 @@
     return "git-diff-line";
   }
 
+  function renderExecutionReferences(container, references) {
+    const list = document.createElement("ul");
+    list.className = "execution-references agents-list";
+    list.setAttribute("aria-label", "실행 식별자");
+    for (const reference of references) {
+      const row = document.createElement("li");
+      row.className = "execution-reference";
+      const expectedRole = reference.label === "Work Agent" ? "work" : reference.label === "예약된 Verification Agent" ? "verification" : undefined;
+      const canOpen = expectedRole && state.role === "main" && state.childAgents.some(function (agent) {
+        return agent.agentId === reference.id && agent.role === expectedRole;
+      });
+      const main = document.createElement(canOpen ? "button" : "div");
+      main.className = "agent-item execution-reference-main";
+      if (canOpen) {
+        main.type = "button";
+        main.title = reference.id + " 세션과 대화하기";
+        main.addEventListener("click", function () {
+          if (state.childAgents.some(function (agent) { return agent.agentId === reference.id && agent.role === expectedRole; })) {
+            vscode.postMessage({ type: "agent.open", agentId: reference.id });
+          }
+        });
+      }
+      const label = document.createElement("span");
+      label.className = "agent-role";
+      label.textContent = reference.label;
+      const id = document.createElement("span");
+      id.className = "execution-reference-id";
+      id.textContent = reference.id;
+      main.append(label, id);
+      const copy = document.createElement("button");
+      copy.type = "button";
+      copy.className = "execution-reference-copy setting-button";
+      copy.textContent = "복사";
+      copy.setAttribute("aria-label", reference.label + " " + reference.id + " 복사");
+      copy.addEventListener("click", function () { vscode.postMessage({ type: "reference.copy", id: reference.id }); });
+      row.append(main, copy);
+      list.append(row);
+    }
+    container.append(list);
+  }
+
   function renderAssistantMarkdown(container, text) {
     if (!markdown) {
       container.textContent = text;
@@ -1220,7 +1271,25 @@
     }
     container.classList.add("markdown-body");
     container.innerHTML = markdown.render(text);
+    finishAssistantMarkdown(container);
+  }
+
+  function appendAssistantMarkdown(container, text) {
+    if (!text) return;
+    if (!markdown) {
+      container.append(document.createTextNode(text));
+      return;
+    }
+    const fragment = document.createElement("template");
+    fragment.innerHTML = markdown.render(text);
+    container.append(fragment.content);
+    finishAssistantMarkdown(container);
+  }
+
+  function finishAssistantMarkdown(container) {
     for (const code of container.querySelectorAll("pre > code")) {
+      if (code.dataset.highlighted === "true") continue;
+      code.dataset.highlighted = "true";
       const languageClass = Array.from(code.classList).find(function (name) { return name.startsWith("language-"); });
       void applySyntaxHighlighting(code, code.textContent, languageClass ? languageClass.slice(9) : "");
     }

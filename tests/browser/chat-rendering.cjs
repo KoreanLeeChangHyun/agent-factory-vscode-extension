@@ -40,7 +40,7 @@ async function main() {
       for (const [key, value] of Object.entries({
         cspSource: "'self'", nonce: 'browser-regression', styleUri: '/static/css/chat.css',
         scriptUri: '/static/js/chat.js', markdownScriptUri: '/static/vendor/markdown-it.min.js',
-        syntaxScriptUri: '/static/vendor/syntax-highlighter.js', ansiScriptUri: '/static/js/ansi-renderer.js', iconUri: '/static/images/agent-factory.svg'
+        syntaxScriptUri: '/static/vendor/syntax-highlighter.js', ansiScriptUri: '/static/js/ansi-renderer.js', executionReferencesScriptUri: '/static/js/execution-references.js', iconUri: '/static/images/agent-factory.svg'
       })) html = html.replaceAll('{{' + key + '}}', value);
       response.setHeader('Content-Type', 'text/html');
       response.end(html.replace('</head>', '<link rel="stylesheet" href="/theme.css"></head>'));
@@ -71,7 +71,8 @@ async function main() {
     page.on('console', message => { if (message.type() === 'error') errors.push(message.text()); });
     await page.addInitScript(events => {
       window.saved = { timeline: events };
-      window.acquireVsCodeApi = () => ({ getState: () => window.saved, setState: value => { window.saved = value; }, postMessage() {} });
+      window.sentMessages = [];
+      window.acquireVsCodeApi = () => ({ getState: () => window.saved, setState: value => { window.saved = value; }, postMessage(message) { window.sentMessages.push(message); } });
     }, fixture);
     await page.goto('http://127.0.0.1:' + server.address().port);
     await page.waitForFunction(() => document.querySelector('code.language-python span') && document.querySelector('.git-diff-source span'));
@@ -225,6 +226,29 @@ async function main() {
     await page.waitForFunction(() => !document.querySelector('[data-id="resizing-output"] details').hidden);
     await page.setViewportSize({ width: 1200, height: 900 });
     await page.waitForFunction(() => document.querySelector('[data-id="resizing-output"] details').hidden);
+    const referencesText = '앞선 설명\n\n실행 식별자:\n- Work Agent: `work-reference`\n- Work Run: run-reference\n- Work Session: session-reference\n- 예약된 Verification Agent: verification-reserved\n- Loop: loop-reference\n\n뒤쪽 설명';
+    await emit({ type: 'agents.list', agents: [{ agentId: 'work-reference', role: 'work', status: 'completed' }] });
+    await emit({ type: 'chat.assistant', phase: 'final', text: referencesText });
+    const references = page.locator('.execution-references').last();
+    assert.equal(await references.locator('li').count(), 5);
+    assert.equal(await references.locator('button.execution-reference-main').count(), 1);
+    await references.locator('button.execution-reference-main').click();
+    assert.deepEqual(await page.evaluate(() => window.sentMessages.at(-1)), { type: 'agent.open', agentId: 'work-reference' });
+    await references.getByRole('button', { name: 'Work Run run-reference 복사', exact: true }).click();
+    assert.deepEqual(await page.evaluate(() => window.sentMessages.at(-1)), { type: 'reference.copy', id: 'run-reference' });
+    assert.equal(await references.locator('.execution-reference-id').first().evaluate(element => getComputedStyle(element).userSelect), 'text');
+    const parsedMessage = references.locator('..');
+    assert.equal((await parsedMessage.innerText()).includes('실행 식별자:'), false);
+    assert.ok((await parsedMessage.innerText()).includes('앞선 설명'));
+    assert.ok(await parsedMessage.locator('p').first().evaluate((before, list) => Boolean(before.compareDocumentPosition(list) & Node.DOCUMENT_POSITION_FOLLOWING), await references.elementHandle()));
+    assert.ok(await parsedMessage.locator('p').last().evaluate((after, list) => Boolean(after.compareDocumentPosition(list) & Node.DOCUMENT_POSITION_PRECEDING), await references.elementHandle()));
+    await emit({ type: 'agents.list', agents: [] });
+    assert.equal(await references.locator('button.execution-reference-main').count(), 0);
+    await emit({ type: 'chat.assistant', phase: 'final', text: '실행 식별자:\n- Work Agent: ../invalid' });
+    assert.equal(await page.locator('.message-assistant').last().locator('.execution-references').count(), 0);
+    assert.ok((await page.locator('.message-assistant').last().innerText()).includes('../invalid'));
+    await emit({ type: 'chat.assistant', phase: 'commentary', text: referencesText });
+    assert.equal(await page.locator('.message-assistant').last().locator('.execution-references').count(), 0);
     assert.deepEqual(errors, []);
     console.log('Strict CSP, aliases, ANSI, themes/contrast, streaming fences, fallback, live disclosures/focus, and multi-file diff rendering passed.');
   } finally {

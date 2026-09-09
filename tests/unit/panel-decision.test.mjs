@@ -12,7 +12,9 @@ const output = await build({
 let selectedMode;
 let configuredMode;
 const configUpdates = [];
+const clipboardWrites = [];
 const vscode = {
+  env: { clipboard: { async writeText(text) { clipboardWrites.push(text); } } },
   ConfigurationTarget: { Global: 1 },
   window: { async showQuickPick() { return selectedMode; } },
   workspace: { getConfiguration() { return {
@@ -154,4 +156,19 @@ test("a run starting while the execution picker is open prevents the selection",
   assert.equal(managed.executionMode, "workspace-write");
   assert.equal(managed.executionModeExplicit, undefined);
   selectedMode = undefined;
+});
+
+
+test("execution reference copy accepts a bounded ID and rejects non-ID clipboard payloads", async () => {
+  const notices = [];
+  const manager = new module.exports.ChatPanelManager({}, {}, () => [], async () => { throw new Error("not used"); });
+  const managed = { panel: { webview: { async postMessage(message) { notices.push(message); return true; } } } };
+  await manager.handleMessage(managed, { type: "reference.copy", id: "run-123" });
+  assert.equal(clipboardWrites.at(-1), "run-123");
+  const before = clipboardWrites.length;
+  for (const id of ["../path", "text with spaces", "x".repeat(129), "<script>", ""]) {
+    await manager.handleMessage(managed, { type: "reference.copy", id });
+  }
+  assert.equal(clipboardWrites.length, before);
+  assert.equal(notices.length, 5);
 });

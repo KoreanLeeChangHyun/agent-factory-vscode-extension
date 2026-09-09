@@ -4,6 +4,7 @@ import type { AttachmentReference } from "../common/types/attachment";
 export type ClientMessage =
   | { readonly type: "client.ready" }
   | { readonly type: "execution.pick" }
+  | { readonly type: "reference.copy"; readonly id: string }
   | {
       readonly type: "chat.send";
       readonly id: string;

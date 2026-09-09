@@ -5,6 +5,7 @@ import type { ClientMessage } from "./messages";
 const clientMessageTypes = new Set([
   "client.ready",
   "execution.pick",
+  "reference.copy",
   "chat.send",
   "decision.approve",
   "run.cancel",
@@ -28,6 +29,9 @@ export function parseClientMessage(value: unknown): ClientMessage | undefined {
   }
 
   switch (value.type) {
+    case "reference.copy":
+      if (typeof value.id !== "string" || !/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(value.id)) return undefined;
+      return { type: value.type, id: value.id };
     case "decision.approve":
       if (typeof value.runId !== "string" || !/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(value.runId)) return undefined;
       return { type: value.type, runId: value.runId };
