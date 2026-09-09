@@ -57,6 +57,7 @@ npm run check
 
 ## Runtime notes
 
+- **바이패스** is an alias for **전체 접근**: it uses the same unrestricted sandbox and `never` execution approval policy; it does not bypass hook trust, Human scope decisions, or verification.
 - New chats default to **전체 접근**: full filesystem and network access with approval policy `never` (no additional execution approval). Before the first message, use **권한** to choose workspace write or CLI defaults instead. The selection is saved in the machine-scoped `agentFactory.mainChat.executionMode` setting for new chats; previously configured alternatives are preserved. Workspace write also uses `never`; CLI defaults leave policy unchanged. Started sessions keep their original permissions: open a new chat to change them.
 
 - Attachments are passed as textual references. Browser-only pasted files need a filesystem path before the runtime can use them.

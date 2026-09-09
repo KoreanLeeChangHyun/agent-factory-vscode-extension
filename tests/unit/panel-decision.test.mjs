@@ -84,7 +84,7 @@ test("new chat execution defaults to full access while configured restrictions a
   const manager = new module.exports.ChatPanelManager({}, {}, () => [], async () => { throw new Error("not used"); });
   configuredMode = undefined;
   assert.equal(manager.defaultExecutionMode(), "danger-full-access");
-  for (const mode of ["cli-default", "workspace-write", "danger-full-access"]) {
+  for (const mode of ["cli-default", "workspace-write", "danger-full-access", "bypass"]) {
     configuredMode = mode;
     assert.equal(manager.defaultExecutionMode(), mode);
   }
@@ -102,7 +102,7 @@ test("host forwards full default only for a new root and preserves configured al
   configuredMode = undefined;
   await manager.sendChat(managed, "task", [], execution);
   assert.equal(calls.at(-1).executionMode, "danger-full-access");
-  for (const mode of ["cli-default", "workspace-write"]) {
+  for (const mode of ["cli-default", "workspace-write", "bypass"]) {
     configuredMode = mode;
     await manager.sendChat(managed, "task", [], execution);
     assert.equal(calls.at(-1).executionMode, mode);
@@ -111,4 +111,23 @@ test("host forwards full default only for a new root and preserves configured al
   managed.state.agentId = "existing-main";
   await manager.sendChat(managed, "follow up", [], execution);
   assert.equal(calls.at(-1).executionMode, undefined);
+});
+
+
+test("bypass selection persists its alias and remains fixed after session binding", async () => {
+  const posted = [];
+  const manager = new module.exports.ChatPanelManager({}, {}, () => [], async () => { throw new Error("not used"); });
+  const managed = {
+    state: { role: "main" },
+    panel: { webview: { async postMessage(message) { posted.push(message); return true; } } }
+  };
+  selectedMode = { mode: "bypass" };
+  await manager.handleMessage(managed, { type: "execution.pick" });
+  assert.equal(managed.executionMode, "bypass");
+  assert.deepEqual(configUpdates.at(-1), ["executionMode", "bypass", 1]);
+  assert.equal(posted.at(-1).mode, "bypass");
+  managed.state.agentId = "existing-main";
+  selectedMode = { mode: "workspace-write" };
+  await manager.handleMessage(managed, { type: "execution.pick" });
+  assert.equal(managed.executionMode, "bypass");
 });

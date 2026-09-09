@@ -19,7 +19,7 @@ export interface ExecutionCapabilities {
   readonly diagnostic?: string;
 }
 
-export type ExecutionMode = "cli-default" | "workspace-write" | "danger-full-access";
+export type ExecutionMode = "cli-default" | "workspace-write" | "danger-full-access" | "bypass";
 
 export interface ExecutionOptions {
   readonly executionMode?: ExecutionMode;
@@ -568,6 +568,7 @@ export class AgentFactoryClient implements AgentRuntimeClient {
 
 export function rootExecutionArguments(mode: ExecutionMode = "cli-default"): string[] {
   if (mode === "cli-default") return [];
+  if (mode === "bypass") mode = "danger-full-access";
   if (mode !== "workspace-write" && mode !== "danger-full-access") throw new Error("올바르지 않은 실행 권한입니다.");
   return ["--sandbox", mode, "--approval-policy", "never"];
 }

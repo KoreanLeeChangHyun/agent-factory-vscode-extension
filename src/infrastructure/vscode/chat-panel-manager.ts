@@ -334,7 +334,7 @@ export class ChatPanelManager implements vscode.Disposable {
 
   private defaultExecutionMode(): import("../agent-factory/agent-client").ExecutionMode {
     const value = vscode.workspace.getConfiguration?.("agentFactory.mainChat").get<string>("executionMode", "danger-full-access");
-    return value === "cli-default" || value === "workspace-write" ? value : "danger-full-access";
+    return value === "cli-default" || value === "workspace-write" || value === "bypass" ? value : "danger-full-access";
   }
 
   private async pickExecutionMode(managed: ManagedPanel): Promise<void> {
@@ -342,7 +342,8 @@ export class ChatPanelManager implements vscode.Disposable {
     const choice = await vscode.window.showQuickPick([
       { label: "CLI 기본값", description: "현재 Codex 설정 사용", mode: "cli-default" as const },
       { label: "작업 공간 쓰기", description: "작업 공간 쓰기 허용 · 추가 승인 없음", mode: "workspace-write" as const },
-      { label: "전체 접근", description: "전체 파일 시스템·네트워크 접근 허용 · 추가 승인 없음", mode: "danger-full-access" as const }
+      { label: "전체 접근", description: "전체 파일 시스템·네트워크 접근 허용 · 추가 승인 없음", mode: "danger-full-access" as const },
+      { label: "바이패스", description: "샌드박스·실행 승인 없음 (전체 접근과 동일)", mode: "bypass" as const }
     ], { title: "새 채팅 실행 권한", placeHolder: "이 채팅과 다음 새 채팅에 적용됩니다. 시작한 세션은 변경되지 않습니다." });
     if (!choice || managed.state.agentId || managed.controller?.running) return;
     managed.executionMode = choice.mode;

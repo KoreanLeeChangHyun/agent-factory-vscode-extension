@@ -1664,7 +1664,7 @@
     if (!executionModeButton) return;
     executionModeButton.hidden = state.role !== "main";
     executionModeButton.disabled = state.executionLocked || state.running;
-    executionModeButton.textContent = state.executionLocked ? "권한: 세션 고정" : "권한: " + ({ "workspace-write": "작업 공간 쓰기", "danger-full-access": "전체 접근" }[state.executionMode] || "CLI 기본값");
+    executionModeButton.textContent = state.executionLocked ? "권한: 세션 고정" : "권한: " + ({ "workspace-write": "작업 공간 쓰기", "danger-full-access": "전체 접근", "bypass": "바이패스" }[state.executionMode] || "CLI 기본값");
     executionModeButton.title = state.executionLocked ? "시작한 세션의 실행 권한은 변경할 수 없습니다. 새 채팅을 열어 권한을 선택하세요." : "새 채팅 실행 권한 선택";
   }
 
