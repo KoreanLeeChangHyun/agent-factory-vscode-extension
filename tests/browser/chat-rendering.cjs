@@ -301,6 +301,57 @@ async function main() {
     assert.equal(new Set(positions).size, 4);
     await page.locator('.run-status-label').evaluate(element => { element.getAnimations()[0].currentTime = 1200; });
     await page.locator('.composer-region').screenshot({ path: path.join(artifactDir, 'run-status-dark-scan.png'), animations: 'allow' });
+    const scanFrames = [];
+    for (const viewportWidth of [795, 320]) {
+      await page.setViewportSize({ width: viewportWidth, height: 900 });
+      for (const [sample, label] of [['short', '검증중'], ['long', '작업 결과를 검증하고 있습니다. 실행 결과와 변경 내용을 확인하고 있습니다']]) {
+        await emit({ type: 'run.progress', text: label });
+        const snapshots = new Map();
+        const visibleFrames = [];
+        for (const time of [0, 300, 600, 900, 1200, 1500, 1800, 2100, 2399, 2400]) {
+          const computed = await page.locator('.run-status-label').evaluate((element, time) => {
+            const animation = element.getAnimations()[0];
+            animation.pause();
+            animation.currentTime = time;
+            const style = getComputedStyle(element);
+            return { width: element.clientWidth, backgroundSize: style.backgroundSize, repeat: style.backgroundRepeat, delay: style.animationDelay, position: style.backgroundPosition };
+          }, time);
+          assert.equal(computed.repeat, 'no-repeat');
+          assert.equal(computed.backgroundSize, '230% 100%');
+          assert.equal(computed.delay, '0s');
+          const screenshot = await page.locator('.run-status-label').screenshot({ path: path.join(artifactDir, 'scan-' + viewportWidth + '-' + sample + '-' + time + '.png'), animations: 'allow' });
+          snapshots.set(time, screenshot);
+          const pixels = await page.evaluate(async base64 => {
+            const image = new Image();
+            image.src = 'data:image/png;base64,' + base64;
+            await image.decode();
+            const canvas = document.createElement('canvas');
+            canvas.width = image.width; canvas.height = image.height;
+            const context = canvas.getContext('2d');
+            context.drawImage(image, 0, 0);
+            const data = context.getImageData(0, 0, canvas.width, canvas.height).data;
+            const xs = [];
+            for (let index = 0; index < data.length; index += 4) {
+              if (data[index + 1] > data[index] + 15 && data[index + 2] > data[index] + 10) xs.push(index / 4 % canvas.width);
+            }
+            return { count: xs.length, center: xs.length ? xs.reduce((sum, x) => sum + x, 0) / xs.length : null };
+          }, screenshot.toString('base64'));
+          const frame = { viewportWidth, sample, time, ...computed, ...pixels };
+          scanFrames.push(frame);
+          if (pixels.count) visibleFrames.push(frame);
+          if ([0, 2399, 2400].includes(time)) assert.equal(pixels.count, 0, 'Highlight must be fully outside the text at loop boundaries');
+        }
+        assert.ok(visibleFrames.length >= 3);
+        for (let index = 1; index < visibleFrames.length; index++) {
+          assert.ok(visibleFrames[index].center > visibleFrames[index - 1].center, 'Highlight must move right without wrapping back');
+        }
+        assert.ok(snapshots.get(0).equals(snapshots.get(2399)), 'Last frame must match the resting text');
+        assert.ok(snapshots.get(0).equals(snapshots.get(2400)), 'Loop restart must not change visible pixels');
+      }
+    }
+    fs.writeFileSync(path.join(artifactDir, 'run-status-scan-frames.json'), JSON.stringify(scanFrames, null, 2));
+    await page.setViewportSize({ width: 795, height: 900 });
+    await emit({ type: 'run.progress', text: '작업 결과를 검증하고 있습니다' });
     await page.emulateMedia({ reducedMotion: 'reduce' });
     const reducedStyle = await page.locator('.run-status-label').evaluate(element => {
       const style = getComputedStyle(element);

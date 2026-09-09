@@ -175,7 +175,8 @@ test("running state appears above the composer with elapsed time and interrupt g
   assert.match(chatStyles, /\.run-status/);
   assert.doesNotMatch(template, /run-status-marker/);
   assert.doesNotMatch(chatStyles, /\.run-status-marker/);
-  assert.match(chatStyles, /@keyframes run-status-text-scan/);
+  assert.match(chatStyles, /@keyframes run-status-text-scan\s*\{[\s\S]*?from\s*\{\s*background-position: 98% 0;[\s\S]*?to\s*\{\s*background-position: 2% 0;/);
+  assert.match(chatStyles, /\.run-status-label\s*\{[^}]*background-size: 230% 100%;[^}]*background-repeat: no-repeat;/);
   assert.match(template, /class="run-status-copy"[\s\S]*run-status-label[\s\S]*run-status-meta/);
   assert.match(chatStyles, /\.run-status-label\s*\{[^}]*color: var\(--vscode-foreground\)[^}]*background-clip: text[^}]*animation: run-status-text-scan/);
   assert.match(chatStyles, /var\(--vscode-foreground\) 45%,[\s\S]*var\(--vscode-terminal-ansiCyan, #94e2d5\) 50%,[\s\S]*var\(--vscode-foreground\) 55%/);

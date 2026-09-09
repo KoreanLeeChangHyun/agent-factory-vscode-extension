@@ -456,11 +456,11 @@ button {
 
 @keyframes run-status-text-scan {
   from {
-    background-position: 130% 0;
+    background-position: 98% 0;
   }
 
   to {
-    background-position: -130% 0;
+    background-position: 2% 0;
   }
 }
 
@@ -485,8 +485,9 @@ button {
     var(--vscode-terminal-ansiCyan, #94e2d5) 50%,
     var(--vscode-foreground) 55%
   );
-  background-position: 130% 0;
+  background-position: 98% 0;
   background-size: 230% 100%;
+  background-repeat: no-repeat;
   background-clip: text;
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
