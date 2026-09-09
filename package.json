@@ -2,7 +2,7 @@
   "name": "agent-factory-main-chat",
   "displayName": "Agent Factory Main Chat",
   "description": "Main Agent chat sessions in VS Code editor tabs.",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "publisher": "agent-factory",
   "license": "UNLICENSED",
   "private": true,
@@ -104,21 +104,24 @@
     "build": "node scripts/build.mjs",
     "watch": "node scripts/build.mjs --watch",
     "check": "npm run typecheck && npm run check:static && npm run test && npm run build",
-    "check:static": "node --check static/js/chat.js",
+    "check:static": "node --check static/js/chat.js && node --check static/js/ansi-renderer.js",
     "typecheck": "tsc --noEmit",
-    "test": "node --test test/unit/*.test.mjs",
+    "test": "node --test tests/unit/*.test.mjs",
     "package": "npm run check && node --require ./scripts/node-file-polyfill.cjs ./node_modules/@vscode/vsce/vsce package --allow-missing-repository",
     "vscode:prepublish": "npm run build"
   },
   "devDependencies": {
     "@types/node": "^22.10.5",
+    "@types/plist": "^3.0.5",
     "@types/vscode": "^1.96.0",
     "@vscode/vsce": "2.32.0",
     "esbuild": "^0.24.2",
     "typescript": "^5.7.2"
   },
   "dependencies": {
+    "@iarna/toml": "^2.2.5",
     "markdown-it": "^14.3.1",
+    "plist": "^5.0.0",
     "shiki": "^4.4.3"
   }
 }

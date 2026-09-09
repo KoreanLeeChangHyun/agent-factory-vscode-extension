@@ -1,3 +1,6 @@
+import { homedir } from "node:os";
+import { join } from "node:path";
+import { readCliTheme } from "../agent-factory/cli-theme";
 import { randomUUID } from "node:crypto";
 import { readGitBranch } from "./git-branch";
 import * as vscode from "vscode";
@@ -25,6 +28,10 @@ interface ManagedPanel {
   state: ChatPanelState;
   readonly subscriptions: vscode.Disposable[];
   controller?: ChatSessionController;
+  themeRevision?: number;
+  themeSignature?: string;
+  themeReady?: boolean;
+  themeTimer?: NodeJS.Timeout;
   agentRefreshTimer?: NodeJS.Timeout;
   lastAgentRefreshAt?: number;
   branchRefreshTimer?: NodeJS.Timeout;
@@ -137,8 +144,20 @@ export class ChatPanelManager implements vscode.Disposable {
     const managed: ManagedPanel = { panel, state, subscriptions };
     subscriptions.push(new vscode.Disposable(() => {
       managed.branchRefreshStarted = false;
+      managed.themeReady = false;
+      managed.themeRevision = (managed.themeRevision ?? 0) + 1;
+      if (managed.themeTimer) clearTimeout(managed.themeTimer);
       if (managed.branchRefreshTimer) clearTimeout(managed.branchRefreshTimer);
     }));
+    const codexHome = process.env.CODEX_HOME || join(homedir(), ".codex");
+    const watcher = vscode.workspace.createFileSystemWatcher(
+      new vscode.RelativePattern(vscode.Uri.file(codexHome), "{config.toml,themes/*.tmTheme}")
+    );
+    const refreshTheme = () => {
+      if (managed.themeTimer) clearTimeout(managed.themeTimer);
+      managed.themeTimer = setTimeout(() => { void this.refreshTheme(managed); }, 150);
+    };
+    subscriptions.push(watcher, watcher.onDidChange(refreshTheme), watcher.onDidCreate(refreshTheme), watcher.onDidDelete(refreshTheme));
     this.panels.set(state.panelId, managed);
     if (panel.active) {
       this.activePanelId = state.panelId;
@@ -158,6 +177,7 @@ export class ChatPanelManager implements vscode.Disposable {
       panel.onDidChangeViewState((event) => {
         if (event.webviewPanel.active) {
           this.activePanelId = state.panelId;
+          void this.refreshTheme(managed);
         }
       }),
       panel.webview.onDidReceiveMessage(async (rawMessage: unknown) => {
@@ -171,6 +191,17 @@ export class ChatPanelManager implements vscode.Disposable {
       this.panels.delete(state.panelId);
       panel.webview.html = fallbackHtml(error);
     }
+  }
+
+  private async refreshTheme(managed: ManagedPanel): Promise<void> {
+    if (!managed.themeReady) return;
+    const revision = managed.themeRevision = (managed.themeRevision ?? 0) + 1;
+    const selection = await readCliTheme();
+    if (!managed.themeReady || revision !== managed.themeRevision) return;
+    const signature = JSON.stringify(selection);
+    if (signature === managed.themeSignature) return;
+    managed.themeSignature = signature;
+    await this.post(managed.panel, { type: "syntax.theme", selection });
   }
 
   private async refreshBranch(managed: ManagedPanel): Promise<void> {
@@ -202,6 +233,9 @@ export class ChatPanelManager implements vscode.Disposable {
 
     switch (message.type) {
       case "client.ready":
+        managed.themeReady = true;
+        managed.themeSignature = undefined;
+        await this.refreshTheme(managed);
         const connection = await this.connectRuntime();
         await this.post(managed.panel, {
           type: "host.initialize",

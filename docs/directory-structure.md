@@ -84,7 +84,7 @@ extension/
 │   └── fonts/
 ├── dist/
 │   └── extension.js                 # Extension Host 번들
-├── test/
+├── tests/
 │   ├── unit/
 │   ├── integration/
 │   ├── e2e/

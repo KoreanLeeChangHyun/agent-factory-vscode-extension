@@ -2,10 +2,29 @@
 
 Agent Factory Main Agent sessions in VS Code editor tabs.
 
-The current vertical slice connects each draft chat panel to the installed Agent Factory
-managed runtime through `skills/agent/scripts/exec.py`. It submits the first turn as a new
-Main Agent, sends later turns to the same session, polls for the terminal result, and can
-cancel the exact active run.
+## Features
+
+- Open Main Agent sessions in editor tabs; stream activity and resume sessions.
+- Render Markdown code fences, Bash commands, ANSI command output, and file diffs.
+- Submit, follow up, and cancel runs through the installed Agent Factory runtime.
+- Use native Fast/Goal controls and inspect Work/Verification status.
+
+## Syntax highlighting
+
+- **Theme selection:** read `tui.theme` from `$CODEX_HOME/config.toml` (default: `~/.codex/config.toml`) on the workspace extension host, including SSH/container hosts.
+- **Built-in themes:** support all 32 CLI theme names using the compiled two-face theme data. Built-in names take precedence over custom filenames.
+- **Custom themes:** load `$CODEX_HOME/themes/<name>.tmTheme`; reload when the configuration/theme changes or the tab becomes active.
+- **Fallback:** no selection uses Catppuccin Mocha/Latte according to the VS Code appearance. Invalid themes show a notice and restore the default. High-contrast modes use GitHub high-contrast themes for readability.
+- **ANSI:** render standard/bright, 256-color and RGB foreground/background, bold, italic, underline and resets using safe text nodes. Terminal palette colors follow VS Code terminal colors. Cursor movement and other terminal controls are discarded; output is a transcript, not a terminal emulator.
+- **Languages:** bundle 28 Shiki grammars with aliases such as `py`, `ts`, `js`, `sh` and `shell`. A missing fence language can be inferred from an explicit shebang; otherwise unrecognized code remains plain text.
+- **Limits:** oversized blocks (over 512,000 characters or 10,000 lines), unsupported languages and highlighting failures preserve the source as plain text.
+- **CLI differences:** Shiki/TextMate and CLI Syntect grammars can assign different scopes. Theme data is shared, but token boundaries, supported languages and high-contrast overrides are not identical. Syntax themes do not replace the editor background.
+
+### Theme data maintenance
+
+- Regenerate `src/webview/cli-themes.json` with `python3 scripts/generate-cli-themes.py`.
+- The generator verifies the pinned two-face bundle hash before decoding it.
+- Preserve/update the source and license notices in `static/vendor/cli-themes.LICENSE.txt` when changing the pin.
 
 ## Development
 
@@ -13,6 +32,13 @@ cancel the exact active run.
 npm install
 npm run check
 ```
+
+## Rendering regression checks
+
+- Unit tests: `npm test`.
+- Browser tests: `node tests/browser/chat-rendering.cjs` after `npm run build`.
+- Install Playwright and Chromium in your test environment. Set `PLAYWRIGHT_MODULE` and `PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH` when using external installations.
+- Packaging: `npm run package`; install the resulting VSIX in the workspace extension host.
 
 ## F5 manual test
 
@@ -29,18 +55,16 @@ npm run check
    text.
 6. Start another request and press `Esc` or the stop button to exercise cancellation.
 
-The slice intentionally does not yet implement full event streaming, a durable message
-queue, approvals, rich Resume/session management, snapshots and restore, settings capability
-negotiation, background notifications, or rich Markdown/tool/diff cards. Attachments are
-currently passed as explicit textual references; browser-only pasted files have no filesystem
-path until a future attachment materialization flow is added.
+## Runtime notes
+
+- Attachments are passed as textual references. Browser-only pasted files need a filesystem path before the runtime can use them.
+- Plugin installation and VS Code extension installation are separate; reinstalling the plugin does not update these webview assets.
 
 Fast and Goal controls use Agent Factory's native local Codex app-server
 adapter. Goal status and usage appear separately from run completion; the
 composer offers a goal objective plus refresh, pause, reopen, cancel, and off
 controls. Both initial messages and exact-session follow-ups carry on/off
-settings. See the sibling plugin's [native runtime guide](../plugin/docs/native-fast-goal.md)
-for required backend support and recovery limits. Goal continuation belongs to
+settings. See the installed plugin's `skills/agent/SKILL.md` for runtime requirements and role boundaries. Goal continuation belongs to
 Main; Work and Verification remain bounded.
 
 The workspace extension host initializes and discovers the private runtime through `exec.py init`, then pins the returned home/project binding. On SSH/container hosts this uses the executing host’s `AGENT_FACTORY_HOME` or `~/.agent-factory`, not the UI machine’s home. Restart the connection after explicit project rebind. The extension no longer builds checkout-local runtime paths.

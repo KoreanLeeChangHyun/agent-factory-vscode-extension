@@ -85,6 +85,8 @@
       totalCalled: Number.isInteger(saved?.workUnits?.totalCalled) ? saved.workUnits.totalCalled : 0
     }
   };
+  let syntaxRevision = 0;
+  let themeUpdate = 0;
   let elapsedTimerId;
   let followLatest = true;
 
@@ -93,11 +95,12 @@
   resizePrompt();
   vscode.postMessage({ type: "client.ready" });
 
-  let syntaxThemeClass = currentSyntaxThemeClass();
+  let syntaxThemeClass = document.body.className;
   new MutationObserver(function () {
-    const nextThemeClass = currentSyntaxThemeClass();
+    const nextThemeClass = document.body.className;
     if (nextThemeClass === syntaxThemeClass) return;
     syntaxThemeClass = nextThemeClass;
+    syntaxRevision += 1;
     renderTimeline();
   }).observe(document.body, { attributes: true, attributeFilter: ["class"] });
 
@@ -295,6 +298,9 @@
         renderStatusBar();
         updateRunControls();
         persist();
+        break;
+      case "syntax.theme":
+        void updateSyntaxTheme(message.selection || {});
         break;
       case "branch.updated":
         state.branch = typeof message.branch === "string" ? message.branch : undefined;
@@ -844,7 +850,9 @@
     path.setAttribute("fill", "none");
     path.setAttribute("stroke", "currentColor");
     marker.append(path);
-    output.append(marker, document.createTextNode(text));
+    output.append(marker, globalThis.agentFactoryAnsi
+      ? globalThis.agentFactoryAnsi.render(text, document)
+      : document.createTextNode(text));
     return output;
   }
 
@@ -991,6 +999,7 @@
   async function applyDiffSyntaxHighlighting(code, diff, inline) {
     const highlighter = globalThis.agentFactorySyntaxHighlighter;
     if (!highlighter) return;
+    const revision = syntaxRevision;
     const elements = inline
       ? new Map(Array.from(code.querySelectorAll("[data-diff-index]")).map(function (element) { return [Number(element.dataset.diffIndex), element]; }))
       : new Map(Array.from(code.children).map(function (element, index) { return [index, element]; }));
@@ -1019,7 +1028,8 @@
         });
         if (entries.length === 0) return;
         try {
-          const highlighted = await highlighter.highlight(entries.map(function (entry) { return entry.text; }).join("\n"), language, currentSyntaxThemeClass() !== "light");
+          const highlighted = await highlighter.highlight(entries.map(function (entry) { return entry.text; }).join("\n"), language, currentSyntaxThemeClass() !== "light", isHighContrast());
+          if (revision !== syntaxRevision) return;
           entries.forEach(function (entry, index) {
             const element = elements.get(entry.index);
             const tokens = highlighted[index];
@@ -1034,13 +1044,15 @@
   async function applySyntaxHighlighting(element, code, language) {
     const highlighter = globalThis.agentFactorySyntaxHighlighter;
     if (!highlighter) return;
+    const revision = syntaxRevision;
     try {
       const highlighted = await highlighter.highlight(
         code,
         language,
-        currentSyntaxThemeClass() !== "light"
+        currentSyntaxThemeClass() !== "light",
+        isHighContrast()
       );
-      if (highlighted.length === 0) return;
+      if (revision !== syntaxRevision || highlighted.length === 0) return;
       const fragment = document.createDocumentFragment();
       highlighted.forEach(function (tokens, index) {
         if (index > 0) fragment.append(document.createTextNode("\n"));
@@ -1067,6 +1079,36 @@
       if (token.fontStyle & 4) span.style.textDecoration = "underline";
       container.append(span);
     });
+  }
+
+  async function updateSyntaxTheme(selection) {
+    const update = ++themeUpdate;
+    syntaxRevision += 1;
+    try {
+      if (globalThis.agentFactorySyntaxHighlighter) {
+        await globalThis.agentFactorySyntaxHighlighter.configureTheme(selection);
+      }
+      if (update !== themeUpdate) return;
+      if (selection.error) upsertThemeWarning(selection.error);
+      else state.timeline = state.timeline.filter(function (event) { return event.id !== "syntax-theme-warning"; });
+    } catch (error) {
+      if (update !== themeUpdate) return;
+      try { await globalThis.agentFactorySyntaxHighlighter?.configureTheme({}); } catch {}
+      if (update !== themeUpdate) return;
+      upsertThemeWarning(String(error));
+    }
+    if (update === themeUpdate) renderTimeline();
+  }
+
+  function upsertThemeWarning(message) {
+    const existing = state.timeline.find(function (event) { return event.id === "syntax-theme-warning"; });
+    if (existing) existing.text = message;
+    else state.timeline.push({ type: "notice", id: "syntax-theme-warning", level: "warning", text: message });
+  }
+
+  function isHighContrast() {
+    return document.body.classList.contains("vscode-high-contrast") ||
+      document.body.classList.contains("vscode-high-contrast-light");
   }
 
   function currentSyntaxThemeClass() {
@@ -1109,7 +1151,7 @@
     container.innerHTML = markdown.render(text);
     for (const code of container.querySelectorAll("pre > code")) {
       const languageClass = Array.from(code.classList).find(function (name) { return name.startsWith("language-"); });
-      if (languageClass) void applySyntaxHighlighting(code, code.textContent, languageClass.slice(9));
+      void applySyntaxHighlighting(code, code.textContent, languageClass ? languageClass.slice(9) : "");
     }
     for (const link of container.querySelectorAll("a")) {
       link.target = "_blank";

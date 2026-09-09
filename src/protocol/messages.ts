@@ -37,6 +37,7 @@ export type ClientMessage =
     };
 
 export type HostMessage =
+  | { readonly type: "syntax.theme"; readonly selection: import("../infrastructure/agent-factory/cli-theme").CliTheme }
   | { readonly type: "branch.updated"; readonly branch?: string }
   | { readonly type: "goal.updated"; readonly goal: import("../infrastructure/agent-factory/agent-client").NativeGoal | null; readonly error?: string }
   | { readonly type: "capabilities.updated"; readonly capabilities: { readonly submit: import("../infrastructure/agent-factory/agent-client").ExecutionCapabilities; readonly send: import("../infrastructure/agent-factory/agent-client").ExecutionCapabilities } }
