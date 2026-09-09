@@ -19,7 +19,10 @@ export interface ExecutionCapabilities {
   readonly diagnostic?: string;
 }
 
+export type ExecutionMode = "cli-default" | "workspace-write" | "danger-full-access";
+
 export interface ExecutionOptions {
+  readonly executionMode?: ExecutionMode;
   readonly model?: string;
   readonly reasoningEffort?: "none" | "low" | "medium" | "high" | "xhigh" | "max";
   readonly fast?: boolean;
@@ -228,6 +231,7 @@ export class AgentFactoryClient implements AgentRuntimeClient {
       "main",
       "--message",
       message,
+      ...rootExecutionArguments(execution.executionMode),
       ...await this.checkedExecution("submit", execution)
     ]);
     return readAcceptance(document, agentId);
@@ -498,6 +502,10 @@ export class AgentFactoryClient implements AgentRuntimeClient {
       COMMAND_TIMEOUT_MS,
       MAX_PROCESS_OUTPUT_BYTES
     );
+    if (output.exitCode !== 0 && arguments_[0] === "submit" && arguments_.includes("--approval-policy") &&
+      /unrecognized arguments|unknown option|no such option/i.test(output.stderr)) {
+      throw new Error("현재 Agent Factory 런타임은 실행 권한 선택을 지원하지 않습니다. 플러그인을 업데이트한 뒤 새 채팅에서 다시 시도하세요.");
+    }
     let document: unknown;
     try {
       document = JSON.parse(output.stdout);
@@ -556,6 +564,12 @@ export class AgentFactoryClient implements AgentRuntimeClient {
     }
     return (await readManagedBytes(resolvedPath, MAX_RESULT_BYTES)).toString("utf8");
   }
+}
+
+export function rootExecutionArguments(mode: ExecutionMode = "cli-default"): string[] {
+  if (mode === "cli-default") return [];
+  if (mode !== "workspace-write" && mode !== "danger-full-access") throw new Error("올바르지 않은 실행 권한입니다.");
+  return ["--sandbox", mode, "--approval-policy", "never"];
 }
 
 function executionArguments(execution: ExecutionOptions): string[] {

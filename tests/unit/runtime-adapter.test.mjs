@@ -738,3 +738,28 @@ test("approval protocol accepts only explicit bounded run identifiers", async ()
     assert.equal(parseClientMessage({ type: "decision.approve", runId }), undefined);
   }
 });
+
+test("explicit execution mode applies sandbox and never approval only to root submit", async () => {
+  const { AgentFactoryClient, rootExecutionArguments } = await importTypeScript("src/infrastructure/agent-factory/agent-client.ts");
+  assert.deepEqual(rootExecutionArguments(), []);
+  assert.throws(() => rootExecutionArguments("unsafe-unknown"), /실행 권한/);
+  const root = await mkdtemp(join(tmpdir(), "af-execution-mode-"));
+  try {
+    const client = new AgentFactoryClient(new URL("../fixtures/fake-exec.py", import.meta.url).pathname, root);
+    await client.submit("main-default", "task", { executionMode: "cli-default" });
+    await client.submit("main-workspace", "task", { executionMode: "workspace-write" });
+    await client.submit("main-full", "task", { executionMode: "danger-full-access" });
+    await client.send("main-full", "next", { executionMode: "workspace-write" });
+    const calls = (await readFile(join(root, "fake-invocations.jsonl"), "utf8")).trim().split("\n").map(JSON.parse);
+    assert.equal(calls[0].includes("--sandbox"), false);
+    for (const [index, mode] of [[1, "workspace-write"], [2, "danger-full-access"]]) {
+      assert.equal(calls[index][calls[index].indexOf("--sandbox") + 1], mode);
+      assert.equal(calls[index][calls[index].indexOf("--approval-policy") + 1], "never");
+    }
+    assert.equal(calls[3][0], "send");
+    assert.equal(calls[3].includes("--sandbox"), false);
+    assert.equal(calls[3].includes("--approval-policy"), false);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});

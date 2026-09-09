@@ -20,6 +20,7 @@
   const reasoningButton = document.getElementById("reasoning-button");
   const reasoningLabel = document.getElementById("reasoning-label");
   const reasoningMenu = document.getElementById("reasoning-menu");
+  const executionModeButton = document.getElementById("execution-mode-button");
   const fastModeButton = document.getElementById("fast-mode-button");
   const goalModeButton = document.getElementById("goal-mode-button");
   const goalPanel = document.getElementById("goal-panel");
@@ -66,6 +67,8 @@
     projectName: typeof saved?.projectName === "string" ? saved.projectName : "",
     pendingDecisionRunId: undefined,
     decisionSubmitting: false,
+    executionMode: "danger-full-access",
+    executionLocked: Boolean(saved?.agentId),
     runtimeAvailable: false,
     branch: undefined,
     capabilities: undefined,
@@ -143,6 +146,7 @@
   reasoningButton.addEventListener("click", function () {
     openSetting("reasoning");
   });
+  executionModeButton?.addEventListener("click", function () { vscode.postMessage({ type: "execution.pick" }); });
   fastModeButton.addEventListener("click", function () {
     toggleMode("fastMode");
   });
@@ -405,6 +409,11 @@
           renderTimeline();
           persist();
         }
+        break;
+      case "execution.updated":
+        state.executionMode = message.mode;
+        state.executionLocked = message.locked === true;
+        updateExecutionControl();
         break;
       case "chat.assistant":
         if (typeof message.text === "string" && message.text) {
@@ -1627,6 +1636,7 @@
   }
 
   function updateRunControls() {
+    updateExecutionControl();
     sendButton.classList.toggle("is-running", state.running);
     sendButton.setAttribute("aria-label", state.running ? "현재 실행 중지" : "메시지 전송");
     sendButton.title = state.running ? "현재 실행 중지 (Esc)" : "전송 (Enter)";
@@ -1650,7 +1660,16 @@
     return state.capabilities?.[state.agentId ? "send" : "submit"] || {};
   }
 
+  function updateExecutionControl() {
+    if (!executionModeButton) return;
+    executionModeButton.hidden = state.role !== "main";
+    executionModeButton.disabled = state.executionLocked || state.running;
+    executionModeButton.textContent = state.executionLocked ? "권한: 세션 고정" : "권한: " + ({ "workspace-write": "작업 공간 쓰기", "danger-full-access": "전체 접근" }[state.executionMode] || "CLI 기본값");
+    executionModeButton.title = state.executionLocked ? "시작한 세션의 실행 권한은 변경할 수 없습니다. 새 채팅을 열어 권한을 선택하세요." : "새 채팅 실행 권한 선택";
+  }
+
   function updateModeControls() {
+    updateExecutionControl();
     const supported = currentCapabilities();
     modelButton.parentElement.hidden = supported.model !== true;
     reasoningButton.parentElement.hidden = supported.reasoning !== true;

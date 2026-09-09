@@ -4,6 +4,7 @@ import type { ClientMessage } from "./messages";
 
 const clientMessageTypes = new Set([
   "client.ready",
+  "execution.pick",
   "chat.send",
   "decision.approve",
   "run.cancel",
@@ -33,6 +34,7 @@ export function parseClientMessage(value: unknown): ClientMessage | undefined {
     case "goal.control":
       if (typeof value.action !== "string" || !["get", "refresh", "pause", "cancel", "disable", "reopen"].includes(value.action)) return undefined;
       return { type: "goal.control", action: value.action as import("../infrastructure/agent-factory/agent-client").GoalAction };
+    case "execution.pick":
     case "client.ready":
     case "run.cancel":
     case "sessions.request":

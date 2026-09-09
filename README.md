@@ -57,6 +57,8 @@ npm run check
 
 ## Runtime notes
 
+- New chats default to **전체 접근**: full filesystem and network access with approval policy `never` (no additional execution approval). Before the first message, use **권한** to choose workspace write or CLI defaults instead. The selection is saved in the machine-scoped `agentFactory.mainChat.executionMode` setting for new chats; previously configured alternatives are preserved. Workspace write also uses `never`; CLI defaults leave policy unchanged. Started sessions keep their original permissions: open a new chat to change them.
+
 - Attachments are passed as textual references. Browser-only pasted files need a filesystem path before the runtime can use them.
 - Plugin installation and VS Code extension installation are separate; reinstalling the plugin does not update these webview assets.
 

@@ -28,6 +28,7 @@ interface ManagedPanel {
   state: ChatPanelState;
   readonly subscriptions: vscode.Disposable[];
   controller?: ChatSessionController;
+  executionMode?: import("../agent-factory/agent-client").ExecutionMode;
   themeRevision?: number;
   themeSignature?: string;
   themeReady?: boolean;
@@ -233,6 +234,8 @@ export class ChatPanelManager implements vscode.Disposable {
 
     switch (message.type) {
       case "client.ready":
+        managed.executionMode ??= this.defaultExecutionMode();
+        await this.post(managed.panel, { type: "execution.updated", mode: managed.executionMode, locked: Boolean(managed.state.agentId) });
         managed.themeReady = true;
         managed.themeSignature = undefined;
         await this.refreshTheme(managed);
@@ -268,6 +271,9 @@ export class ChatPanelManager implements vscode.Disposable {
           managed.branchRefreshStarted = true;
           void this.refreshBranch(managed);
         }
+        return;
+      case "execution.pick":
+        await this.pickExecutionMode(managed);
         return;
       case "chat.send":
         await this.sendChat(managed, message.text, message.attachments, message.execution);
@@ -324,6 +330,25 @@ export class ChatPanelManager implements vscode.Disposable {
         await this.saveStatusItems(managed.panel, message.items);
         return;
     }
+  }
+
+  private defaultExecutionMode(): import("../agent-factory/agent-client").ExecutionMode {
+    const value = vscode.workspace.getConfiguration?.("agentFactory.mainChat").get<string>("executionMode", "danger-full-access");
+    return value === "cli-default" || value === "workspace-write" ? value : "danger-full-access";
+  }
+
+  private async pickExecutionMode(managed: ManagedPanel): Promise<void> {
+    if (managed.state.agentId || managed.controller?.running || (managed.state.role ?? "main") !== "main") return;
+    const choice = await vscode.window.showQuickPick([
+      { label: "CLI 기본값", description: "현재 Codex 설정 사용", mode: "cli-default" as const },
+      { label: "작업 공간 쓰기", description: "작업 공간 쓰기 허용 · 추가 승인 없음", mode: "workspace-write" as const },
+      { label: "전체 접근", description: "전체 파일 시스템·네트워크 접근 허용 · 추가 승인 없음", mode: "danger-full-access" as const }
+    ], { title: "새 채팅 실행 권한", placeHolder: "이 채팅과 다음 새 채팅에 적용됩니다. 시작한 세션은 변경되지 않습니다." });
+    if (!choice || managed.state.agentId || managed.controller?.running) return;
+    managed.executionMode = choice.mode;
+    await vscode.workspace.getConfiguration("agentFactory.mainChat").update("executionMode", choice.mode,
+      vscode.ConfigurationTarget.Global);
+    await this.post(managed.panel, { type: "execution.updated", mode: choice.mode, locked: Boolean(managed.state.agentId) });
   }
 
   private async sendSessionList(managed: ManagedPanel): Promise<void> {
@@ -472,6 +497,7 @@ export class ChatPanelManager implements vscode.Disposable {
         return;
       }
       managed.controller = undefined;
+      await this.post(managed.panel, { type: "execution.updated", mode: "cli-default", locked: true });
       managed.state = { ...managed.state, agentId };
       await this.post(managed.panel, { type: "session.bound", agentId, reset: true });
       await this.post(managed.panel, { type: "capabilities.updated", capabilities: await connection.client.capabilities(agentId) });
@@ -497,6 +523,7 @@ export class ChatPanelManager implements vscode.Disposable {
       managed.controller = new ChatSessionController(connection.client, {
         onBound: (agentId) => {
           managed.state = { ...managed.state, agentId };
+          void this.post(managed.panel, { type: "execution.updated", mode: managed.executionMode ?? this.defaultExecutionMode(), locked: true });
           void this.post(managed.panel, { type: "session.bound", agentId });
           this.scheduleAgentList(managed, true);
         },
@@ -545,6 +572,7 @@ export class ChatPanelManager implements vscode.Disposable {
     await this.ensureController(managed);
     if (!managed.controller) return;
     void managed.controller.send(text, attachments, {
+      ...(!managed.state.agentId && (managed.state.role ?? "main") === "main" ? { executionMode: managed.executionMode ?? this.defaultExecutionMode() } : {}),
       model: execution.model,
       reasoningEffort: execution.reasoningEffort,
       fast: execution.fast,
