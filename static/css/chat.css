@@ -1135,9 +1135,16 @@ button:focus-visible,
   font: inherit;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
-  max-height: 40vh;
-  overflow-y: auto;
 }
+
+.terminal-output-preview {
+  max-height: 4.5em;
+  overflow: hidden;
+}
+
+.terminal-output-block:has(.terminal-output-details[open]) .terminal-output-preview,
+.terminal-output-collapsed .terminal-output-preview { display: none; }
+.terminal-output-details[hidden] { display: none; }
 
 .terminal-output-details { margin-left: 2ch; }
 .terminal-output-details summary { cursor: pointer; color: var(--af-cli-muted); }
@@ -1208,3 +1215,29 @@ button:focus-visible,
 
 .vscode-high-contrast .timeline [style*="color"],
 .vscode-high-contrast-light .timeline [style*="color"] { color: var(--af-cli-foreground) !important; }
+
+.decision-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.decision-actions button {
+  padding: 5px 10px;
+  border: 1px solid var(--vscode-button-border, transparent);
+  border-radius: 3px;
+  background: var(--vscode-button-background);
+  color: var(--vscode-button-foreground);
+  font: inherit;
+  cursor: pointer;
+}
+
+.decision-actions button:hover { background: var(--vscode-button-hoverBackground); }
+.decision-actions .decision-reply {
+  background: var(--vscode-button-secondaryBackground);
+  color: var(--vscode-button-secondaryForeground);
+}
+.decision-actions .decision-reply:hover { background: var(--vscode-button-secondaryHoverBackground); }
+.decision-actions button:focus-visible { outline: 1px solid var(--vscode-focusBorder); outline-offset: 2px; }
+.decision-actions button:disabled { opacity: 0.5; cursor: default; }

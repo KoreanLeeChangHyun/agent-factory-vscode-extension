@@ -197,6 +197,34 @@ async function main() {
     assert.equal(await page.locator('code.language-rust').textContent(), 'let raw = "<unsafe>";\n');
     assert.equal(await page.locator('code.language-rust span, code.language-rust unsafe').count(), 0);
     await page.evaluate(() => { window.agentFactorySyntaxHighlighter.highlight = window.originalHighlight; });
+    await emit({ type: 'run.activity', id: 'long', category: 'command', phase: 'completed', text: longCommand, output: Array.from({ length: 100 }, (_, index) => 'Output line ' + index).join('\n') });
+    const fullOutput = command.locator('details .terminal-command-output');
+    assert.equal(await command.locator('details').evaluate(element => element.open), true);
+    const outputGeometry = await fullOutput.evaluate(element => ({
+      height: element.clientHeight, scrollHeight: element.scrollHeight, overflowY: getComputedStyle(element).overflowY
+    }));
+    assert.ok(outputGeometry.height >= outputGeometry.scrollHeight - 1);
+    assert.equal(outputGeometry.overflowY, 'visible');
+    assert.equal(await page.locator('.timeline').evaluate(element => element.scrollHeight > element.clientHeight), true);
+    const jsonOutput = JSON.stringify({ value: 'x'.repeat(3000) });
+    await emit({ type: 'run.activity', id: 'single-line-output', category: 'command', phase: 'completed', text: 'read json', output: jsonOutput });
+    const jsonResult = page.locator('[data-id="single-line-output"]');
+    await page.waitForFunction(() => !document.querySelector('[data-id="single-line-output"] details').hidden);
+    const previewGeometry = await jsonResult.locator('.terminal-output-preview').evaluate(element => ({
+      height: element.clientHeight, lineHeight: parseFloat(getComputedStyle(element).lineHeight), overflowY: getComputedStyle(element).overflowY
+    }));
+    assert.ok(previewGeometry.height <= previewGeometry.lineHeight * 3 + 1);
+    assert.equal(previewGeometry.overflowY, 'hidden');
+    await jsonResult.locator('summary').click();
+    assert.equal(await jsonResult.locator('details .terminal-command-output').textContent(), jsonOutput);
+    assert.equal(await jsonResult.locator('details .terminal-command-output').evaluate(element => getComputedStyle(element).overflowY), 'visible');
+    await page.setViewportSize({ width: 1200, height: 900 });
+    await emit({ type: 'run.activity', id: 'resizing-output', category: 'command', phase: 'completed', text: 'read json', output: JSON.stringify({ value: 'x'.repeat(180) }) });
+    await page.waitForFunction(() => document.querySelector('[data-id="resizing-output"] details').hidden);
+    await page.setViewportSize({ width: 390, height: 900 });
+    await page.waitForFunction(() => !document.querySelector('[data-id="resizing-output"] details').hidden);
+    await page.setViewportSize({ width: 1200, height: 900 });
+    await page.waitForFunction(() => document.querySelector('[data-id="resizing-output"] details').hidden);
     assert.deepEqual(errors, []);
     console.log('Strict CSP, aliases, ANSI, themes/contrast, streaming fences, fallback, live disclosures/focus, and multi-file diff rendering passed.');
   } finally {

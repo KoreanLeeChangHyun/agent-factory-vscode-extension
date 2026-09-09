@@ -665,3 +665,76 @@ test("session controller emits complete commentary once and marks final output",
     { text: "final result", phase: "final" }
   ]);
 });
+
+
+test("human decision approvals are explicit, once-only and bound to the pending run", async () => {
+  const { ChatSessionController } = await importTypeScript("src/modules/chat/session-controller.ts");
+  const decisions = [], texts = [], sent = [], errors = [], human = [];
+  let nextStatus = "needs-human-decision";
+  const runtime = {
+    async submit(agentId) { return { agentId, runId: "proposal-run" }; },
+    async send(agentId, text, execution) { sent.push({ text, execution }); return { agentId, runId: "reply-run" }; },
+    async updates() { return { cursor: 0, updates: [] }; },
+    async status() { return { status: nextStatus }; },
+    async result() { return { status: nextStatus, text: "제안한 범위로 진행할까요?" }; }
+  };
+  const events = {
+    onBound() {}, onRunningChanged() {}, onProgress() {}, onActivity() {}, onUsage() {},
+    onAssistantText(text, phase, runId) { texts.push({ text, phase, runId }); },
+    onDecision(runId) { decisions.push(runId); }, onHumanDecision(text) { human.push(text); },
+    onError(error) { errors.push(error); }
+  };
+  const controller = new ChatSessionController(runtime, events, undefined, { pollIntervalMs: 0, maxPolls: 1 });
+  await controller.send("task", [], {});
+  assert.deepEqual(errors, []);
+  assert.equal(decisions.at(-1), "proposal-run");
+  assert.deepEqual(texts.at(-1), { text: "제안한 범위로 진행할까요?", phase: "final", runId: "proposal-run" });
+  assert.equal(sent.length, 0);
+  assert.equal(controller.approveDecision("stale-run", {}), false);
+  const restored = new ChatSessionController(runtime, events, "restored-agent");
+  assert.equal(restored.approveDecision("proposal-run", {}), false);
+  nextStatus = "completed";
+  assert.equal(controller.approveDecision("proposal-run", {}), true);
+  assert.equal(controller.approveDecision("proposal-run", {}), false);
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(sent.length, 1);
+  assert.equal(sent[0].execution.actor, "human");
+  assert.equal(sent[0].text, human[0]);
+  assert.equal(controller.approveDecision("proposal-run", {}), false);
+  nextStatus = "needs-human-decision";
+  await controller.send("another proposal", [], {});
+  assert.equal(decisions.at(-1), "reply-run");
+  nextStatus = "completed";
+  await controller.send("직접 답변", [], {});
+  assert.equal(controller.approveDecision("reply-run", {}), false);
+});
+
+test("decision buttons are not inferred from completed prose or diagnostic partial results", async () => {
+  const { ChatSessionController } = await importTypeScript("src/modules/chat/session-controller.ts");
+  for (const result of [
+    { status: "completed", text: "진행할까요?" },
+    { status: "needs-human-decision", text: "진행할까요?", error: { code: "failed", message: "failed" } },
+    { status: "needs-human-decision", text: "" }
+  ]) {
+    const decisions = [];
+    const controller = new ChatSessionController({
+      async submit(agentId) { return { agentId, runId: "run-one" }; },
+      async updates() { return { cursor: 0, updates: [] }; },
+      async status() { return { status: result.status }; }, async result() { return result; }
+    }, {
+      onBound() {}, onRunningChanged() {}, onProgress() {}, onActivity() {}, onUsage() {},
+      onAssistantText() {}, onError() {}, onDecision(runId) { decisions.push(runId); }
+    }, undefined, { pollIntervalMs: 0, maxPolls: 1 });
+    await controller.send("task", [], {});
+    assert.deepEqual(decisions, [null]);
+    assert.equal(controller.approveDecision("run-one", {}), false);
+  }
+});
+
+test("approval protocol accepts only explicit bounded run identifiers", async () => {
+  const { parseClientMessage } = await importTypeScript("src/protocol/validator.ts");
+  assert.deepEqual(parseClientMessage({ type: "decision.approve", runId: "run-123" }), { type: "decision.approve", runId: "run-123" });
+  for (const runId of [undefined, "", "../run", "r".repeat(129), 123]) {
+    assert.equal(parseClientMessage({ type: "decision.approve", runId }), undefined);
+  }
+});

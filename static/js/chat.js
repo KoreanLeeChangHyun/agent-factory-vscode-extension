@@ -6,6 +6,8 @@
     ? globalThis.markdownit({ html: false, linkify: true, typographer: false })
     : undefined;
   const timeline = document.getElementById("timeline");
+  let commandOutputObserver;
+  let commandOutputFrame;
   const emptyState = document.getElementById("empty-state");
   const prompt = document.getElementById("prompt");
   const sendButton = document.getElementById("send-button");
@@ -62,6 +64,8 @@
     timeline: collapseAdjacentReads(Array.isArray(saved?.timeline) ? saved.timeline : []),
     statusItems: normalizeStatusItems(saved?.statusItems),
     projectName: typeof saved?.projectName === "string" ? saved.projectName : "",
+    pendingDecisionRunId: undefined,
+    decisionSubmitting: false,
     runtimeAvailable: false,
     branch: undefined,
     capabilities: undefined,
@@ -359,6 +363,8 @@
         if (typeof message.agentId === "string" && message.agentId) {
           state.agentId = message.agentId;
           if (message.reset === true) {
+            state.pendingDecisionRunId = undefined;
+            state.decisionSubmitting = false;
             state.timeline = [];
             followLatest = true;
             renderTimeline();
@@ -387,9 +393,22 @@
         renderStatusBar();
         persist();
         break;
+      case "decision.pending":
+        state.pendingDecisionRunId = typeof message.runId === "string" ? message.runId : undefined;
+        state.decisionSubmitting = false;
+        renderTimeline();
+        break;
+      case "chat.human-decision":
+        if (typeof message.text === "string" && message.text) {
+          state.timeline.push({ type: "user", id: createId(), text: message.text });
+          followLatest = true;
+          renderTimeline();
+          persist();
+        }
+        break;
       case "chat.assistant":
         if (typeof message.text === "string" && message.text) {
-          state.timeline.push({ type: "assistant", id: createId(), text: message.text, phase: message.phase === "commentary" ? "commentary" : "final" });
+          state.timeline.push({ type: "assistant", id: createId(), text: message.text, runId: message.runId, phase: message.phase === "commentary" ? "commentary" : "final" });
           renderTimeline();
           persist();
         }
@@ -471,6 +490,8 @@
       return;
     }
     goalObjective.value = "";
+    state.pendingDecisionRunId = undefined;
+    state.decisionSubmitting = false;
     state.timeline.push({ type: "user", id: message.id, text: message.text });
     state.draft = "";
     state.attachments = [];
@@ -636,6 +657,30 @@
     updateQuestionControl();
   }
 
+  function renderDecisionActions(content, runId) {
+    const actions = document.createElement("div");
+    actions.className = "decision-actions";
+    actions.setAttribute("role", "group");
+    actions.setAttribute("aria-label", "위 제안에 답변");
+    const approve = document.createElement("button");
+    approve.type = "button";
+    approve.textContent = "제안대로 진행";
+    approve.disabled = state.running || state.decisionSubmitting || !state.runtimeAvailable;
+    approve.addEventListener("click", function () {
+      if (state.running || state.decisionSubmitting || state.pendingDecisionRunId !== runId) return;
+      state.decisionSubmitting = true;
+      approve.disabled = true;
+      vscode.postMessage({ type: "decision.approve", runId });
+    });
+    const reply = document.createElement("button");
+    reply.type = "button";
+    reply.className = "decision-reply";
+    reply.textContent = "직접 답변";
+    reply.addEventListener("click", function () { prompt.focus(); });
+    actions.append(approve, reply);
+    content.append(actions);
+  }
+
   function renderTimeline() {
     const shouldFollowLatest = followLatest;
     const previousScroll = timeline.scrollTop;
@@ -698,6 +743,9 @@
         content.append(mark, text);
       } else if (event.type === "assistant") {
         renderAssistantMarkdown(content, event.text);
+        if (event.runId && event.runId === state.pendingDecisionRunId && event.phase !== "commentary") {
+          renderDecisionActions(content, event.runId);
+        }
       } else if (event.type === "activity" && event.category === "command") {
         renderTerminalCommand(content, event.text, event.phase, event.title);
         renderCommandOutput(content, event.output, Boolean(event.title));
@@ -858,20 +906,36 @@
 
   function renderCommandOutput(container, output, collapsed) {
     if (typeof output !== "string") return;
-    const lines = output.replace(/\r\n/g, "\n").trimEnd().split("\n");
-    const preview = createCommandOutput(output.length === 0 ? "(no output)" : lines.slice(0, 3).join("\n"));
-    if (collapsed || lines.length > 3) {
-      const details = document.createElement("details");
-      details.className = "terminal-output-details";
-      const summary = document.createElement("summary");
-      summary.textContent = "실행 결과 보기";
-      const full = createCommandOutput(output || "(no output)");
-      details.append(summary, full);
-      if (!collapsed) container.append(preview);
-      container.append(details);
-    } else {
-      container.append(preview);
+    const block = document.createElement("div");
+    block.className = "terminal-output-block";
+    block.classList.toggle("terminal-output-collapsed", collapsed);
+    const preview = createCommandOutput(output || "(no output)");
+    preview.classList.add("terminal-output-preview");
+    const details = document.createElement("details");
+    details.className = "terminal-output-details";
+    const summary = document.createElement("summary");
+    summary.textContent = "실행 결과 보기";
+    details.append(summary, createCommandOutput(output || "(no output)"));
+    details.addEventListener("toggle", scheduleCommandOutputMeasurement);
+    block.append(preview, details);
+    container.append(block);
+    if (!commandOutputObserver) {
+      commandOutputObserver = new ResizeObserver(scheduleCommandOutputMeasurement);
+      commandOutputObserver.observe(timeline);
     }
+    scheduleCommandOutputMeasurement();
+  }
+
+  function scheduleCommandOutputMeasurement() {
+    if (commandOutputFrame) return;
+    commandOutputFrame = requestAnimationFrame(function () {
+      commandOutputFrame = undefined;
+      for (const block of timeline.querySelectorAll(".terminal-output-block")) {
+        const preview = block.querySelector(".terminal-output-preview");
+        const details = block.querySelector(".terminal-output-details");
+        details.hidden = !details.open && !block.classList.contains("terminal-output-collapsed") && preview.scrollHeight <= preview.clientHeight + 1;
+      }
+    });
   }
 
   function renderGitDiff(container, diff, fallbackText, phaseValue) {

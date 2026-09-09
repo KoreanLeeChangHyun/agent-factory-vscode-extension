@@ -7,7 +7,7 @@ const TERMINAL_STATES = new Set(["completed", "needs-human-decision", "failed", 
 export interface SessionControllerEvents {
   readonly onBound: (agentId: string) => void;
   readonly onRunningChanged: (running: boolean) => void;
-  readonly onAssistantText: (text: string, phase?: "commentary" | "final") => void;
+  readonly onAssistantText: (text: string, phase?: "commentary" | "final", runId?: string) => void;
   readonly onProgress: (text: string) => void;
   readonly onUsage: (usedTokens: number, contextWindowTokens: number) => void;
   readonly onActivity: (activity: {
@@ -19,6 +19,8 @@ export interface SessionControllerEvents {
     readonly diff?: string;
     readonly output?: string;
   }) => void;
+  readonly onDecision?: (runId: string | null) => void;
+  readonly onHumanDecision?: (text: string) => void;
   readonly onGoal?: (goal: NativeGoal | null, error?: string) => void;
   readonly onStatusObserved?: (status: string) => void;
   readonly onError: (message: string) => void;
@@ -33,6 +35,7 @@ export class ChatSessionController {
   private agentId: string | undefined;
   private currentRunId: string | undefined;
   private busy = false;
+  private pendingDecisionRunId: string | undefined;
 
   public constructor(
     private readonly runtime: AgentRuntimeClient,
@@ -56,6 +59,7 @@ export class ChatSessionController {
       this.events.onError("현재 Main Agent turn이 실행 중입니다. 완료되거나 취소된 뒤 다시 보내세요.");
       return;
     }
+    this.clearDecision();
     this.busy = true;
     this.events.onRunningChanged(true);
     try {
@@ -81,12 +85,27 @@ export class ChatSessionController {
     }
   }
 
+  public approveDecision(runId: string, execution: ExecutionOptions): boolean {
+    if (this.busy || this.pendingDecisionRunId !== runId) return false;
+    const text = "바로 위 응답에서 제안한 범위와 조건대로 진행하세요.";
+    this.clearDecision();
+    this.events.onHumanDecision?.(text);
+    void this.send(text, [], { ...execution, actor: "human" });
+    return true;
+  }
+
+  private clearDecision(): void {
+    this.pendingDecisionRunId = undefined;
+    this.events.onDecision?.(null);
+  }
+
   public async controlGoal(action: GoalAction): Promise<void> {
     if (!this.agentId) return;
     try {
       const result = await this.runtime.goal(this.agentId, action);
       if ("goal" in result) this.events.onGoal?.(result.goal ?? null, result.error);
       if (result.accepted) {
+        this.clearDecision();
         this.busy = true;
         this.currentRunId = result.accepted.runId;
         this.events.onRunningChanged(true);
@@ -151,11 +170,15 @@ export class ChatSessionController {
           if (goalError) this.events.onGoal?.(null, goalError);
           const summary = terminalSummary(result.status);
           this.events.onProgress(summary);
-          if (result.status !== "completed" || diagnostic || goalError) {
+          if ((result.status !== "completed" && result.status !== "needs-human-decision") || diagnostic || goalError) {
             this.events.onError([summary, diagnostic ? `${diagnostic.code}: ${diagnostic.message}` : "", goalError ?? ""].filter(Boolean).join("\n"));
-            this.events.onAssistantText(result.text.trim() ? `${summary}\n\n보존된 부분 결과 (완료 확인 아님):\n${result.text.trim()}` : summary, "final");
+            this.events.onAssistantText(result.text.trim() ? `${summary}\n\n보존된 부분 결과 (완료 확인 아님):\n${result.text.trim()}` : summary, "final", runId);
           } else {
-            this.events.onAssistantText(result.text.trim() || summary, "final");
+            this.events.onAssistantText(result.text.trim() || summary, "final", runId);
+          }
+          if (result.status === "needs-human-decision" && result.text.trim() && !diagnostic && !goalError) {
+            this.pendingDecisionRunId = runId;
+            this.events.onDecision?.(runId);
           }
           return;
         }

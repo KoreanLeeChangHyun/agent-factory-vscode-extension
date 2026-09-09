@@ -16,6 +16,7 @@ export type ClientMessage =
         readonly goalObjective?: string;
       };
     }
+  | { readonly type: "decision.approve"; readonly runId: string }
   | { readonly type: "goal.control"; readonly action: import("../infrastructure/agent-factory/agent-client").GoalAction }
   | { readonly type: "run.cancel" }
   | { readonly type: "sessions.request" }
@@ -96,7 +97,9 @@ export type HostMessage =
         readonly updatedAt?: string;
       }[];
     }
-  | { readonly type: "chat.assistant"; readonly text: string; readonly phase?: "commentary" | "final" }
+  | { readonly type: "decision.pending"; readonly runId: string | null }
+  | { readonly type: "chat.human-decision"; readonly text: string }
+  | { readonly type: "chat.assistant"; readonly text: string; readonly phase?: "commentary" | "final"; readonly runId?: string }
   | { readonly type: "run.progress"; readonly text: string }
   | {
       readonly type: "context.usage";

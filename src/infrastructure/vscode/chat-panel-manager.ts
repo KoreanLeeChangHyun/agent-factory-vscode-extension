@@ -272,6 +272,14 @@ export class ChatPanelManager implements vscode.Disposable {
       case "chat.send":
         await this.sendChat(managed, message.text, message.attachments, message.execution);
         return;
+      case "decision.approve":
+        if (!managed.controller?.approveDecision(message.runId, {
+          ...(managed.state.verifiedWorkRunId ? { verifiedWorkRunId: managed.state.verifiedWorkRunId } : {})
+        })) {
+          await this.post(managed.panel, { type: "decision.pending", runId: null });
+          await this.post(managed.panel, { type: "host.notice", level: "warning", text: "이미 답변했거나 만료된 요청입니다. 현재 대화에 직접 답변하세요." });
+        }
+        return;
       case "composer.settings":
         managed.state = {
           ...managed.state,
@@ -496,8 +504,14 @@ export class ChatPanelManager implements vscode.Disposable {
           void this.post(managed.panel, { type: "run.state", running });
           this.scheduleAgentList(managed, !running);
         },
-        onAssistantText: (responseText, phase) => {
-          void this.post(managed.panel, { type: "chat.assistant", text: responseText, phase });
+        onAssistantText: (responseText, phase, runId) => {
+          void this.post(managed.panel, { type: "chat.assistant", text: responseText, phase, runId });
+        },
+        onDecision: (runId) => {
+          void this.post(managed.panel, { type: "decision.pending", runId });
+        },
+        onHumanDecision: (text) => {
+          void this.post(managed.panel, { type: "chat.human-decision", text });
         },
         onProgress: (progressText) => {
           void this.post(managed.panel, { type: "run.progress", text: progressText });
