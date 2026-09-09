@@ -31,7 +31,11 @@ export function createContainer(context: vscode.ExtensionContext): Container {
       return connections.get(key, async () => {
         const location = await locateAgentFactoryExec({ configuredPath });
         if (!location.available) return location;
-        const client = new AgentFactoryClient(location.execPath, projectRoot);
+        const client = new AgentFactoryClient(location.execPath, projectRoot, "python3", undefined, async () => {
+          const refreshed = await locateAgentFactoryExec({ configuredPath });
+          if (!refreshed.available) throw new Error(refreshed.diagnostic);
+          return refreshed.execPath;
+        });
         const diagnosis = await client.diagnose();
         if (!diagnosis.available) return diagnosis;
         return { available: true, client };

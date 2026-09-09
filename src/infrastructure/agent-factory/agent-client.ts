@@ -191,20 +191,16 @@ export class AgentFactoryClient implements AgentRuntimeClient {
     return executionArguments(execution);
   }
   public constructor(
-    private readonly execPath: string,
+    private execPath: string,
     private readonly projectRoot: string,
     private readonly pythonCommand = "python3",
-    private readonly codexHome = process.env.CODEX_HOME ?? join(homedir(), ".codex")
+    private readonly codexHome = process.env.CODEX_HOME ?? join(homedir(), ".codex"),
+    private readonly rediscoverExecPath?: () => Promise<string>
   ) {}
 
   public async diagnose(): Promise<{ readonly available: true } | { readonly available: false; readonly diagnostic: string }> {
     try {
-      const output = await runBoundedProcess(
-        this.pythonCommand,
-        [this.execPath, "--help"],
-        5_000,
-        64 * 1024
-      );
+      const output = await this.runRuntimeProcess(["--help"], 5_000, 64 * 1024);
       if (output.exitCode === 0) {
         await this.location();
         return { available: true };
@@ -497,9 +493,8 @@ export class AgentFactoryClient implements AgentRuntimeClient {
 
   private async command(arguments_: readonly string[]): Promise<Record<string, unknown>> {
     const binding = arguments_[0] === "init" ? undefined : await this.location();
-    const output = await runBoundedProcess(
-      this.pythonCommand,
-      [this.execPath, ...arguments_, ...(binding ? ["--runtime-home", binding.home, "--project-id", binding.projectId] : [])],
+    const output = await this.runRuntimeProcess(
+      [...arguments_, ...(binding ? ["--runtime-home", binding.home, "--project-id", binding.projectId] : [])],
       COMMAND_TIMEOUT_MS,
       MAX_PROCESS_OUTPUT_BYTES
     );
@@ -516,6 +511,37 @@ export class AgentFactoryClient implements AgentRuntimeClient {
       throw new Error(message || `Agent Factory 런타임 명령이 종료 코드 ${output.exitCode}로 실패했습니다.`);
     }
     return record;
+  }
+
+  private async runRuntimeProcess(
+    arguments_: readonly string[],
+    timeoutMs: number,
+    maxOutputBytes: number
+  ): Promise<ProcessOutput> {
+    try {
+      const info = await lstat(this.execPath);
+      if (!info.isFile()) throw new Error("Agent Factory exec.py가 일반 파일이 아닙니다.");
+    } catch (error) {
+      if (!isMissingFile(error)) throw error;
+      await this.refreshExecPath(error);
+    }
+    try {
+      return await runBoundedProcess(this.pythonCommand, [this.execPath, ...arguments_], timeoutMs, maxOutputBytes);
+    } catch (error) {
+      if (!this.rediscoverExecPath || !isMissingFile(error)) throw error;
+      await this.refreshExecPath(error);
+      return runBoundedProcess(this.pythonCommand, [this.execPath, ...arguments_], timeoutMs, maxOutputBytes);
+    }
+  }
+
+  private async refreshExecPath(originalError: unknown): Promise<void> {
+    if (!this.rediscoverExecPath) throw originalError;
+    const previous = this.execPath;
+    const refreshed = await this.rediscoverExecPath();
+    if (refreshed === previous) throw originalError;
+    this.execPath = refreshed;
+    this.locationPromise = undefined;
+    this.eventSnapshot = undefined;
   }
 
   private async readManagedResult(path: string, agentId: string, runId: string): Promise<string> {
@@ -906,9 +932,11 @@ export function runBoundedProcess(
     };
     child.stdout.on("data", (chunk: Buffer) => collect(stdout, chunk));
     child.stderr.on("data", (chunk: Buffer) => collect(stderr, chunk));
-    child.on("error", (error) => finishWithError(
-      new Error(`Agent Factory 런타임 프로세스를 시작하지 못했습니다: ${error.message}`)
-    ));
+    child.on("error", (error) => {
+      const wrapped = new Error(`Agent Factory 런타임 프로세스를 시작하지 못했습니다: ${error.message}`) as NodeJS.ErrnoException;
+      wrapped.code = (error as NodeJS.ErrnoException).code;
+      finishWithError(wrapped);
+    });
     child.on("close", (code) => {
       if (settled) return;
       settled = true;

@@ -63,6 +63,7 @@
     statusItems: normalizeStatusItems(saved?.statusItems),
     projectName: typeof saved?.projectName === "string" ? saved.projectName : "",
     runtimeAvailable: false,
+    branch: undefined,
     capabilities: undefined,
     running: saved?.running === true,
     model: normalizeModel(saved?.model),
@@ -294,6 +295,10 @@
         renderStatusBar();
         updateRunControls();
         persist();
+        break;
+      case "branch.updated":
+        state.branch = typeof message.branch === "string" ? message.branch : undefined;
+        renderStatusBar();
         break;
       case "goal.updated":
         nativeGoal = message.goal || null;
@@ -1500,9 +1505,9 @@
   function statusLabel(itemId) {
     const labels = {
       agent: state.title,
-      agents: "진행 " + state.workUnits.activeUnits + " · 작업 " + state.workUnits.workActive + " · 검증 " + state.workUnits.verificationActive,
+      agents: "작업 " + state.workUnits.workActive + " · 검증 " + state.workUnits.verificationActive,
       project: state.projectName || "Project —",
-      branch: "Branch —",
+      branch: "Branch " + (state.branch || "—"),
       context: contextStatusLabel(),
       elapsed: "00:00",
       queue: "Queue 0",
@@ -1693,6 +1698,10 @@
   function normalizeStatusItems(value) {
     if (!Array.isArray(value)) return [];
     const items = value.filter(function (item) { return !composerStatusItems.has(item); });
+    if (!items.includes("branch")) {
+      const projectIndex = items.indexOf("project");
+      items.splice(projectIndex < 0 ? 0 : projectIndex + 1, 0, "branch");
+    }
     if (!items.includes("context")) {
       const queueIndex = items.indexOf("queue");
       items.splice(queueIndex < 0 ? items.length : queueIndex, 0, "context");
@@ -1717,22 +1726,22 @@
 
   function renderContextStatus(item) {
     const compactAt = state.contextWindowTokens;
-    const used = Math.min(compactAt, state.contextUsedTokens);
-    const usageRatio = compactAt > 0 ? used / compactAt : 0;
+    const remaining = Math.max(0, compactAt - state.contextUsedTokens);
+    const remainingRatio = compactAt > 0 ? remaining / compactAt : 0;
     const label = document.createElement("span");
     label.className = "context-token-label";
     label.textContent = contextStatusLabel();
     const meter = document.createElement("span");
     meter.className = "context-token-meter";
     meter.setAttribute("role", "progressbar");
-    meter.setAttribute("aria-label", "컨텍스트 토큰 사용량");
+    meter.setAttribute("aria-label", "컨텍스트 토큰 잔량");
     meter.setAttribute("aria-valuemin", "0");
     meter.setAttribute("aria-valuemax", String(compactAt));
-    meter.setAttribute("aria-valuenow", String(used));
+    meter.setAttribute("aria-valuenow", String(remaining));
     const fill = document.createElement("span");
     fill.className = "context-token-meter-fill";
-    fill.style.width = usageRatio * 100 + "%";
-    fill.style.backgroundColor = "hsl(" + Math.round((1 - usageRatio) * 120) + " 72% 45%)";
+    fill.style.width = remainingRatio * 100 + "%";
+    fill.style.backgroundColor = "hsl(" + Math.round(remainingRatio * 120) + " 72% 45%)";
     meter.append(fill);
     item.replaceChildren(label, meter);
   }

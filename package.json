@@ -71,6 +71,7 @@
             "status",
             "agents",
             "project",
+            "branch",
             "context",
             "queue"
           ],

@@ -44,3 +44,5 @@ for required backend support and recovery limits. Goal continuation belongs to
 Main; Work and Verification remain bounded.
 
 The workspace extension host initializes and discovers the private runtime through `exec.py init`, then pins the returned home/project binding. On SSH/container hosts this uses the executing host’s `AGENT_FACTORY_HOME` or `~/.agent-factory`, not the UI machine’s home. Restart the connection after explicit project rebind. The extension no longer builds checkout-local runtime paths.
+
+If a plugin reinstall replaces the versioned cache directory while a chat tab is open, the client rediscovers the newest installed `exec.py` and retries the interrupted runtime command once. Main chat polling also refreshes referenced Work and Verification state while a turn runs; transient refresh failures preserve the last known counts instead of resetting them to zero.

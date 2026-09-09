@@ -1,11 +1,12 @@
 :root {
+  --af-chat-background: var(--vscode-terminal-background, var(--vscode-editor-background, #1e1e1e));
   --af-color-accent: #0080e8;
   --af-color-accent-hover: #0874c9;
   color-scheme: light dark;
   font-family: var(--vscode-font-family);
   font-size: var(--vscode-font-size);
   color: var(--vscode-editor-foreground);
-  background: var(--vscode-editor-background);
+  background: var(--af-chat-background);
 }
 
 * {
@@ -46,7 +47,7 @@ button {
 
 .timeline {
   --af-cli-foreground: var(--vscode-terminal-foreground, var(--vscode-editor-foreground, #cdd6f4));
-  --af-cli-background: var(--vscode-terminal-background, var(--vscode-editor-background, #1e1e1e));
+  --af-cli-background: var(--af-chat-background);
   --af-cli-muted: color-mix(in srgb, var(--af-cli-foreground) 62%, var(--af-cli-background));
   --af-cli-user-background: color-mix(in srgb, var(--af-cli-background) 88%, white);
   --af-cli-code: var(--vscode-terminal-ansiCyan, #94e2d5);
@@ -434,7 +435,7 @@ button {
 .composer-region {
   z-index: 2;
   padding: 8px 12px 10px;
-  background: linear-gradient(to bottom, transparent, var(--vscode-editor-background) 16px);
+  background: var(--af-chat-background);
 }
 
 .run-status {
@@ -548,7 +549,7 @@ button {
   padding: 12px 12px 9px;
   border: 1px solid var(--vscode-input-border, var(--vscode-panel-border));
   border-radius: 18px;
-  background: var(--vscode-input-background);
+  background: var(--af-chat-background);
   box-shadow: 0 8px 28px color-mix(in srgb, #000 18%, transparent);
 }
 
@@ -851,10 +852,10 @@ button {
 .setting-button,
 .mode-button {
   height: 28px;
-  border: 1px solid var(--vscode-input-border, var(--vscode-panel-border));
+  border: 0;
   border-radius: 6px;
   color: var(--vscode-descriptionForeground);
-  background: color-mix(in srgb, var(--vscode-input-background) 72%, transparent);
+  background: transparent;
   font-size: 12px;
   cursor: pointer;
 }
@@ -943,7 +944,6 @@ button {
 
 .setting-button:hover,
 .mode-button:hover {
-  border-color: var(--af-color-accent);
   color: var(--vscode-foreground);
   background: var(--vscode-toolbar-hoverBackground);
 }
@@ -967,7 +967,6 @@ button {
 }
 
 .mode-button[aria-pressed="true"] {
-  border-color: var(--af-color-accent);
   color: var(--af-color-accent);
   background: color-mix(in srgb, var(--af-color-accent) 14%, var(--vscode-input-background));
 }

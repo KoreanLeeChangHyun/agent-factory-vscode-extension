@@ -20,6 +20,7 @@ export interface SessionControllerEvents {
     readonly output?: string;
   }) => void;
   readonly onGoal?: (goal: NativeGoal | null, error?: string) => void;
+  readonly onStatusObserved?: (status: string) => void;
   readonly onError: (message: string) => void;
 }
 
@@ -142,6 +143,7 @@ export class ChatSessionController {
       }
       if (poll % statusPollStride === 0) {
         const status = await this.runtime.status(agentId, runId);
+        this.events.onStatusObserved?.(status.status);
         if (TERMINAL_STATES.has(status.status)) {
           const result = await this.runtime.result(agentId, runId);
           const diagnostic = result.error ?? status.error;

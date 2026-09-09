@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { readGitBranch } from "./git-branch";
 import * as vscode from "vscode";
 import type { StatusItemId } from "../../core/config/types";
 import type { AttachmentReference } from "../../common/types/attachment";
@@ -24,9 +25,14 @@ interface ManagedPanel {
   state: ChatPanelState;
   readonly subscriptions: vscode.Disposable[];
   controller?: ChatSessionController;
+  agentRefreshTimer?: NodeJS.Timeout;
+  lastAgentRefreshAt?: number;
+  branchRefreshTimer?: NodeJS.Timeout;
+  branchRefreshStarted?: boolean;
 }
 
 const COMPOSER_PREFERENCES_KEY = "agentFactory.mainChat.composerPreferences";
+const AGENT_REFRESH_INTERVAL_MS = 2_000;
 
 export class ChatPanelManager implements vscode.Disposable {
   public readonly viewType = "agentFactory.mainChat";
@@ -129,6 +135,10 @@ export class ChatPanelManager implements vscode.Disposable {
 
     const subscriptions: vscode.Disposable[] = [];
     const managed: ManagedPanel = { panel, state, subscriptions };
+    subscriptions.push(new vscode.Disposable(() => {
+      managed.branchRefreshStarted = false;
+      if (managed.branchRefreshTimer) clearTimeout(managed.branchRefreshTimer);
+    }));
     this.panels.set(state.panelId, managed);
     if (panel.active) {
       this.activePanelId = state.panelId;
@@ -136,6 +146,7 @@ export class ChatPanelManager implements vscode.Disposable {
 
     subscriptions.push(
       panel.onDidDispose(() => {
+        if (managed.agentRefreshTimer) clearTimeout(managed.agentRefreshTimer);
         this.panels.delete(state.panelId);
         if (this.activePanelId === state.panelId) {
           this.activePanelId = undefined;
@@ -159,6 +170,22 @@ export class ChatPanelManager implements vscode.Disposable {
     } catch (error) {
       this.panels.delete(state.panelId);
       panel.webview.html = fallbackHtml(error);
+    }
+  }
+
+  private async refreshBranch(managed: ManagedPanel): Promise<void> {
+    if (!managed.branchRefreshStarted) return;
+    try {
+      if (managed.panel.visible) {
+        const branch = await readGitBranch(vscode.workspace.workspaceFolders?.[0]?.uri.fsPath);
+        if (managed.branchRefreshStarted) {
+          await this.post(managed.panel, { type: "branch.updated", branch });
+        }
+      }
+    } finally {
+      if (managed.branchRefreshStarted) {
+        managed.branchRefreshTimer = setTimeout(() => { void this.refreshBranch(managed); }, 3_000);
+      }
     }
   }
 
@@ -202,6 +229,11 @@ export class ChatPanelManager implements vscode.Disposable {
           });
         }
         await this.sendModelList(managed);
+        this.scheduleAgentList(managed, true);
+        if (!managed.branchRefreshStarted) {
+          managed.branchRefreshStarted = true;
+          void this.refreshBranch(managed);
+        }
         return;
       case "chat.send":
         await this.sendChat(managed, message.text, message.attachments, message.execution);
@@ -284,7 +316,6 @@ export class ChatPanelManager implements vscode.Disposable {
     }
     const connection = await this.connectRuntime();
     if (!connection.available) {
-      await this.post(managed.panel, { type: "agents.list", agents: [] });
       await this.post(managed.panel, { type: "host.notice", level: "error", text: connection.diagnostic });
       return;
     }
@@ -292,13 +323,27 @@ export class ChatPanelManager implements vscode.Disposable {
       const agents = await connection.client.listChildSessions(managed.state.agentId);
       await this.post(managed.panel, { type: "agents.list", agents });
     } catch (error) {
-      await this.post(managed.panel, { type: "agents.list", agents: [] });
       await this.post(managed.panel, {
         type: "host.notice",
         level: "error",
         text: error instanceof Error ? error.message : String(error)
       });
     }
+  }
+
+  private scheduleAgentList(managed: ManagedPanel, immediate = false): void {
+    if (!managed.state.agentId || (managed.state.role ?? "main") !== "main") return;
+    const elapsed = Date.now() - (managed.lastAgentRefreshAt ?? 0);
+    const delay = immediate ? 0 : Math.max(0, AGENT_REFRESH_INTERVAL_MS - elapsed);
+    if (managed.agentRefreshTimer) {
+      if (!immediate) return;
+      clearTimeout(managed.agentRefreshTimer);
+    }
+    managed.agentRefreshTimer = setTimeout(() => {
+      managed.agentRefreshTimer = undefined;
+      managed.lastAgentRefreshAt = Date.now();
+      void this.sendAgentList(managed);
+    }, delay);
   }
 
   private async openChildAgent(managed: ManagedPanel, agentId: string): Promise<void> {
@@ -411,9 +456,11 @@ export class ChatPanelManager implements vscode.Disposable {
         onBound: (agentId) => {
           managed.state = { ...managed.state, agentId };
           void this.post(managed.panel, { type: "session.bound", agentId });
+          this.scheduleAgentList(managed, true);
         },
         onRunningChanged: (running) => {
           void this.post(managed.panel, { type: "run.state", running });
+          this.scheduleAgentList(managed, !running);
         },
         onAssistantText: (responseText, phase) => {
           void this.post(managed.panel, { type: "chat.assistant", text: responseText, phase });
@@ -430,6 +477,9 @@ export class ChatPanelManager implements vscode.Disposable {
         },
         onGoal: (goal, error) => {
           void this.post(managed.panel, { type: "goal.updated", goal, error });
+        },
+        onStatusObserved: () => {
+          this.scheduleAgentList(managed);
         },
         onError: (message) => {
           void this.post(managed.panel, { type: "host.notice", level: "error", text: message });

@@ -29,6 +29,23 @@ async function importTypeScript(relativePath) {
   return import(`data:text/javascript;base64,${Buffer.from(source).toString("base64")}`);
 }
 
+test("branch status follows checkout and handles unborn, detached and non-Git folders", async function (t) {
+  const { readGitBranch } = await importTypeScript("src/infrastructure/vscode/git-branch.ts");
+  const { execFileSync } = await import("node:child_process");
+  const root = await mkdtemp(join(tmpdir(), "af-branch-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const git = (...args) => execFileSync("git", args, { cwd: root, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim();
+  assert.equal(await readGitBranch(), undefined);
+  assert.equal(await readGitBranch(root), undefined);
+  git("init", "-b", "main");
+  assert.equal(await readGitBranch(root), "main");
+  git("-c", "user.name=Test", "-c", "user.email=test@example.com", "-c", "commit.gpgsign=false", "commit", "--allow-empty", "-m", "Initial");
+  git("checkout", "-b", "feature/status");
+  assert.equal(await readGitBranch(root), "feature/status");
+  git("checkout", "--detach");
+  assert.equal(await readGitBranch(root), "detached " + git("rev-parse", "--short", "HEAD"));
+});
+
 test("async cache shares work, expires, isolates keys and retries failures", async function () {
   const { AsyncCache } = await importTypeScript("src/common/async-cache.ts");
   let now = 0;
@@ -235,6 +252,30 @@ test("plugin locator honors an override and discovers the newest install across 
   });
 });
 
+test("runtime client rediscovers an installed exec after its cache path is replaced", async function (t) {
+  const { AgentFactoryClient } = await importTypeScript("src/infrastructure/agent-factory/agent-client.ts");
+  const root = await mkdtemp(join(tmpdir(), "agent-factory-runtime-refresh-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const source = new URL("../fixtures/fake-exec.py", import.meta.url).pathname;
+  const oldExec = join(root, "cache/old/exec.py");
+  const newExec = join(root, "cache/new/exec.py");
+  await mkdir(dirname(oldExec), { recursive: true });
+  await mkdir(dirname(newExec), { recursive: true });
+  const script = await readFile(source);
+  await writeFile(oldExec, script);
+  await writeFile(newExec, script);
+  let rediscoveries = 0;
+  const client = new AgentFactoryClient(oldExec, root, "python3", join(root, "codex-home"), async () => {
+    rediscoveries += 1;
+    return newExec;
+  });
+
+  await client.listSessions();
+  await rm(oldExec);
+  assert.deepEqual(await client.status("main-test", "run-fake"), { status: "completed" });
+  assert.equal(rediscoveries, 1);
+});
+
 test("runtime client invokes official commands and reads the bounded managed result", async function () {
   const { AgentFactoryClient } = await importTypeScript("src/infrastructure/agent-factory/agent-client.ts");
   const projectRoot = await mkdtemp(join(tmpdir(), "agent-factory-client-"));
@@ -403,6 +444,7 @@ test("session controller binds once, sends later turns, and retains attachment r
     onAssistantText(text) { messages.push(["assistant", text]); },
     onProgress(text) { messages.push(["progress", text]); },
     onActivity(activity) { messages.push(["activity", activity]); },
+    onStatusObserved(status) { messages.push(["status", status]); },
     onError(text) { messages.push(["error", text]); }
   }, undefined, { pollIntervalMs: 0, maxPolls: 2 });
 
@@ -417,6 +459,7 @@ test("session controller binds once, sends later turns, and retains attachment r
   assert.equal(calls[1][1], calls[0][1]);
   assert.deepEqual(calls[0][3], execution);
   assert.equal(messages.filter((message) => message[0] === "assistant").length, 2);
+  assert.deepEqual(messages.filter((message) => message[0] === "status"), [["status", "completed"], ["status", "completed"]]);
 });
 
 test("session controller clearly rejects a concurrent send", async function () {
