@@ -161,7 +161,7 @@ test("composer shows only supported controls across draft and bound sessions", a
   const context = {
     state: { capabilities: { submit: { model: true }, send: {} }, model: 'gpt-6-astra', reasoning: 'medium', fastMode: true, goalMode: true },
     modelButton: button(), reasoningButton: button(), fastModeButton: button(), goalModeButton: button(),
-    modelLabel: {}, reasoningLabel: {}, openSettingId: undefined,
+    executionModeButton: button(), executionModeLabel: {}, modelLabel: {}, reasoningLabel: {}, openSettingId: undefined,
     goalPanel: { querySelectorAll() { return []; } }, goalStatus: {}, nativeGoal: null, goalError: undefined
   };
   runInNewContext(functions + '\nupdateModeControls();', context);
@@ -226,6 +226,17 @@ test("composer settings messages are strictly validated", async function () {
     agentId: "main-one-work"
   });
   assert.equal(parseClientMessage({ type: "agent.open", agentId: "../work" }), undefined);
+});
+
+test("long pasted text attachment requests are bounded", async function () {
+  const { parseClientMessage } = await importTypeScript("src/protocol/validator.ts");
+  const text = "가".repeat(8_000);
+  assert.deepEqual(parseClientMessage({ type: "attachments.createText", text }), {
+    type: "attachments.createText",
+    text
+  });
+  assert.equal(parseClientMessage({ type: "attachments.createText", text: "short" }), undefined);
+  assert.equal(parseClientMessage({ type: "attachments.createText", text: "x".repeat(1_000_001) }), undefined);
 });
 
 test("plugin locator honors an override and discovers the newest install across marketplaces", async function () {
@@ -418,6 +429,66 @@ test("runtime client invokes official commands and reads the bounded managed res
   assert.ok(invocations[1].includes("high"));
   assert.ok(invocations[1].includes("--fast"));
   assert.ok(invocations[1].includes("--goal-mode"));
+});
+
+test("runtime client refreshes changed context usage during a turn and forces the final refresh", async function (t) {
+  const { AgentFactoryClient } = await importTypeScript("src/infrastructure/agent-factory/agent-client.ts");
+  const projectRoot = await mkdtemp(join(tmpdir(), "agent-factory-live-usage-"));
+  t.after(() => rm(projectRoot, { recursive: true, force: true }));
+  const codexHome = join(projectRoot, "codex-home");
+  const runRoot = join(agentsRoot(projectRoot), "main-test/runs/run-live");
+  const eventsPath = join(runRoot, "events.jsonl");
+  const rolloutPath = join(codexHome, "sessions/2026/09/10/rollout-session-live.jsonl");
+  await mkdir(dirname(eventsPath), { recursive: true });
+  await mkdir(dirname(rolloutPath), { recursive: true });
+  await writeFile(join(runRoot, "state.json"), JSON.stringify({ sessionId: "session-live" }));
+  await writeFile(eventsPath, JSON.stringify({ type: "turn.started" }) + "\n");
+  const tokenCount = (inputTokens) => JSON.stringify({
+    type: "event_msg",
+    payload: {
+      type: "token_count",
+      info: {
+        last_token_usage: { input_tokens: inputTokens },
+        model_context_window: 258_400
+      }
+    }
+  }) + "\n";
+  await writeFile(rolloutPath, tokenCount(10_000));
+  let now = 0;
+  const client = new AgentFactoryClient(
+    new URL("../fixtures/fake-exec.py", import.meta.url).pathname,
+    projectRoot,
+    "python3",
+    codexHome,
+    undefined,
+    () => now
+  );
+
+  assert.deepEqual(await client.updates("main-test", "run-live", 0), {
+    cursor: 1,
+    updates: [
+      { kind: "status", text: "Main Agent가 요청을 분석 중" },
+      { kind: "usage", usedTokens: 10_000, contextWindowTokens: 258_400 }
+    ]
+  });
+  await appendFile(rolloutPath, tokenCount(20_000));
+  now = 999;
+  assert.deepEqual(await client.updates("main-test", "run-live", 1), { cursor: 1, updates: [] });
+  now = 1_000;
+  assert.deepEqual(await client.updates("main-test", "run-live", 1), {
+    cursor: 1,
+    updates: [{ kind: "usage", usedTokens: 20_000, contextWindowTokens: 258_400 }]
+  });
+
+  await appendFile(rolloutPath, tokenCount(30_000));
+  await appendFile(eventsPath, JSON.stringify({ type: "turn.completed" }) + "\n");
+  assert.deepEqual(await client.updates("main-test", "run-live", 1), {
+    cursor: 2,
+    updates: [
+      { kind: "status", text: "응답 정리 중" },
+      { kind: "usage", usedTokens: 30_000, contextWindowTokens: 258_400 }
+    ]
+  });
 });
 
 test("session controller binds once, sends later turns, and retains attachment references", async function () {
@@ -739,6 +810,16 @@ test("approval protocol accepts only explicit bounded run identifiers", async ()
   }
 });
 
+test("execution selection protocol accepts only listed modes", async () => {
+  const { parseClientMessage } = await importTypeScript("src/protocol/validator.ts");
+  for (const mode of ["cli-default", "workspace-write", "danger-full-access", "bypass"]) {
+    assert.deepEqual(parseClientMessage({ type: "execution.select", mode }), { type: "execution.select", mode });
+  }
+  for (const mode of [undefined, "read-only", "unsafe", 1]) {
+    assert.equal(parseClientMessage({ type: "execution.select", mode }), undefined);
+  }
+});
+
 test("explicit execution mode applies sandbox and never approval to submit and send", async () => {
   const { AgentFactoryClient, executionPolicyArguments } = await importTypeScript("src/infrastructure/agent-factory/agent-client.ts");
   assert.deepEqual(executionPolicyArguments(), []);
@@ -757,10 +838,12 @@ test("explicit execution mode applies sandbox and never approval to submit and s
     for (const [index, mode] of [[1, "workspace-write"], [2, "danger-full-access"], [3, "danger-full-access"]]) {
       assert.equal(calls[index][calls[index].indexOf("--sandbox") + 1], mode);
       assert.equal(calls[index][calls[index].indexOf("--approval-policy") + 1], "never");
+      assert.equal(calls[index][calls[index].indexOf("--human-approval-policy") + 1], index === 3 ? "bypass" : "required");
     }
     assert.equal(calls[4][0], "send");
     assert.equal(calls[4][calls[4].indexOf("--sandbox") + 1], "danger-full-access");
     assert.equal(calls[4][calls[4].indexOf("--approval-policy") + 1], "never");
+    assert.equal(calls[4][calls[4].indexOf("--human-approval-policy") + 1], "bypass");
     assert.equal(calls[5].includes("--sandbox"), false);
     assert.equal(calls[5].includes("--approval-policy"), false);
   } finally {
@@ -772,7 +855,7 @@ test("runtime capabilities expose only recognized stored session execution modes
   const { AgentFactoryClient } = await importTypeScript("src/infrastructure/agent-factory/agent-client.ts");
   const client = new AgentFactoryClient("/unused/exec.py", "/unused/project");
   const flags = { model: false, reasoning: false, fast: false, goal: false };
-  for (const mode of ["read-only", "workspace-write", "danger-full-access", "unknown", undefined]) {
+  for (const mode of ["read-only", "workspace-write", "danger-full-access", "bypass", "unknown", undefined]) {
     client.command = async () => ({ kind: "execution-capabilities", schemaVersion: "0.1.0", submit: flags, send: flags, executionMode: mode });
     const observed = await client.capabilities(String(mode));
     assert.equal(observed.executionMode, mode === "unknown" ? undefined : mode);

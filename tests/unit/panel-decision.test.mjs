@@ -9,14 +9,13 @@ const output = await build({
   entryPoints: [new URL("../../src/infrastructure/vscode/chat-panel-manager.ts", import.meta.url).pathname],
   bundle: true, write: false, platform: "node", format: "cjs", target: "node18", external: ["vscode"]
 });
-let selectedMode;
 let configuredMode;
 const configUpdates = [];
 const clipboardWrites = [];
 const vscode = {
   env: { clipboard: { async writeText(text) { clipboardWrites.push(text); } } },
   ConfigurationTarget: { Global: 1 },
-  window: { async showQuickPick() { return selectedMode; } },
+  window: {},
   workspace: { getConfiguration() { return {
     get(_key, fallback) { return configuredMode ?? fallback; },
     async update(...args) { configUpdates.push(args); }
@@ -56,29 +55,23 @@ test("host sends approval only to current controller and rejects missing or stal
 });
 
 
-test("execution mode selection is explicit and supports bound idle sessions but not active runs", async () => {
+test("inline execution mode selection supports bound idle sessions but not active runs", async () => {
   const posted = [];
   const manager = new module.exports.ChatPanelManager({}, {}, () => [], async () => { throw new Error("not used"); });
   const managed = {
     state: { role: "main" },
     panel: { webview: { async postMessage(message) { posted.push(message); return true; } } }
   };
-  selectedMode = undefined;
-  await manager.handleMessage(managed, { type: "execution.pick" });
-  assert.equal(managed.executionMode, undefined);
-  selectedMode = { mode: "danger-full-access" };
-  await manager.handleMessage(managed, { type: "execution.pick" });
+  await manager.handleMessage(managed, { type: "execution.select", mode: "danger-full-access" });
   assert.equal(managed.executionMode, "danger-full-access");
   assert.deepEqual(configUpdates.at(-1), ["executionMode", "danger-full-access", 1]);
   assert.equal(posted.at(-1).mode, "danger-full-access");
   managed.state.agentId = "existing-main";
-  selectedMode = { mode: "workspace-write" };
-  await manager.handleMessage(managed, { type: "execution.pick" });
+  await manager.handleMessage(managed, { type: "execution.select", mode: "workspace-write" });
   assert.equal(managed.executionMode, "workspace-write");
   delete managed.state.agentId;
   managed.controller = { running: true };
-  selectedMode = { mode: "bypass" };
-  await manager.handleMessage(managed, { type: "execution.pick" });
+  await manager.handleMessage(managed, { type: "execution.select", mode: "bypass" });
   assert.equal(managed.executionMode, "workspace-write");
 });
 
@@ -128,34 +121,28 @@ test("bypass selection persists its alias and can change after session binding",
     state: { role: "main" },
     panel: { webview: { async postMessage(message) { posted.push(message); return true; } } }
   };
-  selectedMode = { mode: "bypass" };
-  await manager.handleMessage(managed, { type: "execution.pick" });
+  await manager.handleMessage(managed, { type: "execution.select", mode: "bypass" });
   assert.equal(managed.executionMode, "bypass");
   assert.deepEqual(configUpdates.at(-1), ["executionMode", "bypass", 1]);
   assert.equal(posted.at(-1).mode, "bypass");
   managed.state.agentId = "existing-main";
-  selectedMode = { mode: "workspace-write" };
-  await manager.handleMessage(managed, { type: "execution.pick" });
+  await manager.handleMessage(managed, { type: "execution.select", mode: "workspace-write" });
   assert.equal(managed.executionMode, "workspace-write");
 });
 
-test("a run starting while the execution picker is open prevents the selection", async () => {
-  let resolveChoice;
-  selectedMode = new Promise(resolve => { resolveChoice = resolve; });
+test("execution selection rejects invalid modes and ignores non-Main panels", async () => {
+  const posted = [];
   const manager = new module.exports.ChatPanelManager({}, {}, () => [], async () => { throw new Error("not used"); });
   const managed = {
-    state: { role: "main", agentId: "existing-main" },
+    state: { role: "verification", agentId: "existing-main" },
     executionMode: "workspace-write",
-    controller: { running: false },
-    panel: { webview: { async postMessage() { throw new Error("Selection must not apply"); } } }
+    panel: { webview: { async postMessage(message) { posted.push(message); return true; } } }
   };
-  const pending = manager.handleMessage(managed, { type: "execution.pick" });
-  managed.controller.running = true;
-  resolveChoice({ mode: "bypass" });
-  await pending;
+  await manager.handleMessage(managed, { type: "execution.select", mode: "bypass" });
   assert.equal(managed.executionMode, "workspace-write");
   assert.equal(managed.executionModeExplicit, undefined);
-  selectedMode = undefined;
+  await manager.handleMessage(managed, { type: "execution.select", mode: "unsafe" });
+  assert.equal(posted.at(-1).level, "error");
 });
 
 

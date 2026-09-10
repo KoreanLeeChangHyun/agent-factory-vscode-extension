@@ -57,7 +57,7 @@ npm run check
 
 ## Runtime notes
 
-- **바이패스** is an alias for **전체 접근**: it uses the same unrestricted sandbox and `never` execution approval policy; it does not bypass hook trust, Human scope decisions, or verification.
+- **바이패스** uses the same unrestricted sandbox and `never` execution approval policy as **전체 접근**, and additionally authorizes Main to pass the delegation gate without asking the Human to approve its plan again. Main proceeds with the best bounded interpretation of the request, while missing credentials or genuinely unresolved required Human decisions may still require input. Work and Verification remain required.
 - New chats default to **전체 접근**: full filesystem and network access with approval policy `never` (no additional execution approval). Between runs, use **권한** to choose workspace write or CLI defaults instead. The selection is saved in the machine-scoped `agentFactory.mainChat.executionMode` setting; previously configured alternatives are preserved. Workspace write also uses `never`; CLI defaults use Codex settings for new sessions and are labeled **현재 정책 유지** in existing sessions, preserving the stored policy. Changes apply to the next message, including in existing sessions; active runs are unchanged. Resumed sessions preserve their stored policy until you explicitly choose a mode in that panel.
 
 - Attachments are passed as textual references. Browser-only pasted files need a filesystem path before the runtime can use them.

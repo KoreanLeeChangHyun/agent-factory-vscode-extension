@@ -101,8 +101,13 @@ test("composer exposes separate model and reasoning controls", function () {
   assert.doesNotMatch(template, /id="model-reasoning-button"/);
   assert.match(template, /id="model-menu"/);
   assert.match(template, /id="reasoning-menu"/);
+  assert.match(template, /id="execution-mode-button"[\s\S]*aria-controls="execution-mode-menu"/);
+  assert.match(template, /id="execution-mode-menu" class="setting-menu" role="menu"/);
   assert.match(template, /aria-haspopup="menu"/);
   assert.match(chatScript, /role", "menuitemradio"/);
+  assert.match(chatScript, /type: "execution\.select", mode: value/);
+  assert.doesNotMatch(chatScript, /type: "execution\.pick"/);
+  assert.match(chatScript, /createElementNS\("http:\/\/www\.w3\.org\/2000\/svg", "svg"\)/);
   assert.doesNotMatch(chatScript, /settings\.open/);
   assert.match(chatScript, /modelLabel\.textContent = state\.model \|\| "Default"/);
   assert.match(chatScript, /reasoningLabel\.textContent = state\.reasoning \|\| "Default"/);
@@ -117,6 +122,29 @@ test("composer uses one SVG send button that becomes the stop control", function
   assert.match(template, /id="stop-icon"/);
   assert.doesNotMatch(template, /id="stop-button"/);
   assert.match(chatScript, /sendButton\.classList\.toggle\("is-running"/);
+});
+
+test("image attachments render as previews inside the composer", function () {
+  const composerIndex = template.indexOf('class="composer"');
+  const attachmentsIndex = template.indexOf('id="attachment-list"');
+  const promptIndex = template.indexOf('id="prompt"');
+  assert.ok(attachmentsIndex > composerIndex);
+  assert.ok(attachmentsIndex < promptIndex);
+  assert.match(chatScript, /preview\.src = attachment\.previewUri/);
+  assert.match(chatScript, /URL\.createObjectURL\(file\)/);
+  assert.match(chatStyles, /\.attachment-image\s*\{/);
+  assert.match(chatStyles, /\.attachment-preview\s*\{[^}]*object-fit: cover/);
+  assert.match(panelManager, /previewUri: panel\.webview\.asWebviewUri\(uri\)\.toString\(\)/);
+});
+
+test("long pasted text becomes a real text-file attachment", function () {
+  assert.match(chatScript, /longPasteThreshold = 8_000/);
+  assert.match(chatScript, /event\.target === prompt && text\.length >= longPasteThreshold/);
+  assert.match(chatScript, /type: "attachments\.createText", text/);
+  assert.match(panelManager, /"pasted-text"/);
+  assert.match(panelManager, /vscode\.workspace\.fs\.writeFile\(uri, contents\)/);
+  assert.match(panelManager, /name: "붙여넣은 텍스트\.txt"/);
+  assert.match(chatScript, /prompt\.value\.trim\(\)\.length === 0 && state\.attachments\.length === 0/);
 });
 
 test("status bar includes active Work and Verification counts", function () {

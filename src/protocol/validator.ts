@@ -4,7 +4,7 @@ import type { ClientMessage } from "./messages";
 
 const clientMessageTypes = new Set([
   "client.ready",
-  "execution.pick",
+  "execution.select",
   "reference.copy",
   "chat.send",
   "decision.approve",
@@ -16,6 +16,7 @@ const clientMessageTypes = new Set([
   "agents.request",
   "agent.open",
   "attachments.pick",
+  "attachments.createText",
   "composer.settings",
   "status.reorder"
 ]);
@@ -38,7 +39,12 @@ export function parseClientMessage(value: unknown): ClientMessage | undefined {
     case "goal.control":
       if (typeof value.action !== "string" || !["get", "refresh", "pause", "cancel", "disable", "reopen"].includes(value.action)) return undefined;
       return { type: "goal.control", action: value.action as import("../infrastructure/agent-factory/agent-client").GoalAction };
-    case "execution.pick":
+    case "execution.select":
+      if (typeof value.mode !== "string" || !["cli-default", "workspace-write", "danger-full-access", "bypass"].includes(value.mode)) return undefined;
+      return { type: value.type, mode: value.mode as import("../infrastructure/agent-factory/agent-client").ExecutionMode };
+    case "attachments.createText":
+      if (typeof value.text !== "string" || value.text.length < 8_000 || value.text.length > 1_000_000) return undefined;
+      return { type: value.type, text: value.text };
     case "client.ready":
     case "run.cancel":
     case "sessions.request":
@@ -146,6 +152,7 @@ function parseAttachment(value: unknown): AttachmentReference | undefined {
 
   if (
     (value.uri !== undefined && typeof value.uri !== "string") ||
+    (value.previewUri !== undefined && typeof value.previewUri !== "string") ||
     (value.mediaType !== undefined && typeof value.mediaType !== "string") ||
     (value.size !== undefined && (typeof value.size !== "number" || value.size < 0))
   ) {
@@ -157,6 +164,7 @@ function parseAttachment(value: unknown): AttachmentReference | undefined {
     name: value.name,
     kind: value.kind as AttachmentKind,
     ...(typeof value.uri === "string" ? { uri: value.uri } : {}),
+    ...(typeof value.previewUri === "string" ? { previewUri: value.previewUri } : {}),
     ...(typeof value.mediaType === "string" ? { mediaType: value.mediaType } : {}),
     ...(typeof value.size === "number" ? { size: value.size } : {})
   };

@@ -9,7 +9,19 @@ const MAX_PROCESS_OUTPUT_BYTES = 1024 * 1024;
 const MAX_RESULT_BYTES = 1024 * 1024;
 const MAX_EVENTS_BYTES = 8 * 1024 * 1024;
 const COMMAND_TIMEOUT_MS = 20_000;
+const CONTEXT_USAGE_REFRESH_INTERVAL_MS = 1_000;
 const MANAGED_ID = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
+
+interface ContextUsage {
+  readonly usedTokens: number;
+  readonly contextWindowTokens: number;
+}
+
+interface ContextUsageSnapshot {
+  readonly checkedAt: number;
+  readonly rolloutPath?: string;
+  readonly usage?: ContextUsage;
+}
 
 export interface ExecutionCapabilities {
   readonly model: boolean;
@@ -99,7 +111,7 @@ export interface ChildAgentSession {
 }
 
 export interface AgentRuntimeClient {
-  capabilities(agentId?: string): Promise<{ readonly submit: ExecutionCapabilities; readonly send: ExecutionCapabilities; readonly executionMode?: "read-only" | "workspace-write" | "danger-full-access" }>;
+  capabilities(agentId?: string): Promise<{ readonly submit: ExecutionCapabilities; readonly send: ExecutionCapabilities; readonly executionMode?: "read-only" | "workspace-write" | "danger-full-access" | "bypass" }>;
   submit(agentId: string, message: string, execution: ExecutionOptions): Promise<RunAcceptance>;
   send(agentId: string, message: string, execution: ExecutionOptions): Promise<RunAcceptance>;
   status(agentId: string, runId: string): Promise<RunStatus>;
@@ -113,6 +125,7 @@ export interface AgentRuntimeClient {
 
 export class AgentFactoryClient implements AgentRuntimeClient {
   private readonly capabilityCache = new AsyncCache<Awaited<ReturnType<AgentRuntimeClient["capabilities"]>>>(30_000);
+  private readonly contextUsageSnapshots = new Map<string, ContextUsageSnapshot>();
   private locationPromise?: Promise<{ home: string; projectId: string; agentsRoot: string }>;
 
   private async location(): Promise<{ home: string; projectId: string; agentsRoot: string }> {
@@ -120,6 +133,7 @@ export class AgentFactoryClient implements AgentRuntimeClient {
       this.locationPromise = this.loadLocation().catch((error) => {
         this.locationPromise = undefined;
         this.eventSnapshot = undefined;
+        this.contextUsageSnapshots.clear();
         throw error;
       });
     }
@@ -141,6 +155,7 @@ export class AgentFactoryClient implements AgentRuntimeClient {
     if (value.home !== expectedHome) throw new Error("Agent Factory 저장소 홈 결속이 다릅니다.");
     await checkManagedComponents(value.agentsRoot as string);
     this.eventSnapshot = undefined;
+    this.contextUsageSnapshots.clear();
     return { home: value.home, projectId: value.projectId, agentsRoot: value.agentsRoot as string };
   }
 
@@ -174,7 +189,7 @@ export class AgentFactoryClient implements AgentRuntimeClient {
     };
     return {
       submit: readCapabilities(document.submit), send: readCapabilities(document.send),
-      ...(document.executionMode === "read-only" || document.executionMode === "workspace-write" || document.executionMode === "danger-full-access"
+      ...(document.executionMode === "read-only" || document.executionMode === "workspace-write" || document.executionMode === "danger-full-access" || document.executionMode === "bypass"
         ? { executionMode: document.executionMode } : {})
     };
   }
@@ -202,7 +217,8 @@ export class AgentFactoryClient implements AgentRuntimeClient {
     private readonly projectRoot: string,
     private readonly pythonCommand = "python3",
     private readonly codexHome = process.env.CODEX_HOME ?? join(homedir(), ".codex"),
-    private readonly rediscoverExecPath?: () => Promise<string>
+    private readonly rediscoverExecPath?: () => Promise<string>,
+    private readonly now = Date.now
   ) {}
 
   public async diagnose(): Promise<{ readonly available: true } | { readonly available: false; readonly diagnostic: string }> {
@@ -305,17 +321,36 @@ export class AgentFactoryClient implements AgentRuntimeClient {
     for (const line of newLines) {
       updates.push(...await progressUpdates(line, this.projectRoot));
     }
-    if (newLines.some(isTurnCompletedLine)) {
-      const usage = await this.readCurrentContextUsage(agentId, runId);
-      if (usage) updates.push({ kind: "usage", ...usage });
-    }
+    const usage = await this.readContextUsageUpdate(agentId, runId, newLines.some(isTurnCompletedLine));
+    if (usage) updates.push({ kind: "usage", ...usage });
     return { cursor: lines.length, updates };
   }
 
-  private async readCurrentContextUsage(
+  private async readContextUsageUpdate(
     agentId: string,
-    runId: string
-  ): Promise<{ readonly usedTokens: number; readonly contextWindowTokens: number } | undefined> {
+    runId: string,
+    force: boolean
+  ): Promise<ContextUsage | undefined> {
+    const key = `${agentId}/${runId}`;
+    const previous = this.contextUsageSnapshots.get(key);
+    const checkedAt = this.now();
+    if (!force && previous && checkedAt - previous.checkedAt < CONTEXT_USAGE_REFRESH_INTERVAL_MS) return undefined;
+
+    let rolloutPath = previous?.rolloutPath;
+    if (!rolloutPath) rolloutPath = await this.findCurrentRolloutPath(agentId, runId);
+    const usage = rolloutPath ? await readLatestTokenCount(rolloutPath).catch(() => undefined) : undefined;
+    const latestUsage = usage ?? previous?.usage;
+    this.contextUsageSnapshots.set(key, {
+      checkedAt,
+      ...(rolloutPath ? { rolloutPath } : {}),
+      ...(latestUsage ? { usage: latestUsage } : {})
+    });
+    if (!usage || (previous?.usage?.usedTokens === usage.usedTokens &&
+        previous.usage.contextWindowTokens === usage.contextWindowTokens)) return undefined;
+    return usage;
+  }
+
+  private async findCurrentRolloutPath(agentId: string, runId: string): Promise<string | undefined> {
     const statePath = await this.managedPath(agentId, "runs", runId, "state.json");
     try {
       const info = await lstat(statePath);
@@ -325,8 +360,7 @@ export class AgentFactoryClient implements AgentRuntimeClient {
         ? state.sessionId
         : undefined;
       if (!sessionId) return undefined;
-      const rolloutPath = await findSessionRollout(join(this.codexHome, "sessions"), sessionId);
-      return rolloutPath ? readLatestTokenCount(rolloutPath) : undefined;
+      return findSessionRollout(join(this.codexHome, "sessions"), sessionId);
     } catch {
       return undefined;
     }
@@ -353,6 +387,7 @@ export class AgentFactoryClient implements AgentRuntimeClient {
         if (status !== "cancelled" && status !== "failed") throw error;
       }
     }
+    this.contextUsageSnapshots.delete(`${agentId}/${runId}`);
     return {
       ...runDiagnostics(run),
       status,
@@ -555,6 +590,7 @@ export class AgentFactoryClient implements AgentRuntimeClient {
     this.execPath = refreshed;
     this.locationPromise = undefined;
     this.eventSnapshot = undefined;
+    this.contextUsageSnapshots.clear();
   }
 
   private async readManagedResult(path: string, agentId: string, runId: string): Promise<string> {
@@ -573,9 +609,10 @@ export class AgentFactoryClient implements AgentRuntimeClient {
 
 export function executionPolicyArguments(mode: ExecutionMode = "cli-default"): string[] {
   if (mode === "cli-default") return [];
+  const humanApprovalPolicy = mode === "bypass" ? "bypass" : "required";
   if (mode === "bypass") mode = "danger-full-access";
   if (mode !== "workspace-write" && mode !== "danger-full-access") throw new Error("올바르지 않은 실행 권한입니다.");
-  return ["--sandbox", mode, "--approval-policy", "never"];
+  return ["--sandbox", mode, "--approval-policy", "never", "--human-approval-policy", humanApprovalPolicy];
 }
 
 function executionArguments(execution: ExecutionOptions): string[] {

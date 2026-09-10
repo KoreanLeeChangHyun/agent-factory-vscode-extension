@@ -1,5 +1,5 @@
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { dirname, extname, join } from "node:path";
 import { readCliTheme } from "../agent-factory/cli-theme";
 import { randomUUID } from "node:crypto";
 import { readGitBranch } from "./git-branch";
@@ -280,8 +280,8 @@ export class ChatPanelManager implements vscode.Disposable {
       case "reference.copy":
         await vscode.env.clipboard.writeText(message.id);
         return;
-      case "execution.pick":
-        await this.pickExecutionMode(managed);
+      case "execution.select":
+        await this.selectExecutionMode(managed, message.mode);
         return;
       case "chat.send":
         await this.sendChat(managed, message.text, message.attachments, message.execution);
@@ -335,6 +335,9 @@ export class ChatPanelManager implements vscode.Disposable {
       case "attachments.pick":
         await this.pickAttachments(managed.panel);
         return;
+      case "attachments.createText":
+        await this.createTextAttachment(managed, message.text);
+        return;
       case "status.reorder":
         await this.saveStatusItems(managed.panel, message.items);
         return;
@@ -346,20 +349,16 @@ export class ChatPanelManager implements vscode.Disposable {
     return value === "cli-default" || value === "workspace-write" || value === "bypass" ? value : "danger-full-access";
   }
 
-  private async pickExecutionMode(managed: ManagedPanel): Promise<void> {
+  private async selectExecutionMode(
+    managed: ManagedPanel,
+    mode: import("../agent-factory/agent-client").ExecutionMode
+  ): Promise<void> {
     if (managed.controller?.running || (managed.state.role ?? "main") !== "main") return;
-    const choice = await vscode.window.showQuickPick([
-      { label: managed.state.agentId ? "현재 정책 유지" : "CLI 기본값", description: managed.state.agentId ? "세션에 저장된 실행 권한 사용" : "현재 Codex 설정 사용", mode: "cli-default" as const },
-      { label: "작업 공간 쓰기", description: "작업 공간 쓰기 허용 · 추가 승인 없음", mode: "workspace-write" as const },
-      { label: "전체 접근", description: "전체 파일 시스템·네트워크 접근 허용 · 추가 승인 없음", mode: "danger-full-access" as const },
-      { label: "바이패스", description: "샌드박스·실행 승인 없음 (전체 접근과 동일)", mode: "bypass" as const }
-    ], { title: "다음 실행 권한", placeHolder: "다음 메시지부터 적용됩니다. 현재 실행 중인 작업의 권한은 바뀌지 않습니다." });
-    if (!choice || managed.controller?.running) return;
-    managed.executionMode = choice.mode;
+    managed.executionMode = mode;
     managed.executionModeExplicit = true;
-    await vscode.workspace.getConfiguration("agentFactory.mainChat").update("executionMode", choice.mode,
+    await vscode.workspace.getConfiguration("agentFactory.mainChat").update("executionMode", mode,
       vscode.ConfigurationTarget.Global);
-    await this.post(managed.panel, { type: "execution.updated", mode: choice.mode });
+    await this.post(managed.panel, { type: "execution.updated", mode });
   }
 
   private async sendSessionList(managed: ManagedPanel): Promise<void> {
@@ -609,13 +608,26 @@ export class ChatPanelManager implements vscode.Disposable {
       return;
     }
 
+    const imageFiles = uris.filter((uri) => imageMediaType(uri.fsPath) !== undefined);
+    if (imageFiles.length > 0) {
+      const roots = panel.webview.options.localResourceRoots ?? this.templates.localResourceRoots;
+      const additionalRoots = imageFiles.map((uri) => vscode.Uri.file(dirname(uri.fsPath)));
+      panel.webview.options = {
+        ...panel.webview.options,
+        localResourceRoots: uniqueUris([...roots, ...additionalRoots])
+      };
+    }
+
     const attachments: AttachmentReference[] = await Promise.all(
       uris.map(async (uri) => {
         let kind: AttachmentReference["kind"] = "file";
+        const mediaType = imageMediaType(uri.fsPath);
         try {
           const stat = await vscode.workspace.fs.stat(uri);
           if ((stat.type & vscode.FileType.Directory) !== 0) {
             kind = "folder";
+          } else if (mediaType) {
+            kind = "image";
           }
         } catch {
           // The runtime performs the authoritative path validation before use.
@@ -624,11 +636,46 @@ export class ChatPanelManager implements vscode.Disposable {
           id: randomUUID(),
           name: uri.path.split("/").filter(Boolean).at(-1) ?? uri.toString(),
           kind,
-          uri: uri.toString()
+          uri: uri.toString(),
+          ...(kind === "image" && mediaType ? {
+            mediaType,
+            previewUri: panel.webview.asWebviewUri(uri).toString()
+          } : {})
         };
       })
     );
     await this.post(panel, { type: "attachments.add", attachments });
+  }
+
+  private async createTextAttachment(managed: ManagedPanel, text: string): Promise<void> {
+    try {
+      const directory = vscode.Uri.joinPath(
+        this.context.globalStorageUri,
+        "pasted-text",
+        managed.state.panelId
+      );
+      const uri = vscode.Uri.joinPath(directory, `${randomUUID()}.txt`);
+      const contents = Buffer.from(text, "utf8");
+      await vscode.workspace.fs.createDirectory(directory);
+      await vscode.workspace.fs.writeFile(uri, contents);
+      await this.post(managed.panel, {
+        type: "attachments.add",
+        attachments: [{
+          id: randomUUID(),
+          name: "붙여넣은 텍스트.txt",
+          kind: "file",
+          uri: uri.toString(),
+          mediaType: "text/plain",
+          size: contents.byteLength
+        }]
+      });
+    } catch (error) {
+      await this.post(managed.panel, {
+        type: "host.notice",
+        level: "error",
+        text: `붙여넣은 텍스트를 파일로 만들지 못했습니다: ${error instanceof Error ? error.message : String(error)}`
+      });
+    }
   }
 
   private async saveStatusItems(
@@ -669,6 +716,23 @@ export class ChatPanelManager implements vscode.Disposable {
 
 function workspaceName(): string {
   return vscode.workspace.name ?? "No workspace";
+}
+
+function imageMediaType(path: string): string | undefined {
+  return ({
+    ".avif": "image/avif",
+    ".bmp": "image/bmp",
+    ".gif": "image/gif",
+    ".jpeg": "image/jpeg",
+    ".jpg": "image/jpeg",
+    ".png": "image/png",
+    ".svg": "image/svg+xml",
+    ".webp": "image/webp"
+  } as Readonly<Record<string, string>>)[extname(path).toLowerCase()];
+}
+
+function uniqueUris(uris: readonly vscode.Uri[]): vscode.Uri[] {
+  return [...new Map(uris.map((uri) => [uri.toString(), uri])).values()];
 }
 
 function fallbackHtml(error: unknown): string {

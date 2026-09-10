@@ -21,6 +21,8 @@
   const reasoningLabel = document.getElementById("reasoning-label");
   const reasoningMenu = document.getElementById("reasoning-menu");
   const executionModeButton = document.getElementById("execution-mode-button");
+  const executionModeLabel = document.getElementById("execution-mode-label");
+  const executionModeMenu = document.getElementById("execution-mode-menu");
   const fastModeButton = document.getElementById("fast-mode-button");
   const goalModeButton = document.getElementById("goal-mode-button");
   const goalPanel = document.getElementById("goal-panel");
@@ -48,9 +50,11 @@
   const dropOverlay = document.getElementById("drop-overlay");
   const settingOptions = {
     model: [""],
-    reasoning: ["", "none", "low", "medium", "high", "xhigh", "max"]
+    reasoning: ["", "none", "low", "medium", "high", "xhigh", "max"],
+    execution: ["cli-default", "workspace-write", "danger-full-access", "bypass"]
   };
   const composerStatusItems = new Set(["model", "reasoning", "fast", "goal"]);
+  const longPasteThreshold = 8_000;
   let openSettingId;
 
   const saved = vscode.getState();
@@ -145,7 +149,9 @@
   reasoningButton.addEventListener("click", function () {
     openSetting("reasoning");
   });
-  executionModeButton?.addEventListener("click", function () { vscode.postMessage({ type: "execution.pick" }); });
+  executionModeButton?.addEventListener("click", function () {
+    openSetting("execution");
+  });
   fastModeButton.addEventListener("click", function () {
     toggleMode("fastMode");
   });
@@ -223,11 +229,16 @@
     const images = Array.from(event.clipboardData.files).filter(function (file) {
       return file.type.startsWith("image/");
     });
-    if (!images.length) {
+    if (images.length) {
+      event.preventDefault();
+      addAttachments(images.map(fileToAttachment));
       return;
     }
-    event.preventDefault();
-    addAttachments(images.map(fileToAttachment));
+    const text = event.clipboardData.getData("text/plain");
+    if (event.target === prompt && text.length >= longPasteThreshold) {
+      event.preventDefault();
+      vscode.postMessage({ type: "attachments.createText", text });
+    }
   });
 
   let dragDepth = 0;
@@ -478,7 +489,7 @@
 
   function submit() {
     const text = prompt.value.trim();
-    if (!text || state.running || !state.capabilities || !state.runtimeAvailable) {
+    if ((!text && state.attachments.length === 0) || state.running || !state.capabilities || !state.runtimeAvailable) {
       return;
     }
     const message = {
@@ -500,7 +511,11 @@
     goalObjective.value = "";
     state.pendingDecisionRunId = undefined;
     state.decisionSubmitting = false;
-    state.timeline.push({ type: "user", id: message.id, text: message.text });
+    state.timeline.push({
+      type: "user",
+      id: message.id,
+      text: message.text || state.attachments.map(function (attachment) { return "첨부: " + attachment.name; }).join("\n")
+    });
     state.draft = "";
     state.attachments = [];
     state.running = true;
@@ -603,9 +618,12 @@
       if (!existing.has(key) && state.attachments.length < 100) {
         state.attachments.push(attachment);
         existing.add(key);
+      } else if (attachment.previewUri?.startsWith("blob:")) {
+        URL.revokeObjectURL(attachment.previewUri);
       }
     }
     renderAttachments();
+    updateSendButton();
     persist();
   }
 
@@ -644,10 +662,12 @@
   }
 
   function fileToAttachment(file, forcedKind) {
+    const kind = forcedKind || (file.type.startsWith("image/") ? "image" : "file");
     return {
       id: createId(),
       name: file.name || "attachment",
-      kind: forcedKind || (file.type.startsWith("image/") ? "image" : "file"),
+      kind,
+      ...(kind === "image" ? { previewUri: URL.createObjectURL(file) } : {}),
       mediaType: file.type || undefined,
       size: Number.isFinite(file.size) ? file.size : undefined
     };
@@ -1342,21 +1362,40 @@
     attachmentList.replaceChildren();
     for (const attachment of state.attachments) {
       const chip = document.createElement("div");
-      chip.className = "attachment-chip";
+      chip.className = "attachment-chip" + (attachment.kind === "image" ? " attachment-image" : "");
       chip.title = attachment.uri || attachment.name;
       const name = document.createElement("span");
       name.className = "attachment-chip-name";
       name.textContent = attachment.name;
+      if (attachment.kind === "image" && attachment.previewUri) {
+        chip.classList.add("is-loading");
+        const preview = document.createElement("img");
+        preview.className = "attachment-preview";
+        preview.src = attachment.previewUri;
+        preview.alt = attachment.name;
+        preview.addEventListener("load", function () {
+          chip.classList.remove("is-loading");
+        });
+        preview.addEventListener("error", function () {
+          chip.classList.remove("is-loading");
+          chip.classList.add("preview-failed");
+        });
+        chip.append(preview);
+      }
       const remove = document.createElement("button");
       remove.className = "attachment-remove";
       remove.type = "button";
       remove.textContent = "×";
       remove.setAttribute("aria-label", attachment.name + " 첨부 제거");
       remove.addEventListener("click", function () {
+        if (attachment.previewUri?.startsWith("blob:")) {
+          URL.revokeObjectURL(attachment.previewUri);
+        }
         state.attachments = state.attachments.filter(function (item) {
           return item.id !== attachment.id;
         });
         renderAttachments();
+        updateSendButton();
         persist();
       });
       chip.append(name, remove);
@@ -1699,7 +1738,7 @@
   }
 
   function updateSendButton() {
-    sendButton.disabled = !state.running && (!state.runtimeAvailable || !state.capabilities || prompt.value.trim().length === 0);
+    sendButton.disabled = !state.running && (!state.runtimeAvailable || !state.capabilities || (prompt.value.trim().length === 0 && state.attachments.length === 0));
   }
 
   function updateRunControls() {
@@ -1729,10 +1768,11 @@
 
   function updateExecutionControl() {
     if (!executionModeButton) return;
-    executionModeButton.hidden = state.role !== "main";
+    executionModeButton.parentElement.hidden = state.role !== "main";
     executionModeButton.disabled = state.running;
-    executionModeButton.textContent = state.executionMode === undefined ? "권한: 현재 세션" : "권한: " + ({ "read-only": "읽기 전용", "workspace-write": "작업 공간 쓰기", "danger-full-access": "전체 접근", "bypass": "바이패스" }[state.executionMode] || (state.agentId ? "현재 정책 유지" : "CLI 기본값"));
+    executionModeLabel.textContent = state.executionMode === undefined ? "권한: 현재 세션" : "권한: " + executionModeName(state.executionMode);
     executionModeButton.title = state.running ? "실행이 끝나면 다음 메시지의 권한을 변경할 수 있습니다." : "다음 메시지에 적용할 실행 권한 선택";
+    if (state.running && openSettingId === "execution") closeSettingMenu(false);
   }
 
   function updateModeControls() {
@@ -1742,7 +1782,7 @@
     reasoningButton.parentElement.hidden = supported.reasoning !== true;
     fastModeButton.hidden = supported.fast !== true;
     goalModeButton.hidden = supported.goal !== true || (state.role && state.role !== "main");
-    if (openSettingId && supported[openSettingId] !== true) closeSettingMenu(false);
+    if (openSettingId && openSettingId !== "execution" && supported[openSettingId] !== true) closeSettingMenu(false);
     fastModeButton.setAttribute("aria-pressed", String(state.fastMode));
     fastModeButton.setAttribute("aria-label", state.fastMode ? "Fast mode on" : "Fast mode off");
     fastModeButton.title = state.fastMode ? "Fast mode on" : "Fast mode off";
@@ -1776,8 +1816,8 @@
     closeQuestionMenu(false);
     openSettingId = setting;
     if (setting === "model") vscode.postMessage({ type: "models.request" });
-    const button = setting === "model" ? modelButton : reasoningButton;
-    const menu = setting === "model" ? modelMenu : reasoningMenu;
+    const button = settingButton(setting);
+    const menu = settingMenu(setting);
     renderSettingMenu(setting, menu);
     menu.hidden = false;
     button.setAttribute("aria-expanded", "true");
@@ -1786,7 +1826,7 @@
   }
 
   function renderSettingMenu(setting, menu) {
-    const current = setting === "model" ? state.model : state.reasoning;
+    const current = setting === "model" ? state.model : setting === "reasoning" ? state.reasoning : state.executionMode ?? "cli-default";
     menu.replaceChildren();
     const values = setting === "model" ? [...new Set([...settingOptions.model, state.model])] : settingOptions[setting];
     for (const value of values) {
@@ -1796,12 +1836,25 @@
       option.setAttribute("role", "menuitemradio");
       option.setAttribute("aria-checked", String(value === current));
       option.dataset.value = value;
-      option.textContent = value || "Default";
+      const check = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+      check.classList.add("setting-check");
+      check.setAttribute("viewBox", "0 0 16 16");
+      check.setAttribute("aria-hidden", "true");
+      check.setAttribute("focusable", "false");
+      const checkPath = document.createElementNS("http://www.w3.org/2000/svg", "path");
+      checkPath.setAttribute("d", "m3 8 3 3 7-7");
+      check.append(checkPath);
+      const label = document.createElement("span");
+      label.textContent = setting === "execution" ? executionModeName(value) : value || "Default";
+      option.append(check, label);
       option.addEventListener("click", function () {
         if (setting === "model") {
           state.model = value;
-        } else {
+        } else if (setting === "reasoning") {
           state.reasoning = value;
+        } else {
+          state.executionMode = value;
+          vscode.postMessage({ type: "execution.select", mode: value });
         }
         updateModeControls();
         renderStatusBar();
@@ -1837,14 +1890,32 @@
     if (!openSettingId) {
       return;
     }
-    const button = openSettingId === "model" ? modelButton : reasoningButton;
-    const menu = openSettingId === "model" ? modelMenu : reasoningMenu;
+    const button = settingButton(openSettingId);
+    const menu = settingMenu(openSettingId);
     menu.hidden = true;
     button.setAttribute("aria-expanded", "false");
     openSettingId = undefined;
     if (restoreFocus) {
       button.focus();
     }
+  }
+
+  function settingButton(setting) {
+    return setting === "model" ? modelButton : setting === "reasoning" ? reasoningButton : executionModeButton;
+  }
+
+  function settingMenu(setting) {
+    return setting === "model" ? modelMenu : setting === "reasoning" ? reasoningMenu : executionModeMenu;
+  }
+
+  function executionModeName(mode) {
+    return ({
+      "read-only": "읽기 전용",
+      "cli-default": state.agentId ? "현재 정책 유지" : "CLI 기본값",
+      "workspace-write": "작업 공간 쓰기",
+      "danger-full-access": "전체 접근",
+      "bypass": "바이패스"
+    })[mode] || (state.agentId ? "현재 정책 유지" : "CLI 기본값");
   }
 
   function resizePrompt() {

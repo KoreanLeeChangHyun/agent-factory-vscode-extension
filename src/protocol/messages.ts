@@ -3,7 +3,7 @@ import type { AttachmentReference } from "../common/types/attachment";
 
 export type ClientMessage =
   | { readonly type: "client.ready" }
-  | { readonly type: "execution.pick" }
+  | { readonly type: "execution.select"; readonly mode: import("../infrastructure/agent-factory/agent-client").ExecutionMode }
   | { readonly type: "reference.copy"; readonly id: string }
   | {
       readonly type: "chat.send";
@@ -27,6 +27,7 @@ export type ClientMessage =
   | { readonly type: "agents.request" }
   | { readonly type: "agent.open"; readonly agentId: string }
   | { readonly type: "attachments.pick" }
+  | { readonly type: "attachments.createText"; readonly text: string }
   | {
       readonly type: "composer.settings";
       readonly model?: string;

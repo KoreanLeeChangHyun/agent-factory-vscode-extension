@@ -5,6 +5,7 @@ export interface AttachmentReference {
   readonly name: string;
   readonly kind: AttachmentKind;
   readonly uri?: string;
+  readonly previewUri?: string;
   readonly mediaType?: string;
   readonly size?: number;
 }
