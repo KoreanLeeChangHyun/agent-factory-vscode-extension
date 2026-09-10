@@ -290,7 +290,7 @@ button {
 }
 
 .terminal-command-block {
-  position: relative;
+  min-width: 0;
 }
 
 .terminal-command-prompt { color: var(--af-cli-foreground); }
@@ -312,24 +312,18 @@ button {
 }
 
 .bash-command-toggle {
-  position: absolute;
-  right: 0;
-  bottom: 0;
+  display: block;
+  margin: 3px 0 0 2ch;
   padding: 0;
-  padding-left: 14px;
   border: 0;
   color: var(--af-cli-link);
-  background: linear-gradient(90deg, transparent, var(--af-cli-background) 35%);
+  background: transparent;
   font: inherit;
   cursor: pointer;
 }
 
 .bash-command-toggle.is-expanded {
-  position: static;
   margin-top: 3px;
-  margin-left: 2ch;
-  padding-left: 0;
-  background: transparent;
 }
 
 .bash-command-toggle:hover {

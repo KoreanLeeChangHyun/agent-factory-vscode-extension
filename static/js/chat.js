@@ -908,7 +908,7 @@
     const toggle = document.createElement("button");
     toggle.type = "button";
     toggle.className = "bash-command-toggle";
-    toggle.textContent = "펼치기";
+    toggle.textContent = "명령 펼치기";
     toggle.setAttribute("aria-label", "전체 명령 펼치기");
     toggle.setAttribute("aria-expanded", "false");
     toggle.hidden = true;
@@ -932,7 +932,7 @@
   function setCommandExpanded(text, toggle, expanded) {
     text.classList.toggle("is-expanded", expanded);
     toggle.classList.toggle("is-expanded", expanded);
-    toggle.textContent = expanded ? "접기" : "펼치기";
+    toggle.textContent = expanded ? "명령 접기" : "명령 펼치기";
     toggle.setAttribute("aria-label", expanded ? "명령 접기" : "전체 명령 펼치기");
     toggle.setAttribute("aria-expanded", String(expanded));
     if (expanded) toggle.hidden = false;

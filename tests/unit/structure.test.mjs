@@ -294,12 +294,13 @@ test("terminal commands show three lines before offering an accessible command e
   assert.match(chatScript, /prompt\.textContent = phaseValue === "failed" \? "Failed " : phaseValue === "completed" \? "Ran " : "Running "/);
   assert.match(chatScript, /row\.append\(createActivityPhase\(phaseValue\), text\)/);
   assert.match(chatScript, /toggle\.hidden = !text\.classList\.contains\("is-expanded"\) && text\.scrollHeight <= text\.clientHeight \+ 1/);
-  assert.match(chatScript, /toggle\.textContent = expanded \? "접기" : "펼치기"/);
   assert.match(chatScript, /toggle\.setAttribute\("aria-label", "전체 명령 펼치기"\)/);
   assert.match(chatScript, /toggle\.setAttribute\("aria-expanded", String\(expanded\)\)/);
   assert.match(chatStyles, /\.bash-command-text\s*\{[^}]*max-height: calc\(1\.5em \* 3\)/);
   assert.match(chatStyles, /\.bash-command-text\.is-expanded\s*\{[^}]*max-height: none/);
-  assert.match(chatStyles, /\.bash-command-toggle\s*\{[^}]*position: absolute[^}]*bottom: 0/);
+  assert.match(chatStyles, /\.bash-command-toggle\s*\{[^}]*display: block[^}]*margin: 3px 0 0 2ch/);
+  assert.doesNotMatch(chatStyles.match(/\.bash-command-toggle\s*\{[^}]*\}/)[0], /position: absolute|linear-gradient/);
+  assert.match(chatScript, /toggle\.textContent = expanded \? "명령 접기" : "명령 펼치기"/);
 });
 
 test("terminal commands and extension-aware diffs use VS Code TextMate highlighting", function () {
