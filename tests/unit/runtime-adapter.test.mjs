@@ -228,6 +228,16 @@ test("composer settings messages are strictly validated", async function () {
   assert.equal(parseClientMessage({ type: "agent.open", agentId: "../work" }), undefined);
 });
 
+test("chat links allow browser and local-file targets while rejecting active schemes", async function () {
+  const { parseClientMessage } = await importTypeScript("src/protocol/validator.ts");
+  for (const href of ["https://example.com/docs", "mailto:test@example.com", "file:///workspace/app.ts#L12", "/workspace/app.ts:12:3", "./README.md"]) {
+    assert.deepEqual(parseClientMessage({ type: "link.open", href }), { type: "link.open", href });
+  }
+  for (const href of ["javascript:alert(1)", "data:text/html,test", "command:workbench.action.closeWindow", "", "https://example.com\nnext"]) {
+    assert.equal(parseClientMessage({ type: "link.open", href }), undefined);
+  }
+});
+
 test("long pasted text attachment requests are bounded", async function () {
   const { parseClientMessage } = await importTypeScript("src/protocol/validator.ts");
   const text = "가".repeat(8_000);

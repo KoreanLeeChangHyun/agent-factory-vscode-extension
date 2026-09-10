@@ -5,6 +5,7 @@ export type ClientMessage =
   | { readonly type: "client.ready" }
   | { readonly type: "execution.select"; readonly mode: import("../infrastructure/agent-factory/agent-client").ExecutionMode }
   | { readonly type: "reference.copy"; readonly id: string }
+  | { readonly type: "link.open"; readonly href: string }
   | {
       readonly type: "chat.send";
       readonly id: string;

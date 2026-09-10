@@ -225,6 +225,12 @@
   });
 
   document.addEventListener("click", function (event) {
+    const link = event.target.closest(".markdown-body a");
+    if (link) {
+      event.preventDefault();
+      vscode.postMessage({ type: "link.open", href: link.getAttribute("href") || "" });
+      return;
+    }
     if (openSettingId && !event.target.closest(".setting-control")) {
       closeSettingMenu(false);
     }

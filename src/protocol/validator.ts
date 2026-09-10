@@ -6,6 +6,7 @@ const clientMessageTypes = new Set([
   "client.ready",
   "execution.select",
   "reference.copy",
+  "link.open",
   "chat.send",
   "decision.approve",
   "run.cancel",
@@ -30,6 +31,10 @@ export function parseClientMessage(value: unknown): ClientMessage | undefined {
   }
 
   switch (value.type) {
+    case "link.open":
+      if (typeof value.href !== "string" || value.href.length < 1 || value.href.length > 8192 || /[\u0000-\u001f]/.test(value.href)) return undefined;
+      if (!/^(?:https?:\/\/|mailto:|file:\/\/|\/|\.\.?\/)/i.test(value.href)) return undefined;
+      return { type: value.type, href: value.href };
     case "reference.copy":
       if (typeof value.id !== "string" || !/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(value.id)) return undefined;
       return { type: value.type, id: value.id };

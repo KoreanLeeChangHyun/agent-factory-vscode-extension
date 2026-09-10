@@ -1,5 +1,6 @@
 import { homedir } from "node:os";
-import { dirname, extname, join } from "node:path";
+import { dirname, extname, isAbsolute, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { readCliTheme } from "../agent-factory/cli-theme";
 import { randomUUID } from "node:crypto";
 import { readGitBranch } from "./git-branch";
@@ -280,6 +281,9 @@ export class ChatPanelManager implements vscode.Disposable {
       case "reference.copy":
         await vscode.env.clipboard.writeText(message.id);
         return;
+      case "link.open":
+        await this.openLink(managed, message.href);
+        return;
       case "execution.select":
         await this.selectExecutionMode(managed, message.mode);
         return;
@@ -341,6 +345,34 @@ export class ChatPanelManager implements vscode.Disposable {
       case "status.reorder":
         await this.saveStatusItems(managed.panel, message.items);
         return;
+    }
+  }
+
+  private async openLink(managed: ManagedPanel, href: string): Promise<void> {
+    try {
+      if (/^(?:https?:\/\/|mailto:)/i.test(href)) {
+        await vscode.env.openExternal(vscode.Uri.parse(href, true));
+        return;
+      }
+
+      const target = parseLocalLink(href);
+      const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+      const filePath = isAbsolute(target.path)
+        ? target.path
+        : resolve(workspaceRoot ?? this.context.extensionUri.fsPath, target.path);
+      const document = await vscode.workspace.openTextDocument(vscode.Uri.file(filePath));
+      const editor = await vscode.window.showTextDocument(document, { preview: true });
+      if (target.line !== undefined) {
+        const position = new vscode.Position(Math.max(0, target.line - 1), Math.max(0, (target.column ?? 1) - 1));
+        editor.selection = new vscode.Selection(position, position);
+        editor.revealRange(new vscode.Range(position, position), vscode.TextEditorRevealType.InCenterIfOutsideViewport);
+      }
+    } catch (error) {
+      await this.post(managed.panel, {
+        type: "host.notice",
+        level: "error",
+        text: `링크를 열 수 없습니다: ${error instanceof Error ? error.message : String(error)}`
+      });
     }
   }
 
@@ -716,6 +748,39 @@ export class ChatPanelManager implements vscode.Disposable {
 
 function workspaceName(): string {
   return vscode.workspace.name ?? "No workspace";
+}
+
+function parseLocalLink(href: string): { path: string; line?: number; column?: number } {
+  let path = href;
+  let fragment = "";
+  if (/^file:\/\//i.test(href)) {
+    const url = new URL(href);
+    fragment = url.hash.slice(1);
+    url.hash = "";
+    url.search = "";
+    path = fileURLToPath(url);
+  } else {
+    const hashIndex = path.indexOf("#");
+    if (hashIndex >= 0) {
+      fragment = path.slice(hashIndex + 1);
+      path = path.slice(0, hashIndex);
+    }
+    path = decodeURIComponent(path);
+  }
+
+  const fragmentLocation = fragment.match(/^L(\d+)(?:C(\d+))?$/i);
+  if (fragmentLocation) {
+    return { path, line: Number(fragmentLocation[1]), ...(fragmentLocation[2] ? { column: Number(fragmentLocation[2]) } : {}) };
+  }
+  const suffixLocation = path.match(/^(.*):(\d+)(?::(\d+))?$/);
+  if (suffixLocation) {
+    return {
+      path: suffixLocation[1]!,
+      line: Number(suffixLocation[2]),
+      ...(suffixLocation[3] ? { column: Number(suffixLocation[3]) } : {})
+    };
+  }
+  return { path };
 }
 
 function imageMediaType(path: string): string | undefined {

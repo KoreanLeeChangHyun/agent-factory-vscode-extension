@@ -12,8 +12,13 @@ const output = await build({
 let configuredMode;
 const configUpdates = [];
 const clipboardWrites = [];
+const externalOpens = [];
 const vscode = {
-  env: { clipboard: { async writeText(text) { clipboardWrites.push(text); } } },
+  env: {
+    clipboard: { async writeText(text) { clipboardWrites.push(text); } },
+    async openExternal(uri) { externalOpens.push(uri.value); return true; }
+  },
+  Uri: { parse(value) { return { value }; } },
   ConfigurationTarget: { Global: 1 },
   window: {},
   workspace: { getConfiguration() { return {
@@ -158,4 +163,16 @@ test("execution reference copy accepts a bounded ID and rejects non-ID clipboard
   }
   assert.equal(clipboardWrites.length, before);
   assert.equal(notices.length, 5);
+});
+
+test("validated web links open through VS Code", async () => {
+  const notices = [];
+  const manager = new module.exports.ChatPanelManager({}, {}, () => [], async () => { throw new Error("not used"); });
+  const managed = { panel: { webview: { async postMessage(message) { notices.push(message); return true; } } } };
+  await manager.handleMessage(managed, { type: "link.open", href: "https://example.com/docs" });
+  assert.equal(externalOpens.at(-1), "https://example.com/docs");
+  assert.equal(notices.length, 0);
+  await manager.handleMessage(managed, { type: "link.open", href: "javascript:alert(1)" });
+  assert.equal(externalOpens.length, 1);
+  assert.equal(notices.at(-1).level, "error");
 });

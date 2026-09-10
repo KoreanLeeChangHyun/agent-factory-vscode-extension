@@ -242,6 +242,12 @@ async function main() {
     assert.ok((await parsedMessage.innerText()).includes('앞선 설명'));
     assert.ok(await parsedMessage.locator('p').first().evaluate((before, list) => Boolean(before.compareDocumentPosition(list) & Node.DOCUMENT_POSITION_FOLLOWING), await references.elementHandle()));
     assert.ok(await parsedMessage.locator('p').last().evaluate((after, list) => Boolean(after.compareDocumentPosition(list) & Node.DOCUMENT_POSITION_PRECEDING), await references.elementHandle()));
+    await emit({ type: 'chat.assistant', phase: 'final', text: '[문서](https://example.com/docs) · [파일](/workspace/app.ts:12)' });
+    const chatLinks = page.locator('.message-assistant').last().locator('a');
+    await chatLinks.first().click();
+    assert.deepEqual(await page.evaluate(() => window.sentMessages.at(-1)), { type: 'link.open', href: 'https://example.com/docs' });
+    await chatLinks.last().click();
+    assert.deepEqual(await page.evaluate(() => window.sentMessages.at(-1)), { type: 'link.open', href: '/workspace/app.ts:12' });
     await emit({ type: 'agents.list', agents: [] });
     assert.equal(await references.locator('button.execution-reference-main').count(), 0);
     await emit({ type: 'chat.assistant', phase: 'final', text: '실행 식별자:\n- Work Agent: ../invalid' });
