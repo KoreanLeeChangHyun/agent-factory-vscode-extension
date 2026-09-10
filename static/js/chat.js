@@ -90,7 +90,7 @@
     contextWindowTokens: safeCountOrUndefined(saved?.contextWindowTokens),
     runProgress: typeof saved?.runProgress === "string" ? saved.runProgress : "",
     runStartedAt: Number.isFinite(saved?.runStartedAt) ? saved.runStartedAt : undefined,
-    runPanelExpanded: saved?.runPanelExpanded === true,
+    runPanelExpanded: saved?.running === true && saved?.runPanelExpanded === true,
     sessions: [],
     sessionsLoading: false,
     childAgents: Array.isArray(saved?.childAgents) ? saved.childAgents : [],
@@ -329,6 +329,7 @@
           state.runStartedAt = Date.now();
         } else if (!state.running) {
           state.runStartedAt = undefined;
+          state.runPanelExpanded = false;
         }
         if (!state.statusItems.length) {
           state.statusItems = normalizeStatusItems(message.statusItems);
@@ -1348,13 +1349,12 @@
   }
 
   function renderRunStatus() {
-    const hasWorkLoop = state.role === "main" && state.childAgents.length > 0;
-    runStatus.hidden = !state.running && !hasWorkLoop;
+    runStatus.hidden = !state.running;
     if (!state.running) {
       stopElapsedTimer();
-      runStatusLabel.textContent = hasWorkLoop ? "최근 작업 · 검증" : "";
-      runStatusLabel.title = runStatusLabel.textContent;
-      runElapsed.textContent = hasWorkLoop ? state.workUnits.totalCalled + "개 호출" : "0s";
+      runStatusLabel.textContent = "";
+      runStatusLabel.title = "";
+      runElapsed.textContent = "0s";
       return;
     }
     if (!state.runStartedAt) {

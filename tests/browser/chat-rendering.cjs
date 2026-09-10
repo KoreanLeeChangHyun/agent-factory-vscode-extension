@@ -381,6 +381,8 @@ async function main() {
     await page.locator('.composer-region').screenshot({ path: path.join(artifactDir, 'run-status-dark-reduced-motion.png') });
     fs.writeFileSync(path.join(artifactDir, 'run-status-visibility.json'), JSON.stringify({ statusStyle, positions, reducedStyle, minimumGradientContrast: Math.min(...gradientColors.map(contrast)), metaContrast: contrast(statusStyle.metaColor) }, null, 2));
     await emit({ type: 'run.state', running: false });
+    assert.equal(await page.locator('#run-status').isHidden(), true);
+    assert.equal(await page.locator('#run-status-toggle').getAttribute('aria-expanded'), 'false');
     assert.deepEqual(errors, []);
     console.log('Strict CSP, aliases, ANSI, themes/contrast, streaming fences, fallback, live disclosures/focus, and multi-file diff rendering passed.');
   } finally {
