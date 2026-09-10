@@ -254,6 +254,20 @@ async function main() {
     await page.evaluate(() => { document.body.className = 'vscode-dark'; });
     await emit({ type: 'run.state', running: true });
     await emit({ type: 'run.progress', text: '작업 결과를 검증하고 있습니다' });
+    await emit({ type: 'agents.list', agents: [
+      { agentId: 'work-loop-1', role: 'work', status: 'completed' },
+      { agentId: 'verification-loop-1', role: 'verification', status: 'running' }
+    ] });
+    assert.match(await page.locator('#run-status-agents').textContent(), /작업 1 · 검증 1/);
+    await page.locator('#run-status-toggle').click();
+    assert.equal(await page.locator('#run-status-toggle').getAttribute('aria-expanded'), 'true');
+    assert.equal(await page.locator('#run-details').isVisible(), true);
+    assert.deepEqual(await page.locator('.run-stage-name').allTextContents(), ['작업', '검증']);
+    assert.deepEqual(await page.locator('.run-stage-marker').allTextContents(), ['✓', '●']);
+    await page.locator('.run-stage').last().click();
+    assert.deepEqual(await page.evaluate(() => window.sentMessages.at(-1)), { type: 'agent.open', agentId: 'verification-loop-1' });
+    await page.locator('#run-status-toggle').click();
+    assert.equal(await page.locator('#run-details').isHidden(), true);
     const statusStyle = await page.locator('#run-status').evaluate(element => {
       const label = getComputedStyle(element.querySelector('.run-status-label'));
       const meta = getComputedStyle(element.querySelector('.run-status-meta'));

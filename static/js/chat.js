@@ -41,8 +41,14 @@
   const questionMenu = document.getElementById("question-menu");
   const questionList = document.getElementById("question-list");
   const runStatus = document.getElementById("run-status");
+  const runStatusToggle = document.getElementById("run-status-toggle");
   const runStatusLabel = document.getElementById("run-status-label");
   const runElapsed = document.getElementById("run-elapsed");
+  const runStatusAgents = document.getElementById("run-status-agents");
+  const runDetails = document.getElementById("run-details");
+  const runDetailsSummary = document.getElementById("run-details-summary");
+  const runStageList = document.getElementById("run-stage-list");
+  const runStopButton = document.getElementById("run-stop-button");
   const attachmentList = document.getElementById("attachment-list");
   const statusBar = document.getElementById("status-bar");
   const agentsMenu = document.getElementById("agents-menu");
@@ -84,6 +90,7 @@
     contextWindowTokens: safeCountOrUndefined(saved?.contextWindowTokens),
     runProgress: typeof saved?.runProgress === "string" ? saved.runProgress : "",
     runStartedAt: Number.isFinite(saved?.runStartedAt) ? saved.runStartedAt : undefined,
+    runPanelExpanded: saved?.runPanelExpanded === true,
     sessions: [],
     sessionsLoading: false,
     childAgents: Array.isArray(saved?.childAgents) ? saved.childAgents : [],
@@ -104,6 +111,16 @@
   renderAll();
   resizePrompt();
   vscode.postMessage({ type: "client.ready" });
+
+  runStatusToggle.addEventListener("click", function () {
+    state.runPanelExpanded = !state.runPanelExpanded;
+    renderWorkLoopPanel();
+    if (state.runPanelExpanded && state.role === "main") {
+      vscode.postMessage({ type: "agents.request" });
+    }
+    persist();
+  });
+  runStopButton.addEventListener("click", cancelRun);
 
   let syntaxThemeClass = document.body.className;
   new MutationObserver(function () {
@@ -404,6 +421,8 @@
         state.childAgents = Array.isArray(message.agents) ? message.agents.filter(isChildAgent) : [];
         state.workUnits = summarizeChildAgents(state.childAgents);
         renderAgentsList();
+        renderRunStatus();
+        renderWorkLoopPanel();
         renderTimeline();
         renderStatusBar();
         persist();
@@ -441,6 +460,7 @@
           state.runStartedAt = undefined;
         }
         updateRunControls();
+        renderWorkLoopPanel();
         renderTimeline();
         renderStatusBar();
         persist();
@@ -482,6 +502,7 @@
           totalCalled: safeCount(message.totalCalled)
         };
         renderStatusBar();
+        renderWorkLoopPanel();
         persist();
         break;
     }
@@ -678,6 +699,7 @@
     renderAttachments();
     renderStatusBar();
     renderRunStatus();
+    renderWorkLoopPanel();
     updateSendButton();
     updateRunControls();
     updateModeControls();
@@ -1320,11 +1342,13 @@
   }
 
   function renderRunStatus() {
-    runStatus.hidden = !state.running;
+    const hasWorkLoop = state.role === "main" && state.childAgents.length > 0;
+    runStatus.hidden = !state.running && !hasWorkLoop;
     if (!state.running) {
       stopElapsedTimer();
-      runStatusLabel.textContent = "";
-      runElapsed.textContent = "0s";
+      runStatusLabel.textContent = hasWorkLoop ? "최근 작업 · 검증" : "";
+      runStatusLabel.title = runStatusLabel.textContent;
+      runElapsed.textContent = hasWorkLoop ? state.workUnits.totalCalled + "개 호출" : "0s";
       return;
     }
     if (!state.runStartedAt) {
@@ -1337,6 +1361,74 @@
     if (!elapsedTimerId) {
       elapsedTimerId = window.setInterval(renderRunStatus, 1000);
     }
+  }
+
+  function renderWorkLoopPanel() {
+    const expandable = state.role === "main";
+    const expanded = expandable && state.runPanelExpanded && !runStatus.hidden;
+    runStatusToggle.disabled = !expandable;
+    runStatusToggle.setAttribute("aria-expanded", String(expanded));
+    runStatus.classList.toggle("is-expanded", expanded);
+    runStatus.classList.toggle("is-running", state.running);
+    runDetails.hidden = !expanded;
+    runStatusAgents.hidden = !expandable;
+    runStatusAgents.textContent = state.workUnits.totalCalled > 0
+      ? "작업 " + Math.max(countChildAgents("work"), state.workUnits.workActive) + " · 검증 " + Math.max(countChildAgents("verification"), state.workUnits.verificationActive)
+      : "";
+    if (!expanded) return;
+
+    runDetailsSummary.textContent = state.workUnits.activeUnits > 0
+      ? state.workUnits.activeUnits + "개 진행 중"
+      : state.childAgents.length > 0 ? state.childAgents.length + "개 호출" : "준비 중";
+    runStageList.replaceChildren();
+    if (state.childAgents.length === 0) {
+      runStageList.append(emptyAgentItem("아직 호출된 작업자나 검증자가 없습니다."));
+    } else {
+      for (const agent of state.childAgents) {
+        runStageList.append(createRunStage(agent));
+      }
+    }
+    runStopButton.hidden = !state.running;
+  }
+
+  function createRunStage(agent) {
+    const item = document.createElement("button");
+    item.type = "button";
+    item.className = "run-stage";
+    item.dataset.status = agent.status;
+    item.title = agent.agentId + " 세션 열기";
+    const marker = document.createElement("span");
+    marker.className = "run-stage-marker";
+    marker.setAttribute("aria-hidden", "true");
+    marker.textContent = childAgentStatusMarker(agent.status);
+    const copy = document.createElement("span");
+    copy.className = "run-stage-copy";
+    const name = document.createElement("span");
+    name.className = "run-stage-name";
+    name.textContent = agent.role === "work" ? "작업" : "검증";
+    const id = document.createElement("span");
+    id.className = "run-stage-id";
+    id.textContent = agent.agentId;
+    copy.append(name, id);
+    const status = document.createElement("span");
+    status.className = "run-stage-status";
+    status.textContent = childAgentStatusLabel(agent.status);
+    item.append(marker, copy, status);
+    item.addEventListener("click", function () {
+      vscode.postMessage({ type: "agent.open", agentId: agent.agentId });
+    });
+    return item;
+  }
+
+  function countChildAgents(role) {
+    return state.childAgents.filter(function (agent) { return agent.role === role; }).length;
+  }
+
+  function childAgentStatusMarker(status) {
+    if (status === "completed") return "✓";
+    if (status === "failed" || status === "cancelled") return "×";
+    if (status === "needs-human-decision") return "!";
+    return "●";
   }
 
   function stopElapsedTimer() {
@@ -1945,6 +2037,7 @@
       contextWindowTokens: state.contextWindowTokens,
       runProgress: state.runProgress,
       runStartedAt: state.runStartedAt,
+      runPanelExpanded: state.runPanelExpanded,
       workUnits: state.workUnits,
       childAgents: state.childAgents
     });

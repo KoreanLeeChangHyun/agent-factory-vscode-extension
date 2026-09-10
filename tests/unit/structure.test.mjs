@@ -190,17 +190,22 @@ test("composer selections remain sticky across turns and panel restoration", fun
   assert.match(chatScript, /model: state\.model,[\s\S]*reasoning: state\.reasoning,[\s\S]*fastMode: state\.fastMode,[\s\S]*goalMode: state\.goalMode/);
 });
 
-test("running state appears above the composer with elapsed time and interrupt guidance", function () {
+test("running state appears above the composer as an expandable work loop panel", function () {
   const runStatusIndex = template.indexOf('id="run-status"');
   const composerIndex = template.indexOf('class="composer"');
   assert.ok(runStatusIndex > 0);
   assert.ok(runStatusIndex < composerIndex);
   assert.match(template, /role="status"/);
   assert.match(template, /id="run-elapsed"/);
-  assert.match(template, /Esc로 중단/);
+  assert.match(template, /id="run-status-toggle"[^>]*aria-controls="run-details"/);
+  assert.match(template, /id="run-details"[^>]*aria-label="작업 및 검증 상세"/);
+  assert.match(template, /id="run-stage-list"/);
+  assert.match(template, /id="run-stop-button"/);
   assert.match(chatScript, /aria-busy/);
   assert.match(chatScript, /formatElapsed/);
   assert.match(chatStyles, /\.run-status/);
+  assert.match(chatStyles, /\.run-details/);
+  assert.match(chatStyles, /\.run-stage/);
   assert.doesNotMatch(template, /run-status-marker/);
   assert.doesNotMatch(chatStyles, /\.run-status-marker/);
   assert.match(chatStyles, /@keyframes run-status-text-scan\s*\{[\s\S]*?from\s*\{\s*background-position: 98% 0;[\s\S]*?to\s*\{\s*background-position: 2% 0;/);
@@ -213,6 +218,9 @@ test("running state appears above the composer with elapsed time and interrupt g
   assert.match(chatStyles, /prefers-reduced-motion: reduce[\s\S]*\.run-status-label[\s\S]*color: var\(--vscode-foreground\)[\s\S]*animation: none/);
   assert.doesNotMatch(chatStyles, /\.run-status::after/);
   assert.doesNotMatch(chatStyles, /\.message-running/);
+  assert.match(chatScript, /state\.runPanelExpanded = !state\.runPanelExpanded/);
+  assert.match(chatScript, /function createRunStage\(agent\)/);
+  assert.match(chatScript, /type: "agent\.open", agentId: agent\.agentId/);
 });
 
 test("runtime status stays in the loader while concrete activity updates the timeline", function () {
