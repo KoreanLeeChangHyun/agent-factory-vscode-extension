@@ -15,6 +15,7 @@ const diff = [
 const fixture = [
   { type: 'user', id: 'user', text: 'Render CLI transcript' },
   { type: 'assistant', id: 'fences', phase: 'final', text: '```python\nprint("hello")\n```\n\n```unknown\n<raw> preserved\n```' },
+  { type: 'activity', id: 'short', category: 'command', phase: 'completed', text: 'echo ready', output: 'ready' },
   { type: 'activity', id: 'long', category: 'command', phase: 'started', text: longCommand, output: 'one\ntwo\nthree\nfour' },
   { type: 'activity', id: 'diff', category: 'file', phase: 'completed', text: 'example.py', diff }
 ];
@@ -88,7 +89,10 @@ async function main() {
     assert.match(await page.locator('meta[http-equiv="Content-Security-Policy"]').getAttribute('content'), /'wasm-unsafe-eval'/);
 
     const command = page.locator('[data-id="long"]');
+    const shortCommand = page.locator('[data-id="short"]');
     const file = page.locator('[data-id="diff"]');
+    assert.equal(await shortCommand.locator('.bash-command-toggle').isHidden(), true);
+    assert.equal(await command.locator('.bash-command-toggle').isVisible(), true);
     await command.locator('.bash-command-toggle').click();
     await command.locator('summary').click();
     await file.locator('summary').click();

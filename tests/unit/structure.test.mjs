@@ -9,10 +9,25 @@ const chatStyles = await readFile(new URL("../../static/css/chat.css", import.me
 const agentClient = await readFile(new URL("../../src/infrastructure/agent-factory/agent-client.ts", import.meta.url), "utf8");
 const panelManager = await readFile(new URL("../../src/infrastructure/vscode/chat-panel-manager.ts", import.meta.url), "utf8");
 const syntaxHighlighter = await readFile(new URL("../../src/webview/syntax-highlighter.ts", import.meta.url), "utf8");
+const loadingGallery = await readFile(new URL("../../templates/loading-animation-gallery.html", import.meta.url), "utf8");
+const loadingGalleryStyles = await readFile(new URL("../../static/css/loading-animation-gallery.css", import.meta.url), "utf8");
+const bootstrap = await readFile(new URL("../../src/core/bootstrap.ts", import.meta.url), "utf8");
 
 test("extension runs in the workspace extension host", function () {
   assert.deepEqual(packageJson.extensionKind, ["workspace"]);
   assert.equal(packageJson.main, "./dist/extension.js");
+});
+
+test("loading animation gallery previews themed candidates from the command palette", function () {
+  const command = packageJson.contributes.commands.find(function (item) {
+    return item.command === "agentFactory.loadingAnimations.preview";
+  });
+  assert.equal(command.title, "로딩 애니메이션 샘플 보기");
+  assert.match(bootstrap, /registerCommand\("agentFactory\.loadingAnimations\.preview"/);
+  assert.match(loadingGallery, /class="sample-card/g);
+  assert.match(loadingGallery, /id="motion-toggle"/);
+  assert.match(loadingGalleryStyles, /var\(--vscode-editor-background/);
+  assert.match(loadingGalleryStyles, /prefers-reduced-motion: reduce/);
 });
 
 test("chat is restored as an editor webview panel", function () {
@@ -212,7 +227,8 @@ test("running state appears above the composer as an expandable work loop panel"
   assert.match(chatStyles, /\.run-status-label\s*\{[^}]*background-size: 230% 100%;[^}]*background-repeat: no-repeat;/);
   assert.match(template, /class="run-status-copy"[\s\S]*run-status-label[\s\S]*run-status-meta/);
   assert.match(chatStyles, /\.run-status-label\s*\{[^}]*color: var\(--vscode-foreground\)[^}]*background-clip: text[^}]*animation: run-status-text-scan/);
-  assert.match(chatStyles, /var\(--vscode-foreground\) 45%,[\s\S]*var\(--vscode-terminal-ansiCyan, #94e2d5\) 50%,[\s\S]*var\(--vscode-foreground\) 55%/);
+  assert.match(chatStyles, /var\(--vscode-foreground\) 45%,[\s\S]*color-mix\(in srgb, var\(--vscode-foreground\) 42%, var\(--af-chat-background\)\) 50%,[\s\S]*var\(--vscode-foreground\) 55%/);
+  assert.doesNotMatch(chatStyles.match(/\.run-status-label\s*\{[^}]*\}/)[0], /ansiCyan|#94e2d5/);
   assert.doesNotMatch(chatStyles.match(/\.run-status-copy\s*\{[^}]*\}/)[0], /animation|transparent|background-image/);
   assert.match(chatStyles, /\.run-status-meta\s*\{[^}]*color: var\(--vscode-foreground\)/);
   assert.match(chatStyles, /prefers-reduced-motion: reduce[\s\S]*\.run-status-label[\s\S]*color: var\(--vscode-foreground\)[\s\S]*animation: none/);
@@ -293,14 +309,17 @@ test("terminal commands show three lines before offering an accessible command e
   assert.match(chatScript, /renderTerminalCommand\(content, event\.text, event\.phase, event\.title\)/);
   assert.match(chatScript, /prompt\.textContent = phaseValue === "failed" \? "Failed " : phaseValue === "completed" \? "Ran " : "Running "/);
   assert.match(chatScript, /row\.append\(createActivityPhase\(phaseValue\), text\)/);
-  assert.match(chatScript, /toggle\.hidden = !text\.classList\.contains\("is-expanded"\) && text\.scrollHeight <= text\.clientHeight \+ 1/);
+  assert.match(chatScript, /toggle\.hidden = text\.scrollHeight <= text\.clientHeight \+ 1/);
+  assert.match(chatScript, /new ResizeObserver\(scheduleCommandDisclosureMeasurement\)/);
   assert.match(chatScript, /toggle\.setAttribute\("aria-label", "전체 명령 펼치기"\)/);
   assert.match(chatScript, /toggle\.setAttribute\("aria-expanded", String\(expanded\)\)/);
+  assert.match(chatScript, /togglePath\.setAttribute\("d", "m4 6 4 4 4-4"\)/);
   assert.match(chatStyles, /\.bash-command-text\s*\{[^}]*max-height: calc\(1\.5em \* 3\)/);
   assert.match(chatStyles, /\.bash-command-text\.is-expanded\s*\{[^}]*max-height: none/);
-  assert.match(chatStyles, /\.bash-command-toggle\s*\{[^}]*display: block[^}]*margin: 3px 0 0 2ch/);
+  assert.match(chatStyles, /\.bash-command-toggle\s*\{[^}]*display: grid[^}]*margin: 3px 0 0 2ch/);
+  assert.match(chatStyles, /\.bash-command-toggle\[hidden\]\s*\{[^}]*display: none/);
   assert.doesNotMatch(chatStyles.match(/\.bash-command-toggle\s*\{[^}]*\}/)[0], /position: absolute|linear-gradient/);
-  assert.match(chatScript, /toggle\.textContent = expanded \? "명령 접기" : "명령 펼치기"/);
+  assert.match(chatStyles, /\.bash-command-toggle\.is-expanded svg\s*\{[^}]*rotate\(180deg\)/);
 });
 
 test("terminal commands and extension-aware diffs use VS Code TextMate highlighting", function () {

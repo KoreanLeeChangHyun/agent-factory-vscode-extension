@@ -6,6 +6,8 @@
     ? globalThis.markdownit({ html: false, linkify: true, typographer: false })
     : undefined;
   const timeline = document.getElementById("timeline");
+  let commandDisclosureObserver;
+  let commandDisclosureFrame;
   let commandOutputObserver;
   let commandOutputFrame;
   const emptyState = document.getElementById("empty-state");
@@ -915,10 +917,18 @@
     const toggle = document.createElement("button");
     toggle.type = "button";
     toggle.className = "bash-command-toggle";
-    toggle.textContent = "명령 펼치기";
     toggle.setAttribute("aria-label", "전체 명령 펼치기");
+    toggle.title = "전체 명령 펼치기";
     toggle.setAttribute("aria-expanded", "false");
     toggle.hidden = true;
+    const toggleIcon = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+    toggleIcon.setAttribute("viewBox", "0 0 16 16");
+    toggleIcon.setAttribute("aria-hidden", "true");
+    toggleIcon.setAttribute("focusable", "false");
+    const togglePath = document.createElementNS("http://www.w3.org/2000/svg", "path");
+    togglePath.setAttribute("d", "m4 6 4 4 4-4");
+    toggleIcon.append(togglePath);
+    toggle.append(toggleIcon);
     toggle.addEventListener("click", function () {
       setCommandExpanded(text, toggle, !text.classList.contains("is-expanded"));
     });
@@ -926,23 +936,36 @@
     commandBlock.className = "terminal-command-block";
     commandBlock.append(row, toggle);
     container.append(commandBlock);
-    requestAnimationFrame(function () {
-      toggle.hidden = !text.classList.contains("is-expanded") && text.scrollHeight <= text.clientHeight + 1;
-    });
+    if (!commandDisclosureObserver) {
+      commandDisclosureObserver = new ResizeObserver(scheduleCommandDisclosureMeasurement);
+      commandDisclosureObserver.observe(timeline);
+    }
+    scheduleCommandDisclosureMeasurement();
     void applySyntaxHighlighting(commandCode, command, "bash").then(function () {
-      requestAnimationFrame(function () {
-        toggle.hidden = !text.classList.contains("is-expanded") && text.scrollHeight <= text.clientHeight + 1;
-      });
+      scheduleCommandDisclosureMeasurement();
     });
   }
 
   function setCommandExpanded(text, toggle, expanded) {
     text.classList.toggle("is-expanded", expanded);
     toggle.classList.toggle("is-expanded", expanded);
-    toggle.textContent = expanded ? "명령 접기" : "명령 펼치기";
     toggle.setAttribute("aria-label", expanded ? "명령 접기" : "전체 명령 펼치기");
+    toggle.title = expanded ? "명령 접기" : "전체 명령 펼치기";
     toggle.setAttribute("aria-expanded", String(expanded));
     if (expanded) toggle.hidden = false;
+  }
+
+  function scheduleCommandDisclosureMeasurement() {
+    if (commandDisclosureFrame) return;
+    commandDisclosureFrame = requestAnimationFrame(function () {
+      commandDisclosureFrame = undefined;
+      for (const block of timeline.querySelectorAll(".terminal-command-block")) {
+        const text = block.querySelector(".bash-command-text");
+        const toggle = block.querySelector(".bash-command-toggle");
+        if (!text || !toggle || text.classList.contains("is-expanded")) continue;
+        toggle.hidden = text.scrollHeight <= text.clientHeight + 1;
+      }
+    });
   }
 
   function readActivityDisplayTitle(title, phase) {

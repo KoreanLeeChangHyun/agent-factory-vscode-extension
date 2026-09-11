@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src {{cspSource}}; script-src 'nonce-{{nonce}}';" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <link rel="stylesheet" href="{{styleUri}}" />
+    <title>로딩 애니메이션 샘플</title>
+  </head>
+  <body>
+    <main>
+      <header class="gallery-header">
+        <div>
+          <p class="eyebrow">Agent Factory · UI Lab</p>
+          <h1>로딩 애니메이션</h1>
+          <p class="intro">실제 실행 상태 바의 크기와 테마에서 비교하는 여섯 가지 후보입니다.</p>
+        </div>
+        <div class="gallery-controls" aria-label="애니메이션 제어">
+          <button id="motion-toggle" type="button" aria-pressed="false">일시정지</button>
+          <button id="motion-replay" type="button">처음부터</button>
+        </div>
+      </header>
+
+      <section class="sample-grid" aria-label="로딩 애니메이션 후보">
+        <article class="sample-card is-current">
+          <div class="sample-heading"><span class="sample-number">01</span><h2>Text shimmer</h2><span class="current-badge">현재 적용</span></div>
+          <p>상태 문구 위로 빛이 지나갑니다. 가장 조용하고 정보 중심적입니다.</p>
+          <div class="status-preview variant-shimmer" role="img" aria-label="텍스트 시머 로딩 애니메이션">
+            <span class="marker pulse-dot"></span><span class="status-label">작업 결과를 검증하고 있습니다</span><span class="elapsed">18s</span><span class="agent-count">작업 2 · 검증 1</span><span class="chevron">⌃</span>
+          </div>
+        </article>
+
+        <article class="sample-card">
+          <div class="sample-heading"><span class="sample-number">02</span><h2>Soft pulse</h2></div>
+          <p>작은 점 하나가 호흡하듯 반응합니다. 장시간 작업에도 피로가 적습니다.</p>
+          <div class="status-preview variant-pulse" role="img" aria-label="소프트 펄스 로딩 애니메이션">
+            <span class="marker pulse-dot"></span><span class="status-label">작업 결과를 검증하고 있습니다</span><span class="elapsed">18s</span><span class="agent-count">작업 2 · 검증 1</span><span class="chevron">⌃</span>
+          </div>
+        </article>
+
+        <article class="sample-card">
+          <div class="sample-heading"><span class="sample-number">03</span><h2>Orbit</h2></div>
+          <p>작은 입자가 중심을 회전합니다. 에이전트가 계속 움직인다는 인상이 선명합니다.</p>
+          <div class="status-preview variant-orbit" role="img" aria-label="오비트 로딩 애니메이션">
+            <span class="marker orbit"><i></i></span><span class="status-label">작업 결과를 검증하고 있습니다</span><span class="elapsed">18s</span><span class="agent-count">작업 2 · 검증 1</span><span class="chevron">⌃</span>
+          </div>
+        </article>
+
+        <article class="sample-card">
+          <div class="sample-heading"><span class="sample-number">04</span><h2>Thinking dots</h2></div>
+          <p>세 점이 순서대로 떠오릅니다. 익숙하고 친근한 대화형 표현입니다.</p>
+          <div class="status-preview variant-dots" role="img" aria-label="씽킹 도트 로딩 애니메이션">
+            <span class="marker dots"><i></i><i></i><i></i></span><span class="status-label">작업 결과를 검증하고 있습니다</span><span class="elapsed">18s</span><span class="agent-count">작업 2 · 검증 1</span><span class="chevron">⌃</span>
+          </div>
+        </article>
+
+        <article class="sample-card">
+          <div class="sample-heading"><span class="sample-number">05</span><h2>Signal</h2></div>
+          <p>막대가 낮게 오르내립니다. 여러 작업자가 병렬로 일하는 느낌을 줍니다.</p>
+          <div class="status-preview variant-signal" role="img" aria-label="시그널 로딩 애니메이션">
+            <span class="marker signal"><i></i><i></i><i></i><i></i></span><span class="status-label">작업 결과를 검증하고 있습니다</span><span class="elapsed">18s</span><span class="agent-count">작업 2 · 검증 1</span><span class="chevron">⌃</span>
+          </div>
+        </article>
+
+        <article class="sample-card">
+          <div class="sample-heading"><span class="sample-number">06</span><h2>Progress track</h2></div>
+          <p>하단의 빛이 좌우로 이동합니다. 실행 영역 전체에 진행감을 더합니다.</p>
+          <div class="status-preview variant-track" role="img" aria-label="프로그레스 트랙 로딩 애니메이션">
+            <span class="marker pulse-dot"></span><span class="status-label">작업 결과를 검증하고 있습니다</span><span class="elapsed">18s</span><span class="agent-count">작업 2 · 검증 1</span><span class="chevron">⌃</span><span class="track"></span>
+          </div>
+        </article>
+      </section>
+
+      <p class="gallery-note">시스템에서 동작 줄이기를 사용 중이면 애니메이션이 정지된 모습으로 표시됩니다.</p>
+    </main>
+    <script nonce="{{nonce}}" src="{{scriptUri}}"></script>
+  </body>
+</html>

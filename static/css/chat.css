@@ -312,9 +312,12 @@ button {
 }
 
 .bash-command-toggle {
-  display: block;
+  display: grid;
+  width: 20px;
+  height: 20px;
   margin: 3px 0 0 2ch;
   padding: 0;
+  place-items: center;
   border: 0;
   color: var(--af-cli-link);
   background: transparent;
@@ -322,8 +325,27 @@ button {
   cursor: pointer;
 }
 
+.bash-command-toggle[hidden] {
+  display: none;
+}
+
+.bash-command-toggle svg {
+  width: 14px;
+  height: 14px;
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 1.5;
+  transition: transform 140ms ease;
+}
+
 .bash-command-toggle.is-expanded {
   margin-top: 3px;
+}
+
+.bash-command-toggle.is-expanded svg {
+  transform: rotate(180deg);
 }
 
 .bash-command-toggle:hover {
@@ -522,7 +544,7 @@ button {
   background-image: linear-gradient(
     90deg,
     var(--vscode-foreground) 45%,
-    var(--vscode-terminal-ansiCyan, #94e2d5) 50%,
+    color-mix(in srgb, var(--vscode-foreground) 42%, var(--af-chat-background)) 50%,
     var(--vscode-foreground) 55%
   );
   background-position: 98% 0;

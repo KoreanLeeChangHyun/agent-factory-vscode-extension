@@ -1,0 +1,86 @@
+:root {
+  --background: var(--vscode-editor-background, #181818);
+  --foreground: var(--vscode-foreground, #cccccc);
+  --muted: var(--vscode-descriptionForeground, #969696);
+  --border: var(--vscode-panel-border, #3c3c3c);
+  --surface: var(--vscode-editorWidget-background, #252526);
+  --accent: #0080e8;
+  --cyan: var(--vscode-terminal-ansiCyan, #75beff);
+  color-scheme: light dark;
+  font-family: var(--vscode-font-family, system-ui, sans-serif);
+  color: var(--foreground);
+  background: var(--background);
+}
+
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--background); }
+button { font: inherit; }
+main { width: min(1040px, 100%); margin: 0 auto; padding: 42px 28px 54px; }
+.gallery-header { display: flex; align-items: end; justify-content: space-between; gap: 24px; margin-bottom: 30px; }
+.eyebrow { margin: 0 0 8px; color: var(--cyan); font-size: 11px; font-weight: 650; letter-spacing: .11em; text-transform: uppercase; }
+h1 { margin: 0; font-size: clamp(26px, 4vw, 38px); font-weight: 620; letter-spacing: -.035em; }
+.intro { margin: 10px 0 0; color: var(--muted); font-size: 13px; }
+.gallery-controls { display: flex; flex: 0 0 auto; gap: 7px; }
+.gallery-controls button { padding: 7px 11px; border: 1px solid var(--border); border-radius: 6px; color: var(--foreground); background: var(--surface); cursor: pointer; }
+.gallery-controls button:hover { border-color: var(--vscode-focusBorder, var(--accent)); }
+.gallery-controls button:focus-visible { outline: 1px solid var(--vscode-focusBorder, var(--accent)); outline-offset: 2px; }
+.sample-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
+.sample-card { position: relative; min-width: 0; padding: 17px; border: 1px solid var(--border); border-radius: 12px; background: color-mix(in srgb, var(--surface) 62%, var(--background)); }
+.sample-card.is-current { border-color: color-mix(in srgb, var(--accent) 58%, var(--border)); }
+.sample-heading { display: flex; min-height: 21px; align-items: center; gap: 8px; }
+.sample-number { color: var(--muted); font: 10px/1 var(--vscode-editor-font-family, monospace); letter-spacing: .08em; }
+h2 { margin: 0; font-size: 13px; font-weight: 620; }
+.current-badge { margin-left: auto; padding: 2px 6px; border-radius: 999px; color: var(--cyan); background: color-mix(in srgb, var(--cyan) 12%, transparent); font-size: 10px; }
+.sample-card > p { min-height: 34px; margin: 7px 0 15px; color: var(--muted); font-size: 11px; line-height: 1.5; }
+.status-preview { position: relative; display: flex; width: 100%; min-height: 36px; padding: 7px 9px; align-items: center; gap: 8px; overflow: hidden; border: 1px solid var(--vscode-input-border, var(--border)); border-radius: 9px; color: var(--foreground); background: color-mix(in srgb, var(--surface) 72%, var(--background)); font-size: 12px; line-height: 1.4; }
+.marker { position: relative; display: inline-flex; width: 9px; height: 9px; flex: 0 0 9px; align-items: center; justify-content: center; }
+.pulse-dot { width: 7px; height: 7px; flex-basis: 7px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 18%, transparent); }
+.status-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.elapsed { flex: 0 0 auto; }
+.agent-count { min-width: 0; margin-left: auto; overflow: hidden; color: var(--muted); text-overflow: ellipsis; white-space: nowrap; }
+.chevron { width: 12px; flex: 0 0 auto; color: var(--muted); font-size: 13px; text-align: center; }
+
+@keyframes text-shimmer { from { background-position: 98% 0; } to { background-position: 2% 0; } }
+.variant-shimmer .status-label { color: var(--foreground); background: linear-gradient(90deg, var(--foreground) 45%, color-mix(in srgb, var(--foreground) 42%, var(--background)) 50%, var(--foreground) 55%) 98% 0 / 230% 100% no-repeat; background-clip: text; -webkit-background-clip: text; -webkit-text-fill-color: transparent; animation: text-shimmer 2.4s linear infinite; }
+
+@keyframes soft-pulse { 0%, 100% { transform: scale(.72); opacity: .55; box-shadow: 0 0 0 0 transparent; } 50% { transform: scale(1); opacity: 1; box-shadow: 0 0 0 5px color-mix(in srgb, var(--accent) 16%, transparent); } }
+.variant-pulse .pulse-dot { animation: soft-pulse 1.65s ease-in-out infinite; }
+
+@keyframes orbit-spin { to { transform: rotate(360deg); } }
+.orbit { border: 1px solid color-mix(in srgb, var(--accent) 38%, transparent); border-radius: 50%; animation: orbit-spin 1.25s linear infinite; }
+.orbit i { position: absolute; top: -2px; width: 4px; height: 4px; border-radius: 50%; background: var(--cyan); box-shadow: 0 0 5px color-mix(in srgb, var(--cyan) 60%, transparent); }
+
+@keyframes dot-rise { 0%, 60%, 100% { transform: translateY(1px); opacity: .35; } 30% { transform: translateY(-2px); opacity: 1; } }
+.dots { width: 15px; flex-basis: 15px; gap: 2px; }
+.dots i { width: 3px; height: 3px; border-radius: 50%; background: var(--accent); animation: dot-rise 1.05s ease-in-out infinite; }
+.dots i:nth-child(2) { animation-delay: .14s; }
+.dots i:nth-child(3) { animation-delay: .28s; }
+
+@keyframes signal-wave { 0%, 100% { height: 3px; opacity: .45; } 50% { height: 10px; opacity: 1; } }
+.signal { width: 14px; flex-basis: 14px; align-items: center; gap: 1px; }
+.signal i { width: 2px; height: 3px; border-radius: 1px; background: var(--cyan); animation: signal-wave .9s ease-in-out infinite; }
+.signal i:nth-child(2) { animation-delay: .12s; }
+.signal i:nth-child(3) { animation-delay: .24s; }
+.signal i:nth-child(4) { animation-delay: .36s; }
+
+@keyframes track-slide { from { transform: translateX(-120%); } to { transform: translateX(520%); } }
+.track { position: absolute; right: auto; bottom: 0; left: 0; width: 20%; height: 1px; border-radius: 1px; background: linear-gradient(90deg, transparent, var(--cyan), transparent); animation: track-slide 1.8s ease-in-out infinite; }
+
+.is-paused *, .is-paused *::before, .is-paused *::after { animation-play-state: paused !important; }
+.is-replaying .status-preview *, .is-replaying .status-preview *::before, .is-replaying .status-preview *::after { animation-delay: 0s; }
+.gallery-note { margin: 20px 0 0; color: var(--muted); font-size: 11px; text-align: center; }
+
+@media (max-width: 720px) {
+  main { padding: 28px 16px 40px; }
+  .gallery-header { align-items: flex-start; flex-direction: column; }
+  .sample-grid { grid-template-columns: 1fr; }
+}
+
+@media (max-width: 440px) {
+  .agent-count { display: none; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation: none !important; transition: none !important; }
+  .variant-shimmer .status-label { background: none; -webkit-text-fill-color: currentColor; }
+}

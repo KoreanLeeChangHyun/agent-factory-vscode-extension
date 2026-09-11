@@ -19,6 +19,7 @@
     "onCommand:agentFactory.mainChat.open",
     "onCommand:agentFactory.mainChat.resume",
     "onCommand:agentFactory.mainChat.rename",
+    "onCommand:agentFactory.loadingAnimations.preview",
     "onWebviewPanel:agentFactory.mainChat"
   ],
   "main": "./dist/extension.js",
@@ -38,6 +39,11 @@
       {
         "command": "agentFactory.mainChat.rename",
         "title": "Main Agent 이름 변경",
+        "category": "Agent Factory"
+      },
+      {
+        "command": "agentFactory.loadingAnimations.preview",
+        "title": "로딩 애니메이션 샘플 보기",
         "category": "Agent Factory"
       }
     ],
@@ -122,7 +128,7 @@
     "build": "node scripts/build.mjs",
     "watch": "node scripts/build.mjs --watch",
     "check": "npm run typecheck && npm run check:static && npm run test && npm run build",
-    "check:static": "node --check static/js/chat.js && node --check static/js/ansi-renderer.js && node --check static/js/execution-references.js",
+    "check:static": "node --check static/js/chat.js && node --check static/js/ansi-renderer.js && node --check static/js/execution-references.js && node --check static/js/loading-animation-gallery.js",
     "typecheck": "tsc --noEmit",
     "test": "node --test tests/unit/*.test.mjs",
     "package": "npm run check && node --require ./scripts/node-file-polyfill.cjs ./node_modules/@vscode/vsce/vsce package --allow-missing-repository",
