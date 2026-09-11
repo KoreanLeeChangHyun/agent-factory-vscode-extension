@@ -428,14 +428,14 @@ button {
 
 .composer-region {
   z-index: 2;
-  padding: 8px 12px 10px;
+  padding: 10px 12px 12px;
   background: var(--af-chat-background);
 }
 
 .run-status {
   display: block;
-  width: 100%;
-  margin: 0 auto 6px;
+  width: calc(100% - 12px);
+  margin: 0 auto 8px;
   color: var(--vscode-descriptionForeground);
   font-size: 12px;
   line-height: 1.4;
@@ -449,16 +449,23 @@ button {
   display: flex;
   width: 100%;
   min-height: 34px;
-  padding: 6px 9px;
+  padding: 6px 10px;
   align-items: center;
   gap: 8px;
   overflow: hidden;
-  border: 1px solid var(--vscode-input-border, var(--vscode-panel-border));
-  border-radius: 9px;
+  border: 1px solid color-mix(in srgb, var(--vscode-panel-border, var(--vscode-input-border, #454545)) 72%, transparent);
+  border-radius: 11px;
   color: var(--vscode-foreground);
-  background: color-mix(in srgb, var(--vscode-editorWidget-background) 72%, var(--af-chat-background));
+  background: color-mix(in srgb, var(--vscode-editorWidget-background) 54%, var(--af-chat-background));
+  box-shadow: 0 1px 0 color-mix(in srgb, white 4%, transparent);
   text-align: left;
   cursor: pointer;
+  transition: border-color 140ms ease, background-color 140ms ease;
+}
+
+.run-status-toggle:not(:disabled):hover {
+  border-color: color-mix(in srgb, var(--vscode-foreground) 22%, transparent);
+  background: color-mix(in srgb, var(--vscode-editorWidget-background) 72%, var(--af-chat-background));
 }
 
 .run-status-toggle:disabled {
@@ -471,7 +478,7 @@ button {
 
 .run-status.is-expanded .run-status-toggle {
   border-bottom-color: transparent;
-  border-radius: 9px 9px 0 0;
+  border-radius: 11px 11px 0 0;
 }
 
 .run-status-pulse {
@@ -565,9 +572,9 @@ button {
   max-height: min(42vh, 340px);
   padding: 10px;
   overflow-y: auto;
-  border: 1px solid var(--vscode-input-border, var(--vscode-panel-border));
+  border: 1px solid color-mix(in srgb, var(--vscode-panel-border, var(--vscode-input-border, #454545)) 72%, transparent);
   border-top: 0;
-  border-radius: 0 0 9px 9px;
+  border-radius: 0 0 11px 11px;
   background: var(--vscode-editorWidget-background);
   box-shadow: 0 -8px 24px color-mix(in srgb, #000 12%, transparent);
 }
@@ -798,16 +805,22 @@ button {
 .composer {
   width: 100%;
   margin: 0 auto;
-  padding: 12px 12px 9px;
-  border: 1px solid var(--vscode-input-border, var(--vscode-panel-border));
-  border-radius: 18px;
-  background: var(--af-chat-background);
-  box-shadow: 0 8px 28px color-mix(in srgb, #000 18%, transparent);
+  padding: 14px 14px 10px;
+  border: 1px solid color-mix(in srgb, var(--vscode-panel-border, var(--vscode-input-border, #454545)) 84%, var(--vscode-foreground) 6%);
+  border-radius: 20px;
+  background: color-mix(in srgb, var(--vscode-editorWidget-background) 32%, var(--af-chat-background));
+  box-shadow:
+    0 12px 32px color-mix(in srgb, #000 22%, transparent),
+    inset 0 1px 0 color-mix(in srgb, white 4%, transparent);
+  transition: border-color 140ms ease, box-shadow 140ms ease;
 }
 
 .composer:focus-within {
-  border-color: var(--af-color-accent);
-  box-shadow: 0 0 0 1px var(--af-color-accent), 0 8px 28px color-mix(in srgb, #000 18%, transparent);
+  border-color: color-mix(in srgb, var(--af-color-accent) 78%, var(--vscode-panel-border, var(--vscode-input-border, #454545)));
+  box-shadow:
+    0 0 0 3px color-mix(in srgb, var(--af-color-accent) 14%, transparent),
+    0 14px 36px color-mix(in srgb, #000 24%, transparent),
+    inset 0 1px 0 color-mix(in srgb, white 5%, transparent);
 }
 
 .utility-picker {
@@ -820,11 +833,12 @@ button {
   height: 28px;
   padding: 0;
   place-items: center;
-  border: 1px solid var(--vscode-input-border, var(--vscode-panel-border));
-  border-radius: 6px;
+  border: 1px solid transparent;
+  border-radius: 8px;
   color: var(--vscode-descriptionForeground);
-  background: color-mix(in srgb, var(--vscode-input-background) 72%, transparent);
+  background: transparent;
   cursor: pointer;
+  transition: color 120ms ease, background-color 120ms ease, border-color 120ms ease;
 }
 
 .utility-button svg {
@@ -840,7 +854,8 @@ button {
 .utility-button:hover,
 .utility-button[aria-expanded="true"] {
   color: var(--vscode-foreground);
-  background: var(--vscode-toolbar-hoverBackground);
+  border-color: color-mix(in srgb, var(--vscode-panel-border, var(--vscode-input-border, #454545)) 72%, transparent);
+  background: color-mix(in srgb, var(--vscode-toolbar-hoverBackground) 82%, transparent);
 }
 
 .utility-button:disabled {
@@ -1002,16 +1017,17 @@ button {
 #prompt {
   display: block;
   width: 100%;
-  min-height: 28px;
+  min-height: 34px;
   max-height: min(34vh, 280px);
   resize: none;
   overflow-y: auto;
-  padding: 2px 3px 9px;
+  padding: 1px 4px 12px;
   border: 0;
   outline: 0;
   color: var(--vscode-input-foreground);
   background: transparent;
-  line-height: 1.5;
+  line-height: 1.55;
+  caret-color: var(--af-color-accent);
 }
 
 #prompt::placeholder {
@@ -1027,12 +1043,15 @@ button {
 
 .composer-actions {
   position: relative;
+  margin: 0 -2px;
+  padding-top: 8px;
   justify-content: space-between;
+  border-top: 1px solid color-mix(in srgb, var(--vscode-panel-border, var(--vscode-input-border, #454545)) 48%, transparent);
 }
 
 .composer-actions-start,
 .composer-actions-end {
-  gap: 7px;
+  gap: 4px;
 }
 
 .composer-actions-start {
@@ -1050,6 +1069,7 @@ button {
   border: 0;
   border-radius: 50%;
   cursor: pointer;
+  transition: color 120ms ease, background-color 120ms ease, transform 120ms ease;
 }
 
 .icon-button svg,
@@ -1085,11 +1105,15 @@ button {
 
 .send-button:hover {
   background: var(--af-color-accent-hover);
+  transform: translateY(-1px);
 }
 
 .send-button:disabled {
-  opacity: 0.42;
+  color: var(--vscode-descriptionForeground);
+  background: color-mix(in srgb, var(--vscode-toolbar-hoverBackground) 72%, transparent);
+  opacity: 0.72;
   cursor: default;
+  transform: none;
 }
 
 .send-button.is-running {
@@ -1105,11 +1129,12 @@ button {
 .mode-button {
   height: 28px;
   border: 0;
-  border-radius: 6px;
+  border-radius: 8px;
   color: var(--vscode-descriptionForeground);
   background: transparent;
   font-size: 12px;
   cursor: pointer;
+  transition: color 120ms ease, background-color 120ms ease;
 }
 
 .setting-control {
@@ -1124,7 +1149,7 @@ button {
   align-items: center;
   justify-content: space-between;
   gap: 5px;
-  padding: 0 8px;
+  padding: 0 7px;
 }
 
 .setting-menu {
@@ -1228,7 +1253,8 @@ button {
 
 .mode-button[aria-pressed="true"] {
   color: var(--af-color-accent);
-  background: color-mix(in srgb, var(--af-color-accent) 14%, var(--vscode-input-background));
+  background: color-mix(in srgb, var(--af-color-accent) 16%, var(--vscode-input-background));
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--af-color-accent) 24%, transparent);
 }
 
 .status-bar {
