@@ -14,6 +14,7 @@ const configUpdates = [];
 const clipboardWrites = [];
 const externalOpens = [];
 const vscode = {
+  ViewColumn: { Active: -1 },
   env: {
     clipboard: { async writeText(text) { clipboardWrites.push(text); } },
     async openExternal(uri) { externalOpens.push(uri.value); return true; }
@@ -175,4 +176,51 @@ test("validated web links open through VS Code", async () => {
   await manager.handleMessage(managed, { type: "link.open", href: "javascript:alert(1)" });
   assert.equal(externalOpens.length, 1);
   assert.equal(notices.at(-1).level, "error");
+});
+
+test("sidebar catalog merges runtime sessions with saved names and reuses an open panel", async () => {
+  const storage = new Map();
+  const posted = [], revealed = [];
+  const context = { workspaceState: {
+    get(key) { return storage.get(key); },
+    async update(key, value) { storage.set(key, value); }
+  } };
+  const manager = new module.exports.ChatPanelManager(context, {}, () => [], async () => ({
+    available: true, client: { async listSessions() {
+      return [{ agentId: "main-existing", sessionId: "session-one" }, { agentId: "main-remote", sessionId: "session-two" }];
+    } }
+  }));
+  const state = { panelId: "draft-id", title: "My agent", role: "main", agentId: "main-existing" };
+  const managed = { state, controller: { running: false }, panel: {
+    reveal(...args) { revealed.push(args); },
+    webview: { async postMessage(message) { posted.push(message); } }
+  } };
+  manager.panels.set(state.panelId, managed);
+  await manager.renameSidebarAgent(state, "Renamed agent");
+  assert.equal(managed.panel.title, "Renamed agent");
+  assert.equal(posted.at(-1).type, "chat.renamed");
+  let catalog = await manager.sidebarAgents();
+  assert.equal(catalog.length, 2);
+  assert.equal(catalog.find(agent => agent.state.agentId === "main-existing").state.title, "Renamed agent");
+  await manager.openSidebarAgent(catalog[0].state);
+  assert.equal(revealed.length, 1);
+  manager.panels.clear();
+  catalog = await manager.sidebarAgents();
+  assert.equal(catalog.find(agent => agent.state.agentId === "main-existing").state.title, "Renamed agent");
+  assert.equal(catalog.find(agent => agent.state.agentId === "main-existing").state.panelId, "draft-id");
+});
+
+test("opening a saved sidebar chat preserves its identity and group key over composer defaults", async () => {
+  const manager = new module.exports.ChatPanelManager({}, {}, () => [], async () => { throw new Error("not used"); });
+  const state = { panelId: "saved-panel", agentId: "main-saved", title: "Saved name", role: "main" };
+  let attached;
+  manager.composerPreferences = () => ({ panelId: "fresh-default", title: "Main Agent", model: "preferred-model" });
+  manager.webviewOptions = () => ({});
+  manager.attach = async (_panel, value) => { attached = value; };
+  vscode.window.createWebviewPanel = () => ({});
+  await manager.openSidebarAgent(state);
+  assert.equal(attached.panelId, "saved-panel");
+  assert.equal(attached.agentId, "main-saved");
+  assert.equal(attached.title, "Saved name");
+  assert.equal(attached.model, "preferred-model");
 });

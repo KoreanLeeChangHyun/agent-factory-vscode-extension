@@ -469,25 +469,25 @@ button {
 
 .run-status-toggle {
   display: flex;
-  width: 100%;
-  min-height: 34px;
-  padding: 6px 10px;
+  width: fit-content;
+  max-width: 100%;
+  min-height: 24px;
+  padding: 3px 4px;
   align-items: center;
   gap: 8px;
   overflow: hidden;
-  border: 1px solid color-mix(in srgb, var(--vscode-panel-border, var(--vscode-input-border, #454545)) 72%, transparent);
-  border-radius: 11px;
+  border: 0;
+  border-radius: 0;
   color: var(--vscode-foreground);
-  background: color-mix(in srgb, var(--vscode-editorWidget-background) 54%, var(--af-chat-background));
-  box-shadow: 0 1px 0 color-mix(in srgb, white 4%, transparent);
+  background: transparent;
+  box-shadow: none;
   text-align: left;
   cursor: pointer;
-  transition: border-color 140ms ease, background-color 140ms ease;
+  transition: color 140ms ease;
 }
 
 .run-status-toggle:not(:disabled):hover {
-  border-color: color-mix(in srgb, var(--vscode-foreground) 22%, transparent);
-  background: color-mix(in srgb, var(--vscode-editorWidget-background) 72%, var(--af-chat-background));
+  color: var(--af-color-accent);
 }
 
 .run-status-toggle:disabled {
@@ -496,11 +496,6 @@ button {
 
 .run-status-toggle:disabled .run-status-chevron {
   display: none;
-}
-
-.run-status.is-expanded .run-status-toggle {
-  border-bottom-color: transparent;
-  border-radius: 11px 11px 0 0;
 }
 
 .run-status-pulse {
@@ -591,12 +586,12 @@ button {
 }
 
 .run-details {
+  margin-top: 6px;
   max-height: min(42vh, 340px);
   padding: 10px;
   overflow-y: auto;
   border: 1px solid color-mix(in srgb, var(--vscode-panel-border, var(--vscode-input-border, #454545)) 72%, transparent);
-  border-top: 0;
-  border-radius: 0 0 11px 11px;
+  border-radius: 11px;
   background: var(--vscode-editorWidget-background);
   box-shadow: 0 -8px 24px color-mix(in srgb, #000 12%, transparent);
 }

@@ -35,6 +35,7 @@ export type ClientMessage =
       readonly reasoning?: "none" | "low" | "medium" | "high" | "xhigh" | "max";
       readonly fastMode: boolean;
       readonly goalMode: boolean;
+      readonly workLoopMode?: boolean;
     }
   | {
       readonly type: "status.reorder";
@@ -63,6 +64,7 @@ export type HostMessage =
       readonly reasoning?: "none" | "low" | "medium" | "high" | "xhigh" | "max";
       readonly fastMode: boolean;
       readonly goalMode: boolean;
+      readonly workLoopMode?: boolean;
       readonly contextUsedTokens?: number;
       readonly contextWindowTokens?: number;
     }

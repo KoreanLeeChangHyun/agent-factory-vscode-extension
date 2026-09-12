@@ -68,6 +68,7 @@ export function parseClientMessage(value: unknown): ClientMessage | undefined {
         (value.model !== undefined && (typeof value.model !== "string" || value.model.length > 100)) ||
         (value.reasoning !== undefined && (typeof value.reasoning !== "string" || !reasoningEfforts.has(value.reasoning))) ||
         typeof value.fastMode !== "boolean" ||
+        (value.workLoopMode !== undefined && typeof value.workLoopMode !== "boolean") ||
         typeof value.goalMode !== "boolean"
       ) {
         return undefined;
@@ -79,7 +80,8 @@ export function parseClientMessage(value: unknown): ClientMessage | undefined {
           ? { reasoning: value.reasoning as "none" | "low" | "medium" | "high" | "xhigh" | "max" }
           : {}),
         fastMode: value.fastMode,
-        goalMode: value.goalMode
+        goalMode: value.goalMode,
+        ...(typeof value.workLoopMode === "boolean" ? { workLoopMode: value.workLoopMode } : {})
       };
     case "chat.send": {
       if (

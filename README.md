@@ -8,6 +8,13 @@ Agent Factory Main Agent sessions in VS Code editor tabs.
 - Render Markdown code fences, Bash commands, ANSI command output, and file diffs.
 - Submit, follow up, and cancel runs through the installed Agent Factory runtime.
 - Use native Fast/Goal controls and inspect Work/Verification status.
+- Organize Main Agent chats in the Agent Factory activity-bar sidebar, with workspace-local names and groups.
+
+## Agent sidebar
+
+Open the factory icon in the activity bar to browse Main Agent chats. Use **+** to create a chat, the folder button to create a group, and refresh to discover sessions created outside this window. Select an agent to open its chat; already-open chats are revealed without creating another tab.
+
+Use an agent's context menu to rename it or change its group. Group menus support renaming and ungrouping; ungrouping preserves every agent. Names and groups persist in the current VS Code workspace. Running chats display a spinner. Work and Verification sessions remain accessible from their Main chat's agent list.
 
 ## Syntax highlighting
 

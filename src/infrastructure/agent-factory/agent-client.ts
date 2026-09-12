@@ -388,11 +388,39 @@ export class AgentFactoryClient implements AgentRuntimeClient {
       }
     }
     this.contextUsageSnapshots.delete(`${agentId}/${runId}`);
+    let diagnostics = runDiagnostics(run);
+    if (status === "failed" && diagnostics.error?.code === "codex_failed") {
+      const message = await this.readFailureMessage(agentId, runId);
+      if (message) diagnostics = { ...diagnostics, error: { ...diagnostics.error, message } };
+    }
     return {
-      ...runDiagnostics(run),
+      ...diagnostics,
       status,
       text
     };
+  }
+
+  private async readFailureMessage(agentId: string, runId: string): Promise<string | undefined> {
+    try {
+      const path = await this.managedPath(agentId, "runs", runId, "events.jsonl");
+      const content = (await readManagedBytes(path, MAX_EVENTS_BYTES)).toString("utf8");
+      let message: string | undefined;
+      for (const line of content.split("\n").slice(0, -1)) {
+        let event: Record<string, unknown> | undefined;
+        try { event = readRecordOrUndefined(JSON.parse(line)); } catch { continue; }
+        if (!event) continue;
+        if (event.type === "thread.started" || event.type === "turn.started" || event.type === "turn.completed") {
+          message = undefined;
+        } else if (event.type === "error" || event.type === "turn.failed") {
+          const detail = event.type === "error" ? event.message : readRecordOrUndefined(event.error)?.message;
+          if (typeof detail === "string" && detail.trim()) message = detail.trim().slice(0, 4096);
+        }
+      }
+      return message;
+    } catch {
+      // The runtime diagnostic remains available when event details cannot be read.
+      return undefined;
+    }
   }
 
   public async cancel(agentId: string, runId: string): Promise<void> {

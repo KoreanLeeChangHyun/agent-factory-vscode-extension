@@ -27,6 +27,7 @@
   const executionModeMenu = document.getElementById("execution-mode-menu");
   const fastModeButton = document.getElementById("fast-mode-button");
   const goalModeButton = document.getElementById("goal-mode-button");
+  const workLoopButton = document.getElementById("work-loop-button");
   const goalPanel = document.getElementById("goal-panel");
   const goalObjective = document.getElementById("goal-objective");
   const goalStatus = document.getElementById("goal-status");
@@ -88,6 +89,7 @@
     reasoning: normalizeSettingValue(saved?.reasoning, settingOptions.reasoning),
     fastMode: saved?.fastMode === true,
     goalMode: saved?.goalMode === true,
+    workLoopMode: saved?.workLoopMode === true,
     contextUsedTokens: safeCountOrUndefined(saved?.contextUsedTokens),
     contextWindowTokens: safeCountOrUndefined(saved?.contextWindowTokens),
     runProgress: typeof saved?.runProgress === "string" ? saved.runProgress : "",
@@ -173,6 +175,9 @@
   });
   fastModeButton.addEventListener("click", function () {
     toggleMode("fastMode");
+  });
+  workLoopButton.addEventListener("click", function () {
+    toggleMode("workLoopMode");
   });
   goalModeButton.addEventListener("click", function () {
     toggleMode("goalMode");
@@ -325,6 +330,7 @@
         state.reasoning = normalizeSettingValue(message.reasoning, settingOptions.reasoning);
         state.fastMode = message.fastMode === true;
         state.goalMode = message.goalMode === true;
+        state.workLoopMode = message.workLoopMode === true;
         state.contextUsedTokens = safeCountOrUndefined(message.contextUsedTokens);
         state.contextWindowTokens = safeCountOrUndefined(message.contextWindowTokens);
         if (state.running && !state.runStartedAt) {
@@ -518,7 +524,17 @@
   });
 
   function submit() {
-    const text = prompt.value.trim();
+    let text = prompt.value.trim();
+    if (!text && state.attachments.length === 0) return;
+    if (state.workLoopMode && state.role === "main") {
+      text = (text ? text + "\n\n" : "") +
+        "작업·검증 루프를 지금 실행하세요. 이 메시지는 작업 실행과 위임에 대한 명시적 승인입니다. " +
+        "위 요청과 첨부 자료를 대상으로 하며, 없으면 현재 대화에서 합의한 작업을 대상으로 합니다. " +
+        "Main이 직접 작업을 대신하지 말고 Agent Factory의 관리되는 Work → Verification 루프를 시작하세요. " +
+        "독립 Verification이 완료된 Work 실행을 검증하고, 실패하면 같은 Work에서 수정한 뒤 재검증하세요. " +
+        "검증 통과까지 진행하고 실제 작업·검증 실행 ID와 결과를 보고하세요. " +
+        "실행할 작업이 불명확하면 필요한 내용만 질문하고, 실행 실패를 완료로 보고하지 마세요.";
+    }
     if ((!text && state.attachments.length === 0) || state.running || !state.capabilities || !state.runtimeAvailable) {
       return;
     }
@@ -1898,6 +1914,10 @@
 
   function updateModeControls() {
     updateExecutionControl();
+    workLoopButton.hidden = state.role !== "main";
+    workLoopButton.setAttribute("aria-pressed", String(state.workLoopMode));
+    workLoopButton.title = state.workLoopMode ? "작업·검증 모드 켜짐: 전송할 요청에 작업·검증 루프 적용" : "작업·검증 모드 꺼짐";
+    workLoopButton.setAttribute("aria-label", workLoopButton.title);
     const supported = currentCapabilities();
     modelButton.parentElement.hidden = supported.model !== true;
     reasoningButton.parentElement.hidden = supported.reasoning !== true;
@@ -2062,6 +2082,7 @@
       reasoning: state.reasoning,
       fastMode: state.fastMode,
       goalMode: state.goalMode,
+      workLoopMode: state.workLoopMode,
       contextUsedTokens: state.contextUsedTokens,
       contextWindowTokens: state.contextWindowTokens,
       runProgress: state.runProgress,
@@ -2100,7 +2121,8 @@
       model: state.model || undefined,
       reasoning: state.reasoning || undefined,
       fastMode: state.fastMode,
-      goalMode: state.goalMode
+      goalMode: state.goalMode,
+      workLoopMode: state.workLoopMode
     });
   }
 

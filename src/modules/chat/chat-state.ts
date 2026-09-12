@@ -10,13 +10,14 @@ export interface ChatPanelState {
   readonly reasoning?: "none" | "low" | "medium" | "high" | "xhigh" | "max";
   readonly fastMode?: boolean;
   readonly goalMode?: boolean;
+  readonly workLoopMode?: boolean;
   readonly contextUsedTokens?: number;
   readonly contextWindowTokens?: number;
 }
 
 export type ComposerPreferences = Pick<
   ChatPanelState,
-  "model" | "reasoning" | "fastMode" | "goalMode"
+  "model" | "reasoning" | "fastMode" | "goalMode" | "workLoopMode"
 >;
 
 export function createDraftChatState(preferences: ComposerPreferences = {}): ChatPanelState {
@@ -48,6 +49,7 @@ export function restoreChatState(
       : preferences.reasoning ? { reasoning: preferences.reasoning } : {}),
     fastMode: typeof value.fastMode === "boolean" ? value.fastMode : preferences.fastMode === true,
     goalMode: typeof value.goalMode === "boolean" ? value.goalMode : preferences.goalMode === true,
+    workLoopMode: typeof value.workLoopMode === "boolean" ? value.workLoopMode : preferences.workLoopMode === true,
     ...(readCount(value.contextUsedTokens) !== undefined
       ? { contextUsedTokens: readCount(value.contextUsedTokens) }
       : {}),

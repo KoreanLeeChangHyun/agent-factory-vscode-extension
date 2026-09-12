@@ -29,6 +29,36 @@ async function importTypeScript(relativePath) {
   return import(`data:text/javascript;base64,${Buffer.from(source).toString("base64")}`);
 }
 
+test("failed results expose provider errors and retain fallback diagnostics", async function (t) {
+  const { AgentFactoryClient } = await importTypeScript("src/infrastructure/agent-factory/agent-client.ts");
+  const root = await mkdtemp(join(tmpdir(), "af-failure-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const runRoot = join(agentsRoot(root), "main-test/runs/run-test");
+  await mkdir(runRoot, { recursive: true });
+  const error = { code: "codex_failed", message: "codex exec exited with 1" };
+  await writeFile(join(runRoot, "state.json"), JSON.stringify({ status: "failed", error }));
+  const client = new AgentFactoryClient(new URL("../fixtures/fake-exec.py", import.meta.url).pathname, root);
+  const result = () => client.result("main-test", "run-test");
+  assert.deepEqual((await result()).error, error);
+  const message = "Selected model is at capacity. Please try a different model.";
+  const eventsPath = join(runRoot, "events.jsonl");
+  for (const event of [{ type: "error", message }, { type: "turn.failed", error: { message } }]) {
+    await writeFile(eventsPath, "malformed\n" + JSON.stringify(event) + "\n");
+    assert.deepEqual((await result()).error, { ...error, message });
+  }
+  await appendFile(eventsPath, JSON.stringify({ type: "turn.started" }) + "\n");
+  assert.deepEqual((await result()).error, error);
+  await appendFile(eventsPath, JSON.stringify({ type: "error", message }));
+  assert.deepEqual((await result()).error, error);
+  await appendFile(eventsPath, "\n");
+  await writeFile(join(runRoot, "state.json"), JSON.stringify({ status: "completed" }));
+  await writeFile(join(runRoot, "result.md"), "done");
+  assert.deepEqual(await result(), { status: "completed", text: "done" });
+  const specific = { code: "execution_preflight_failed", message: "preflight failed" };
+  await writeFile(join(runRoot, "state.json"), JSON.stringify({ status: "failed", error: specific }));
+  assert.deepEqual((await result()).error, specific);
+});
+
 test("branch status follows checkout and handles unborn, detached and non-Git folders", async function (t) {
   const { readGitBranch } = await importTypeScript("src/infrastructure/vscode/git-branch.ts");
   const { execFileSync } = await import("node:child_process");
@@ -160,7 +190,7 @@ test("composer shows only supported controls across draft and bound sessions", a
   const button = () => ({ parentElement: {}, setAttribute() {} });
   const context = {
     state: { capabilities: { submit: { model: true }, send: {} }, model: 'gpt-6-astra', reasoning: 'medium', fastMode: true, goalMode: true },
-    modelButton: button(), reasoningButton: button(), fastModeButton: button(), goalModeButton: button(),
+    modelButton: button(), reasoningButton: button(), fastModeButton: button(), goalModeButton: button(), workLoopButton: button(),
     executionModeButton: button(), executionModeLabel: {}, modelLabel: {}, reasoningLabel: {}, openSettingId: undefined,
     goalPanel: { querySelectorAll() { return []; } }, goalStatus: {}, nativeGoal: null, goalError: undefined
   };
@@ -185,6 +215,7 @@ test("chat panel restoration preserves composer settings and context usage", asy
     reasoning: "high",
     fastMode: true,
     goalMode: true,
+    workLoopMode: true,
     contextUsedTokens: 39_300,
     contextWindowTokens: 1_050_000
   }), {
@@ -194,6 +225,7 @@ test("chat panel restoration preserves composer settings and context usage", asy
     reasoning: "high",
     fastMode: true,
     goalMode: true,
+    workLoopMode: true,
     contextUsedTokens: 39_300,
     contextWindowTokens: 1_050_000
   });

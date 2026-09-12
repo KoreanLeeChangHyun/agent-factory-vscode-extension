@@ -4,6 +4,7 @@ import { fileURLToPath } from "node:url";
 import { readCliTheme } from "../agent-factory/cli-theme";
 import { randomUUID } from "node:crypto";
 import { readGitBranch } from "./git-branch";
+import { RunningTitle } from "./running-title";
 import * as vscode from "vscode";
 import type { StatusItemId } from "../../core/config/types";
 import type { AttachmentReference } from "../../common/types/attachment";
@@ -39,15 +40,86 @@ interface ManagedPanel {
   lastAgentRefreshAt?: number;
   branchRefreshTimer?: NodeJS.Timeout;
   branchRefreshStarted?: boolean;
+  runningTitle?: RunningTitle;
 }
 
 const COMPOSER_PREFERENCES_KEY = "agentFactory.mainChat.composerPreferences";
 const AGENT_REFRESH_INTERVAL_MS = 2_000;
+const SIDEBAR_AGENTS_KEY = "agentFactory.sidebar.agents";
+
+export interface SidebarAgent {
+  readonly state: ChatPanelState;
+  readonly running: boolean;
+}
 
 export class ChatPanelManager implements vscode.Disposable {
   public readonly viewType = "agentFactory.mainChat";
   private readonly panels = new Map<string, ManagedPanel>();
   private activePanelId: string | undefined;
+  private readonly sidebarListeners = new Set<() => void>();
+
+  public onAgentsChanged(listener: () => void): vscode.Disposable {
+    this.sidebarListeners.add(listener);
+    return { dispose: () => { this.sidebarListeners.delete(listener); } };
+  }
+
+  private notifyAgents(): void {
+    for (const listener of this.sidebarListeners) listener();
+  }
+
+  private savedAgents(): ChatPanelState[] {
+    const saved = this.context.workspaceState?.get<unknown>(SIDEBAR_AGENTS_KEY);
+    return Array.isArray(saved) ? saved.map(value => restoreChatState(value)) : [];
+  }
+
+  private rememberAgent(state: ChatPanelState): void {
+    if ((state.role ?? "main") !== "main") return;
+    const saved = this.savedAgents().filter(entry => entry.panelId !== state.panelId &&
+      (!state.agentId || entry.agentId !== state.agentId));
+    void this.context.workspaceState?.update(SIDEBAR_AGENTS_KEY, [...saved, state]);
+    this.notifyAgents();
+  }
+
+  public async sidebarAgents(): Promise<SidebarAgent[]> {
+    const states = this.savedAgents();
+    const connection = await this.connectRuntime();
+    if (connection.available) {
+      for (const session of await connection.client.listSessions()) {
+        if (!states.some(state => state.agentId === session.agentId)) {
+          states.push({ panelId: session.agentId, title: session.agentId, role: "main", agentId: session.agentId, model: session.model });
+        }
+      }
+    }
+    for (const managed of this.panels.values()) {
+      if ((managed.state.role ?? "main") !== "main") continue;
+      const index = states.findIndex(state => state.panelId === managed.state.panelId ||
+        (state.agentId && state.agentId === managed.state.agentId));
+      if (index >= 0) states[index] = managed.state;
+      else states.push(managed.state);
+    }
+    return states.map(state => ({ state, running: [...this.panels.values()].some(panel =>
+      (panel.state.panelId === state.panelId || (state.agentId && panel.state.agentId === state.agentId)) && panel.controller?.running === true) }));
+  }
+
+  public async openSidebarAgent(state: ChatPanelState): Promise<void> {
+    const existing = [...this.panels.values()].find(panel => panel.state.panelId === state.panelId ||
+      (state.agentId && panel.state.agentId === state.agentId));
+    if (existing) { existing.panel.reveal(undefined, true); return; }
+    const panel = vscode.window.createWebviewPanel(this.viewType, state.title, vscode.ViewColumn.Active, this.webviewOptions());
+    await this.attach(panel, { ...this.composerPreferences(), ...state });
+  }
+
+  public async renameSidebarAgent(state: ChatPanelState, title: string): Promise<void> {
+    const updated = { ...state, title };
+    for (const managed of this.panels.values()) {
+      if (managed.state.panelId !== state.panelId && (!state.agentId || managed.state.agentId !== state.agentId)) continue;
+      managed.state = { ...managed.state, title };
+      managed.panel.title = title;
+      if (managed.controller?.running) managed.runningTitle?.refresh();
+      await this.post(managed.panel, { type: "chat.renamed", title });
+    }
+    this.rememberAgent(updated);
+  }
 
   public constructor(
     private readonly context: vscode.ExtensionContext,
@@ -120,7 +192,9 @@ export class ChatPanelManager implements vscode.Disposable {
     const normalizedTitle = title.trim();
     managed.state = { ...managed.state, title: normalizedTitle };
     managed.panel.title = normalizedTitle;
+    if (managed.controller?.running) managed.runningTitle?.refresh();
     await this.post(managed.panel, { type: "chat.renamed", title: normalizedTitle });
+    this.rememberAgent(managed.state);
   }
 
   public dispose(): void {
@@ -145,6 +219,8 @@ export class ChatPanelManager implements vscode.Disposable {
 
     const subscriptions: vscode.Disposable[] = [];
     const managed: ManagedPanel = { panel, state, subscriptions };
+    managed.runningTitle = new RunningTitle(() => managed.state.title, (title) => { panel.title = title; });
+    subscriptions.push(managed.runningTitle);
     subscriptions.push(new vscode.Disposable(() => {
       managed.branchRefreshStarted = false;
       managed.themeReady = false;
@@ -162,6 +238,7 @@ export class ChatPanelManager implements vscode.Disposable {
     };
     subscriptions.push(watcher, watcher.onDidChange(refreshTheme), watcher.onDidCreate(refreshTheme), watcher.onDidDelete(refreshTheme));
     this.panels.set(state.panelId, managed);
+    this.rememberAgent(state);
     if (panel.active) {
       this.activePanelId = state.panelId;
     }
@@ -170,6 +247,7 @@ export class ChatPanelManager implements vscode.Disposable {
       panel.onDidDispose(() => {
         if (managed.agentRefreshTimer) clearTimeout(managed.agentRefreshTimer);
         this.panels.delete(state.panelId);
+        this.notifyAgents();
         if (this.activePanelId === state.panelId) {
           this.activePanelId = undefined;
         }
@@ -261,6 +339,7 @@ export class ChatPanelManager implements vscode.Disposable {
           reasoning: managed.state.reasoning,
           fastMode: managed.state.fastMode === true,
           goalMode: managed.state.goalMode === true,
+          workLoopMode: managed.state.workLoopMode === true,
           contextUsedTokens: managed.state.contextUsedTokens,
           contextWindowTokens: managed.state.contextWindowTokens
         });
@@ -272,6 +351,7 @@ export class ChatPanelManager implements vscode.Disposable {
           });
         }
         await this.sendModelList(managed);
+        if (managed.state.agentId) await this.post(managed.panel, { type: "session.bound", agentId: managed.state.agentId });
         this.scheduleAgentList(managed, true);
         if (!managed.branchRefreshStarted) {
           managed.branchRefreshStarted = true;
@@ -305,7 +385,8 @@ export class ChatPanelManager implements vscode.Disposable {
           model: message.model,
           reasoning: message.reasoning,
           fastMode: message.fastMode,
-          goalMode: message.goalMode
+          goalMode: message.goalMode,
+          workLoopMode: message.workLoopMode ?? managed.state.workLoopMode
         };
         await this.saveComposerPreferences(managed.state);
         return;
@@ -509,7 +590,8 @@ export class ChatPanelManager implements vscode.Disposable {
       model: state.model,
       reasoning: state.reasoning,
       fastMode: state.fastMode === true,
-      goalMode: state.goalMode === true
+      goalMode: state.goalMode === true,
+      workLoopMode: state.workLoopMode === true
     } satisfies ComposerPreferences);
   }
 
@@ -543,6 +625,7 @@ export class ChatPanelManager implements vscode.Disposable {
       managed.executionModeExplicit = false;
       await this.post(managed.panel, { type: "execution.updated", mode: managed.executionMode });
       managed.state = { ...managed.state, agentId };
+      this.rememberAgent(managed.state);
       await this.post(managed.panel, { type: "session.bound", agentId, reset: true });
       const capabilities = await connection.client.capabilities(agentId);
       await this.post(managed.panel, { type: "capabilities.updated", capabilities });
@@ -569,11 +652,14 @@ export class ChatPanelManager implements vscode.Disposable {
       managed.controller = new ChatSessionController(connection.client, {
         onBound: (agentId) => {
           managed.state = { ...managed.state, agentId };
+          this.rememberAgent(managed.state);
           void this.post(managed.panel, { type: "execution.updated", mode: managed.executionMode ?? this.defaultExecutionMode() });
           void this.post(managed.panel, { type: "session.bound", agentId });
           this.scheduleAgentList(managed, true);
         },
         onRunningChanged: (running) => {
+          this.notifyAgents();
+          managed.runningTitle?.setRunning(running);
           void this.post(managed.panel, { type: "run.state", running });
           this.scheduleAgentList(managed, !running);
         },

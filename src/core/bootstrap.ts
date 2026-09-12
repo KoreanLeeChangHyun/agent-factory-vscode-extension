@@ -1,4 +1,5 @@
 import * as vscode from "vscode";
+import { AgentSidebar } from "../infrastructure/vscode/agent-sidebar";
 import { createContainer } from "./container";
 import { ChatPanelSerializer } from "../infrastructure/vscode/chat-panel-serializer";
 import { LoadingAnimationGallery } from "../infrastructure/vscode/loading-animation-gallery";
@@ -8,6 +9,7 @@ export function bootstrap(context: vscode.ExtensionContext): void {
 
   context.subscriptions.push(
     container.chatPanels,
+    new AgentSidebar(context, container.chatPanels),
     vscode.commands.registerCommand("agentFactory.mainChat.open", async () => {
       await container.chatPanels.openDraft();
     }),

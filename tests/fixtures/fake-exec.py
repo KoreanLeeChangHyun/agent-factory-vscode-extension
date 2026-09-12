@@ -60,10 +60,12 @@ elif command == "status":
     }))
 elif command == "result":
     result_path = agents_root / agent_id / "runs" / run_id / "result.md"
+    state_path = result_path.with_name("state.json")
+    run = json.loads(state_path.read_text()) if state_path.exists() else {"status": "completed"}
     print(json.dumps({
         "schemaVersion": "0.1.0",
         "kind": "result",
-        "run": {"status": "completed", "resultPath": str(result_path)},
+        "run": {"status": "completed", **run, "resultPath": str(result_path)},
     }))
 elif command == "cancel":
     print(json.dumps({
