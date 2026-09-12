@@ -39,3 +39,36 @@ test("malformed, unknown, duplicated and nested execution reference blocks remai
     assert.deepEqual(extract(text), { text, references: [] });
   }
 });
+
+const managed = (command, output, children = []) => {
+  const result = context.agentFactoryExecutionReferences.managedCommand(command, output, children);
+  return result && JSON.parse(JSON.stringify(result));
+};
+const exec = 'python3 skills/agent/scripts/exec.py';
+test('managed commands recognize explicit roles, exact runs, quoted paths and polling substitutions', () => {
+  assert.equal(managed(exec + ' submit --agent work-1 --role work --message "hello --role verification"').role, 'work');
+  assert.equal(managed('python3 "/repo with spaces/skills/agent/scripts/exec.py" status --agent work-1 --run-id run-1').runId, 'run-1');
+  assert.equal(managed('for i in {1..15}; do state_json=$(' + exec + ' status --agent work-1 --run-id run-1); done').action, 'status');
+  assert.equal(managed(exec + ' result --agent verifier --run-id run-2', undefined, [{ agentId: 'verifier', role: 'verification' }]).role, 'verification');
+  assert.equal(managed(exec + ' submit --agent work-1 --role work', '{"agentId":"work-1","runId":"run-1","kind":"ack"}').runId, 'run-1');
+  assert.equal(managed(exec + ' result --agent work-1 --run-id run-1', '{"run":{"agentId":"work-1","runId":"other","status":"completed"}}').observedStatus, undefined);
+  assert.equal(managed('python3 skills/agent/scripts/loop.py start --work-agent work-1 --verification-agent verification-1').kind, 'loop');
+});
+test('ordinary commands, quoted examples and ambiguous multiple invocations stay Bash', () => {
+  for (const command of ['echo ready', 'echo ";" "python3" "skills/agent/scripts/exec.py" status --agent work-1', 'cat <<EOF\n' + exec + ' status --agent work-1\nEOF', 'python3 other/exec.py status --agent work-1', 'echo "' + exec + ' status --agent work-1"', "echo 'example; " + exec + " status --agent work-1'", exec + ' status --agent "$agent"', exec + ' status --agent work-1; ' + exec + ' status --agent work-2']) {
+    assert.equal(managed(command), undefined, command);
+  }
+});
+
+test("skill reads identify entrypoint and reference ownership without labeling quoted examples", () => {
+  const docs = command => JSON.parse(JSON.stringify(context.agentFactoryExecutionReferences.skillDocuments(command)));
+  const prefix = '/home/test/.codex/plugins/cache/agent-factory/agent-factory/1.0.0/skills/';
+  assert.deepEqual(docs(`cat ${prefix}convention/references/communication.md`), [{
+    skill: 'agent-factory:convention', document: 'references/communication.md', path: `${prefix}convention/references/communication.md`
+  }]);
+  assert.equal(docs(`sed -n '1,40p' ${prefix}agent/SKILL.md`)[0].skill, 'agent-factory:agent');
+  assert.equal(docs('cat "/home/test path/.codex/skills/.system/imagegen/SKILL.md"')[0].skill, 'imagegen');
+  assert.equal(docs(`cat ${prefix}agent/SKILL.md; cat ${prefix}convention/references/communication.md`).length, 2);
+  assert.deepEqual(docs(`echo 'cat ${prefix}agent/SKILL.md'`), []);
+  assert.deepEqual(docs('cat README.md'), []);
+});

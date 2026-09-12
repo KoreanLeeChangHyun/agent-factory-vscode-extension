@@ -2,7 +2,7 @@ import { constants as fsConstants } from "node:fs";
 import { spawn } from "node:child_process";
 import { lstat, open as openFile, readFile, readdir, realpath } from "node:fs/promises";
 import { homedir } from "node:os";
-import { isAbsolute, join, relative, resolve, sep } from "node:path";
+import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { AsyncCache } from "../../common/async-cache";
 
 const MAX_PROCESS_OUTPUT_BYTES = 1024 * 1024;
@@ -104,6 +104,7 @@ export interface MainAgentSession {
 
 export interface ChildAgentSession {
   readonly agentId: string;
+  readonly runId?: string;
   readonly role: "work" | "verification";
   readonly status: string;
   readonly updatedAt?: string;
@@ -342,7 +343,7 @@ export class AgentFactoryClient implements AgentRuntimeClient {
     const updates: RunUpdate[] = [];
     const newLines = lines.slice(start);
     for (const line of newLines) {
-      updates.push(...await progressUpdates(line, this.projectRoot));
+      updates.push(...await progressUpdates(line, this.projectRoot, join(dirname(path), "result.md")));
     }
     const usage = await this.readContextUsageUpdate(agentId, runId, newLines.some(isTurnCompletedLine));
     if (usage) updates.push({ kind: "usage", ...usage });
@@ -506,11 +507,15 @@ export class AgentFactoryClient implements AgentRuntimeClient {
       ) {
         continue;
       }
-      const latest = await this.latestRunInfo(agent.agentId);
+      const reference = referenced.get(agent.agentId)!;
+      const latest = reference.pending
+        ? { status: "unknown" }
+        : await this.latestRunInfo(agent.agentId, reference.runId);
       agents.push({
         agentId: agent.agentId,
         role: agent.role,
         status: latest.status,
+        ...(latest.runId ? { runId: latest.runId } : {}),
         ...(latest.verifiedWorkRunId ? { verifiedWorkRunId: latest.verifiedWorkRunId } : {}),
         ...(typeof agent.updatedAt === "string" ? { updatedAt: agent.updatedAt } : {})
       });
@@ -518,9 +523,9 @@ export class AgentFactoryClient implements AgentRuntimeClient {
     return agents.sort((left, right) => (right.updatedAt ?? "").localeCompare(left.updatedAt ?? ""));
   }
 
-  private async discoverChildAgents(mainAgentId: string, runId?: string): Promise<ReadonlySet<string>> {
+  private async discoverChildAgents(mainAgentId: string, runId?: string): Promise<ReadonlyMap<string, ChildAgentReference>> {
     const runsDirectory = await this.managedPath(mainAgentId, "runs");
-    const childIds = new Set<string>();
+    const childIds = new Map<string, ChildAgentReference>();
     let runs;
     try {
       runs = (await readdir(runsDirectory, { withFileTypes: true }))
@@ -542,6 +547,7 @@ export class AgentFactoryClient implements AgentRuntimeClient {
         if (isMissingFile(error)) continue;
         throw error;
       }
+      const runChildren = new Map<string, ChildAgentReference>();
       for (const line of content.split("\n")) {
         let event: unknown;
         try {
@@ -551,17 +557,34 @@ export class AgentFactoryClient implements AgentRuntimeClient {
         }
         const item = readRecordOrUndefined(readRecordOrUndefined(event)?.item);
         if (item?.type !== "command_execution" || typeof item.command !== "string") continue;
-        for (const childId of childAgentIdsFromCommand(item.command)) childIds.add(childId);
+        for (const reference of childAgentReferencesFromCommand(item.command, this.execPath, this.projectRoot)) {
+          const output = typeof item.aggregated_output === "string" ? item.aggregated_output : item.aggregatedOutput;
+          if (reference.pending && typeof output === "string") {
+            for (const outputLine of output.split("\n")) {
+              try {
+                const ack = readRecordOrUndefined(JSON.parse(outputLine));
+                if (ack?.kind === "ack" && ack.agentId === reference.agentId && typeof ack.runId === "string" && MANAGED_ID.test(ack.runId)) {
+                  reference.runId = ack.runId;
+                  reference.pending = false;
+                }
+              } catch { /* Command output may also contain ordinary log lines. */ }
+            }
+          }
+          runChildren.set(reference.agentId, reference);
+        }
+      }
+      for (const [agentId, reference] of runChildren) {
+        if (!childIds.has(agentId)) childIds.set(agentId, reference);
       }
     }
     return childIds;
   }
 
-  private async latestRunInfo(agentId: string): Promise<{ readonly status: string; readonly verifiedWorkRunId?: string }> {
+  private async latestRunInfo(agentId: string, runId?: string): Promise<{ readonly status: string; readonly runId?: string; readonly verifiedWorkRunId?: string }> {
     const runsDirectory = await this.managedPath(agentId, "runs");
     try {
       const runs = (await readdir(runsDirectory, { withFileTypes: true }))
-        .filter((entry) => entry.isDirectory() && MANAGED_ID.test(entry.name))
+        .filter((entry) => entry.isDirectory() && MANAGED_ID.test(entry.name) && (runId === undefined || entry.name === runId))
         .sort((left, right) => right.name.localeCompare(left.name));
       for (const run of runs.slice(0, 100)) {
         const statePath = await this.managedPath(agentId, "runs", run.name, "state.json");
@@ -572,6 +595,7 @@ export class AgentFactoryClient implements AgentRuntimeClient {
           if (typeof state?.status === "string" && state.status) {
             return {
               status: state.status,
+              runId: run.name,
               ...(typeof state.verifiedWorkRunId === "string" && MANAGED_ID.test(state.verifiedWorkRunId)
                 ? { verifiedWorkRunId: state.verifiedWorkRunId }
                 : {})
@@ -584,7 +608,7 @@ export class AgentFactoryClient implements AgentRuntimeClient {
     } catch (error) {
       if (!isMissingFile(error)) throw error;
     }
-    return { status: "unknown" };
+    return { status: "unknown", ...(runId ? { runId } : {}) };
   }
 
   private async command(arguments_: readonly string[]): Promise<Record<string, unknown>> {
@@ -679,19 +703,103 @@ function executionArguments(execution: ExecutionOptions): string[] {
   return arguments_;
 }
 
-function childAgentIdsFromCommand(command: string): readonly string[] {
-  const ids = new Set<string>();
+interface ChildAgentReference {
+  readonly agentId: string;
+  runId?: string;
+  pending?: boolean;
+}
+
+function childAgentReferencesFromCommand(command: string, execPath: string, projectRoot: string): readonly ChildAgentReference[] {
+  const ids = new Map<string, ChildAgentReference>();
   for (const flag of ["work-agent", "verification-agent"] as const) {
     const pattern = new RegExp(`--${flag}(?:=|\\s+)(?:'([^']+)'|\"([^\"]+)\"|([A-Za-z0-9][A-Za-z0-9._-]{0,127}))`, "g");
     for (const match of command.matchAll(pattern)) {
       const candidate = match[1] ?? match[2] ?? match[3];
-      if (candidate && MANAGED_ID.test(candidate)) ids.add(candidate);
+      if (candidate && MANAGED_ID.test(candidate)) ids.set(candidate, { agentId: candidate });
     }
   }
-  return [...ids];
+  for (const words of shellCommandWords(command)) {
+    const executable = /(?:^|\/)python(?:3(?:\.\d+)?)?$/.test(words[0] ?? "") ? 1 : 0;
+    const script = words[executable] ?? "";
+    if (script !== execPath && !/(?:^|\/)skills\/agent\/scripts\/exec\.py$/.test(script)) continue;
+    if (!["submit", "send", "status", "result", "cancel"].includes(words[executable + 1] ?? "")) continue;
+    const options = words.slice(executable + 2);
+    const option = (name: string): string | undefined => {
+      const index = options.findIndex((word) => word === name || word.startsWith(`${name}=`));
+      if (index < 0) return undefined;
+      return options[index] === name ? options[index + 1] : options[index]!.slice(name.length + 1);
+    };
+    const root = option("--project-root");
+    if (root && isAbsolute(root) && resolve(root) !== resolve(projectRoot)) continue;
+    const candidate = option("--agent");
+    const runId = option("--run-id");
+    if (runId !== undefined && !MANAGED_ID.test(runId)) continue;
+    if (candidate && MANAGED_ID.test(candidate)) ids.set(candidate, {
+      agentId: candidate,
+      ...(runId ? { runId } : {}),
+      ...(!runId && ["submit", "send"].includes(words[executable + 1]!) ? { pending: true } : {})
+    });
+  }
+  return [...ids.values()];
 }
 
-async function progressUpdates(line: string, projectRoot: string): Promise<readonly RunUpdate[]> {
+// Read shell words without evaluating them. Quoted message text is one argument,
+// while shell -c payloads and unquoted command substitutions contain commands.
+function shellCommandWords(command: string, depth = 0): readonly (readonly string[])[] {
+  if (depth > 4) return [];
+  const commands: string[][] = [];
+  let words: string[] = [];
+  let word = "";
+  let started = false;
+  let quote = "";
+  const finishWord = (): void => {
+    if (started) words.push(word);
+    word = "";
+    started = false;
+  };
+  const finishCommand = (): void => {
+    finishWord();
+    if (words.length) commands.push(words);
+    words = [];
+  };
+  for (let index = 0; index < command.length; index++) {
+    const char = command[index]!;
+    if (char === "\\" && quote !== "'" && index + 1 < command.length) {
+      const next = command[index + 1]!;
+      if (!quote || /[\\"$`\n]/.test(next)) {
+        if (next !== "\n") { word += next; started = true; }
+        index++;
+        continue;
+      }
+    }
+    if (quote) {
+      if (char === quote) quote = "";
+      else word += char;
+    } else if (char === "'" || char === '\"') {
+      quote = char;
+      started = true;
+    } else if (/[;|&()\n]/.test(char)) {
+      finishCommand();
+    } else if (/\s/.test(char)) {
+      finishWord();
+    } else if (char === "#" && !started) {
+      while (index + 1 < command.length && command[index + 1] !== "\n") index++;
+    } else {
+      word += char;
+      started = true;
+    }
+  }
+  if (!quote) finishCommand();
+  return commands.flatMap((arguments_) => {
+    if (/^(?:do|then|else)$/.test(arguments_[0] ?? "")) arguments_ = arguments_.slice(1);
+    if (/(?:^|\/)(?:ba|z|da)?sh$/.test(arguments_[0] ?? "") && /^-[a-z]*c[a-z]*$/.test(arguments_[1] ?? "")) {
+      return shellCommandWords(arguments_[2] ?? "", depth + 1);
+    }
+    return [arguments_];
+  });
+}
+
+async function progressUpdates(line: string, projectRoot: string, ownResultPath: string): Promise<readonly RunUpdate[]> {
   let value: unknown;
   try {
     value = JSON.parse(line);
@@ -718,6 +826,14 @@ async function progressUpdates(line: string, projectRoot: string): Promise<reado
   const completed = event.type === "item.completed";
   const itemId = typeof item.id === "string" && item.id ? item.id : undefined;
   if (item.type === "command_execution") {
+    if (typeof item.command === "string" && (!completed || item.exit_code === 0)) {
+      const commands = shellCommandWords(item.command);
+      const ownResultRead = commands.length > 0 && commands.every(words =>
+        /^(?:.*\/)?(?:cat|head|tail|sed)$/.test(words[0] ?? "") &&
+        words.includes(ownResultPath) && words.slice(1).every(word =>
+          word === ownResultPath || /^(?:-n|-q|--|-?\d+|\d+(?:,\d+)?p)$/.test(word)));
+      if (ownResultRead) return [statusUpdate("응답 정리 중")];
+    }
     const detail = summarizeCommand(item.command) ?? "명령 내용 없음";
     const title = summarizeReadActivity(item.command);
     const output = typeof item.aggregatedOutput === "string" ? item.aggregatedOutput : item.aggregated_output;

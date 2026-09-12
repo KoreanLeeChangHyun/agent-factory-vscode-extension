@@ -9,6 +9,7 @@ Agent Factory Main Agent sessions in VS Code editor tabs.
 - Submit, follow up, and cancel runs through the installed Agent Factory runtime.
 - Use native Fast/Goal controls and inspect Work/Verification status.
 - Organize Main Agent chats in the Agent Factory activity-bar sidebar, with workspace-local names and groups.
+- Follow delegated Work and Verification runs in chat cards with live status, session links, and expandable command details.
 
 ## Agent sidebar
 

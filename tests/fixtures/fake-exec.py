@@ -39,6 +39,7 @@ if command == "list":
         "kind": "agent-list",
         "agents": [
             {"agentId": "main-older", "sessionId": "session-older", "role": "main", "updatedAt": "2026-08-30T10:00:00Z"},
+            {"agentId": "verification-hidden", "sessionId": "session-verification", "role": "verification", "updatedAt": "2026-09-01T11:00:00Z"},
             {"agentId": "work-hidden", "sessionId": "session-work", "role": "work", "updatedAt": "2026-09-01T10:00:00Z"},
             {"agentId": "main-newer", "sessionId": "session-newer", "role": "main", "updatedAt": "2026-09-01T09:00:00Z", "model": "gpt-5.6-sol"},
         ],

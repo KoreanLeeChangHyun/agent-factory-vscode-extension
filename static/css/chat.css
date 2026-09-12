@@ -1569,3 +1569,25 @@ button:focus-visible,
 .execution-reference-main:not(button):hover { color: inherit; background: transparent; }
 .execution-reference-id { overflow-wrap: anywhere; user-select: text; }
 .execution-reference-copy { flex: none; }
+
+.managed-agent-card {
+  border: 1px solid var(--vscode-panel-border);
+  border-radius: 8px;
+  padding: 10px 12px;
+  background: var(--vscode-editorWidget-background);
+  min-width: 0;
+}
+.managed-agent-heading { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
+.managed-agent-status, .managed-agent-progress { color: var(--vscode-descriptionForeground); font-size: 12px; }
+.managed-agent-identity { margin: 5px 0; overflow-wrap: anywhere; font-size: 11px; color: var(--vscode-descriptionForeground); user-select: text; }
+.managed-agent-open { margin-top: 8px; }
+.managed-agent-details { margin-top: 8px; }
+.managed-agent-details > summary { cursor: pointer; color: var(--vscode-descriptionForeground); font-size: 12px; }
+.managed-agent-details > div { margin-top: 8px; }
+.managed-agent-card[data-status="running"] .managed-agent-status { color: var(--vscode-progressBar-background, var(--vscode-foreground)); }
+.managed-agent-card[data-status="failed"] .managed-agent-status { color: var(--vscode-errorForeground); }
+
+.skill-read-document { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; list-style-position: inside; }
+.skill-read-document strong { color: var(--vscode-foreground); }
+.skill-read-document span { color: var(--af-cli-muted); }
+.skill-read-details > summary { cursor: pointer; color: var(--af-cli-muted); }

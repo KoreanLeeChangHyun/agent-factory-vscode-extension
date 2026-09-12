@@ -401,8 +401,7 @@ test("runtime client invokes official commands and reads the bounded managed res
       { kind: "activity", id: "skill-1", category: "command", phase: "started", text: "sed -n '1,240p' /home/test/.codex/plugins/cache/personal/agent-factory/0.1.0/skills/agent/SKILL.md", title: "Skill 읽기 · agent-factory:agent" },
       { kind: "status", text: "명령 실행 중" },
       { kind: "status", text: "Main Agent가 요청을 분석 중" },
-      { kind: "activity", id: "result-read-1", category: "command", phase: "started", text: `sed -n '1,20p' ${resultPath}`, title: "실행 결과 읽기" },
-      { kind: "status", text: "명령 실행 중" },
+      { kind: "status", text: "응답 정리 중" },
       { kind: "activity", id: "mcp-1", category: "tool", phase: "started", text: "codex/list_mcp_resources" },
       { kind: "status", text: "연결 도구 실행 중" },
       { kind: "status", text: "응답 정리 중" },
@@ -457,6 +456,7 @@ test("runtime client invokes official commands and reads the bounded managed res
   await writeFile(childState, JSON.stringify({ status: "completed" }));
   assert.deepEqual(await client.listChildSessions("main-parent"), [{
     agentId: "work-hidden",
+    runId: "run-child",
     role: "work",
     status: "completed",
     updatedAt: "2026-09-01T10:00:00Z"
@@ -1110,4 +1110,129 @@ test("child progress counts queued work and excludes completed verification", as
   assert.equal(result.activeUnits, 1);
   assert.equal(result.workActive, 1);
   assert.equal(result.verificationActive, 0);
+});
+
+test("direct managed commands discover children through shell wrappers and retain exact run status", async t => {
+  const { AgentFactoryClient } = await importTypeScript("src/infrastructure/agent-factory/agent-client.ts");
+  const root = await mkdtemp(join(tmpdir(), "af-direct-children-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const client = new AgentFactoryClient(new URL("../fixtures/fake-exec.py", import.meta.url).pathname, root);
+  const events = join(agentsRoot(root), "main-parent/runs/run-current/events.jsonl");
+  await mkdir(dirname(events), { recursive: true });
+  for (const [agent, run, state] of [
+    ["work-hidden", "run-old", { status: "completed" }],
+    ["work-hidden", "run-newer", { status: "failed" }],
+    ["verification-hidden", "run-verification", { status: "running", verifiedWorkRunId: "run-old" }],
+    ["verification-hidden", "run-z-unrelated", { status: "completed" }]
+  ]) {
+    const path = join(agentsRoot(root), agent, "runs", run, "state.json");
+    await mkdir(dirname(path), { recursive: true });
+    await writeFile(path, JSON.stringify(state));
+  }
+  const event = (command, output = "") => JSON.stringify({ type: "item.completed", item: { type: "command_execution", command, aggregated_output: output } });
+  const work = `python3 skills/agent/scripts/exec.py result --project-root '${root}' --agent='work-hidden' --run-id=run-old`;
+  const verification = `python3 '/installed plugin/skills/agent/scripts/exec.py' submit --project-root='${root}' --agent "verification-hidden" --role verification --message 'Please verify; do not run unrelated --agent work-hidden'`;
+  const shell = command => `/usr/bin/zsh -lc '${command.replaceAll("'", "'\\''")}'`;
+  await writeFile(events, [event(shell(work)), event(shell(verification), JSON.stringify({ kind: "ack", agentId: "verification-hidden", runId: "run-verification" }))].join("\n"));
+  assert.deepEqual(await client.listChildSessions("main-parent", "run-current"), [
+    { agentId: "verification-hidden", role: "verification", runId: "run-verification", status: "running", verifiedWorkRunId: "run-old", updatedAt: "2026-09-01T11:00:00Z" },
+    { agentId: "work-hidden", role: "work", runId: "run-old", status: "completed", updatedAt: "2026-09-01T10:00:00Z" }
+  ]);
+  const polling = `for i in {1..15}; do state_json=$(python3 skills/agent/scripts/exec.py status --agent verification-hidden --run-id run-verification); done`;
+  await writeFile(events, event(shell(polling)));
+  assert.equal((await client.listChildSessions("main-parent", "run-current"))[0].status, "running");
+  await writeFile(events, event(shell(verification)));
+  const pending = await client.listChildSessions("main-parent", "run-current");
+  assert.equal(pending[0].status, "unknown");
+  assert.equal(pending[0].runId, undefined);
+  await writeFile(events, event(shell(work.replace("run-old", "run-missing"))));
+  assert.equal((await client.listChildSessions("main-parent", "run-current"))[0].status, "unknown");
+
+  for (const command of [
+    "other-cli status --agent work-hidden",
+    "python3 unrelated/exec.py status --agent work-hidden",
+    "echo python3 skills/agent/scripts/exec.py status --agent work-hidden",
+    "echo 'python3 skills/agent/scripts/exec.py status --agent work-hidden'",
+    "python3 skills/agent/scripts/exec.py submit --agent main-older --message 'python3 skills/agent/scripts/exec.py status --agent work-hidden'",
+    "python3 skills/agent/scripts/exec.py status --agent work-hidden --project-root /different-project",
+    "python3 skills/agent/scripts/exec.py status --agent 'work-hidden/../../outside'",
+    "python3 skills/agent/scripts/exec.py status --agent work-hidden --run-id ../run-old",
+    "python3 skills/agent/scripts/exec.py list; other-cli --agent work-hidden"
+  ]) {
+    await writeFile(events, event(shell(command)));
+    assert.deepEqual(await client.listChildSessions("main-parent", "run-current"), [], command);
+  }
+});
+
+test("Goal status lookup cannot block reconnect or leave idle chat running", async () => {
+  const { ChatSessionController } = await importTypeScript("src/modules/chat/session-controller.ts");
+  for (const active of [false, true]) {
+    let releaseGoal, releaseUpdates, finish;
+    const goalGate = new Promise(resolve => { releaseGoal = resolve; });
+    const updateGate = new Promise(resolve => { releaseUpdates = resolve; });
+    const done = new Promise(resolve => { finish = resolve; });
+    const running = [], errors = [], finals = [];
+    let discovered = 0;
+    const controller = new ChatSessionController({
+      async goal() { return goalGate; },
+      async activeRun() { discovered++; return active ? { agentId: "main-race", runId: "run-race" } : undefined; },
+      async updates() { await updateGate; return { cursor: 0, updates: [] }; },
+      async status() { return { status: "completed" }; },
+      async result() { return { status: "completed", text: "Recovered" }; }
+    }, {
+      onBound() {}, onRunningChanged(value) { running.push(value); if (!value) finish(); },
+      onAssistantText(text) { finals.push(text); }, onProgress() {}, onUsage() {}, onActivity() {},
+      onError(error) { errors.push(error); }
+    }, "main-race", { pollIntervalMs: 1 });
+    const lookup = controller.controlGoal("get");
+    assert.equal(controller.running, false);
+    assert.equal(await controller.reconnect(), active);
+    assert.equal(discovered, 1);
+    releaseUpdates();
+    await done;
+    assert.equal(controller.running, false);
+    for (let i = 0; i < 3; i++) await controller.cancel();
+    assert.deepEqual(errors, []);
+    assert.equal(running.at(-1), false);
+    assert.deepEqual(finals, active ? ["Recovered"] : []);
+    releaseGoal({ goal: null });
+    await lookup;
+    assert.equal(controller.running, false);
+  }
+});
+
+test("send rejected during Goal lookup restores the optimistic composer state", async () => {
+  const { ChatSessionController } = await importTypeScript("src/modules/chat/session-controller.ts");
+  let release;
+  const gate = new Promise(resolve => { release = resolve; });
+  const running = [];
+  const controller = new ChatSessionController({ async goal() { return gate; } }, {
+    onBound() {}, onRunningChanged(value) { running.push(value); }, onAssistantText() {},
+    onProgress() {}, onActivity() {}, onError() {}
+  }, "main-race");
+  const lookup = controller.controlGoal("get");
+  await controller.send("hello", [], {});
+  assert.deepEqual(running, [false]);
+  release({ goal: null });
+  await lookup;
+});
+
+test("internal result reads stay hidden while child, mixed and failed reads remain visible", async t => {
+  const { AgentFactoryClient } = await importTypeScript("src/infrastructure/agent-factory/agent-client.ts");
+  const root = await mkdtemp(join(tmpdir(), "af-own-result-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const runRoot = join(agentsRoot(root), 'main-test/runs/run-fake');
+  await mkdir(runRoot, { recursive: true });
+  const own = join(runRoot, 'result.md');
+  const child = join(agentsRoot(root), 'work-test/runs/run-child/result.md');
+  const cases = [
+    { id: 'own', command: `cat '${own}'`, exit_code: 0 },
+    { id: 'child', command: `cat '${child}'`, exit_code: 0 },
+    { id: 'mixed', command: `cat '${own}' README.md`, exit_code: 0 },
+    { id: 'failed', command: `cat '${own}'`, exit_code: 1 }
+  ];
+  await writeFile(join(runRoot, 'events.jsonl'), cases.map(item => JSON.stringify({ type: 'item.completed', item: { type: 'command_execution', ...item } })).join('\n') + '\n');
+  const client = new AgentFactoryClient(new URL('../fixtures/fake-exec.py', import.meta.url).pathname, root);
+  const { updates } = await client.updates('main-test', 'run-fake', 0);
+  assert.deepEqual(updates.filter(update => update.kind === 'activity').map(update => update.id), ['child', 'mixed', 'failed']);
 });

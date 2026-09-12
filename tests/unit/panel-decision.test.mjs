@@ -393,3 +393,12 @@ test("opening a saved sidebar chat preserves its identity and group key over com
   assert.equal(attached.title, "Saved name");
   assert.equal(attached.model, "preferred-model");
 });
+
+test("stop on an unbound idle panel reconciles state without repeated notices", async () => {
+  const posted = [];
+  const manager = new module.exports.ChatPanelManager({}, {}, () => [], async () => { throw new Error("not needed"); });
+  const managed = { state: {}, panel: { webview: { async postMessage(message) { posted.push(message); return true; } } } };
+  for (let i = 0; i < 3; i++) await manager.handleMessage(managed, { type: "run.cancel" });
+  assert.equal(posted.length, 3);
+  for (const message of posted) assert.deepEqual(JSON.parse(JSON.stringify(message)), { type: "run.state", running: false });
+});

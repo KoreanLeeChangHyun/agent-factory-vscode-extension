@@ -53,7 +53,7 @@ export class ChatSessionController {
   }
 
   public get running(): boolean {
-    return this.busy || this.goalControlPending;
+    return this.busy || (this.goalControlPending && this.pendingGoalAction === "reopen");
   }
 
   public get runId(): string | undefined { return this.currentRunId; }
@@ -61,7 +61,7 @@ export class ChatSessionController {
   public dispose(): void { this.disposed = true; }
 
   public async reconnect(): Promise<boolean> {
-    if (this.disposed || !this.agentId || this.busy || this.goalControlPending) return this.running;
+    if (this.disposed || !this.agentId || this.running) return this.running;
     this.cancelRequested = false;
     this.busy = true;
     this.events.onRunningChanged(true);
@@ -106,6 +106,7 @@ export class ChatSessionController {
     if (this.disposed) return;
     if (this.busy || this.goalControlPending) {
       this.events.onError("현재 Main Agent turn이 실행 중입니다. 완료되거나 취소된 뒤 다시 보내세요.");
+      if (!this.running) this.events.onRunningChanged(false);
       return;
     }
     this.clearDecision();
@@ -183,7 +184,10 @@ export class ChatSessionController {
     try {
       result = await this.runtime.goal(this.agentId, action);
     } catch (error) {
-      if (action === "reopen") this.cancelRequested = false;
+      if (action === "reopen") {
+        this.cancelRequested = false;
+        if (!this.disposed) this.events.onRunningChanged(this.busy);
+      }
       this.events.onError(errorMessage(error));
       return;
     } finally {
@@ -221,6 +225,7 @@ export class ChatSessionController {
         }
       } else if (action === "reopen") {
         this.cancelRequested = false;
+        if (!this.disposed) this.events.onRunningChanged(this.busy);
       }
     } catch (error) {
       this.events.onError(errorMessage(error));
@@ -234,7 +239,7 @@ export class ChatSessionController {
         this.events.onProgress("Goal 실행 접수 즉시 취소하도록 요청했습니다.");
         return;
       }
-      this.events.onError("현재 실행 중인 Agent가 없습니다.");
+      if (!this.disposed) this.events.onRunningChanged(false);
       return;
     }
     this.cancelRequested = true;

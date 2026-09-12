@@ -763,13 +763,104 @@
     content.append(actions);
   }
 
+  function renderSkillDocuments(container, documents, event) {
+    container.classList.add("skill-read-card");
+    const details = document.createElement("details");
+    details.className = "skill-read-details";
+    const summary = document.createElement("summary");
+    summary.className = "skill-read-document";
+    summary.title = activityPhaseAccessibleLabel(event.phase);
+    for (const documentInfo of documents) {
+      if (summary.childNodes.length) summary.append(document.createTextNode(" · "));
+      const name = document.createElement("strong");
+      name.textContent = documentInfo.skill;
+      const file = document.createElement("span");
+      file.textContent = documentInfo.document;
+      file.title = documentInfo.path;
+      summary.append(name, document.createTextNode(" "), file);
+    }
+    details.append(summary);
+    renderTerminalCommand(details, event.text, event.phase);
+    renderCommandOutput(details, event.output, false);
+    container.append(details);
+  }
+
+  function renderManagedAgent(container, managed, events) {
+    container.classList.add("managed-agent-card");
+    const child = state.childAgents.find(function (agent) { return agent.agentId === managed.agentId; });
+    const pendingRequest = ["submit", "send", "start", "resume"].includes(managed.action) && !managed.runId;
+    const matchesRun = managed.kind !== "loop" && child && !pendingRequest && (!managed.runId || child.runId === managed.runId);
+    const role = managed.role || child?.role;
+    const status = matchesRun ? child.status : managed.observedStatus || "unknown";
+    container.dataset.status = status;
+    const heading = document.createElement("div");
+    heading.className = "managed-agent-heading";
+    const label = document.createElement("strong");
+    label.textContent = managed.kind === "loop" ? "작업 · 검증" : role === "verification" ? "검증 에이전트" : role === "work" ? "작업 에이전트" : "에이전트";
+    const badge = document.createElement("span");
+    badge.className = "managed-agent-status";
+    badge.textContent = status === "active" ? "진행 중" : status === "runtime-error" ? "실행 오류" : childAgentStatusLabel(status);
+    heading.append(label, badge);
+    const identity = document.createElement("div");
+    identity.className = "managed-agent-identity";
+    identity.textContent = managed.agentId + (managed.runId ? " · " + managed.runId : "");
+    const progress = document.createElement("div");
+    progress.className = "managed-agent-progress";
+    const last = events[events.length - 1];
+    const actions = { submit: "실행 요청", start: "작업 · 검증 시작 요청", send: "추가 요청", status: "상태 확인", result: "결과 조회", updates: "진행 내용 조회", cancel: "취소 요청", resume: "재개 요청", reconcile: "작업 · 검증 진행 확인", "recover-receipt": "실행 복구 요청", skip: "검증 생략 요청" };
+    progress.textContent = (actions[managed.action] || "실행 확인") + (last.phase === "failed" ? " 실패" : last.phase === "started" ? " 중" : " 처리됨");
+    container.append(heading, identity, progress);
+    if (child && state.role === "main") {
+      const open = document.createElement("button");
+      open.type = "button";
+      open.className = "managed-agent-open setting-button";
+      open.textContent = "대화 열기";
+      open.addEventListener("click", function () {
+        if (state.childAgents.some(function (agent) { return agent.agentId === managed.agentId; })) vscode.postMessage({ type: "agent.open", agentId: managed.agentId });
+      });
+      container.append(open);
+    }
+    const details = document.createElement("details");
+    details.className = "managed-agent-details";
+    const summary = document.createElement("summary");
+    summary.textContent = "명령 및 실행 기록 · " + events.length;
+    details.append(summary);
+    for (const event of events) {
+      const raw = document.createElement("div");
+      renderTerminalCommand(raw, event.text, event.phase, event.title);
+      renderCommandOutput(raw, event.output, Boolean(event.title));
+      details.append(raw);
+    }
+    container.append(details);
+  }
+
+  function managedActivities() {
+    const groups = new Map(), byEvent = new Map();
+    for (const event of state.timeline) {
+      if (event.type !== "activity" || event.category !== "command") continue;
+      const managed = globalThis.agentFactoryExecutionReferences?.managedCommand(event.text, event.output, state.childAgents);
+      if (!managed) continue;
+      const key = managed.kind + ":" + managed.agentId;
+      let group = groups.get(key);
+      if (!group || (group.managed.runId && managed.runId && group.managed.runId !== managed.runId) || ["submit", "start"].includes(managed.action)) {
+        group = { managed, events: [] };
+        groups.set(key, group);
+      } else {
+        group.managed = { ...group.managed, ...managed, role: managed.role || group.managed.role, runId: managed.runId || group.managed.runId, observedStatus: managed.observedStatus || group.managed.observedStatus };
+      }
+      group.events.push(event);
+      byEvent.set(event.id, group);
+    }
+    return byEvent;
+  }
+
   function renderTimeline() {
     const shouldFollowLatest = followLatest;
     const previousScroll = timeline.scrollTop;
     const displayStates = new Map();
     let focusedControl;
     for (const element of timeline.querySelectorAll(".message")) {
-      const controls = Array.from(element.querySelectorAll(".bash-command-toggle, summary, .execution-reference button"));
+      const controls = Array.from(element.querySelectorAll(".bash-command-toggle, summary, .execution-reference button, .managed-agent-open"));
       const focusIndex = controls.indexOf(document.activeElement);
       if (focusIndex >= 0) focusedControl = { id: element.dataset.id, index: focusIndex };
       displayStates.set(element.dataset.id, {
@@ -782,7 +873,10 @@
       element.remove();
     });
     emptyState.hidden = state.timeline.length > 0;
+    const managedByEvent = managedActivities();
     for (const event of state.timeline) {
+      const managedGroup = managedByEvent.get(event.id);
+      if (managedGroup && managedGroup.events[0] !== event) continue;
       const message = document.createElement("article");
       message.className = "message message-" + event.type;
       message.dataset.id = event.id;
@@ -838,8 +932,16 @@
           renderDecisionActions(content, event.runId);
         }
       } else if (event.type === "activity" && event.category === "command") {
-        renderTerminalCommand(content, event.text, event.phase, event.title);
-        renderCommandOutput(content, event.output, Boolean(event.title));
+        const skillDocuments = globalThis.agentFactoryExecutionReferences?.skillDocuments(event.text) || [];
+        if (managedGroup) {
+          message.classList.add("message-activity-agent");
+          renderManagedAgent(content, managedGroup.managed, managedGroup.events);
+        } else if (skillDocuments.length) {
+          renderSkillDocuments(content, skillDocuments, event);
+        } else {
+          renderTerminalCommand(content, event.text, event.phase, event.title);
+          renderCommandOutput(content, event.output, Boolean(event.title));
+        }
       } else if (event.type === "activity" && event.category === "file" && event.diff) {
         renderGitDiff(content, event.diff, event.text, event.phase);
       } else {
@@ -864,7 +966,7 @@
         });
       }
       if (focusedControl?.id === event.id) {
-        const control = message.querySelectorAll(".bash-command-toggle, summary, .execution-reference button")[focusedControl.index];
+        const control = message.querySelectorAll(".bash-command-toggle, summary, .execution-reference button, .managed-agent-open")[focusedControl.index];
         if (control) {
           if (control.classList.contains("bash-command-toggle")) control.hidden = false;
           control.focus({ preventScroll: true });

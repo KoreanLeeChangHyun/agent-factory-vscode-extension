@@ -221,7 +221,7 @@ export class ChatPanelManager implements vscode.Disposable {
 
   private async attach(panel: vscode.WebviewPanel, state: ChatPanelState): Promise<void> {
     panel.title = state.title;
-    panel.iconPath = undefined;
+    panel.iconPath = vscode.Uri.joinPath(this.context.extensionUri, "static", "images", "agent-factory.png");
     panel.webview.options = this.webviewOptions();
 
     const subscriptions: vscode.Disposable[] = [];
@@ -413,7 +413,7 @@ export class ChatPanelManager implements vscode.Disposable {
         return;
       case "run.cancel":
         if (!managed.controller) {
-          await this.post(managed.panel, { type: "host.notice", level: "info", text: "현재 실행 중인 Agent가 없습니다." });
+          await this.post(managed.panel, { type: "run.state", running: false });
         } else {
           await managed.controller.cancel();
         }

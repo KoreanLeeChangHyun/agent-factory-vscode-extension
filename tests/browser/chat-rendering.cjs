@@ -230,6 +230,54 @@ async function main() {
     await page.waitForFunction(() => !document.querySelector('[data-id="resizing-output"] details').hidden);
     await page.setViewportSize({ width: 1200, height: 900 });
     await page.waitForFunction(() => document.querySelector('[data-id="resizing-output"] details').hidden);
+    await emit({ type: 'run.activity', id: 'skill-reference-card', category: 'command', phase: 'completed', text: 'cat /home/test/.codex/plugins/cache/agent-factory/agent-factory/1.0.0/skills/convention/references/communication.md', output: '# Human communication' });
+    const skillCard = page.locator('[data-id="skill-reference-card"] .skill-read-card');
+    assert.equal(await skillCard.locator('strong').textContent(), 'agent-factory:convention');
+    assert.equal(await skillCard.locator('.skill-read-document span').textContent(), 'references/communication.md');
+    assert.equal(await skillCard.locator('details').first().getAttribute('open'), null);
+    await skillCard.locator('summary').first().click();
+    assert.equal(await skillCard.locator('.syntax-code').first().isVisible(), true);
+    await emit({ type: 'run.activity', id: 'skill-reference-card', category: 'command', phase: 'failed', text: 'cat /home/test/.codex/plugins/cache/agent-factory/agent-factory/1.0.0/skills/convention/references/communication.md', output: 'read failed' });
+    assert.equal(await skillCard.locator('summary').first().getAttribute('title'), '실패');
+    assert.equal(await skillCard.locator('details').first().getAttribute('open'), '');
+    const managedSubmit = 'python3 skills/agent/scripts/exec.py submit --agent work-card --role work --message "Update UI"';
+    await emit({ type: 'run.activity', id: 'managed-submit', category: 'command', phase: 'completed', text: managedSubmit, output: '{"agentId":"work-card","runId":"run-card"}' });
+    const managedCard = page.locator('[data-id="managed-submit"] .managed-agent-card');
+    assert.equal(await managedCard.count(), 1);
+    assert.equal(await managedCard.locator('.managed-agent-status').textContent(), '상태 미확인');
+    assert.equal(await managedCard.locator('details').first().getAttribute('open'), null);
+    assert.equal(await managedCard.locator('.managed-agent-open').count(), 0);
+    await emit({ type: 'agents.list', agents: [{ agentId: 'work-card', role: 'work', status: 'running', runId: 'run-card' }] });
+    assert.equal(await managedCard.locator('.managed-agent-status').textContent(), '실행 중');
+    await managedCard.locator('.managed-agent-open').click();
+    assert.deepEqual(await page.evaluate(() => window.sentMessages.at(-1)), { type: 'agent.open', agentId: 'work-card' });
+    await managedCard.locator('summary').first().click();
+    await emit({ type: 'run.activity', id: 'managed-status', category: 'command', phase: 'completed', text: 'for i in {1..15}; do state_json=$(python3 skills/agent/scripts/exec.py status --agent work-card --run-id run-card); done', output: '{"run":{"agentId":"work-card","runId":"run-card","status":"running"}}' });
+    assert.equal(await page.locator('.managed-agent-card').count(), 1);
+    assert.equal(await managedCard.locator('details').first().getAttribute('open'), '');
+    assert.equal(await managedCard.locator('.managed-agent-status').textContent(), '실행 중');
+    await emit({ type: 'run.activity', id: 'managed-result', category: 'command', phase: 'completed', text: 'python3 skills/agent/scripts/exec.py result --agent work-card --run-id run-card', output: '{"run":{"agentId":"work-card","runId":"run-card","status":"completed"}}' });
+    await emit({ type: 'agents.list', agents: [{ agentId: 'work-card', role: 'work', status: 'completed', runId: 'run-card' }] });
+    assert.equal(await managedCard.locator('.managed-agent-status').textContent(), '완료');
+    assert.match(await managedCard.locator('summary').first().textContent(), /3$/);
+    await emit({ type: 'agents.list', agents: [{ agentId: 'work-card', role: 'work', status: 'running', runId: 'run-new' }] });
+    assert.equal(await managedCard.locator('.managed-agent-status').textContent(), '완료');
+    await managedCard.locator('summary').first().click();
+    await emit({ type: 'run.activity', id: 'managed-verify', category: 'command', phase: 'completed', text: 'python3 skills/agent/scripts/exec.py submit --agent verification-card --role verification --message "Verify UI"', output: '{"agentId":"verification-card","runId":"verify-run"}' });
+    await emit({ type: 'agents.list', agents: [{ agentId: 'work-card', role: 'work', status: 'completed', runId: 'run-card' }, { agentId: 'verification-card', role: 'verification', status: 'running', runId: 'verify-run' }] });
+    assert.equal(await page.locator('[data-id="managed-verify"] strong').textContent(), '검증 에이전트');
+    await managedCard.scrollIntoViewIfNeeded();
+    fs.mkdirSync(path.join(root, 'out/managed-agents'), { recursive: true });
+    const cardBox = await managedCard.boundingBox();
+    const verifyBox = await page.locator('[data-id="managed-verify"] .managed-agent-card').boundingBox();
+    await page.screenshot({ path: path.join(root, 'out/managed-agents/cards.png'), clip: { x: cardBox.x, y: cardBox.y, width: cardBox.width, height: verifyBox.y + verifyBox.height - cardBox.y } });
+    await emit({ type: 'run.activity', id: 'managed-pending', category: 'command', phase: 'started', text: managedSubmit });
+    assert.equal(await page.locator('[data-id="managed-pending"] .managed-agent-status').textContent(), '상태 미확인');
+    if (process.argv.includes('--managed-agents-only')) {
+      assert.deepEqual(errors, []);
+      console.log('Managed agent cards: browser checks passed');
+      return;
+    }
     const referencesText = '앞선 설명\n\n실행 식별자:\n- Work Agent: `work-reference`\n- Work Run: run-reference\n- Work Session: session-reference\n- 예약된 Verification Agent: verification-reserved\n- Loop: loop-reference\n\n뒤쪽 설명';
     await emit({ type: 'agents.list', agents: [{ agentId: 'work-reference', role: 'work', status: 'completed' }] });
     await emit({ type: 'chat.assistant', phase: 'final', text: referencesText });
@@ -268,7 +316,7 @@ async function main() {
       { agentId: 'work-loop-1', role: 'work', status: 'completed' },
       { agentId: 'verification-loop-1', role: 'verification', status: 'running' }
     ] });
-    assert.match(await page.locator('#run-status-agents').textContent(), /작업 1 · 검증 1/);
+    assert.match(await page.locator('#run-status-agents').textContent(), /작업 0 · 검증 1/);
     await page.locator('#run-status-toggle').click();
     assert.equal(await page.locator('#run-status-toggle').getAttribute('aria-expanded'), 'true');
     assert.equal(await page.locator('#run-details').isVisible(), true);
