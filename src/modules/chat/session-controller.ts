@@ -34,8 +34,13 @@ export interface SessionControllerOptions {
 export class ChatSessionController {
   private agentId: string | undefined;
   private currentRunId: string | undefined;
+  private currentRunAgentId: string | undefined;
   private busy = false;
   private pendingDecisionRunId: string | undefined;
+  private cancelRequested = false;
+  private cancellationInFlight: Promise<void> | undefined;
+  private goalControlPending = false;
+  private pendingGoalAction: GoalAction | undefined;
   private disposed = false;
 
   public constructor(
@@ -48,7 +53,7 @@ export class ChatSessionController {
   }
 
   public get running(): boolean {
-    return this.busy;
+    return this.busy || this.goalControlPending;
   }
 
   public get runId(): string | undefined { return this.currentRunId; }
@@ -56,7 +61,8 @@ export class ChatSessionController {
   public dispose(): void { this.disposed = true; }
 
   public async reconnect(): Promise<boolean> {
-    if (this.disposed || !this.agentId || this.busy) return this.busy;
+    if (this.disposed || !this.agentId || this.busy || this.goalControlPending) return this.running;
+    this.cancelRequested = false;
     this.busy = true;
     this.events.onRunningChanged(true);
     try {
@@ -64,7 +70,9 @@ export class ChatSessionController {
       if (this.disposed) return false;
       if (active) {
         this.currentRunId = active.runId;
+        this.currentRunAgentId = active.agentId;
         this.events.onProgress("진행 중인 작업에 다시 연결했습니다.");
+        await this.flushCancellation();
         void this.followExistingRun(active.agentId, active.runId);
         return true;
       }
@@ -83,6 +91,8 @@ export class ChatSessionController {
     catch (error) { if (!this.disposed) this.events.onError(errorMessage(error)); }
     finally {
       this.currentRunId = undefined;
+      this.currentRunAgentId = undefined;
+      this.cancelRequested = false;
       this.busy = false;
       if (!this.disposed) this.events.onRunningChanged(false);
     }
@@ -94,11 +104,12 @@ export class ChatSessionController {
     execution: ExecutionOptions
   ): Promise<void> {
     if (this.disposed) return;
-    if (this.busy) {
+    if (this.busy || this.goalControlPending) {
       this.events.onError("현재 Main Agent turn이 실행 중입니다. 완료되거나 취소된 뒤 다시 보내세요.");
       return;
     }
     this.clearDecision();
+    this.cancelRequested = false;
     this.busy = true;
     this.events.onRunningChanged(true);
     try {
@@ -106,7 +117,9 @@ export class ChatSessionController {
         const active = await this.runtime.activeRun?.(this.agentId);
         if (active) {
           this.currentRunId = active.runId;
+          this.currentRunAgentId = active.agentId;
           this.events.onError("진행 중인 작업에 다시 연결했습니다. 방금 입력한 요청은 전송하지 않았습니다.");
+          await this.flushCancellation();
           await this.pollUntilTerminal(active.agentId, active.runId);
           return;
         }
@@ -118,23 +131,29 @@ export class ChatSessionController {
         this.agentId = accepted.agentId;
         this.events.onBound(this.agentId);
         this.currentRunId = accepted.runId;
+        this.currentRunAgentId = accepted.agentId;
+        await this.flushCancellation();
         await this.pollUntilTerminal(accepted.agentId, accepted.runId);
       } else {
         const accepted = await this.runtime.send(this.agentId, request, execution);
         this.currentRunId = accepted.runId;
+        this.currentRunAgentId = accepted.agentId;
+        await this.flushCancellation();
         await this.pollUntilTerminal(accepted.agentId, accepted.runId);
       }
     } catch (error) {
       this.events.onError(errorMessage(error));
     } finally {
       this.currentRunId = undefined;
+      this.currentRunAgentId = undefined;
+      this.cancelRequested = false;
       this.busy = false;
       if (!this.disposed) this.events.onRunningChanged(false);
     }
   }
 
   public approveDecision(runId: string, execution: ExecutionOptions): boolean {
-    if (this.busy || this.pendingDecisionRunId !== runId) return false;
+    if (this.busy || this.goalControlPending || this.pendingDecisionRunId !== runId) return false;
     const text = "바로 위 응답에서 제안한 범위와 조건대로 진행하세요.";
     this.clearDecision();
     this.events.onHumanDecision?.(text);
@@ -149,21 +168,59 @@ export class ChatSessionController {
 
   public async controlGoal(action: GoalAction): Promise<void> {
     if (!this.agentId) return;
+    if (this.goalControlPending) {
+      this.events.onError("이전 Goal 제어 요청이 처리 중입니다.");
+      return;
+    }
+    if (action === "reopen" && this.busy) {
+      this.events.onError("현재 실행이 끝난 뒤 Goal을 다시 여세요.");
+      return;
+    }
+    if (action === "reopen") this.cancelRequested = false;
+    this.goalControlPending = true;
+    this.pendingGoalAction = action;
+    let result: Awaited<ReturnType<AgentRuntimeClient["goal"]>>;
     try {
-      const result = await this.runtime.goal(this.agentId, action);
+      result = await this.runtime.goal(this.agentId, action);
+    } catch (error) {
+      if (action === "reopen") this.cancelRequested = false;
+      this.events.onError(errorMessage(error));
+      return;
+    } finally {
+      this.goalControlPending = false;
+      this.pendingGoalAction = undefined;
+    }
+    try {
       if ("goal" in result) this.events.onGoal?.(result.goal ?? null, result.error);
       if (result.accepted) {
+        if (this.busy) {
+          this.events.onError("다른 실행이 진행 중이어서 Goal 실행을 연결할 수 없습니다.");
+          return;
+        }
+        this.currentRunId = result.accepted.runId;
+        this.currentRunAgentId = result.accepted.agentId;
+        if (this.disposed) {
+          await this.flushCancellation();
+          this.currentRunId = undefined;
+          this.currentRunAgentId = undefined;
+          this.cancelRequested = false;
+          return;
+        }
         this.clearDecision();
         this.busy = true;
-        this.currentRunId = result.accepted.runId;
         this.events.onRunningChanged(true);
         try {
+          await this.flushCancellation();
           await this.pollUntilTerminal(result.accepted.agentId, result.accepted.runId);
         } finally {
           this.currentRunId = undefined;
+          this.currentRunAgentId = undefined;
+          this.cancelRequested = false;
           this.busy = false;
-          this.events.onRunningChanged(false);
+          if (!this.disposed) this.events.onRunningChanged(false);
         }
+      } else if (action === "reopen") {
+        this.cancelRequested = false;
       }
     } catch (error) {
       this.events.onError(errorMessage(error));
@@ -171,15 +228,39 @@ export class ChatSessionController {
   }
 
   public async cancel(): Promise<void> {
-    if (!this.busy || !this.agentId || !this.currentRunId) {
+    if (!this.busy) {
+      if (this.goalControlPending && this.pendingGoalAction === "reopen") {
+        this.cancelRequested = true;
+        this.events.onProgress("Goal 실행 접수 즉시 취소하도록 요청했습니다.");
+        return;
+      }
       this.events.onError("현재 실행 중인 Agent가 없습니다.");
       return;
     }
-    try {
-      await this.runtime.cancel(this.agentId, this.currentRunId);
-    } catch (error) {
-      this.events.onError(errorMessage(error));
+    this.cancelRequested = true;
+    if (!this.currentRunAgentId || !this.currentRunId) {
+      this.events.onProgress("실행 접수 즉시 취소하도록 요청했습니다.");
+      return;
     }
+    await this.flushCancellation();
+  }
+
+  private async flushCancellation(): Promise<void> {
+    if (!this.cancelRequested || !this.currentRunAgentId || !this.currentRunId) return;
+    if (!this.cancellationInFlight) {
+      const agentId = this.currentRunAgentId;
+      const runId = this.currentRunId;
+      const request = this.runtime.cancel(agentId, runId).catch((error) => {
+        this.cancelRequested = false;
+        this.events.onError(errorMessage(error));
+      });
+      let tracked: Promise<void>;
+      tracked = request.finally(() => {
+        if (this.cancellationInFlight === tracked) this.cancellationInFlight = undefined;
+      });
+      this.cancellationInFlight = tracked;
+    }
+    await this.cancellationInFlight;
   }
 
   private async pollUntilTerminal(agentId: string, runId: string): Promise<void> {

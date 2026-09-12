@@ -31,6 +31,8 @@ interface ManagedPanel {
   readonly subscriptions: vscode.Disposable[];
   controller?: ChatSessionController;
   controllerInitialization?: Promise<void>;
+  sessionTransition?: Promise<void>;
+  disposed?: boolean;
   executionModeExplicit?: boolean;
   executionMode?: import("../agent-factory/agent-client").ExecutionMode;
   themeRevision?: number;
@@ -58,6 +60,7 @@ export class ChatPanelManager implements vscode.Disposable {
   private readonly panels = new Map<string, ManagedPanel>();
   private activePanelId: string | undefined;
   private readonly sidebarListeners = new Set<() => void>();
+  private sidebarAgentWrite: Promise<void> = Promise.resolve();
 
   public onAgentsChanged(listener: () => void): vscode.Disposable {
     this.sidebarListeners.add(listener);
@@ -73,15 +76,21 @@ export class ChatPanelManager implements vscode.Disposable {
     return Array.isArray(saved) ? saved.map(value => restoreChatState(value)) : [];
   }
 
-  private rememberAgent(state: ChatPanelState): void {
-    if ((state.role ?? "main") !== "main") return;
-    const saved = this.savedAgents().filter(entry => entry.panelId !== state.panelId &&
-      (!state.agentId || entry.agentId !== state.agentId));
-    void this.context.workspaceState?.update(SIDEBAR_AGENTS_KEY, [...saved, state]);
-    this.notifyAgents();
+  private rememberAgent(state: ChatPanelState): Promise<void> {
+    if ((state.role ?? "main") !== "main") return Promise.resolve();
+    const snapshot = { ...state };
+    const write = this.sidebarAgentWrite.then(async () => {
+      const saved = this.savedAgents().filter(entry => entry.panelId !== snapshot.panelId &&
+        (!snapshot.agentId || entry.agentId !== snapshot.agentId));
+      await this.context.workspaceState?.update(SIDEBAR_AGENTS_KEY, [...saved, snapshot]);
+    });
+    this.sidebarAgentWrite = write.catch(() => undefined);
+    void write.then(() => this.notifyAgents(), () => undefined);
+    return write;
   }
 
   public async sidebarAgents(): Promise<SidebarAgent[]> {
+    await this.sidebarAgentWrite;
     const states = this.savedAgents();
     const connection = await this.connectRuntime();
     if (connection.available) {
@@ -119,7 +128,7 @@ export class ChatPanelManager implements vscode.Disposable {
       if (managed.controller?.running) managed.runningTitle?.refresh();
       await this.post(managed.panel, { type: "chat.renamed", title });
     }
-    this.rememberAgent(updated);
+    await this.rememberAgent(updated);
   }
 
   public constructor(
@@ -142,7 +151,9 @@ export class ChatPanelManager implements vscode.Disposable {
 
   public async revive(panel: vscode.WebviewPanel, serializedState: unknown): Promise<void> {
     const state = restoreChatState(serializedState, this.composerPreferences());
-    const existing = this.panels.get(state.panelId);
+    const panelMatch = this.panels.get(state.panelId);
+    const existing = (panelMatch && !panelMatch.disposed ? panelMatch : undefined) ?? [...this.panels.values()].find(candidate =>
+      Boolean(!candidate.disposed && state.agentId && candidate.state.agentId === state.agentId));
     if (existing) {
       existing.panel.reveal(panel.viewColumn, true);
       panel.dispose();
@@ -218,6 +229,7 @@ export class ChatPanelManager implements vscode.Disposable {
     managed.runningTitle = new RunningTitle(() => managed.state.title, (title) => { panel.title = title; });
     subscriptions.push(managed.runningTitle);
     subscriptions.push(new vscode.Disposable(() => {
+      managed.disposed = true;
       managed.controller?.dispose();
       managed.branchRefreshStarted = false;
       managed.themeReady = false;
@@ -419,7 +431,17 @@ export class ChatPanelManager implements vscode.Disposable {
         await this.openChildAgent(managed, message.agentId);
         return;
       case "session.select":
-        await this.selectSession(managed, message.agentId);
+        if (managed.sessionTransition) {
+          await this.post(managed.panel, { type: "host.notice", level: "warning", text: "다른 세션을 불러오고 있습니다." });
+          return;
+        }
+        const transition = this.selectSession(managed, message.agentId);
+        managed.sessionTransition = transition;
+        try {
+          await transition;
+        } finally {
+          if (managed.sessionTransition === transition) managed.sessionTransition = undefined;
+        }
         return;
       case "attachments.pick":
         await this.pickAttachments(managed.panel);
@@ -566,6 +588,12 @@ export class ChatPanelManager implements vscode.Disposable {
         });
         return;
       }
+      const existing = [...this.panels.values()].find(candidate =>
+        !candidate.disposed && candidate.state.agentId === child.agentId);
+      if (existing) {
+        existing.panel.reveal(undefined, true);
+        return;
+      }
       const label = child.role === "work" ? "작업자" : "검증자";
       const state: ChatPanelState = {
         ...createDraftChatState(this.composerPreferences()),
@@ -608,6 +636,16 @@ export class ChatPanelManager implements vscode.Disposable {
   }
 
   private async selectSession(managed: ManagedPanel, agentId: string): Promise<void> {
+    if ((managed.state.role ?? "main") !== "main") {
+      await this.post(managed.panel, {
+        type: "host.notice",
+        level: "warning",
+        text: "Main Agent 패널에서만 다른 Main Agent 세션을 불러올 수 있습니다."
+      });
+      return;
+    }
+    if (managed.controllerInitialization) await managed.controllerInitialization;
+    if (managed.disposed) return;
     if (managed.controller?.running) {
       await this.post(managed.panel, {
         type: "host.notice",
@@ -616,13 +654,21 @@ export class ChatPanelManager implements vscode.Disposable {
       });
       return;
     }
+    const existing = [...this.panels.values()].find(candidate =>
+      candidate !== managed && !candidate.disposed && candidate.state.agentId === agentId);
+    if (existing) {
+      existing.panel.reveal(undefined, true);
+      return;
+    }
     const connection = await this.connectRuntime();
+    if (managed.disposed) return;
     if (!connection.available) {
       await this.post(managed.panel, { type: "host.notice", level: "error", text: connection.diagnostic });
       return;
     }
     try {
       const sessions = await connection.client.listSessions();
+      if (managed.disposed) return;
       if (!sessions.some((session) => session.agentId === agentId)) {
         await this.post(managed.panel, {
           type: "host.notice",
@@ -632,21 +678,44 @@ export class ChatPanelManager implements vscode.Disposable {
         await this.post(managed.panel, { type: "sessions.list", sessions });
         return;
       }
+      if (managed.controller?.running) {
+        await this.post(managed.panel, {
+          type: "host.notice",
+          level: "warning",
+          text: "현재 실행이 끝난 뒤 다른 세션을 불러오세요."
+        });
+        return;
+      }
+      const claimed = [...this.panels.values()].find(candidate =>
+        candidate !== managed && !candidate.disposed && candidate.state.agentId === agentId);
+      if (claimed) {
+        claimed.panel.reveal(undefined, true);
+        return;
+      }
       managed.controller?.dispose();
       managed.controller = undefined;
       managed.executionMode = undefined;
       managed.executionModeExplicit = false;
-      await this.post(managed.panel, { type: "execution.updated", mode: managed.executionMode });
       managed.state = { ...managed.state, agentId };
-      this.rememberAgent(managed.state);
+      await this.post(managed.panel, { type: "execution.updated", mode: managed.executionMode });
+      if (managed.disposed) return;
+      await this.rememberAgent(managed.state);
+      if (managed.disposed) return;
       await this.post(managed.panel, { type: "session.bound", agentId, reset: true });
+      if (managed.disposed) return;
       await this.reconnectController(managed);
+      if (managed.disposed) return;
       const capabilities = await connection.client.capabilities(agentId);
+      if (managed.disposed) return;
       await this.post(managed.panel, { type: "capabilities.updated", capabilities });
+      if (managed.disposed) return;
       await this.post(managed.panel, { type: "execution.updated", mode: capabilities.executionMode });
+      if (managed.disposed) return;
       const observed = await connection.client.goal(agentId, "get");
+      if (managed.disposed) return;
       await this.post(managed.panel, { type: "goal.updated", goal: observed.goal ?? null, error: observed.error });
     } catch (error) {
+      if (managed.disposed) return;
       await this.post(managed.panel, {
         type: "host.notice",
         level: "error",
@@ -656,7 +725,7 @@ export class ChatPanelManager implements vscode.Disposable {
   }
 
   private async ensureController(managed: ManagedPanel): Promise<void> {
-    if (managed.controller) return;
+    if (managed.disposed || managed.controller) return;
     if (!managed.controllerInitialization) {
       managed.controllerInitialization = this.createController(managed).finally(() => { managed.controllerInitialization = undefined; });
     }
@@ -664,13 +733,16 @@ export class ChatPanelManager implements vscode.Disposable {
   }
 
   private async reconnectController(managed: ManagedPanel): Promise<void> {
+    if (managed.disposed) return;
     await this.ensureController(managed);
+    if (managed.disposed) return;
     await managed.controller?.reconnect();
   }
 
   private async createController(managed: ManagedPanel): Promise<void> {
-    if (!managed.controller) {
+    if (!managed.disposed && !managed.controller) {
       const connection = await this.connectRuntime();
+      if (managed.disposed) return;
       if (!connection.available) {
         await this.post(managed.panel, { type: "host.notice", level: "error", text: connection.diagnostic });
         await this.post(managed.panel, { type: "run.state", running: false });
@@ -728,6 +800,10 @@ export class ChatPanelManager implements vscode.Disposable {
     attachments: readonly AttachmentReference[],
     execution: Extract<import("../../protocol/messages").ClientMessage, { type: "chat.send" }>["execution"]
   ): Promise<void> {
+    if (managed.sessionTransition) {
+      await managed.sessionTransition;
+      if (managed.disposed) return;
+    }
     await this.ensureController(managed);
     if (!managed.controller) return;
     void managed.controller.send(text, attachments, {

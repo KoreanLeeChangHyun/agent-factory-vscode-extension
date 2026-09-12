@@ -197,7 +197,10 @@ export class AgentFactoryClient implements AgentRuntimeClient {
 
   public async goal(agentId: string, action: GoalAction): Promise<{ goal?: NativeGoal | null; accepted?: RunAcceptance; error?: string }> {
     const document = await this.command(["goal", "--project-root", this.projectRoot, "--agent", agentId, action]);
-    if (document.kind === "ack") return { accepted: readAcceptance(document, agentId) };
+    if (document.kind === "ack") {
+      if (action !== "reopen") throw new Error("Agent Factory Goal 제어가 예상하지 않은 실행을 접수했습니다.");
+      return { accepted: readAcceptance(document, agentId) };
+    }
     if (document.kind === "goal-control") return {};
     return { goal: readNativeGoal(document.goal), ...(typeof document.error === "string" ? { error: document.error } : {}) };
   }
@@ -1065,7 +1068,9 @@ function readAcceptance(document: Record<string, unknown>, expectedAgentId: stri
     document.kind !== "ack" ||
     document.status !== "accepted" ||
     document.agentId !== expectedAgentId ||
-    typeof document.runId !== "string"
+    !MANAGED_ID.test(expectedAgentId) ||
+    typeof document.runId !== "string" ||
+    !MANAGED_ID.test(document.runId)
   ) {
     throw new Error("Agent Factory 런타임이 올바른 실행 접수 응답을 반환하지 않았습니다.");
   }

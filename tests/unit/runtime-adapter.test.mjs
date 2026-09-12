@@ -606,6 +606,86 @@ test("session controller clearly rejects a concurrent send", async function () {
   assert.match(errors[0], /실행 중/);
 });
 
+test("cancellation requested during submission is delivered once to the accepted run", async function () {
+  const { ChatSessionController } = await importTypeScript("src/modules/chat/session-controller.ts");
+  let acceptSubmit, releaseCancel;
+  const submitGate = new Promise(resolve => { acceptSubmit = resolve; });
+  const cancelGate = new Promise(resolve => { releaseCancel = resolve; });
+  const cancellations = [], progress = [];
+  const runtime = {
+    async submit() { return submitGate; },
+    async updates(_agentId, _runId, cursor) { return { cursor, updates: [] }; },
+    async status() { return { status: "completed" }; },
+    async result() { return { status: "completed", text: "cancelled result" }; },
+    async cancel(...args) { cancellations.push(args); await cancelGate; }
+  };
+  const controller = new ChatSessionController(runtime, {
+    onBound() {}, onRunningChanged() {}, onAssistantText() {}, onActivity() {}, onError() {},
+    onProgress(text) { progress.push(text); }
+  }, undefined, { pollIntervalMs: 0, maxPolls: 1 });
+
+  const sending = controller.send("task", [], {});
+  await new Promise(resolve => setImmediate(resolve));
+  await controller.cancel();
+  await controller.cancel();
+  assert.match(progress.at(-1), /접수 즉시 취소/);
+  acceptSubmit({ agentId: "main-accepted", runId: "run-accepted" });
+  await new Promise(resolve => setImmediate(resolve));
+  assert.deepEqual(cancellations, [["main-accepted", "run-accepted"]]);
+  releaseCancel();
+  await sending;
+});
+
+test("Goal control serializes reopen requests before runtime acceptance", async function () {
+  const { ChatSessionController } = await importTypeScript("src/modules/chat/session-controller.ts");
+  let releaseGoal;
+  const gate = new Promise(resolve => { releaseGoal = resolve; });
+  const calls = [], errors = [];
+  const controller = new ChatSessionController({
+    async goal(agentId, action) { calls.push([agentId, action]); return gate; },
+    async send() { throw new Error("send must not race Goal reopen"); }
+  }, {
+    onBound() {}, onRunningChanged() {}, onAssistantText() {}, onProgress() {}, onActivity() {},
+    onError(error) { errors.push(error); }
+  }, "main-exact");
+
+  const first = controller.controlGoal("reopen");
+  await new Promise(resolve => setImmediate(resolve));
+  await controller.controlGoal("reopen");
+  await controller.send("racing request", [], {});
+  assert.deepEqual(calls, [["main-exact", "reopen"]]);
+  assert.equal(errors.filter(error => /실행 중/.test(error)).length, 1);
+  assert.equal(errors.filter(error => /Goal 제어 요청이 처리 중/.test(error)).length, 1);
+  releaseGoal({ goal: null });
+  await first;
+});
+
+test("cancellation during Goal reopen acceptance targets the accepted run once", async function () {
+  const { ChatSessionController } = await importTypeScript("src/modules/chat/session-controller.ts");
+  let acceptGoal;
+  const gate = new Promise(resolve => { acceptGoal = resolve; });
+  const cancellations = [], progress = [];
+  const controller = new ChatSessionController({
+    async goal() { return gate; },
+    async cancel(...args) { cancellations.push(args); },
+    async updates(_agentId, _runId, cursor) { return { cursor, updates: [] }; },
+    async status() { return { status: "completed" }; },
+    async result() { return { status: "completed", text: "done" }; }
+  }, {
+    onBound() {}, onRunningChanged() {}, onAssistantText() {}, onActivity() {}, onError() {},
+    onProgress(text) { progress.push(text); }
+  }, "main-exact", { pollIntervalMs: 0, maxPolls: 1 });
+
+  const reopening = controller.controlGoal("reopen");
+  await new Promise(resolve => setImmediate(resolve));
+  await controller.cancel();
+  await controller.cancel();
+  assert.match(progress.at(-1), /Goal 실행 접수 즉시 취소/);
+  acceptGoal({ accepted: { agentId: "main-exact", runId: "run-reopened" } });
+  await reopening;
+  assert.deepEqual(cancellations, [["main-exact", "run-reopened"]]);
+});
+
 test("native settings preserve explicit off and inherit on exact-session send", async () => {
   const { AgentFactoryClient } = await importTypeScript("src/infrastructure/agent-factory/agent-client.ts");
   const root = await mkdtemp(join(tmpdir(), "native-settings-"));
@@ -652,6 +732,19 @@ test("Goal control and objective protocol rejects unsupported actions and overlo
   assert.equal(parseClientMessage(message).execution.goalObjective, "finish");
   assert.equal(parseClientMessage({ ...message, execution: { ...message.execution, goalObjective: "x".repeat(4001) } }), undefined);
   assert.equal(parseClientMessage({ ...message, execution: { ...message.execution, goal: false } }), undefined);
+});
+
+test("runtime acceptance rejects malformed run identities and Goal acknowledgements for non-reopen actions", async () => {
+  const { AgentFactoryClient } = await importTypeScript("src/infrastructure/agent-factory/agent-client.ts");
+  const client = new AgentFactoryClient("/unused/exec.py", "/workspace");
+  client.capabilities = async () => ({
+    submit: { model: true, reasoning: true, fast: true, goal: true },
+    send: { model: true, reasoning: true, fast: true, goal: true }
+  });
+  client.command = async () => ({ kind: "ack", status: "accepted", agentId: "main-exact", runId: "../outside" });
+  await assert.rejects(client.submit("main-exact", "task", {}), /접수 응답/);
+  client.command = async () => ({ kind: "ack", status: "accepted", agentId: "main-exact", runId: "run-exact" });
+  await assert.rejects(client.goal("main-exact", "refresh"), /예상하지 않은 실행/);
 });
 
 test("Goal controls use the bound session and report backend errors", async () => {

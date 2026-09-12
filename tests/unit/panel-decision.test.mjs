@@ -178,6 +178,175 @@ test("validated web links open through VS Code", async () => {
   assert.equal(notices.at(-1).level, "error");
 });
 
+test("child panels cannot switch identities to a Main session", async () => {
+  const posted = [];
+  const manager = new module.exports.ChatPanelManager({}, {}, () => [], async () => {
+    throw new Error("non-Main session selection must not connect");
+  });
+  const managed = {
+    state: { role: "work", agentId: "work-exact" },
+    panel: { webview: { async postMessage(message) { posted.push(message); return true; } } }
+  };
+  await manager.handleMessage(managed, { type: "session.select", agentId: "main-other" });
+  assert.equal(managed.state.agentId, "work-exact");
+  assert.equal(posted.at(-1).level, "warning");
+});
+
+test("session selection and restoration reuse an already bound panel", async () => {
+  const reveals = [], disposed = [];
+  const manager = new module.exports.ChatPanelManager({ globalState: { get() {} } }, {}, () => [], async () => {
+    throw new Error("duplicate panel must not connect");
+  });
+  const existing = {
+    state: { panelId: "panel-existing", role: "main", agentId: "main-exact" },
+    panel: { reveal(...args) { reveals.push(args); } }
+  };
+  manager.panels.set("panel-existing", existing);
+  const selecting = {
+    state: { panelId: "panel-other", role: "main" },
+    panel: { webview: { async postMessage() { return true; } } }
+  };
+  manager.panels.set("panel-other", selecting);
+  await manager.handleMessage(selecting, { type: "session.select", agentId: "main-exact" });
+  assert.equal(selecting.state.agentId, undefined);
+  const revived = { viewColumn: 2, dispose() { disposed.push(true); } };
+  await manager.revive(revived, { panelId: "restored-duplicate", role: "main", agentId: "main-exact" });
+  assert.equal(reveals.length, 2);
+  assert.deepEqual(disposed, [true]);
+});
+
+test("session transitions serialize concurrent selection and chat sends", async () => {
+  const posted = [], sent = [];
+  let releaseSessions;
+  const gate = new Promise(resolve => { releaseSessions = resolve; });
+  const manager = new module.exports.ChatPanelManager({}, {}, () => [], async () => ({
+    available: true,
+    client: { async listSessions() { return gate; } }
+  }));
+  const managed = {
+    state: { panelId: "panel-one", role: "main" },
+    controller: { running: false, async send(text) { sent.push(text); } },
+    panel: { webview: { async postMessage(message) { posted.push(message); return true; } } }
+  };
+  const selecting = manager.handleMessage(managed, { type: "session.select", agentId: "main-one" });
+  await new Promise(resolve => setImmediate(resolve));
+  await manager.handleMessage(managed, { type: "session.select", agentId: "main-two" });
+  const sending = manager.handleMessage(managed, {
+    type: "chat.send", id: "message-one", text: "must not cross sessions", attachments: [],
+    execution: { fast: false, goal: false }
+  });
+  assert.equal(posted.filter(message => message.level === "warning").length, 1);
+  assert.deepEqual(sent, []);
+  releaseSessions([]);
+  await Promise.all([selecting, sending]);
+  assert.deepEqual(sent, ["must not cross sessions"]);
+});
+
+test("concurrent panels atomically claim one session identity", async () => {
+  let releaseSessions;
+  const gate = new Promise(resolve => { releaseSessions = resolve; });
+  const storage = new Map(), reveals = [], reconnected = [];
+  const context = {
+    workspaceState: {
+      get(key) { return storage.get(key); },
+      async update(key, value) { storage.set(key, value); }
+    }
+  };
+  const client = {
+    async listSessions() { return gate; },
+    async capabilities() { return { submit: {}, send: {} }; },
+    async goal() { return { goal: null }; }
+  };
+  const manager = new module.exports.ChatPanelManager(context, {}, () => [], async () => ({ available: true, client }));
+  manager.reconnectController = async managed => { reconnected.push(managed.state.panelId); };
+  const panels = ["one", "two"].map(panelId => ({
+    state: { panelId, role: "main" },
+    controller: { running: false, dispose() {} },
+    panel: {
+      reveal() { reveals.push(panelId); },
+      webview: { async postMessage() { return true; } }
+    }
+  }));
+  for (const managed of panels) manager.panels.set(managed.state.panelId, managed);
+
+  const selections = panels.map(managed => manager.handleMessage(managed, {
+    type: "session.select", agentId: "main-shared"
+  }));
+  await new Promise(resolve => setImmediate(resolve));
+  releaseSessions([{ agentId: "main-shared" }]);
+  await Promise.all(selections);
+
+  assert.equal(panels.filter(managed => managed.state.agentId === "main-shared").length, 1);
+  assert.equal(reconnected.length, 1);
+  assert.equal(reveals.length, 1);
+});
+
+test("disposing during session persistence prevents controller recreation", async () => {
+  let releaseWrite;
+  const writeGate = new Promise(resolve => { releaseWrite = resolve; });
+  let writeStarted;
+  const started = new Promise(resolve => { writeStarted = resolve; });
+  let reconnects = 0, capabilities = 0, goals = 0;
+  const context = { workspaceState: {
+    get() { return []; },
+    async update() { writeStarted(); await writeGate; }
+  } };
+  const client = {
+    async listSessions() { return [{ agentId: "main-target" }]; },
+    async capabilities() { capabilities += 1; return { submit: {}, send: {} }; },
+    async goal() { goals += 1; return { goal: null }; }
+  };
+  const manager = new module.exports.ChatPanelManager(context, {}, () => [], async () => ({ available: true, client }));
+  manager.reconnectController = async () => { reconnects += 1; };
+  const managed = {
+    state: { panelId: "closing", role: "main" },
+    controller: { running: false, dispose() {} },
+    panel: { webview: { async postMessage() { return true; } } }
+  };
+  manager.panels.set("closing", managed);
+
+  const selecting = manager.handleMessage(managed, { type: "session.select", agentId: "main-target" });
+  await started;
+  managed.disposed = true;
+  releaseWrite();
+  await selecting;
+
+  assert.equal(reconnects, 0);
+  assert.equal(capabilities, 0);
+  assert.equal(goals, 0);
+  let disposedConnects = 0;
+  const disposedManager = new module.exports.ChatPanelManager({}, {}, () => [], async () => {
+    disposedConnects += 1;
+    return { available: true, client };
+  });
+  await disposedManager.ensureController({ disposed: true });
+  assert.equal(disposedConnects, 0);
+});
+
+test("sidebar session writes serialize read-modify-write updates", async () => {
+  const storage = new Map(), releases = [];
+  const context = { workspaceState: {
+    get(key) { return storage.get(key); },
+    async update(key, value) {
+      await new Promise(resolve => releases.push(resolve));
+      storage.set(key, value);
+    }
+  } };
+  const manager = new module.exports.ChatPanelManager(context, {}, () => [], async () => {
+    throw new Error("not used");
+  });
+  const first = manager.rememberAgent({ panelId: "one", title: "One", role: "main" });
+  const second = manager.rememberAgent({ panelId: "two", title: "Two", role: "main" });
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(releases.length, 1);
+  releases.shift()();
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(releases.length, 1);
+  releases.shift()();
+  await Promise.all([first, second]);
+  assert.deepEqual(Array.from(storage.get("agentFactory.sidebar.agents"), state => state.panelId), ["one", "two"]);
+});
+
 test("sidebar catalog merges runtime sessions with saved names and reuses an open panel", async () => {
   const storage = new Map();
   const posted = [], revealed = [];
