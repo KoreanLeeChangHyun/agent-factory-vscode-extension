@@ -7,8 +7,12 @@ interface Layout { groups: Group[]; assignments: Record<string, string> }
 type Node = { kind: "group"; group: Group } | { kind: "agent"; agent: SidebarAgent };
 const VIEW = "agentFactory.agents";
 const STORAGE = "agentFactory.sidebar.groups";
+const DRAG_MIME = "application/vnd.code.tree.agentfactory.agents";
 
-export class AgentSidebar implements vscode.TreeDataProvider<Node>, vscode.Disposable {
+export class AgentSidebar implements vscode.TreeDataProvider<Node>, vscode.TreeDragAndDropController<Node>, vscode.Disposable {
+  public readonly dragMimeTypes = [DRAG_MIME];
+  public readonly dropMimeTypes = [DRAG_MIME];
+  private readonly dragSource = randomUUID();
   private readonly changed = new vscode.EventEmitter<Node | undefined>();
   public readonly onDidChangeTreeData = this.changed.event;
   private readonly subscriptions: vscode.Disposable[] = [this.changed];
@@ -25,7 +29,9 @@ export class AgentSidebar implements vscode.TreeDataProvider<Node>, vscode.Dispo
       groups: Array.isArray(saved?.groups) ? saved.groups.filter(group => typeof group?.id === "string" && typeof group.name === "string") : [],
       assignments: saved?.assignments && typeof saved.assignments === "object" ? { ...saved.assignments } : {}
     };
-    this.view = vscode.window.createTreeView(VIEW, { treeDataProvider: this, showCollapseAll: true });
+    this.view = vscode.window.createTreeView(VIEW, {
+      treeDataProvider: this, dragAndDropController: this, canSelectMany: true, showCollapseAll: true
+    });
     this.subscriptions.push(this.view, panels.onAgentsChanged(() => this.scheduleRefresh()),
       this.view.onDidChangeVisibility(event => { if (event.visible) void this.refresh(); }));
     const command = (name: string, action: (node?: Node) => unknown) => this.subscriptions.push(
@@ -90,6 +96,32 @@ export class AgentSidebar implements vscode.TreeDataProvider<Node>, vscode.Dispo
     item.iconPath = new vscode.ThemeIcon(running ? "loading~spin" : "comment-discussion");
     item.command = { command: "agentFactory.sidebar.open", title: "에이전트 열기", arguments: [node] };
     return item;
+  }
+
+  public handleDrag(nodes: readonly Node[], transfer: vscode.DataTransfer, token: vscode.CancellationToken): void {
+    if (token.isCancellationRequested || this.disposed) return;
+    const ids = nodes.filter(node => node.kind === "agent").map(node => node.agent.state.panelId);
+    if (ids.length) transfer.set(DRAG_MIME, new vscode.DataTransferItem({ source: this.dragSource, ids }));
+  }
+
+  public async handleDrop(target: Node | undefined, transfer: vscode.DataTransfer, token: vscode.CancellationToken): Promise<void> {
+    if (token.isCancellationRequested || this.disposed) return;
+    const payload = transfer.get(DRAG_MIME)?.value;
+    if (!payload || payload.source !== this.dragSource || !Array.isArray(payload.ids)) return;
+    const groupId = target?.kind === "group" ? target.group.id
+      : target?.kind === "agent" ? this.layout.assignments[target.agent.state.panelId] : undefined;
+    if (groupId && !this.layout.groups.some(group => group.id === groupId)) return;
+    if (target?.kind === "agent" && !this.agents.some(agent => agent.state.panelId === target.agent.state.panelId)) return;
+    const ids = new Set<string>(payload.ids.filter((id: unknown): id is string => typeof id === "string"));
+    let changed = false;
+    for (const agent of this.agents) {
+      const id = agent.state.panelId;
+      if (!ids.has(id) || this.layout.assignments[id] === groupId) continue;
+      if (groupId) this.layout.assignments[id] = groupId;
+      else delete this.layout.assignments[id];
+      changed = true;
+    }
+    if (changed) await this.save();
   }
 
   private async name(title: string, value = ""): Promise<string | undefined> {

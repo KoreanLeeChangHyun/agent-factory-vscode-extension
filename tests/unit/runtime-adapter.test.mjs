@@ -903,3 +903,118 @@ test("runtime capabilities expose only recognized stored session execution modes
     assert.equal(observed.executionMode, mode === "unknown" ? undefined : mode);
   }
 });
+
+test("active run discovery includes queued runs, skips terminal runs and validates identities", async t => {
+  const { AgentFactoryClient } = await importTypeScript("src/infrastructure/agent-factory/agent-client.ts");
+  const root = await mkdtemp(join(tmpdir(), "af-reconnect-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const client = new AgentFactoryClient(new URL("../fixtures/fake-exec.py", import.meta.url).pathname, root);
+  assert.equal(await client.activeRun("main-test"), undefined);
+  for (const [runId, status, agentId] of [["run-1", "queued", "main-test"], ["run-2", "completed", "main-test"], ["run-3", "running", "different-agent"]]) {
+    const path = join(agentsRoot(root), "main-test", "runs", runId, "state.json");
+    await mkdir(dirname(path), { recursive: true });
+    await writeFile(path, JSON.stringify({ runId, agentId, status }));
+  }
+  assert.deepEqual(await client.activeRun("main-test"), { agentId: "main-test", runId: "run-1" });
+  await writeFile(join(agentsRoot(root), "main-test/runs/run-1/state.json"), JSON.stringify({ agentId: "main-test", runId: "run-1", status: "cancelled" }));
+  assert.equal(await client.activeRun("main-test"), undefined);
+});
+
+test("reconnect follows an existing run, rejects duplicate sends and cancels the correct run", async () => {
+  const { ChatSessionController } = await importTypeScript("src/modules/chat/session-controller.ts");
+  const calls = [], running = [], finals = [];
+  let release;
+  const gate = new Promise(resolve => { release = resolve; });
+  let finished;
+  const done = new Promise(resolve => { finished = resolve; });
+  const runtime = {
+    async activeRun() { calls.push("discover"); return { agentId: "main-existing", runId: "run-active" }; },
+    async updates() { await gate; return { cursor: 0, updates: [] }; },
+    async status() { return { status: "completed" }; },
+    async result() { return { status: "completed", text: "Recovered result" }; },
+    async cancel(...args) { calls.push(args); },
+    async send() { throw new Error("Must not send"); },
+    async submit() { throw new Error("Must not submit"); }
+  };
+  const controller = new ChatSessionController(runtime, {
+    onBound() {}, onRunningChanged(value) { running.push(value); if (!value) finished(); },
+    onAssistantText(text) { finals.push(text); }, onProgress() {}, onUsage() {}, onActivity() {}, onError() {}
+  }, "main-existing", { pollIntervalMs: 1 });
+  assert.equal(await controller.reconnect(), true);
+  assert.equal(await controller.reconnect(), true);
+  assert.equal(calls.filter(value => value === "discover").length, 1);
+  assert.equal(controller.running, true);
+  await controller.send("new request", [], {});
+  await controller.cancel();
+  assert.deepEqual(calls.at(-1), ["main-existing", "run-active"]);
+  release();
+  await done;
+  assert.equal(controller.running, false);
+  assert.deepEqual(finals, ["Recovered result"]);
+});
+
+test("send discovers a run started before reconnection and never resubmits", async () => {
+  const { ChatSessionController } = await importTypeScript("src/modules/chat/session-controller.ts");
+  const errors = [];
+  let discovered = 0;
+  const controller = new ChatSessionController({
+    async activeRun() { discovered++; return { agentId: "main-existing", runId: "run-active" }; },
+    async updates() { return { cursor: 0, updates: [] }; },
+    async status() { return { status: "completed" }; },
+    async result() { return { status: "completed", text: "done" }; },
+    async send() { throw new Error("Duplicate submission"); }
+  }, { onBound() {}, onRunningChanged() {}, onAssistantText() {}, onProgress() {}, onUsage() {}, onActivity() {}, onError(error) { errors.push(error); } }, "main-existing");
+  await controller.send("task", [], {});
+  assert.equal(discovered, 1);
+  assert.match(errors[0], /전송하지 않았습니다/);
+  assert.equal(errors.length, 1);
+});
+
+test("closing a recovered chat detaches polling without cancelling its runtime", async () => {
+  const { ChatSessionController } = await importTypeScript("src/modules/chat/session-controller.ts");
+  let release;
+  const gate = new Promise(resolve => { release = resolve; });
+  let statusCalls = 0, cancelCalls = 0;
+  const controller = new ChatSessionController({
+    async activeRun() { return { agentId: "main-existing", runId: "run-active" }; },
+    async updates() { await gate; return { cursor: 1, updates: [{ kind: "commentary", text: "hidden" }] }; },
+    async status() { statusCalls++; return { status: "running" }; },
+    async cancel() { cancelCalls++; }
+  }, { onBound() {}, onRunningChanged() {}, onAssistantText() { assert.fail("Detached chat received output"); }, onProgress() {}, onUsage() {}, onActivity() {}, onError() {} }, "main-existing");
+  await controller.reconnect();
+  controller.dispose();
+  release();
+  await new Promise(resolve => setTimeout(resolve, 10));
+  assert.equal(statusCalls, 0);
+  assert.equal(cancelCalls, 0);
+});
+
+test("current run child lookup excludes agents called by earlier turns", async t => {
+  const { AgentFactoryClient } = await importTypeScript("src/infrastructure/agent-factory/agent-client.ts");
+  const root = await mkdtemp(join(tmpdir(), "af-current-children-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const client = new AgentFactoryClient(new URL("../fixtures/fake-exec.py", import.meta.url).pathname, root);
+  const oldEvents = join(agentsRoot(root), "main-parent/runs/run-old/events.jsonl");
+  const newEvents = join(agentsRoot(root), "main-parent/runs/run-new/events.jsonl");
+  const childState = join(agentsRoot(root), "work-hidden/runs/run-child/state.json");
+  for (const path of [oldEvents, newEvents, childState]) await mkdir(dirname(path), { recursive: true });
+  const event = JSON.stringify({ type: "item.completed", item: { type: "command_execution", command: "python3 loop.py start --work-agent work-hidden" } }) + "\n";
+  await writeFile(oldEvents, event);
+  await writeFile(newEvents, "");
+  await writeFile(childState, JSON.stringify({ status: "completed" }));
+  assert.equal((await client.listChildSessions("main-parent")).length, 1);
+  assert.deepEqual(await client.listChildSessions("main-parent", "run-new"), []);
+  await writeFile(newEvents, event);
+  assert.equal((await client.listChildSessions("main-parent", "run-new")).length, 1);
+  await assert.rejects(client.listChildSessions("main-parent", "../run-old"));
+});
+
+test("child progress counts queued work and excludes completed verification", async () => {
+  const script = await readFile(new URL("../../static/js/chat.js", import.meta.url), "utf8");
+  const source = script.slice(script.indexOf("  function summarizeChildAgents("), script.indexOf("  function childAgentStatusLabel("));
+  const context = { agents: [{ role: "work", status: "queued" }, { role: "verification", status: "completed" }] };
+  const result = runInNewContext(source + "\nsummarizeChildAgents(agents)", context);
+  assert.equal(result.activeUnits, 1);
+  assert.equal(result.workActive, 1);
+  assert.equal(result.verificationActive, 0);
+});

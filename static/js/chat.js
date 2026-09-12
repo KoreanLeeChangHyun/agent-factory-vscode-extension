@@ -461,6 +461,10 @@
         break;
       case "chat.assistant":
         if (typeof message.text === "string" && message.text) {
+          if (message.runId && state.timeline.some(function (entry) {
+            return entry.type === "assistant" && entry.runId === message.runId && entry.text === message.text &&
+              entry.phase === (message.phase === "commentary" ? "commentary" : "final");
+          })) break;
           state.timeline.push({ type: "assistant", id: createId(), text: message.text, runId: message.runId, phase: message.phase === "commentary" ? "commentary" : "final" });
           renderTimeline();
           persist();
@@ -524,7 +528,8 @@
   });
 
   function submit() {
-    let text = prompt.value.trim();
+    const userText = prompt.value.trim();
+    let text = userText;
     if (!text && state.attachments.length === 0) return;
     if (state.workLoopMode && state.role === "main") {
       text = (text ? text + "\n\n" : "") +
@@ -560,10 +565,12 @@
     state.timeline.push({
       type: "user",
       id: message.id,
-      text: message.text || state.attachments.map(function (attachment) { return "첨부: " + attachment.name; }).join("\n")
+      text: userText || state.attachments.map(function (attachment) { return "첨부: " + attachment.name; }).join("\n")
     });
     state.draft = "";
     state.attachments = [];
+    state.childAgents = [];
+    state.workUnits = summarizeChildAgents([]);
     state.running = true;
     state.runProgress = "Main Agent 시작 중";
     state.runStartedAt = Date.now();
@@ -1418,7 +1425,7 @@
     runDetails.hidden = !expanded;
     runStatusAgents.hidden = !expandable;
     runStatusAgents.textContent = state.workUnits.totalCalled > 0
-      ? "작업 " + Math.max(countChildAgents("work"), state.workUnits.workActive) + " · 검증 " + Math.max(countChildAgents("verification"), state.workUnits.verificationActive)
+      ? "작업 " + state.workUnits.workActive + " · 검증 " + state.workUnits.verificationActive + " 진행 중"
       : "";
     if (!expanded) return;
 
@@ -1429,7 +1436,9 @@
     if (state.childAgents.length === 0) {
       runStageList.append(emptyAgentItem("아직 호출된 작업자나 검증자가 없습니다."));
     } else {
-      for (const agent of state.childAgents) {
+      for (const agent of state.childAgents.slice().sort(function (a, b) {
+        return (a.role === "work" ? 0 : 1) - (b.role === "work" ? 0 : 1);
+      })) {
         runStageList.append(createRunStage(agent));
       }
     }
@@ -1821,7 +1830,7 @@
   }
 
   function summarizeChildAgents(agents) {
-    const activeStatuses = new Set(["accepted", "starting", "running", "cancelling"]);
+    const activeStatuses = new Set(["accepted", "queued", "starting", "running", "cancelling"]);
     return {
       activeUnits: agents.filter(function (agent) { return activeStatuses.has(agent.status); }).length,
       workActive: agents.filter(function (agent) { return agent.role === "work" && activeStatuses.has(agent.status); }).length,
@@ -1833,6 +1842,7 @@
   function childAgentStatusLabel(status) {
     const labels = {
       accepted: "대기 중",
+      queued: "대기 중",
       starting: "시작 중",
       running: "실행 중",
       cancelling: "취소 중",

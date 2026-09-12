@@ -14,6 +14,7 @@ function harness(overrides = {}, text = "오류 수정") {
     prompt: { value: text }, goalObjective: { value: "" }, nativeGoal: null,
     currentCapabilities: () => ({ model: true, reasoning: true, fast: true, goal: true }),
     createId: () => "message-id", renderAll() {}, resizePrompt() {}, persist() {},
+    summarizeChildAgents: () => ({ activeUnits: 0, workActive: 0, verificationActive: 0, totalCalled: 0 }),
     appendNotice() {}, vscode: { postMessage: message => sent.push(message) },
     workLoopButton: {}, sendButton: {}
   };
@@ -30,7 +31,8 @@ test("loop button sends explicit delegation with the draft, attachments and sele
   assert.match(sent[0].text, /실패하면 같은 Work에서 수정한 뒤 재검증/);
   assert.equal(sent[0].attachments[0].name, "input.txt");
   assert.equal(sent[0].execution.model, "chosen-model");
-  assert.equal(context.state.timeline[0].text, sent[0].text);
+  assert.equal(context.state.timeline[0].text, "오류 수정");
+  assert.doesNotMatch(context.state.timeline[0].text, /Work → Verification/);
   assert.equal(context.prompt.value, "");
   run("submit()");
   assert.equal(sent.length, 1);
@@ -72,4 +74,11 @@ test("icon click toggles mode without submitting and keeps its setting", () => {
   runInNewContext(handler, context);
   assert.equal(context.state.workLoopMode, false);
   assert.deepEqual(calls, [true, false]);
+});
+
+test("attachment-only loop requests show attachment names without injected instructions", () => {
+  const { context, sent, run } = harness({ attachments: [{ name: "input.txt" }] }, "");
+  run("submit()");
+  assert.equal(context.state.timeline[0].text, "첨부: input.txt");
+  assert.match(sent[0].text, /Work → Verification/);
 });

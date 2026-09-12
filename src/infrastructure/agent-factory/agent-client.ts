@@ -118,9 +118,10 @@ export interface AgentRuntimeClient {
   updates(agentId: string, runId: string, cursor: number): Promise<RunUpdates>;
   result(agentId: string, runId: string): Promise<RunResult>;
   cancel(agentId: string, runId: string): Promise<void>;
+  activeRun(agentId: string): Promise<RunAcceptance | undefined>;
   goal(agentId: string, action: GoalAction): Promise<{ readonly goal?: NativeGoal | null; readonly accepted?: RunAcceptance; readonly error?: string }>;
   listSessions(): Promise<readonly MainAgentSession[]>;
-  listChildSessions(mainAgentId: string): Promise<readonly ChildAgentSession[]>;
+  listChildSessions(mainAgentId: string, runId?: string): Promise<readonly ChildAgentSession[]>;
 }
 
 export class AgentFactoryClient implements AgentRuntimeClient {
@@ -283,6 +284,25 @@ export class AgentFactoryClient implements AgentRuntimeClient {
       runId
     ]);
     return { status: readRunStatus(document), ...runDiagnostics(readRecord(document.run, "status run")) };
+  }
+
+  public async activeRun(agentId: string): Promise<RunAcceptance | undefined> {
+    const path = await this.managedPath(agentId, "runs");
+    let entries;
+    try { entries = await readdir(path, { withFileTypes: true }); }
+    catch (error) { if (isMissingFile(error)) return undefined; throw error; }
+    const active = new Set(["accepted", "queued", "starting", "running", "cancelling"]);
+    for (const entry of entries.filter(entry => entry.isDirectory() && MANAGED_ID.test(entry.name))
+      .sort((a, b) => b.name.localeCompare(a.name))) {
+      const statePath = await this.managedPath(agentId, "runs", entry.name, "state.json");
+      let state: Record<string, unknown> | undefined;
+      try { state = readRecordOrUndefined(JSON.parse((await readManagedBytes(statePath, 256 * 1024)).toString("utf8"))); }
+      catch (error) { if (isMissingFile(error)) continue; throw error; }
+      if (state?.agentId === agentId && state.runId === entry.name && typeof state.status === "string" && active.has(state.status)) {
+        return { agentId, runId: entry.name };
+      }
+    }
+    return undefined;
   }
 
   public async updates(agentId: string, runId: string, cursor: number): Promise<RunUpdates> {
@@ -461,11 +481,12 @@ export class AgentFactoryClient implements AgentRuntimeClient {
     }).sort((left, right) => (right.updatedAt ?? "").localeCompare(left.updatedAt ?? ""));
   }
 
-  public async listChildSessions(mainAgentId: string): Promise<readonly ChildAgentSession[]> {
+  public async listChildSessions(mainAgentId: string, runId?: string): Promise<readonly ChildAgentSession[]> {
     if (!MANAGED_ID.test(mainAgentId)) {
       throw new Error("Main Agent 식별자가 올바르지 않습니다.");
     }
-    const referenced = await this.discoverChildAgents(mainAgentId);
+    if (runId !== undefined && !MANAGED_ID.test(runId)) throw new Error("Main Agent 실행 식별자가 올바르지 않습니다.");
+    const referenced = await this.discoverChildAgents(mainAgentId, runId);
     if (referenced.size === 0) return [];
     const document = await this.command(["list", "--project-root", this.projectRoot]);
     if (!Array.isArray(document.agents) || document.agents.length > 1_000) {
@@ -494,13 +515,13 @@ export class AgentFactoryClient implements AgentRuntimeClient {
     return agents.sort((left, right) => (right.updatedAt ?? "").localeCompare(left.updatedAt ?? ""));
   }
 
-  private async discoverChildAgents(mainAgentId: string): Promise<ReadonlySet<string>> {
+  private async discoverChildAgents(mainAgentId: string, runId?: string): Promise<ReadonlySet<string>> {
     const runsDirectory = await this.managedPath(mainAgentId, "runs");
     const childIds = new Set<string>();
     let runs;
     try {
       runs = (await readdir(runsDirectory, { withFileTypes: true }))
-        .filter((entry) => entry.isDirectory() && MANAGED_ID.test(entry.name))
+        .filter((entry) => entry.isDirectory() && MANAGED_ID.test(entry.name) && (runId === undefined || entry.name === runId))
         .sort((left, right) => right.name.localeCompare(left.name))
         .slice(0, 500);
     } catch (error) {

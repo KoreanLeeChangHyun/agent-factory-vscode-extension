@@ -36,6 +36,7 @@ export class ChatSessionController {
   private currentRunId: string | undefined;
   private busy = false;
   private pendingDecisionRunId: string | undefined;
+  private disposed = false;
 
   public constructor(
     private readonly runtime: AgentRuntimeClient,
@@ -50,11 +51,49 @@ export class ChatSessionController {
     return this.busy;
   }
 
+  public get runId(): string | undefined { return this.currentRunId; }
+
+  public dispose(): void { this.disposed = true; }
+
+  public async reconnect(): Promise<boolean> {
+    if (this.disposed || !this.agentId || this.busy) return this.busy;
+    this.busy = true;
+    this.events.onRunningChanged(true);
+    try {
+      const active = await this.runtime.activeRun?.(this.agentId);
+      if (this.disposed) return false;
+      if (active) {
+        this.currentRunId = active.runId;
+        this.events.onProgress("진행 중인 작업에 다시 연결했습니다.");
+        void this.followExistingRun(active.agentId, active.runId);
+        return true;
+      }
+      this.busy = false;
+      this.events.onRunningChanged(false);
+      return false;
+    } catch (error) {
+      this.busy = false;
+      this.events.onRunningChanged(false);
+      throw error;
+    }
+  }
+
+  private async followExistingRun(agentId: string, runId: string): Promise<void> {
+    try { await this.pollUntilTerminal(agentId, runId); }
+    catch (error) { if (!this.disposed) this.events.onError(errorMessage(error)); }
+    finally {
+      this.currentRunId = undefined;
+      this.busy = false;
+      if (!this.disposed) this.events.onRunningChanged(false);
+    }
+  }
+
   public async send(
     text: string,
     attachments: readonly AttachmentReference[],
     execution: ExecutionOptions
   ): Promise<void> {
+    if (this.disposed) return;
     if (this.busy) {
       this.events.onError("현재 Main Agent turn이 실행 중입니다. 완료되거나 취소된 뒤 다시 보내세요.");
       return;
@@ -63,6 +102,15 @@ export class ChatSessionController {
     this.busy = true;
     this.events.onRunningChanged(true);
     try {
+      if (this.agentId) {
+        const active = await this.runtime.activeRun?.(this.agentId);
+        if (active) {
+          this.currentRunId = active.runId;
+          this.events.onError("진행 중인 작업에 다시 연결했습니다. 방금 입력한 요청은 전송하지 않았습니다.");
+          await this.pollUntilTerminal(active.agentId, active.runId);
+          return;
+        }
+      }
       const request = withAttachmentReferences(text, attachments);
       if (!this.agentId) {
         const candidateAgentId = `main-${randomUUID()}`;
@@ -81,7 +129,7 @@ export class ChatSessionController {
     } finally {
       this.currentRunId = undefined;
       this.busy = false;
-      this.events.onRunningChanged(false);
+      if (!this.disposed) this.events.onRunningChanged(false);
     }
   }
 
@@ -141,12 +189,14 @@ export class ChatSessionController {
     let cursor = 0;
     let lastCommentary: string | undefined;
     for (let poll = 0; poll < maxPolls; poll += 1) {
+      if (this.disposed) return;
       const updates = await this.runtime.updates(agentId, runId, cursor);
+      if (this.disposed) return;
       cursor = updates.cursor;
       for (const update of updates.updates) {
         if (update.kind === "commentary") {
           if (update.text.trim() && update.text !== lastCommentary) {
-            this.events.onAssistantText(update.text, "commentary");
+            this.events.onAssistantText(update.text, "commentary", runId);
             lastCommentary = update.text;
           }
         } else if (update.kind === "status") {
@@ -162,6 +212,7 @@ export class ChatSessionController {
       }
       if (poll % statusPollStride === 0) {
         const status = await this.runtime.status(agentId, runId);
+        if (this.disposed) return;
         this.events.onStatusObserved?.(status.status);
         if (TERMINAL_STATES.has(status.status)) {
           const result = await this.runtime.result(agentId, runId);

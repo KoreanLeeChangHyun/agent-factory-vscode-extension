@@ -16,6 +16,10 @@ Open the factory icon in the activity bar to browse Main Agent chats. Use **+** 
 
 Use an agent's context menu to rename it or change its group. Group menus support renaming and ungrouping; ungrouping preserves every agent. Names and groups persist in the current VS Code workspace. Running chats display a spinner. Work and Verification sessions remain accessible from their Main chat's agent list.
 
+Drag one or more selected agents onto a group to move them. Dropping onto another agent uses that agent's group; dropping onto empty space removes the group assignment. These changes are saved automatically.
+
+Opening a bound chat reconnects to its existing accepted or active run and follows progress and completion without submitting another request. The stop button cancels that run. Closing a chat detaches the display without cancelling the background runtime.
+
 ## Syntax highlighting
 
 - **Theme selection:** read `tui.theme` from `$CODEX_HOME/config.toml` (default: `~/.codex/config.toml`) on the workspace extension host, including SSH/container hosts.

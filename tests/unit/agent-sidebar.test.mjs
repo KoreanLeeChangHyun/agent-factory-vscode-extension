@@ -15,6 +15,7 @@ function harness(storage = new Map()) {
   let listener;
   const tree = { onDidChangeVisibility() { return { dispose() {} }; }, dispose() {} };
   const vscode = {
+    DataTransferItem: class { constructor(value) { this.value = value; } },
     EventEmitter: class { event = () => ({ dispose() {} }); fire() {} dispose() {} },
     TreeItem: class { constructor(label, collapsibleState) { this.label = label; this.collapsibleState = collapsibleState; } },
     ThemeIcon: class { constructor(id) { this.id = id; } },
@@ -89,4 +90,52 @@ test("cancelled name and group prompts leave the layout intact", async () => {
   assert.equal(h.sidebar.getChildren().length, 2);
   assert.equal(h.renamed.length, 0);
   h.sidebar.dispose();
+});
+
+test("drag and drop moves multiple agents, supports agent targets, persists and ungroups", async () => {
+  const h = harness();
+  await h.sidebar.refresh();
+  const agents = h.sidebar.getChildren();
+  h.inputs.push("Drag group");
+  await h.run("newGroup");
+  const group = h.sidebar.getChildren()[0];
+  const transfer = new Map(), token = { isCancellationRequested: false };
+  h.sidebar.handleDrag([agents[0]], transfer, token);
+  await h.sidebar.handleDrop(group, transfer, token);
+  assert.equal(h.sidebar.getChildren(group).length, 1);
+  h.sidebar.handleDrag([agents[1]], transfer, token);
+  await h.sidebar.handleDrop(h.sidebar.getChildren(group)[0], transfer, token);
+  assert.equal(h.sidebar.getChildren(group).length, 2);
+  const restored = harness(h.storage);
+  await restored.sidebar.refresh();
+  assert.equal(restored.sidebar.getChildren(restored.sidebar.getChildren()[0]).length, 2);
+  restored.sidebar.dispose();
+  h.sidebar.handleDrag(h.sidebar.getChildren(group), transfer, token);
+  await h.sidebar.handleDrop(undefined, transfer, token);
+  assert.equal(h.sidebar.getChildren(group).length, 0);
+  assert.equal(h.sidebar.getChildren().filter(node => node.kind === "agent").length, 2);
+  h.sidebar.dispose();
+});
+
+test("drag and drop ignores cancellation, group drags, foreign payloads and stale targets", async () => {
+  const h = harness(), other = harness();
+  await h.sidebar.refresh();
+  await other.sidebar.refresh();
+  h.inputs.push("Target");
+  await h.run("newGroup");
+  const group = h.sidebar.getChildren()[0], agent = h.sidebar.getChildren()[1];
+  const transfer = new Map(), token = { isCancellationRequested: false };
+  h.sidebar.handleDrag([group], transfer, token);
+  assert.equal(transfer.size, 0);
+  other.sidebar.handleDrag(other.sidebar.getChildren(), transfer, token);
+  await h.sidebar.handleDrop(group, transfer, token);
+  assert.equal(h.sidebar.getChildren(group).length, 0);
+  h.sidebar.handleDrag([agent], transfer, token);
+  await h.sidebar.handleDrop(group, transfer, { isCancellationRequested: true });
+  assert.equal(h.sidebar.getChildren(group).length, 0);
+  await h.run("deleteGroup", group);
+  await h.sidebar.handleDrop(group, transfer, token);
+  assert.equal(h.sidebar.getChildren().length, 2);
+  h.sidebar.dispose();
+  other.sidebar.dispose();
 });
