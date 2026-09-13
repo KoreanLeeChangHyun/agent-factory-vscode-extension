@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { build } from "esbuild";
+import { readFile } from "node:fs/promises";
 import test from "node:test";
 
 async function importTypeScript(relativePath, mockExtensionImports = false) {
@@ -30,6 +31,31 @@ async function importTypeScript(relativePath, mockExtensionImports = false) {
 }
 
 const dependency = await importTypeScript("src/infrastructure/agent-factory/plugin-dependency.ts");
+
+test("release metadata and installation guidance stay coupled", async () => {
+  const packageJson = JSON.parse(await readFile(new URL("../../package.json", import.meta.url), "utf8"));
+  const packageLock = JSON.parse(await readFile(new URL("../../package-lock.json", import.meta.url), "utf8"));
+  const readme = await readFile(new URL("../../README.md", import.meta.url), "utf8");
+  const version = packageJson.version;
+
+  assert.equal(packageLock.version, version);
+  assert.equal(packageLock.packages[""].version, version);
+  assert.ok(readme.includes(`Extension \`${version}\``));
+  assert.ok(readme.includes(`${version}+codex.<token>`));
+  for (const notice of [
+    "installed and enabled",
+    "identical semantic base version",
+    "official `agent-factory` marketplace",
+    "attempts one compatible plugin installation",
+    "activation blocks",
+    "fully installable and usable without this extension",
+    "released together",
+    "does not contain or bundle"
+  ]) assert.ok(readme.includes(notice), `README missing release notice: ${notice}`);
+  assert.ok(readme.includes("codex plugin marketplace add KoreanLeeChangHyun/agent-factory-codex-plugin --ref main"));
+  assert.ok(readme.includes("codex plugin marketplace upgrade agent-factory"));
+  assert.ok(readme.includes("codex plugin add agent-factory@agent-factory"));
+});
 
 function record(overrides = {}) {
   return {

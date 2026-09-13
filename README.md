@@ -2,6 +2,30 @@
 
 Agent Factory Main Agent sessions in VS Code editor tabs.
 
+## Required companion plugin
+
+This extension requires an installed and enabled Agent Factory Codex plugin with
+the identical semantic base version. Extension `1.0.4` accepts plugin
+`1.0.4+codex.<token>`, for example, but not another semantic base version.
+
+During activation, the extension checks configured Codex marketplaces, prefers the
+official `agent-factory` marketplace, and attempts one compatible plugin installation
+when the plugin is missing or mismatched. It rechecks that the required plugin is
+installed and enabled before registering commands and views. If the requirement is
+still unmet, activation blocks and reports the problem. Install or update the plugin
+manually with:
+
+```bash
+codex plugin marketplace add KoreanLeeChangHyun/agent-factory-codex-plugin --ref main
+codex plugin marketplace upgrade agent-factory
+codex plugin add agent-factory@agent-factory
+```
+
+The plugin remains fully installable and usable without this extension. The plugin
+and extension are released together and must stay on matching semantic base versions.
+The extension invokes Codex plugin installation; it does not contain or bundle the
+plugin.
+
 ## Features
 
 - Open Main Agent sessions in editor tabs; stream activity and resume sessions.
@@ -47,9 +71,9 @@ npm run check
 
 ## Installation requirement
 
-Extension version 1.0.2 requires an installed and enabled Agent Factory plugin with the
-same semantic base version, 1.0.2. A plugin cachebuster suffix such as
-`1.0.2+codex.<token>` is accepted. During activation the extension checks configured
+Extension version 1.0.4 requires an installed and enabled Agent Factory plugin with the
+same semantic base version, 1.0.4. A plugin cachebuster suffix such as
+`1.0.4+codex.<token>` is accepted. During activation the extension checks configured
 Codex marketplaces and, when necessary, installs one compatible available plugin before
 registering its commands and views. The official `agent-factory` marketplace is preferred.
 
@@ -67,7 +91,7 @@ this plugin requirement.
 
 ## F5 manual test
 
-1. Configure a marketplace that provides Agent Factory plugin semantic version 1.0.2.
+1. Configure a marketplace that provides Agent Factory plugin semantic version 1.0.4.
    Activation installs the compatible plugin when needed. Confirm
    `skills/agent/scripts/exec.py` is present in the Codex plugin cache; if it is elsewhere,
    set `agentFactory.mainChat.runtimeExecPath` to its absolute path after satisfying the
