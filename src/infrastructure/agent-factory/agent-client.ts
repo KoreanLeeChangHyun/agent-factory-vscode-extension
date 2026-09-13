@@ -1,7 +1,7 @@
 import { constants as fsConstants } from "node:fs";
 import { spawn } from "node:child_process";
-import { lstat, open as openFile, readFile, readdir, realpath } from "node:fs/promises";
-import { homedir } from "node:os";
+import { lstat, mkdtemp, open as openFile, readFile, readdir, realpath, rm, writeFile } from "node:fs/promises";
+import { homedir, tmpdir } from "node:os";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { AsyncCache } from "../../common/async-cache";
 
@@ -60,6 +60,11 @@ export interface RunAcceptance {
   readonly runId: string;
 }
 
+export interface RuntimeImageInput {
+  readonly path: string;
+  readonly mediaType: "image/png" | "image/jpeg" | "image/gif" | "image/webp";
+}
+
 export interface RunStatus {
   readonly error?: { readonly code: string; readonly message: string };
   readonly goalError?: string;
@@ -113,8 +118,8 @@ export interface ChildAgentSession {
 
 export interface AgentRuntimeClient {
   capabilities(agentId?: string): Promise<{ readonly submit: ExecutionCapabilities; readonly send: ExecutionCapabilities; readonly executionMode?: "read-only" | "workspace-write" | "danger-full-access" | "bypass" }>;
-  submit(agentId: string, message: string, execution: ExecutionOptions): Promise<RunAcceptance>;
-  send(agentId: string, message: string, execution: ExecutionOptions): Promise<RunAcceptance>;
+  submit(agentId: string, message: string, execution: ExecutionOptions, images?: readonly RuntimeImageInput[]): Promise<RunAcceptance>;
+  send(agentId: string, message: string, execution: ExecutionOptions, images?: readonly RuntimeImageInput[]): Promise<RunAcceptance>;
   status(agentId: string, runId: string): Promise<RunStatus>;
   updates(agentId: string, runId: string, cursor: number): Promise<RunUpdates>;
   result(agentId: string, runId: string): Promise<RunResult>;
@@ -245,8 +250,8 @@ export class AgentFactoryClient implements AgentRuntimeClient {
     }
   }
 
-  public async submit(agentId: string, message: string, execution: ExecutionOptions): Promise<RunAcceptance> {
-    const document = await this.command([
+  public async submit(agentId: string, message: string, execution: ExecutionOptions, images: readonly RuntimeImageInput[] = []): Promise<RunAcceptance> {
+    const document = await this.inputCommand([
       "submit",
       "--project-root",
       this.projectRoot,
@@ -254,27 +259,55 @@ export class AgentFactoryClient implements AgentRuntimeClient {
       agentId,
       "--role",
       "main",
-      "--message",
-      message,
       ...executionPolicyArguments(execution.executionMode),
       ...await this.checkedExecution("submit", execution)
-    ]);
+    ], message, images);
     return readAcceptance(document, agentId);
   }
 
-  public async send(agentId: string, message: string, execution: ExecutionOptions): Promise<RunAcceptance> {
-    const document = await this.command([
+  public async send(agentId: string, message: string, execution: ExecutionOptions, images: readonly RuntimeImageInput[] = []): Promise<RunAcceptance> {
+    const document = await this.inputCommand([
       "send",
       "--project-root",
       this.projectRoot,
       "--agent",
       agentId,
-      "--message",
-      message,
       ...executionPolicyArguments(execution.executionMode),
       ...await this.checkedExecution("send", execution, agentId)
-    ]);
+    ], message, images);
     return readAcceptance(document, agentId);
+  }
+
+  private async inputCommand(arguments_: string[], message: string, images: readonly RuntimeImageInput[]): Promise<Record<string, unknown>> {
+    if (images.length === 0) return this.command([...arguments_, "--message", message]);
+    if (images.length > 8) throw new Error("이미지는 최대 8개까지 첨부할 수 있습니다.");
+    const directory = await mkdtemp(join(tmpdir(), "agent-factory-input-"));
+    try {
+      const contractImages: { path: string; mediaType: string }[] = [];
+      let total = 0;
+      for (const [index, image] of images.entries()) {
+        const suffix = imageSuffix(image.mediaType);
+        const source = await openFile(image.path, fsConstants.O_RDONLY | fsConstants.O_NOFOLLOW);
+        let content: Buffer;
+        try {
+          const before = await source.stat();
+          if (!before.isFile() || before.size < 1 || before.size > 10 * 1024 * 1024) throw new Error("이미지 파일 크기가 허용 범위를 벗어났습니다.");
+          content = await source.readFile();
+          const after = await source.stat();
+          if (before.dev !== after.dev || before.ino !== after.ino || before.size !== after.size || before.mtimeMs !== after.mtimeMs) throw new Error("이미지 파일이 읽는 동안 변경되었습니다.");
+        } finally { await source.close(); }
+        total += content.byteLength;
+        if (total > 20 * 1024 * 1024) throw new Error("이미지 전체 크기는 20 MiB를 넘을 수 없습니다.");
+        const name = `${String(index).padStart(2, "0")}${suffix}`;
+        await writeFile(join(directory, name), content, { mode: 0o600, flag: "wx" });
+        contractImages.push({ path: name, mediaType: image.mediaType });
+      }
+      const contractPath = join(directory, "input.json");
+      await writeFile(contractPath, JSON.stringify({ schemaVersion: "0.1.0", kind: "agent-input", message, images: contractImages }), { mode: 0o600, flag: "wx" });
+      return await this.command([...arguments_, "--input-file", contractPath]);
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
   }
 
   public async status(agentId: string, runId: string): Promise<RunStatus> {
@@ -1191,6 +1224,12 @@ function readAcceptance(document: Record<string, unknown>, expectedAgentId: stri
     throw new Error("Agent Factory 런타임이 올바른 실행 접수 응답을 반환하지 않았습니다.");
   }
   return { agentId: document.agentId, runId: document.runId };
+}
+
+function imageSuffix(mediaType: RuntimeImageInput["mediaType"]): string {
+  const suffix = { "image/png": ".png", "image/jpeg": ".jpg", "image/gif": ".gif", "image/webp": ".webp" }[mediaType];
+  if (!suffix) throw new Error("지원하지 않는 이미지 형식입니다.");
+  return suffix;
 }
 
 function runDiagnostics(run: Record<string, unknown>): Pick<RunStatus, "error" | "goalError"> {

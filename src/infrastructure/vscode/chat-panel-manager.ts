@@ -1,13 +1,16 @@
 import { homedir } from "node:os";
-import { dirname, extname, isAbsolute, join, resolve } from "node:path";
+import { extname, isAbsolute, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { readCliTheme } from "../agent-factory/cli-theme";
 import { randomUUID } from "node:crypto";
+import { constants as fsConstants } from "node:fs";
+import { open as openFile, realpath, unlink } from "node:fs/promises";
 import { readGitBranch } from "./git-branch";
 import { RunningTitle } from "./running-title";
 import * as vscode from "vscode";
 import type { StatusItemId } from "../../core/config/types";
 import type { AttachmentReference } from "../../common/types/attachment";
+import { canStageImage } from "../../common/image-input";
 import {
   createDraftChatState,
   restoreChatState,
@@ -29,6 +32,8 @@ interface ManagedPanel {
   readonly panel: vscode.WebviewPanel;
   state: ChatPanelState;
   readonly subscriptions: vscode.Disposable[];
+  readonly imageAttachments: Map<string, number>;
+  imageMutation: Promise<void>;
   controller?: ChatSessionController;
   controllerInitialization?: Promise<void>;
   sessionTransition?: Promise<void>;
@@ -225,7 +230,7 @@ export class ChatPanelManager implements vscode.Disposable {
     panel.webview.options = this.webviewOptions();
 
     const subscriptions: vscode.Disposable[] = [];
-    const managed: ManagedPanel = { panel, state, subscriptions };
+    const managed: ManagedPanel = { panel, state, subscriptions, imageAttachments: new Map(), imageMutation: Promise.resolve() };
     managed.runningTitle = new RunningTitle(() => managed.state.title, (title) => { panel.title = title; });
     subscriptions.push(managed.runningTitle);
     subscriptions.push(new vscode.Disposable(() => {
@@ -384,7 +389,12 @@ export class ChatPanelManager implements vscode.Disposable {
         await this.selectExecutionMode(managed, message.mode);
         return;
       case "chat.send":
-        await this.sendChat(managed, message.text, message.attachments, message.execution);
+        try {
+          await this.sendChat(managed, message.text, message.attachments, message.execution);
+        } catch (error) {
+          await this.post(managed.panel, { type: "host.notice", level: "error", text: error instanceof Error ? error.message : String(error) });
+          await this.post(managed.panel, { type: "run.state", running: false });
+        }
         return;
       case "decision.approve":
         if (!managed.controller?.approveDecision(message.runId, {
@@ -444,10 +454,22 @@ export class ChatPanelManager implements vscode.Disposable {
         }
         return;
       case "attachments.pick":
-        await this.pickAttachments(managed.panel);
+        await this.mutateImages(managed, () => this.pickAttachments(managed));
         return;
       case "attachments.createText":
         await this.createTextAttachment(managed, message.text);
+        return;
+      case "attachments.createImage":
+        await this.mutateImages(managed, () => this.createImageAttachment(managed, message));
+        return;
+      case "attachments.restore":
+        await this.mutateImages(managed, () => this.restoreImageAttachments(managed, message.attachments));
+        return;
+      case "attachment.open":
+        await this.openImageAttachment(managed, message.id);
+        return;
+      case "attachment.remove":
+        await this.mutateImages(managed, () => this.removeImageAttachment(managed, message.id));
         return;
       case "status.reorder":
         await this.saveStatusItems(managed.panel, message.items);
@@ -806,7 +828,16 @@ export class ChatPanelManager implements vscode.Disposable {
     }
     await this.ensureController(managed);
     if (!managed.controller) return;
-    void managed.controller.send(text, attachments, {
+    const preparedAttachments = await Promise.all(attachments.map(async (attachment) => {
+      if (attachment.kind !== "image") return attachment;
+      const uri = await this.imageAttachmentPath(managed.state.panelId, attachment.id);
+      if (!uri) throw new Error(`이미지 첨부 원본을 확인할 수 없습니다: ${attachment.name}`);
+      const mediaType = imageMediaType(uri.fsPath);
+      if (!mediaType) throw new Error(`지원하지 않는 이미지 첨부입니다: ${attachment.name}`);
+      const info = await vscode.workspace.fs.stat(uri);
+      return { ...attachment, uri: uri.toString(), mediaType, size: info.size, previewUri: undefined };
+    }));
+    void managed.controller.send(text, preparedAttachments, {
       ...((managed.state.role ?? "main") === "main" && (!managed.state.agentId || managed.executionModeExplicit) ? { executionMode: managed.executionMode ?? this.defaultExecutionMode() } : {}),
       model: execution.model,
       reasoningEffort: execution.reasoningEffort,
@@ -815,10 +846,18 @@ export class ChatPanelManager implements vscode.Disposable {
       goalObjective: execution.goalObjective,
       ...((managed.state.role ?? "main") !== "main" ? { actor: "human" as const } : {}),
       ...(managed.state.verifiedWorkRunId ? { verifiedWorkRunId: managed.state.verifiedWorkRunId } : {})
-    });
+    }).finally(() => Promise.all(attachments.filter(item => item.kind === "image")
+      .map(item => this.removeImageAttachment(managed, item.id, false))));
   }
 
-  private async pickAttachments(panel: vscode.WebviewPanel): Promise<void> {
+  private async mutateImages(managed: ManagedPanel, action: () => Promise<void>): Promise<void> {
+    const operation = managed.imageMutation.then(action, action);
+    managed.imageMutation = operation.then(() => undefined, () => undefined);
+    await operation;
+  }
+
+  private async pickAttachments(managed: ManagedPanel): Promise<void> {
+    const panel = managed.panel;
     const uris = await vscode.window.showOpenDialog({
       canSelectFiles: true,
       canSelectFolders: true,
@@ -829,18 +868,13 @@ export class ChatPanelManager implements vscode.Disposable {
       return;
     }
 
-    const imageFiles = uris.filter((uri) => imageMediaType(uri.fsPath) !== undefined);
-    if (imageFiles.length > 0) {
-      const roots = panel.webview.options.localResourceRoots ?? this.templates.localResourceRoots;
-      const additionalRoots = imageFiles.map((uri) => vscode.Uri.file(dirname(uri.fsPath)));
-      panel.webview.options = {
-        ...panel.webview.options,
-        localResourceRoots: uniqueUris([...roots, ...additionalRoots])
-      };
-    }
-
-    const attachments: AttachmentReference[] = await Promise.all(
-      uris.map(async (uri) => {
+    const attachments: AttachmentReference[] = [];
+    const createdImageIds: string[] = [];
+    let imageCount = managed.imageAttachments.size;
+    let imageBytes = [...managed.imageAttachments.values()].reduce((total, size) => total + size, 0);
+    let rejectedImages = 0;
+    try {
+      for (const uri of uris) {
         let kind: AttachmentReference["kind"] = "file";
         const mediaType = imageMediaType(uri.fsPath);
         try {
@@ -853,19 +887,36 @@ export class ChatPanelManager implements vscode.Disposable {
         } catch {
           // The runtime performs the authoritative path validation before use.
         }
-        return {
-          id: randomUUID(),
+        const id = randomUUID();
+        if (kind === "image" && mediaType) {
+          const content = await readSafeImage(uri.fsPath);
+          if (!canStageImage(imageCount, imageBytes, content.byteLength)) {
+            rejectedImages += 1;
+            continue;
+          }
+          const attachment = await this.persistImage(panel, managed.state.panelId, id, uri.path.split("/").filter(Boolean).at(-1) ?? "image", mediaType, content);
+          attachments.push(attachment);
+          createdImageIds.push(id);
+          managed.imageAttachments.set(id, content.byteLength);
+          imageCount += 1;
+          imageBytes += content.byteLength;
+          continue;
+        }
+        attachments.push({
+          id,
           name: uri.path.split("/").filter(Boolean).at(-1) ?? uri.toString(),
           kind,
           uri: uri.toString(),
-          ...(kind === "image" && mediaType ? {
-            mediaType,
-            previewUri: panel.webview.asWebviewUri(uri).toString()
-          } : {})
-        };
-      })
-    );
-    await this.post(panel, { type: "attachments.add", attachments });
+          ...(mediaType ? { mediaType } : {})
+        });
+      }
+    } catch (error) {
+      await Promise.all(createdImageIds.map(id => this.removeImageAttachment(managed, id, false)));
+      await this.post(panel, { type: "host.notice", level: "error", text: `첨부 파일을 준비하지 못했습니다: ${error instanceof Error ? error.message : String(error)}` });
+      return;
+    }
+    if (attachments.length) await this.post(panel, { type: "attachments.add", attachments });
+    if (rejectedImages) await this.post(panel, { type: "host.notice", level: "warning", text: `이미지 ${rejectedImages}개를 첨부 한도(최대 8개, 개별 10 MiB, 전체 20 MiB) 때문에 제외했습니다.` });
   }
 
   private async createTextAttachment(managed: ManagedPanel, text: string): Promise<void> {
@@ -896,6 +947,92 @@ export class ChatPanelManager implements vscode.Disposable {
         level: "error",
         text: `붙여넣은 텍스트를 파일로 만들지 못했습니다: ${error instanceof Error ? error.message : String(error)}`
       });
+    }
+  }
+
+  private async createImageAttachment(
+    managed: ManagedPanel,
+    message: Extract<import("../../protocol/messages").ClientMessage, { type: "attachments.createImage" }>
+  ): Promise<void> {
+    try {
+      const content = Buffer.from(message.data, "base64");
+      if (!hasImageSignature(content, message.mediaType)) throw new Error("이미지 내용과 미디어 형식이 일치하지 않습니다.");
+      const stagedBytes = [...managed.imageAttachments.values()].reduce((total, size) => total + size, 0);
+      if (!canStageImage(managed.imageAttachments.size, stagedBytes, content.byteLength)) throw new Error("이미지 첨부 한도를 초과했습니다.");
+      const attachment = await this.persistImage(managed.panel, managed.state.panelId, message.id, message.name, message.mediaType, content);
+      managed.imageAttachments.set(message.id, content.byteLength);
+      await this.post(managed.panel, { type: "attachments.add", attachments: [attachment] });
+    } catch (error) {
+      await this.post(managed.panel, { type: "attachment.rejected", id: message.id });
+      await this.post(managed.panel, { type: "host.notice", level: "error", text: `이미지 첨부를 저장하지 못했습니다: ${error instanceof Error ? error.message : String(error)}` });
+    }
+  }
+
+  private async restoreImageAttachments(managed: ManagedPanel, references: readonly { readonly id: string; readonly name: string }[]): Promise<void> {
+    const attachments: AttachmentReference[] = [];
+    for (const reference of references) {
+      const uri = await this.imageAttachmentPath(managed.state.panelId, reference.id);
+      if (!uri) {
+        await this.post(managed.panel, { type: "attachment.rejected", id: reference.id });
+        continue;
+      }
+      const mediaType = imageMediaType(uri.fsPath);
+      if (!mediaType) continue;
+      const info = await vscode.workspace.fs.stat(uri);
+      const directory = vscode.Uri.joinPath(uri, "..");
+      const roots = managed.panel.webview.options.localResourceRoots ?? this.templates.localResourceRoots;
+      managed.panel.webview.options = { ...managed.panel.webview.options, localResourceRoots: uniqueUris([...roots, directory]) };
+      attachments.push({ id: reference.id, name: reference.name, kind: "image", uri: uri.toString(), previewUri: managed.panel.webview.asWebviewUri(uri).toString(), mediaType, size: info.size });
+      managed.imageAttachments.set(reference.id, info.size);
+    }
+    if (attachments.length) await this.post(managed.panel, { type: "attachments.add", attachments });
+  }
+
+  private async persistImage(panel: vscode.WebviewPanel, panelId: string, id: string, name: string, mediaType: string, content: Buffer): Promise<AttachmentReference> {
+    assertAttachmentScopeId(panelId, "panel");
+    assertAttachmentScopeId(id, "attachment");
+    if (content.byteLength < 1 || content.byteLength > 10 * 1024 * 1024 || !hasImageSignature(content, mediaType)) throw new Error("지원하지 않거나 너무 큰 이미지입니다.");
+    const suffix = imageSuffix(mediaType);
+    const directory = vscode.Uri.joinPath(this.context.globalStorageUri, "chat-images", panelId, id.slice(0, 2));
+    await vscode.workspace.fs.createDirectory(directory);
+    const uri = vscode.Uri.joinPath(directory, `${id}${suffix}`);
+    const file = await openFile(uri.fsPath, fsConstants.O_WRONLY | fsConstants.O_CREAT | fsConstants.O_EXCL | fsConstants.O_NOFOLLOW, 0o600);
+    try { await file.writeFile(content); } finally { await file.close(); }
+    const roots = panel.webview.options.localResourceRoots ?? this.templates.localResourceRoots;
+    panel.webview.options = { ...panel.webview.options, localResourceRoots: uniqueUris([...roots, directory]) };
+    return { id, name, kind: "image", uri: uri.toString(), previewUri: panel.webview.asWebviewUri(uri).toString(), mediaType, size: content.byteLength };
+  }
+
+  private async imageAttachmentPath(panelId: string, id: string): Promise<vscode.Uri | undefined> {
+    assertAttachmentScopeId(panelId, "panel");
+    assertAttachmentScopeId(id, "attachment");
+    const base = vscode.Uri.joinPath(this.context.globalStorageUri, "chat-images", panelId, id.slice(0, 2));
+    for (const suffix of [".png", ".jpg", ".gif", ".webp"]) {
+      const uri = vscode.Uri.joinPath(base, `${id}${suffix}`);
+      try {
+        const file = await openFile(uri.fsPath, fsConstants.O_RDONLY | fsConstants.O_NOFOLLOW);
+        try { if ((await file.stat()).isFile()) return uri; } finally { await file.close(); }
+      } catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; }
+    }
+    return undefined;
+  }
+
+  private async openImageAttachment(managed: ManagedPanel, id: string): Promise<void> {
+    const uri = await this.imageAttachmentPath(managed.state.panelId, id);
+    if (!uri) {
+      await this.post(managed.panel, { type: "host.notice", level: "warning", text: "이미지 원본이 더 이상 존재하지 않습니다." });
+      return;
+    }
+    await vscode.commands.executeCommand("vscode.open", uri);
+  }
+
+  private async removeImageAttachment(managed: ManagedPanel, id: string, report = true): Promise<void> {
+    try {
+      const uri = await this.imageAttachmentPath(managed.state.panelId, id);
+      if (uri) await unlink(uri.fsPath);
+      managed.imageAttachments.delete(id);
+    } catch (error) {
+      if (report) await this.post(managed.panel, { type: "host.notice", level: "warning", text: `이미지 임시 파일을 정리하지 못했습니다: ${error instanceof Error ? error.message : String(error)}` });
     }
   }
 
@@ -974,15 +1111,43 @@ function parseLocalLink(href: string): { path: string; line?: number; column?: n
 
 function imageMediaType(path: string): string | undefined {
   return ({
-    ".avif": "image/avif",
-    ".bmp": "image/bmp",
     ".gif": "image/gif",
     ".jpeg": "image/jpeg",
     ".jpg": "image/jpeg",
     ".png": "image/png",
-    ".svg": "image/svg+xml",
     ".webp": "image/webp"
   } as Readonly<Record<string, string>>)[extname(path).toLowerCase()];
+}
+
+function imageSuffix(mediaType: string): string {
+  const suffix = ({ "image/png": ".png", "image/jpeg": ".jpg", "image/gif": ".gif", "image/webp": ".webp" } as Record<string, string>)[mediaType];
+  if (!suffix) throw new Error("지원하지 않는 이미지 형식입니다.");
+  return suffix;
+}
+
+function hasImageSignature(content: Buffer, mediaType: string): boolean {
+  if (mediaType === "image/png") return content.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]));
+  if (mediaType === "image/jpeg") return content.length >= 3 && content[0] === 0xff && content[1] === 0xd8 && content[2] === 0xff;
+  if (mediaType === "image/gif") return content.subarray(0, 6).toString("ascii") === "GIF87a" || content.subarray(0, 6).toString("ascii") === "GIF89a";
+  if (mediaType === "image/webp") return content.subarray(0, 4).toString("ascii") === "RIFF" && content.subarray(8, 12).toString("ascii") === "WEBP";
+  return false;
+}
+
+async function readSafeImage(path: string): Promise<Buffer> {
+  if (await realpath(path) !== resolve(path)) throw new Error("심볼릭 링크 이미지는 첨부할 수 없습니다.");
+  const file = await openFile(path, fsConstants.O_RDONLY | fsConstants.O_NOFOLLOW);
+  try {
+    const before = await file.stat();
+    if (!before.isFile() || before.size < 1 || before.size > 10 * 1024 * 1024) throw new Error("이미지 크기가 허용 범위를 벗어났습니다.");
+    const content = await file.readFile();
+    const after = await file.stat();
+    if (before.dev !== after.dev || before.ino !== after.ino || before.size !== after.size || before.mtimeMs !== after.mtimeMs) throw new Error("이미지가 읽는 동안 변경되었습니다.");
+    return content;
+  } finally { await file.close(); }
+}
+
+function assertAttachmentScopeId(value: string, label: string): void {
+  if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(value)) throw new Error(`${label} image scope is invalid`);
 }
 
 function uniqueUris(uris: readonly vscode.Uri[]): vscode.Uri[] {

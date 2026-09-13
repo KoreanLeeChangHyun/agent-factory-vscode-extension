@@ -45,6 +45,19 @@ npm install
 npm run check
 ```
 
+## Installation requirement
+
+Extension version 1.0.2 requires an installed and enabled Agent Factory plugin with the
+same semantic base version, 1.0.2. A plugin cachebuster suffix such as
+`1.0.2+codex.<token>` is accepted. During activation the extension checks configured
+Codex marketplaces and, when necessary, installs one compatible available plugin before
+registering its commands and views. The official `agent-factory` marketplace is preferred.
+
+The coordinated deployment process must publish and configure the official marketplace
+before distributing the VSIX. If no compatible plugin is available, activation stops and
+shows an actionable error. Setting `agentFactory.mainChat.runtimeExecPath` does not waive
+this plugin requirement.
+
 ## Rendering regression checks
 
 - Unit tests: `npm test`.
@@ -54,9 +67,11 @@ npm run check
 
 ## F5 manual test
 
-1. Install the Agent Factory plugin and confirm `skills/agent/scripts/exec.py` is present in
-   the Codex plugin cache. If it is elsewhere, set
-   `agentFactory.mainChat.runtimeExecPath` to its absolute path.
+1. Configure a marketplace that provides Agent Factory plugin semantic version 1.0.2.
+   Activation installs the compatible plugin when needed. Confirm
+   `skills/agent/scripts/exec.py` is present in the Codex plugin cache; if it is elsewhere,
+   set `agentFactory.mainChat.runtimeExecPath` to its absolute path after satisfying the
+   plugin requirement.
 2. Open this extension folder in VS Code, run `npm install`, and press `F5`.
 3. When prompted, enter the absolute path of the project to test. The Extension Development
    Host opens that project directly while keeping this extension loaded from

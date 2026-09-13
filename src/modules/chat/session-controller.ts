@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { fileURLToPath } from "node:url";
 import type { AttachmentReference } from "../../common/types/attachment";
 import type { AgentRuntimeClient, ExecutionOptions, NativeGoal, GoalAction } from "../../infrastructure/agent-factory/agent-client";
 
@@ -126,9 +127,10 @@ export class ChatSessionController {
         }
       }
       const request = withAttachmentReferences(text, attachments);
+      const images = runtimeImages(attachments);
       if (!this.agentId) {
         const candidateAgentId = `main-${randomUUID()}`;
-        const accepted = await this.runtime.submit(candidateAgentId, request, execution);
+        const accepted = await this.runtime.submit(candidateAgentId, request, execution, images);
         this.agentId = accepted.agentId;
         this.events.onBound(this.agentId);
         this.currentRunId = accepted.runId;
@@ -136,7 +138,7 @@ export class ChatSessionController {
         await this.flushCancellation();
         await this.pollUntilTerminal(accepted.agentId, accepted.runId);
       } else {
-        const accepted = await this.runtime.send(this.agentId, request, execution);
+        const accepted = await this.runtime.send(this.agentId, request, execution, images);
         this.currentRunId = accepted.runId;
         this.currentRunAgentId = accepted.agentId;
         await this.flushCancellation();
@@ -339,6 +341,18 @@ export function withAttachmentReferences(
     return `- [${attachment.kind}] ${attachment.name}: ${target}${details ? ` (${details})` : ""}`;
   });
   return `${text}\n\n첨부 참조:\n${references.join("\n")}`;
+}
+
+export function runtimeImages(attachments: readonly AttachmentReference[]) {
+  return attachments.filter((attachment) => attachment.kind === "image").map((attachment) => {
+    if (!attachment.uri?.startsWith("file:") || !["image/png", "image/jpeg", "image/gif", "image/webp"].includes(attachment.mediaType ?? "")) {
+      throw new Error(`이미지 첨부를 안전한 로컬 파일로 준비하지 못했습니다: ${attachment.name}`);
+    }
+    return {
+      path: fileURLToPath(attachment.uri),
+      mediaType: attachment.mediaType as "image/png" | "image/jpeg" | "image/gif" | "image/webp"
+    };
+  });
 }
 
 function terminalSummary(status: string): string {

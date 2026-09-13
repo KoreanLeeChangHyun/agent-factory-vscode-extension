@@ -18,6 +18,10 @@ const clientMessageTypes = new Set([
   "agent.open",
   "attachments.pick",
   "attachments.createText",
+  "attachments.createImage",
+  "attachments.restore",
+  "attachment.open",
+  "attachment.remove",
   "composer.settings",
   "status.reorder"
 ]);
@@ -50,6 +54,30 @@ export function parseClientMessage(value: unknown): ClientMessage | undefined {
     case "attachments.createText":
       if (typeof value.text !== "string" || value.text.length < 8_000 || value.text.length > 1_000_000) return undefined;
       return { type: value.type, text: value.text };
+    case "attachments.createImage": {
+      if (typeof value.id !== "string" || !/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(value.id)
+          || typeof value.name !== "string" || !value.name || value.name.length > 255
+          || typeof value.mediaType !== "string" || !["image/png", "image/jpeg", "image/gif", "image/webp"].includes(value.mediaType)
+          || typeof value.size !== "number" || !Number.isSafeInteger(value.size) || value.size < 1 || value.size > 10 * 1024 * 1024
+          || typeof value.data !== "string" || value.data.length > 14 * 1024 * 1024
+          || !/^[A-Za-z0-9+/]+={0,2}$/.test(value.data)) return undefined;
+      const content = Buffer.from(value.data, "base64");
+      if (content.byteLength !== value.size || content.toString("base64") !== value.data) return undefined;
+      return { type: value.type, id: value.id, name: value.name, mediaType: value.mediaType, size: value.size, data: value.data };
+    }
+    case "attachments.restore": {
+      if (!Array.isArray(value.attachments) || value.attachments.length > 8) return undefined;
+      const attachments = value.attachments.filter((item): item is { id: string; name: string } => isRecord(item)
+        && typeof item.id === "string" && /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(item.id)
+        && typeof item.name === "string" && item.name.length > 0 && item.name.length <= 255)
+        .map(item => ({ id: item.id, name: item.name }));
+      if (attachments.length !== value.attachments.length) return undefined;
+      return { type: value.type, attachments };
+    }
+    case "attachment.open":
+    case "attachment.remove":
+      if (typeof value.id !== "string" || !/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(value.id)) return undefined;
+      return { type: value.type, id: value.id };
     case "client.ready":
     case "run.cancel":
     case "sessions.request":
@@ -111,6 +139,8 @@ export function parseClientMessage(value: unknown): ClientMessage | undefined {
       if (attachments.length !== value.attachments.length || attachments.length > 100) {
         return undefined;
       }
+      const images = attachments.filter((attachment) => attachment.kind === "image");
+      if (images.length > 8 || images.reduce((total, image) => total + (image.size ?? 0), 0) > 20 * 1024 * 1024) return undefined;
       return {
         type: value.type,
         id: value.id,
@@ -148,9 +178,9 @@ function parseAttachment(value: unknown): AttachmentReference | undefined {
   if (
     !isRecord(value) ||
     typeof value.id !== "string" ||
-    !value.id ||
+    !/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(value.id) ||
     typeof value.name !== "string" ||
-    !value.name ||
+    !value.name || value.name.length > 255 ||
     typeof value.kind !== "string" ||
     !attachmentKinds.has(value.kind as AttachmentKind)
   ) {
@@ -158,10 +188,10 @@ function parseAttachment(value: unknown): AttachmentReference | undefined {
   }
 
   if (
-    (value.uri !== undefined && typeof value.uri !== "string") ||
-    (value.previewUri !== undefined && typeof value.previewUri !== "string") ||
-    (value.mediaType !== undefined && typeof value.mediaType !== "string") ||
-    (value.size !== undefined && (typeof value.size !== "number" || value.size < 0))
+    (value.uri !== undefined && (typeof value.uri !== "string" || value.uri.length > 8192 || /[\u0000-\u001f]/.test(value.uri))) ||
+    (value.previewUri !== undefined && (typeof value.previewUri !== "string" || value.previewUri.length > 8192)) ||
+    (value.mediaType !== undefined && (typeof value.mediaType !== "string" || value.mediaType.length > 100)) ||
+    (value.size !== undefined && (typeof value.size !== "number" || !Number.isSafeInteger(value.size) || value.size < 0))
   ) {
     return undefined;
   }

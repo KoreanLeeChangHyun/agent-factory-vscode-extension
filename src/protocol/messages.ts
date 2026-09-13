@@ -29,6 +29,10 @@ export type ClientMessage =
   | { readonly type: "agent.open"; readonly agentId: string }
   | { readonly type: "attachments.pick" }
   | { readonly type: "attachments.createText"; readonly text: string }
+  | { readonly type: "attachments.createImage"; readonly id: string; readonly name: string; readonly mediaType: string; readonly size: number; readonly data: string }
+  | { readonly type: "attachments.restore"; readonly attachments: readonly { readonly id: string; readonly name: string }[] }
+  | { readonly type: "attachment.open"; readonly id: string }
+  | { readonly type: "attachment.remove"; readonly id: string }
   | {
       readonly type: "composer.settings";
       readonly model?: string;
@@ -72,6 +76,7 @@ export type HostMessage =
       readonly type: "attachments.add";
       readonly attachments: readonly AttachmentReference[];
     }
+  | { readonly type: "attachment.rejected"; readonly id: string }
   | {
       readonly type: "host.notice";
       readonly level: "info" | "warning" | "error";
