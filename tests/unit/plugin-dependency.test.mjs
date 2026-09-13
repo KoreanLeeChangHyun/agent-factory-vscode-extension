@@ -36,6 +36,7 @@ test("release metadata and installation guidance stay coupled", async () => {
   const packageJson = JSON.parse(await readFile(new URL("../../package.json", import.meta.url), "utf8"));
   const packageLock = JSON.parse(await readFile(new URL("../../package-lock.json", import.meta.url), "utf8"));
   const readme = await readFile(new URL("../../README.md", import.meta.url), "utf8");
+  const normalizedReadme = readme.replace(/\s+/g, " ");
   const version = packageJson.version;
 
   assert.equal(packageLock.version, version);
@@ -46,12 +47,12 @@ test("release metadata and installation guidance stay coupled", async () => {
     "installed and enabled",
     "identical semantic base version",
     "official `agent-factory` marketplace",
-    "attempts one compatible plugin installation",
+    "attempt one compatible plugin installation",
     "activation blocks",
     "fully installable and usable without this extension",
     "released together",
     "does not contain or bundle"
-  ]) assert.ok(readme.includes(notice), `README missing release notice: ${notice}`);
+  ]) assert.ok(normalizedReadme.includes(notice), `README missing release notice: ${notice}`);
   assert.ok(readme.includes("codex plugin marketplace add KoreanLeeChangHyun/agent-factory-codex-plugin --ref main"));
   assert.ok(readme.includes("codex plugin marketplace upgrade agent-factory"));
   assert.ok(readme.includes("codex plugin add agent-factory@agent-factory"));
@@ -73,6 +74,10 @@ function json(value) {
   return { stdout: JSON.stringify(value) };
 }
 
+function currentList(installed = [], available = []) {
+  return { installed, available };
+}
+
 function queuedRunner(results) {
   const calls = [];
   const runner = async (command, args, options) => {
@@ -85,64 +90,88 @@ function queuedRunner(results) {
   return { calls, runner };
 }
 
-test("compatible installed plugin performs no add and accepts a cachebuster suffix", async () => {
-  const process = queuedRunner([json([record({ installed: true, enabled: true })])]);
+test("current CLI schema activates a compatible installed plugin without requesting available catalog", async () => {
+  const process = queuedRunner([json(currentList([record({ installed: true, enabled: true })]))]);
   await dependency.ensureAgentFactoryPlugin("1.0.2", process.runner);
   assert.equal(dependency.semanticBase("1.0.2+codex.20260913"), "1.0.2");
-  assert.deepEqual(process.calls.map((call) => call.args), [["plugin", "list", "--available", "--json"]]);
+  assert.deepEqual(process.calls.map((call) => call.args), [["plugin", "list", "--json"]]);
   assert.equal(process.calls[0].command, "codex");
   assert.ok(process.calls[0].options.timeout > 0);
   assert.ok(process.calls[0].options.maxBuffer > 0);
 });
 
-test("missing or incompatible installed plugin adds a compatible plugin and verifies it", async () => {
-  const candidate = record({ pluginId: "team@agent-factory", marketplaceName: "team" });
+test("installation-needed path reads a large current-schema available catalog and verifies without it", async () => {
+  const candidate = record({
+    pluginId: "team@agent-factory",
+    marketplaceName: "team",
+    catalogPadding: "x".repeat(300 * 1024)
+  });
+  const installedCandidate = record({
+    pluginId: "team@agent-factory",
+    marketplaceName: "team",
+    installed: true,
+    enabled: true
+  });
   const process = queuedRunner([
-    json([record({ version: "1.0.1", installed: true, enabled: true }), candidate]),
+    json(currentList([record({ version: "1.0.1", installed: true, enabled: true })])),
+    json(currentList([], [candidate])),
     json({ installed: true }),
-    json([{ ...candidate, installed: true, enabled: true }])
+    json(currentList([installedCandidate]))
   ]);
   await dependency.ensureAgentFactoryPlugin("1.0.2+extension.build", process.runner);
   assert.deepEqual(process.calls.map((call) => call.args), [
+    ["plugin", "list", "--json"],
     ["plugin", "list", "--available", "--json"],
     ["plugin", "add", "team@agent-factory", "--json"],
-    ["plugin", "list", "--available", "--json"]
+    ["plugin", "list", "--json"]
   ]);
+  assert.ok(process.calls[1].options.maxBuffer > 300 * 1024);
+  assert.ok(process.calls[1].options.maxBuffer > process.calls[0].options.maxBuffer);
 });
 
 test("candidate selection prefers marketplace agent-factory and is otherwise deterministic", async () => {
   const official = record({ pluginId: "official@agent-factory", marketplaceName: "agent-factory" });
   const process = queuedRunner([
-    json([record({ pluginId: "z@agent-factory", marketplaceName: "zeta" }), official, record({ pluginId: "a@agent-factory", marketplaceName: "alpha" })]),
+    json(currentList()),
+    json(currentList([], [record({ pluginId: "z@agent-factory", marketplaceName: "zeta" }), official, record({ pluginId: "a@agent-factory", marketplaceName: "alpha" })])),
     json({ installed: true }),
-    json([{ ...official, installed: true, enabled: true }])
+    json(currentList([{ ...official, installed: true, enabled: true }]))
   ]);
   await dependency.ensureAgentFactoryPlugin("1.0.2", process.runner);
-  assert.deepEqual(process.calls[1].args, ["plugin", "add", "official@agent-factory", "--json"]);
+  assert.deepEqual(process.calls[2].args, ["plugin", "add", "official@agent-factory", "--json"]);
 
   const alphabetical = queuedRunner([
-    json([record({ pluginId: "z@agent-factory", marketplaceName: "zeta" }), record({ pluginId: "a@agent-factory", marketplaceName: "alpha" })]),
+    json(currentList()),
+    json(currentList([], [record({ pluginId: "z@agent-factory", marketplaceName: "zeta" }), record({ pluginId: "a@agent-factory", marketplaceName: "alpha" })])),
     json({ installed: true }),
-    json([record({ pluginId: "a@agent-factory", marketplaceName: "alpha", installed: true, enabled: true })])
+    json(currentList([record({ pluginId: "a@agent-factory", marketplaceName: "alpha", installed: true, enabled: true })]))
   ]);
   await dependency.ensureAgentFactoryPlugin("1.0.2", alphabetical.runner);
-  assert.deepEqual(alphabetical.calls[1].args, ["plugin", "add", "a@agent-factory", "--json"]);
+  assert.deepEqual(alphabetical.calls[2].args, ["plugin", "add", "a@agent-factory", "--json"]);
 });
 
 test("no compatible available plugin fails without add", async () => {
-  const process = queuedRunner([json([record({ version: "1.0.1", installed: true, enabled: true })])]);
+  const process = queuedRunner([
+    json(currentList([record({ version: "1.0.1", installed: true, enabled: true })])),
+    json(currentList())
+  ]);
   await assert.rejects(dependency.ensureAgentFactoryPlugin("1.0.2", process.runner), /공식 marketplace/);
-  assert.equal(process.calls.length, 1);
+  assert.equal(process.calls.length, 2);
 });
 
 test("add or recheck failure blocks activation", async (t) => {
   await t.test("malformed add output", async () => {
-    const process = queuedRunner([json([record()]), { stdout: "[]" }]);
+    const process = queuedRunner([json(currentList()), json(currentList([], [record()])), { stdout: "[]" }]);
     await assert.rejects(dependency.ensureAgentFactoryPlugin("1.0.2", process.runner), /JSON 객체/);
-    assert.equal(process.calls.length, 2);
+    assert.equal(process.calls.length, 3);
   });
   await t.test("plugin remains disabled after add", async () => {
-    const process = queuedRunner([json([record()]), json({ installed: true }), json([record({ installed: true, enabled: false })])]);
+    const process = queuedRunner([
+      json(currentList()),
+      json(currentList([], [record()])),
+      json({ installed: true }),
+      json(currentList([record({ installed: true, enabled: false })]))
+    ]);
     await assert.rejects(dependency.ensureAgentFactoryPlugin("1.0.2", process.runner), /활성 상태/);
   });
 });
@@ -153,17 +182,42 @@ test("malformed, oversized, and failed command output blocks", async (t) => {
     await assert.rejects(dependency.ensureAgentFactoryPlugin("1.0.2", process.runner), /올바른 JSON/);
   });
   await t.test("invalid record", async () => {
-    const process = queuedRunner([json([{ name: "agent-factory" }])]);
+    const process = queuedRunner([json(currentList([{ name: "agent-factory" }]))]);
     await assert.rejects(dependency.ensureAgentFactoryPlugin("1.0.2", process.runner), /레코드 형식/);
   });
   await t.test("oversized output", async () => {
     const process = queuedRunner([{ stdout: " ".repeat(256 * 1024 + 1) }]);
     await assert.rejects(dependency.ensureAgentFactoryPlugin("1.0.2", process.runner), /크기를 초과/);
   });
-  await t.test("failed command", async () => {
+  await t.test("missing executable", async () => {
+    const error = Object.assign(new Error("spawn codex ENOENT"), { code: "ENOENT" });
+    const process = queuedRunner([error]);
+    await assert.rejects(dependency.ensureAgentFactoryPlugin("1.0.2", process.runner), /실행 파일을 찾을 수 없습니다/);
+  });
+  await t.test("timeout", async () => {
+    const error = Object.assign(new Error("timed out"), { killed: true });
+    const process = queuedRunner([error]);
+    await assert.rejects(dependency.ensureAgentFactoryPlugin("1.0.2", process.runner), /시간이 초과/);
+  });
+  await t.test("output limit", async () => {
+    const error = Object.assign(new Error("stdout maxBuffer length exceeded"), {
+      code: "ERR_CHILD_PROCESS_STDIO_MAXBUFFER"
+    });
+    const process = queuedRunner([error]);
+    await assert.rejects(dependency.ensureAgentFactoryPlugin("1.0.2", process.runner), /크기를 초과/);
+  });
+  await t.test("other command failure", async () => {
     const process = queuedRunner([new Error("spawn failed")]);
     await assert.rejects(dependency.ensureAgentFactoryPlugin("1.0.2", process.runner), /실행 환경/);
   });
+});
+
+test("legacy top-level and plugins-array schemas remain compatible", async () => {
+  const topLevel = queuedRunner([json([record({ installed: true, enabled: true })])]);
+  await dependency.ensureAgentFactoryPlugin("1.0.2", topLevel.runner);
+
+  const pluginsArray = queuedRunner([json({ plugins: [record({ installed: true, enabled: true })] })]);
+  await dependency.ensureAgentFactoryPlugin("1.0.2", pluginsArray.runner);
 });
 
 test("activation bootstraps only after dependency success and reports one failure", async () => {
