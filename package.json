@@ -231,7 +231,7 @@
     "check:static": "node --check static/js/chat.js && node --check static/js/ansi-renderer.js && node --check static/js/execution-references.js && node --check static/js/loading-animation-gallery.js",
     "typecheck": "tsc --noEmit",
     "test": "node --test tests/unit/*.test.mjs",
-    "package": "npm run check && node --require ./scripts/node-file-polyfill.cjs ./node_modules/@vscode/vsce/vsce package --allow-missing-repository",
+    "package": "npm run check && node -e \"require('node:fs').mkdirSync('releases', { recursive: true })\" && node --require ./scripts/node-file-polyfill.cjs ./node_modules/@vscode/vsce/vsce package --allow-missing-repository --out releases",
     "vscode:prepublish": "npm run build"
   },
   "devDependencies": {
