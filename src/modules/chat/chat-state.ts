@@ -13,6 +13,7 @@ export interface ChatPanelState {
   readonly workLoopMode?: boolean;
   readonly contextUsedTokens?: number;
   readonly contextWindowTokens?: number;
+  readonly weeklyUsedPercent?: number;
 }
 
 export type ComposerPreferences = Pick<
@@ -56,6 +57,9 @@ export function restoreChatState(
     ...(readCount(value.contextWindowTokens) !== undefined
       ? { contextWindowTokens: readCount(value.contextWindowTokens) }
       : {}),
+    ...(readPercent(value.weeklyUsedPercent) !== undefined
+      ? { weeklyUsedPercent: readPercent(value.weeklyUsedPercent) }
+      : {}),
     ...(readNonEmptyString(value.agentId)
       ? { agentId: readNonEmptyString(value.agentId) }
       : {})
@@ -90,4 +94,10 @@ function readRole(value: unknown): ChatPanelState["role"] {
 
 function readCount(value: unknown): number | undefined {
   return Number.isSafeInteger(value) && Number(value) >= 0 ? Number(value) : undefined;
+}
+
+function readPercent(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isFinite(value) && value >= 0 && value <= 100
+    ? value
+    : undefined;
 }

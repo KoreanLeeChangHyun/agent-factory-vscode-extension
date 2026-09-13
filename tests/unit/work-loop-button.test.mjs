@@ -46,12 +46,23 @@ test("enabled mode never sends an empty message, even in an existing session", (
   assert.equal(sent.length, 0);
 });
 
-test("running or disconnected sessions do not send", () => {
-  for (const state of [{ running: true }, { runtimeAvailable: false }, { capabilities: null }]) {
-    const { sent, run } = harness(state);
-    run("submit()");
-    assert.equal(sent.length, 0);
-  }
+test("running sessions send the draft to the host queue", () => {
+  const { sent, run } = harness({ running: true });
+  run("submit()");
+  assert.equal(sent.length, 1);
+  assert.match(sent[0].text, /^오류 수정\n\n작업·검증 루프/);
+});
+
+test("sessions without a runtime do not send", () => {
+  const { sent, run } = harness({ runtimeAvailable: false });
+  run("submit()");
+  assert.equal(sent.length, 0);
+});
+
+test("sessions without capabilities do not send", () => {
+  const { sent, run } = harness({ capabilities: null });
+  run("submit()");
+  assert.equal(sent.length, 0);
 });
 
 test("disabled mode and child sessions preserve the original request", () => {

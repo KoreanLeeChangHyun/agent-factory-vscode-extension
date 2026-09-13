@@ -139,6 +139,16 @@ test("composer uses one SVG send button that becomes the stop control", function
   assert.match(chatScript, /sendButton\.classList\.toggle\("is-running"/);
 });
 
+test("composer submits active-run input to the host queue and retains the empty-composer stop control", function () {
+  assert.doesNotMatch(chatScript, /state\.running \|\| !state\.capabilities/);
+  assert.match(chatScript, /state\.running && !hasComposerContent\(\)/);
+  assert.match(chatScript, /"메시지를 Queue에 추가"/);
+  assert.match(chatScript, /case "queue\.updated"/);
+  assert.match(chatScript, /queue: "Queue " \+ state\.queueCount/);
+  assert.match(panelManager, /onQueueChanged: \(count\)/);
+  assert.match(panelManager, /managed\.chatSendPreparation = sendPreparation\.then/);
+});
+
 test("image attachments render as previews inside the composer", function () {
   const composerIndex = template.indexOf('class="composer"');
   const attachmentsIndex = template.indexOf('id="attachment-list"');
@@ -159,7 +169,8 @@ test("long pasted text becomes a real text-file attachment", function () {
   assert.match(panelManager, /"pasted-text"/);
   assert.match(panelManager, /vscode\.workspace\.fs\.writeFile\(uri, contents\)/);
   assert.match(panelManager, /name: "붙여넣은 텍스트\.txt"/);
-  assert.match(chatScript, /prompt\.value\.trim\(\)\.length === 0 && state\.attachments\.length === 0/);
+  assert.match(chatScript, /function hasComposerContent\(\)[\s\S]*?return prompt\.value\.trim\(\)\.length > 0 \|\| state\.attachments\.length > 0;/);
+  assert.match(chatScript, /!state\.running && !hasComposerContent\(\)/);
 });
 
 test("status bar includes active Work and Verification counts", function () {
@@ -174,13 +185,16 @@ test("status bar includes active Work and Verification counts", function () {
   assert.match(chatScript, /composerStatusItems = new Set\(\["model", "reasoning", "fast", "goal"\]\)/);
   assert.match(chatScript, /case "context\.usage"/);
   assert.match(chatScript, /if \(!items\.includes\("context"\)\)/);
-  assert.match(chatScript, /Math\.max\(0, state\.contextWindowTokens - state\.contextUsedTokens\)\.toLocaleString\("ko-KR"\) \+ " 남음"/);
+  assert.match(chatScript, /"컨텍스트 " \+ remainingPercent \+ "% 남음 \("/);
+  assert.match(chatScript, /"주간 " \+ formatPercent\(state\.weeklyUsedPercent\) \+ " 사용"/);
+  assert.match(chatScript, /"주간 사용량 확인 불가"/);
   assert.match(chatScript, /meter\.setAttribute\("role", "progressbar"\)/);
   assert.match(chatScript, /fill\.style\.width = remainingRatio \* 100 \+ "%"/);
   assert.match(chatScript, /Math\.round\(remainingRatio \* 120\)/);
   assert.match(chatStyles, /\.context-token-meter/);
   assert.match(agentClient, /last_token_usage/);
   assert.match(agentClient, /model_context_window/);
+  assert.match(agentClient, /window_minutes !== 7 \* 24 \* 60/);
   assert.match(chatScript, /agents: "작업 " \+ state\.workUnits\.workActive \+ " · 검증 " \+ state\.workUnits\.verificationActive/);
   assert.match(template, /id="agents-menu"[^>]*aria-label="호출된 작업자와 검증자"/);
   assert.match(chatScript, /type: "agents\.request"/);

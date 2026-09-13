@@ -8,9 +8,10 @@ const TERMINAL_STATES = new Set(["completed", "needs-human-decision", "failed", 
 export interface SessionControllerEvents {
   readonly onBound: (agentId: string) => void;
   readonly onRunningChanged: (running: boolean) => void;
+  readonly onQueueChanged?: (count: number) => void;
   readonly onAssistantText: (text: string, phase?: "commentary" | "final", runId?: string) => void;
   readonly onProgress: (text: string) => void;
-  readonly onUsage: (usedTokens: number, contextWindowTokens: number) => void;
+  readonly onUsage: (usedTokens: number, contextWindowTokens: number, weeklyUsedPercent?: number) => void;
   readonly onActivity: (activity: {
     readonly id: string;
     readonly category: "command" | "file" | "tool";
@@ -43,6 +44,12 @@ export class ChatSessionController {
   private goalControlPending = false;
   private pendingGoalAction: GoalAction | undefined;
   private disposed = false;
+  private readonly queuedSends: Array<{
+    readonly text: string;
+    readonly attachments: readonly AttachmentReference[];
+    readonly execution: ExecutionOptions;
+    readonly resolve: () => void;
+  }> = [];
 
   public constructor(
     private readonly runtime: AgentRuntimeClient,
@@ -58,8 +65,13 @@ export class ChatSessionController {
   }
 
   public get runId(): string | undefined { return this.currentRunId; }
+  public get queueLength(): number { return this.queuedSends.length; }
 
-  public dispose(): void { this.disposed = true; }
+  public dispose(): void {
+    this.disposed = true;
+    for (const queued of this.queuedSends.splice(0)) queued.resolve();
+    this.events.onQueueChanged?.(0);
+  }
 
   public async reconnect(): Promise<boolean> {
     if (this.disposed || !this.agentId || this.running) return this.running;
@@ -77,12 +89,10 @@ export class ChatSessionController {
         void this.followExistingRun(active.agentId, active.runId);
         return true;
       }
-      this.busy = false;
-      this.events.onRunningChanged(false);
+      this.releaseBusyAndDrainQueue();
       return false;
     } catch (error) {
-      this.busy = false;
-      this.events.onRunningChanged(false);
+      this.releaseBusyAndDrainQueue();
       throw error;
     }
   }
@@ -91,11 +101,23 @@ export class ChatSessionController {
     try { await this.pollUntilTerminal(agentId, runId); }
     catch (error) { if (!this.disposed) this.events.onError(errorMessage(error)); }
     finally {
-      this.currentRunId = undefined;
-      this.currentRunAgentId = undefined;
-      this.cancelRequested = false;
-      this.busy = false;
-      if (!this.disposed) this.events.onRunningChanged(false);
+      this.releaseBusyAndDrainQueue();
+    }
+  }
+
+  private releaseBusyAndDrainQueue(): void {
+    this.currentRunId = undefined;
+    this.currentRunAgentId = undefined;
+    this.cancelRequested = false;
+    this.busy = false;
+    const queued = this.queuedSends.shift();
+    if (queued) this.events.onQueueChanged?.(this.queuedSends.length);
+    if (queued && !this.disposed) {
+      void this.sendAndDrainQueue(queued.text, queued.attachments, queued.execution, false).finally(queued.resolve);
+    } else if (!this.disposed) {
+      this.events.onRunningChanged(false);
+    } else {
+      queued?.resolve();
     }
   }
 
@@ -105,25 +127,66 @@ export class ChatSessionController {
     execution: ExecutionOptions
   ): Promise<void> {
     if (this.disposed) return;
-    if (this.busy || this.goalControlPending) {
-      this.events.onError("현재 Main Agent turn이 실행 중입니다. 완료되거나 취소된 뒤 다시 보내세요.");
+    if (this.goalControlPending) {
+      this.events.onError("이전 Goal 제어 요청이 처리 중입니다. 완료된 뒤 다시 보내세요.");
       if (!this.running) this.events.onRunningChanged(false);
       return;
     }
-    this.clearDecision();
-    this.cancelRequested = false;
+    if (this.busy) {
+      return new Promise((resolve) => {
+        this.queuedSends.push({ text, attachments, execution, resolve });
+        this.events.onQueueChanged?.(this.queuedSends.length);
+      });
+    }
+    await this.sendAndDrainQueue(text, attachments, execution);
+  }
+
+  private async sendAndDrainQueue(
+    text: string,
+    attachments: readonly AttachmentReference[],
+    execution: ExecutionOptions,
+    checkActiveRun = true
+  ): Promise<void> {
     this.busy = true;
     this.events.onRunningChanged(true);
+    let next: { readonly text: string; readonly attachments: readonly AttachmentReference[]; readonly execution: ExecutionOptions; readonly resolve?: () => void } | undefined = {
+      text, attachments, execution
+    };
+    while (next && !this.disposed) {
+      await this.sendOne(next.text, next.attachments, next.execution, checkActiveRun);
+      checkActiveRun = false;
+      next.resolve?.();
+      next = this.queuedSends.shift();
+      if (next) this.events.onQueueChanged?.(this.queuedSends.length);
+    }
+    for (const queued of this.queuedSends.splice(0)) queued.resolve();
+    this.currentRunId = undefined;
+    this.currentRunAgentId = undefined;
+    this.cancelRequested = false;
+    this.busy = false;
+    if (!this.disposed) this.events.onRunningChanged(false);
+  }
+
+  private async sendOne(
+    text: string,
+    attachments: readonly AttachmentReference[],
+    execution: ExecutionOptions,
+    checkActiveRun = true
+  ): Promise<void> {
+    this.clearDecision();
+    this.cancelRequested = false;
     try {
-      if (this.agentId) {
+      if (this.agentId && checkActiveRun) {
         const active = await this.runtime.activeRun?.(this.agentId);
         if (active) {
           this.currentRunId = active.runId;
           this.currentRunAgentId = active.agentId;
-          this.events.onError("진행 중인 작업에 다시 연결했습니다. 방금 입력한 요청은 전송하지 않았습니다.");
+          this.events.onProgress("진행 중인 작업이 끝난 뒤 입력한 요청을 이어서 실행합니다.");
           await this.flushCancellation();
           await this.pollUntilTerminal(active.agentId, active.runId);
-          return;
+          this.currentRunId = undefined;
+          this.currentRunAgentId = undefined;
+          this.cancelRequested = false;
         }
       }
       const request = withAttachmentReferences(text, attachments);
@@ -150,8 +213,6 @@ export class ChatSessionController {
       this.currentRunId = undefined;
       this.currentRunAgentId = undefined;
       this.cancelRequested = false;
-      this.busy = false;
-      if (!this.disposed) this.events.onRunningChanged(false);
     }
   }
 
@@ -292,7 +353,7 @@ export class ChatSessionController {
         } else if (update.kind === "goal") {
           this.events.onGoal?.(update.goal, update.error);
         } else if (update.kind === "usage") {
-          this.events.onUsage(update.usedTokens, update.contextWindowTokens);
+          this.events.onUsage(update.usedTokens, update.contextWindowTokens, update.weeklyUsedPercent);
         } else {
           lastCommentary = undefined;
           this.events.onActivity({ ...update, id: `${runId}:${update.id}` });

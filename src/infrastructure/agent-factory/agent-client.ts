@@ -15,6 +15,7 @@ const MANAGED_ID = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
 interface ContextUsage {
   readonly usedTokens: number;
   readonly contextWindowTokens: number;
+  readonly weeklyUsedPercent?: number;
 }
 
 interface ContextUsageSnapshot {
@@ -89,6 +90,7 @@ export type RunUpdate =
       readonly kind: "usage";
       readonly usedTokens: number;
       readonly contextWindowTokens: number;
+      readonly weeklyUsedPercent?: number;
     }
   | {
       readonly kind: "activity";
@@ -415,7 +417,8 @@ export class AgentFactoryClient implements AgentRuntimeClient {
       ...(latestUsage ? { usage: latestUsage } : {})
     });
     if (!usage || (previous?.usage?.usedTokens === usage.usedTokens &&
-        previous.usage.contextWindowTokens === usage.contextWindowTokens)) return undefined;
+        previous.usage.contextWindowTokens === usage.contextWindowTokens &&
+        previous.usage.weeklyUsedPercent === usage.weeklyUsedPercent)) return undefined;
     return usage;
   }
 
@@ -969,7 +972,7 @@ async function findSessionRollout(sessionsRoot: string, sessionId: string): Prom
 
 async function readLatestTokenCount(
   rolloutPath: string
-): Promise<{ readonly usedTokens: number; readonly contextWindowTokens: number } | undefined> {
+): Promise<ContextUsage | undefined> {
   const handle = await openFile(rolloutPath, "r");
   try {
     const info = await handle.stat();
@@ -990,13 +993,31 @@ async function readLatestTokenCount(
       const usedTokens = readTokenCount(lastUsage?.input_tokens);
       const contextWindowTokens = readTokenCount(infoRecord?.model_context_window);
       if (payload?.type === "token_count" && usedTokens !== undefined && contextWindowTokens !== undefined) {
-        return { usedTokens, contextWindowTokens };
+        const weeklyUsedPercent = readWeeklyUsedPercent(payload.rate_limits);
+        return {
+          usedTokens,
+          contextWindowTokens,
+          ...(weeklyUsedPercent !== undefined ? { weeklyUsedPercent } : {})
+        };
       }
     }
     return undefined;
   } finally {
     await handle.close();
   }
+}
+
+function readWeeklyUsedPercent(value: unknown): number | undefined {
+  const rateLimits = readRecordOrUndefined(value);
+  for (const key of ["primary", "secondary"] as const) {
+    const window = readRecordOrUndefined(rateLimits?.[key]);
+    if (window?.window_minutes !== 7 * 24 * 60) continue;
+    const usedPercent = window.used_percent;
+    if (typeof usedPercent === "number" && Number.isFinite(usedPercent) && usedPercent >= 0 && usedPercent <= 100) {
+      return usedPercent;
+    }
+  }
+  return undefined;
 }
 
 function activityUpdate(

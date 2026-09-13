@@ -225,7 +225,8 @@ test("chat panel restoration preserves composer settings and context usage", asy
     goalMode: true,
     workLoopMode: true,
     contextUsedTokens: 39_300,
-    contextWindowTokens: 1_050_000
+    contextWindowTokens: 1_050_000,
+    weeklyUsedPercent: 12.5
   }), {
     panelId: "panel-one",
     title: "Main Agent",
@@ -235,8 +236,68 @@ test("chat panel restoration preserves composer settings and context usage", asy
     goalMode: true,
     workLoopMode: true,
     contextUsedTokens: 39_300,
-    contextWindowTokens: 1_050_000
+    contextWindowTokens: 1_050_000,
+    weeklyUsedPercent: 12.5
   });
+});
+
+test("webview persistence carries weekly usage through chat state restoration", async function () {
+  const script = await readFile(new URL("../../static/js/chat.js", import.meta.url), "utf8");
+  const persist = script.slice(
+    script.indexOf("  function persist()"),
+    script.indexOf("  function safeCount(value)")
+  );
+  let serialized;
+  runInNewContext(persist + "\npersist();", {
+    state: {
+      panelId: "panel-one",
+      title: "Main Agent",
+      role: "main",
+      draft: "",
+      attachments: [],
+      timeline: [],
+      statusItems: [],
+      runtimeAvailable: true,
+      running: false,
+      fastMode: false,
+      goalMode: false,
+      workLoopMode: false,
+      contextUsedTokens: 39_300,
+      contextWindowTokens: 1_050_000,
+      weeklyUsedPercent: 12.5,
+      workUnits: {},
+      childAgents: []
+    },
+    vscode: {
+      setState(value) {
+        serialized = JSON.parse(JSON.stringify(value));
+      }
+    }
+  });
+
+  assert.equal(serialized.weeklyUsedPercent, 12.5);
+  const { restoreChatState } = await importTypeScript("src/modules/chat/chat-state.ts");
+  assert.equal(restoreChatState(serialized).weeklyUsedPercent, 12.5);
+});
+
+test("context footer distinguishes remaining context from used weekly account quota", async function () {
+  const script = await readFile(new URL("../../static/js/chat.js", import.meta.url), "utf8");
+  const functions = script.slice(
+    script.indexOf("  function contextStatusLabel()"),
+    script.indexOf("  function renderContextStatus(item)")
+  );
+  const context = {
+    state: { contextUsedTokens: 54_264, contextWindowTokens: 258_400, weeklyUsedPercent: 12.5 }
+  };
+  assert.equal(
+    runInNewContext(functions + "\ncontextStatusLabel();", context),
+    "컨텍스트 79% 남음 (204,136 tokens) · 주간 12.5% 사용"
+  );
+  context.state.weeklyUsedPercent = undefined;
+  assert.equal(
+    runInNewContext("contextStatusLabel();", context),
+    "컨텍스트 79% 남음 (204,136 tokens) · 주간 사용량 확인 불가"
+  );
 });
 
 test("composer settings messages are strictly validated", async function () {
@@ -355,7 +416,8 @@ test("runtime client invokes official commands and reads the bounded managed res
       info: {
         last_token_usage: { input_tokens: 39_300 },
         model_context_window: 258_400
-      }
+      },
+      rate_limits: { primary: { used_percent: 3, window_minutes: 10_080 } }
     }
   }) + "\n");
   const client = new AgentFactoryClient(fakeExec, projectRoot, "python3", codexHome);
@@ -413,7 +475,7 @@ test("runtime client invokes official commands and reads the bounded managed res
       { kind: "activity", id: "mcp-1", category: "tool", phase: "started", text: "codex/list_mcp_resources" },
       { kind: "status", text: "연결 도구 실행 중" },
       { kind: "status", text: "응답 정리 중" },
-      { kind: "usage", usedTokens: 39300, contextWindowTokens: 258400 }
+      { kind: "usage", usedTokens: 39300, contextWindowTokens: 258400, weeklyUsedPercent: 3 }
     ]
   });
   await appendFile(eventsPath, '{"type":"turn.completed"');
@@ -493,17 +555,21 @@ test("runtime client refreshes changed context usage during a turn and forces th
   await mkdir(dirname(rolloutPath), { recursive: true });
   await writeFile(join(runRoot, "state.json"), JSON.stringify({ sessionId: "session-live" }));
   await writeFile(eventsPath, JSON.stringify({ type: "turn.started" }) + "\n");
-  const tokenCount = (inputTokens) => JSON.stringify({
+  const tokenCount = (inputTokens, rate_limits) => JSON.stringify({
     type: "event_msg",
     payload: {
       type: "token_count",
       info: {
         last_token_usage: { input_tokens: inputTokens },
         model_context_window: 258_400
-      }
+      },
+      rate_limits
     }
   }) + "\n";
-  await writeFile(rolloutPath, tokenCount(10_000));
+  await writeFile(rolloutPath, tokenCount(10_000, {
+    primary: { used_percent: 25, window_minutes: 300 },
+    secondary: { used_percent: 12.5, window_minutes: 10_080 }
+  }));
   let now = 0;
   const client = new AgentFactoryClient(
     new URL("../fixtures/fake-exec.py", import.meta.url).pathname,
@@ -518,10 +584,12 @@ test("runtime client refreshes changed context usage during a turn and forces th
     cursor: 1,
     updates: [
       { kind: "status", text: "Main Agent가 요청을 분석 중" },
-      { kind: "usage", usedTokens: 10_000, contextWindowTokens: 258_400 }
+      { kind: "usage", usedTokens: 10_000, contextWindowTokens: 258_400, weeklyUsedPercent: 12.5 }
     ]
   });
-  await appendFile(rolloutPath, tokenCount(20_000));
+  await appendFile(rolloutPath, tokenCount(20_000, {
+    primary: { used_percent: 25, window_minutes: 300 }
+  }));
   now = 999;
   assert.deepEqual(await client.updates("main-test", "run-live", 1), { cursor: 1, updates: [] });
   now = 1_000;
@@ -530,7 +598,9 @@ test("runtime client refreshes changed context usage during a turn and forces th
     updates: [{ kind: "usage", usedTokens: 20_000, contextWindowTokens: 258_400 }]
   });
 
-  await appendFile(rolloutPath, tokenCount(30_000));
+  await appendFile(rolloutPath, tokenCount(30_000, {
+    primary: { used_percent: 140, window_minutes: 10_080 }
+  }));
   await appendFile(eventsPath, JSON.stringify({ type: "turn.completed" }) + "\n");
   assert.deepEqual(await client.updates("main-test", "run-live", 1), {
     cursor: 2,
@@ -583,21 +653,34 @@ test("session controller binds once, sends later turns, and retains attachment r
   assert.deepEqual(messages.filter((message) => message[0] === "status"), [["status", "completed"], ["status", "completed"]]);
 });
 
-test("session controller clearly rejects a concurrent send", async function () {
+test("session controller queues concurrent sends in order without dropping attachments or settings", async function () {
   const { ChatSessionController } = await importTypeScript("src/modules/chat/session-controller.ts");
   let releaseStatus;
-  const errors = [];
+  let statusCalls = 0;
+  const calls = [], queueCounts = [], running = [], errors = [];
   const runtime = {
-    async submit(agentId) { return { agentId, runId: "run-busy" }; },
-    async send() { throw new Error("unexpected send"); },
+    async submit(agentId, message, execution) {
+      calls.push(["submit", message, execution]);
+      return { agentId, runId: "run-busy" };
+    },
+    async send(agentId, message, execution) {
+      calls.push(["send", message, execution]);
+      return { agentId, runId: `run-${calls.length}` };
+    },
     async updates(_agentId, _runId, cursor) { return { cursor, updates: [] }; },
-    status() { return new Promise((resolve) => { releaseStatus = resolve; }); },
+    status() {
+      statusCalls += 1;
+      return statusCalls === 1
+        ? new Promise((resolve) => { releaseStatus = resolve; })
+        : Promise.resolve({ status: "completed" });
+    },
     async result() { return { status: "completed", text: "done" }; },
     async cancel() {}
   };
   const controller = new ChatSessionController(runtime, {
     onBound() {},
-    onRunningChanged() {},
+    onRunningChanged(value) { running.push(value); },
+    onQueueChanged(count) { queueCounts.push(count); },
     onAssistantText() {},
     onProgress() {},
     onActivity() {},
@@ -607,11 +690,22 @@ test("session controller clearly rejects a concurrent send", async function () {
   const execution = { fast: false, goalMode: false };
   const first = controller.send("first", [], execution);
   while (!releaseStatus) await new Promise((resolve) => setImmediate(resolve));
-  await controller.send("second", [], execution);
+  const secondExecution = { model: "gpt-6-astra", fast: true, goalMode: false };
+  const second = controller.send("second", [{ id: "queued", name: "queued.md", kind: "file", uri: "file:///tmp/queued.md" }], secondExecution);
+  const third = controller.send("third", [], execution);
+  assert.equal(controller.queueLength, 2);
   releaseStatus({ status: "completed" });
-  await first;
+  await Promise.all([first, second, third]);
 
-  assert.match(errors[0], /실행 중/);
+  assert.deepEqual(calls.map(call => call[0]), ["submit", "send", "send"]);
+  assert.match(calls[1][1], /^second\n\n첨부 참조:/);
+  assert.match(calls[1][1], /queued\.md: file:\/\/\/tmp\/queued\.md/);
+  assert.equal(calls[2][1], "third");
+  assert.deepEqual(calls[1][2], secondExecution);
+  assert.deepEqual(queueCounts, [1, 2, 1, 0]);
+  assert.deepEqual(running, [true, false]);
+  assert.deepEqual(errors, []);
+  assert.equal(controller.queueLength, 0);
 });
 
 test("cancellation requested during submission is delivered once to the accepted run", async function () {
@@ -662,8 +756,10 @@ test("Goal control serializes reopen requests before runtime acceptance", async 
   await controller.controlGoal("reopen");
   await controller.send("racing request", [], {});
   assert.deepEqual(calls, [["main-exact", "reopen"]]);
-  assert.equal(errors.filter(error => /실행 중/.test(error)).length, 1);
-  assert.equal(errors.filter(error => /Goal 제어 요청이 처리 중/.test(error)).length, 1);
+  assert.deepEqual(errors, [
+    "이전 Goal 제어 요청이 처리 중입니다.",
+    "이전 Goal 제어 요청이 처리 중입니다. 완료된 뒤 다시 보내세요."
+  ]);
   releaseGoal({ goal: null });
   await first;
 });
@@ -1021,20 +1117,79 @@ test("active run discovery includes queued runs, skips terminal runs and validat
   assert.equal(await client.activeRun("main-test"), undefined);
 });
 
-test("reconnect follows an existing run, rejects duplicate sends and cancels the correct run", async () => {
+test("reconnect with no active run hands racing input to the FIFO queue exactly once", async () => {
+  const { ChatSessionController } = await importTypeScript("src/modules/chat/session-controller.ts");
+  let resolveDiscovery;
+  const discovery = new Promise(resolve => { resolveDiscovery = resolve; });
+  let discoveries = 0;
+  const sent = [], queueCounts = [];
+  const controller = new ChatSessionController({
+    activeRun() { discoveries += 1; return discovery; },
+    async send(agentId, message) { sent.push(message); return { agentId, runId: `run-${sent.length}` }; },
+    async updates(_agentId, _runId, cursor) { return { cursor, updates: [] }; },
+    async status() { return { status: "completed" }; },
+    async result() { return { status: "completed", text: "done" }; }
+  }, {
+    onBound() {}, onRunningChanged() {}, onAssistantText() {}, onProgress() {}, onActivity() {}, onError() {},
+    onQueueChanged(count) { queueCounts.push(count); }
+  }, "main-race", { pollIntervalMs: 0, maxPolls: 1 });
+
+  const reconnecting = controller.reconnect();
+  const first = controller.send("first", [], {});
+  const second = controller.send("second", [], {});
+  resolveDiscovery(undefined);
+  const third = controller.send("third", [], {});
+
+  assert.equal(await reconnecting, false);
+  await Promise.all([first, second, third]);
+  assert.deepEqual(sent, ["first", "second", "third"]);
+  assert.deepEqual(queueCounts, [1, 2, 3, 2, 1, 0]);
+  assert.equal(discoveries, 1);
+  assert.equal(controller.queueLength, 0);
+});
+
+test("reconnect discovery failure still drains input queued during discovery", async () => {
+  const { ChatSessionController } = await importTypeScript("src/modules/chat/session-controller.ts");
+  let rejectDiscovery;
+  const discovery = new Promise((_resolve, reject) => { rejectDiscovery = reject; });
+  let discoveries = 0;
+  const sent = [];
+  const controller = new ChatSessionController({
+    activeRun() { discoveries += 1; return discoveries === 1 ? discovery : Promise.resolve(undefined); },
+    async send(agentId, message) { sent.push(message); return { agentId, runId: "run-after-error" }; },
+    async updates(_agentId, _runId, cursor) { return { cursor, updates: [] }; },
+    async status() { return { status: "completed" }; },
+    async result() { return { status: "completed", text: "done" }; }
+  }, {
+    onBound() {}, onRunningChanged() {}, onAssistantText() {}, onProgress() {}, onActivity() {}, onError() {}
+  }, "main-race", { pollIntervalMs: 0, maxPolls: 1 });
+
+  const reconnecting = controller.reconnect();
+  const queued = controller.send("preserved", [], {});
+  rejectDiscovery(new Error("discovery failed"));
+
+  await assert.rejects(reconnecting, /discovery failed/);
+  await queued;
+  assert.deepEqual(sent, ["preserved"]);
+  assert.equal(discoveries, 1);
+  assert.equal(controller.queueLength, 0);
+});
+
+test("reconnect follows an existing run, queues new input and cancels the correct run", async () => {
   const { ChatSessionController } = await importTypeScript("src/modules/chat/session-controller.ts");
   const calls = [], running = [], finals = [];
   let release;
   const gate = new Promise(resolve => { release = resolve; });
   let finished;
   const done = new Promise(resolve => { finished = resolve; });
+  let discovers = 0;
   const runtime = {
-    async activeRun() { calls.push("discover"); return { agentId: "main-existing", runId: "run-active" }; },
+    async activeRun() { calls.push("discover"); discovers += 1; return discovers === 1 ? { agentId: "main-existing", runId: "run-active" } : undefined; },
     async updates() { await gate; return { cursor: 0, updates: [] }; },
     async status() { return { status: "completed" }; },
     async result() { return { status: "completed", text: "Recovered result" }; },
     async cancel(...args) { calls.push(args); },
-    async send() { throw new Error("Must not send"); },
+    async send(agentId, message) { calls.push(["send", agentId, message]); return { agentId, runId: "run-queued" }; },
     async submit() { throw new Error("Must not submit"); }
   };
   const controller = new ChatSessionController(runtime, {
@@ -1045,30 +1200,33 @@ test("reconnect follows an existing run, rejects duplicate sends and cancels the
   assert.equal(await controller.reconnect(), true);
   assert.equal(calls.filter(value => value === "discover").length, 1);
   assert.equal(controller.running, true);
-  await controller.send("new request", [], {});
+  const queued = controller.send("new request", [], {});
+  assert.equal(controller.queueLength, 1);
   await controller.cancel();
   assert.deepEqual(calls.at(-1), ["main-existing", "run-active"]);
   release();
+  await queued;
   await done;
   assert.equal(controller.running, false);
-  assert.deepEqual(finals, ["Recovered result"]);
+  assert.ok(calls.some(call => Array.isArray(call) && call[0] === "send" && call[2] === "new request"));
+  assert.deepEqual(finals, ["Recovered result", "Recovered result"]);
 });
 
-test("send discovers a run started before reconnection and never resubmits", async () => {
+test("send discovered during a reconnect race waits for the active run and then preserves the input", async () => {
   const { ChatSessionController } = await importTypeScript("src/modules/chat/session-controller.ts");
-  const errors = [];
+  const errors = [], sent = [];
   let discovered = 0;
   const controller = new ChatSessionController({
     async activeRun() { discovered++; return { agentId: "main-existing", runId: "run-active" }; },
     async updates() { return { cursor: 0, updates: [] }; },
     async status() { return { status: "completed" }; },
     async result() { return { status: "completed", text: "done" }; },
-    async send() { throw new Error("Duplicate submission"); }
+    async send(agentId, message) { sent.push([agentId, message]); return { agentId, runId: "run-next" }; }
   }, { onBound() {}, onRunningChanged() {}, onAssistantText() {}, onProgress() {}, onUsage() {}, onActivity() {}, onError(error) { errors.push(error); } }, "main-existing");
   await controller.send("task", [], {});
   assert.equal(discovered, 1);
-  assert.match(errors[0], /전송하지 않았습니다/);
-  assert.equal(errors.length, 1);
+  assert.deepEqual(sent, [["main-existing", "task"]]);
+  assert.deepEqual(errors, []);
 });
 
 test("closing a recovered chat detaches polling without cancelling its runtime", async () => {

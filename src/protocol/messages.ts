@@ -71,6 +71,8 @@ export type HostMessage =
       readonly workLoopMode?: boolean;
       readonly contextUsedTokens?: number;
       readonly contextWindowTokens?: number;
+      readonly weeklyUsedPercent?: number;
+      readonly queueCount: number;
     }
   | {
       readonly type: "attachments.add";
@@ -121,6 +123,7 @@ export type HostMessage =
       readonly type: "context.usage";
       readonly usedTokens: number;
       readonly contextWindowTokens: number;
+      readonly weeklyUsedPercent?: number;
     }
   | {
       readonly type: "run.activity";
@@ -136,6 +139,7 @@ export type HostMessage =
       readonly type: "run.state";
       readonly running: boolean;
     }
+  | { readonly type: "queue.updated"; readonly count: number }
   | {
       readonly type: "workUnits.summary";
       readonly activeUnits: number;

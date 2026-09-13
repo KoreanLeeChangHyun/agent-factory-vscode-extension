@@ -92,8 +92,10 @@
     fastMode: saved?.fastMode === true,
     goalMode: saved?.goalMode === true,
     workLoopMode: saved?.workLoopMode === true,
+    queueCount: 0,
     contextUsedTokens: safeCountOrUndefined(saved?.contextUsedTokens),
     contextWindowTokens: safeCountOrUndefined(saved?.contextWindowTokens),
+    weeklyUsedPercent: safePercentOrUndefined(saved?.weeklyUsedPercent),
     runProgress: typeof saved?.runProgress === "string" ? saved.runProgress : "",
     runStartedAt: Number.isFinite(saved?.runStartedAt) ? saved.runStartedAt : undefined,
     runPanelExpanded: saved?.running === true && saved?.runPanelExpanded === true,
@@ -149,7 +151,7 @@
     state.draft = prompt.value;
     persist();
     resizePrompt();
-    updateSendButton();
+    updateRunControls();
   });
 
   prompt.addEventListener("keydown", function (event) {
@@ -165,7 +167,7 @@
   });
 
   sendButton.addEventListener("click", function () {
-    if (state.running) {
+    if (state.running && !hasComposerContent()) {
       cancelRun();
     } else {
       submit();
@@ -349,6 +351,8 @@
         state.workLoopMode = message.workLoopMode === true;
         state.contextUsedTokens = safeCountOrUndefined(message.contextUsedTokens);
         state.contextWindowTokens = safeCountOrUndefined(message.contextWindowTokens);
+        state.weeklyUsedPercent = safePercentOrUndefined(message.weeklyUsedPercent);
+        state.queueCount = safeCount(message.queueCount);
         if (state.running && !state.runStartedAt) {
           state.runStartedAt = Date.now();
         } else if (!state.running) {
@@ -527,6 +531,11 @@
         renderStatusBar();
         persist();
         break;
+      case "queue.updated":
+        state.queueCount = safeCount(message.count);
+        renderStatusBar();
+        updateSendButton();
+        break;
       case "run.progress":
         if (typeof message.text === "string" && message.text) {
           state.runProgress = message.text;
@@ -538,6 +547,7 @@
         if (Number.isSafeInteger(message.usedTokens) && Number.isSafeInteger(message.contextWindowTokens)) {
           state.contextUsedTokens = Math.max(0, message.usedTokens);
           state.contextWindowTokens = Math.max(0, message.contextWindowTokens);
+          state.weeklyUsedPercent = safePercentOrUndefined(message.weeklyUsedPercent);
           renderStatusBar();
           persist();
         }
@@ -583,7 +593,7 @@
         "검증 통과까지 진행하고 실제 작업·검증 실행 ID와 결과를 보고하세요. " +
         "실행할 작업이 불명확하면 필요한 내용만 질문하고, 실행 실패를 완료로 보고하지 마세요.";
     }
-    if ((!text && state.attachments.length === 0) || state.running || !state.capabilities || !state.runtimeAvailable) {
+    if ((!text && state.attachments.length === 0) || !state.capabilities || !state.runtimeAvailable) {
       return;
     }
     if (state.attachments.some(function (attachment) { return attachment.pending; })) {
@@ -1970,7 +1980,8 @@
       } else if (itemId === "context" && state.contextUsedTokens !== undefined && state.contextWindowTokens !== undefined) {
         renderContextStatus(item);
         item.title = "최근 turn 기준 사용 " + state.contextUsedTokens.toLocaleString("ko-KR") +
-          " / 자동 컴팩트 기준 " + state.contextWindowTokens.toLocaleString("ko-KR") + " tokens";
+          " / 자동 컴팩트 기준 " + state.contextWindowTokens.toLocaleString("ko-KR") + " tokens · " +
+          (state.weeklyUsedPercent === undefined ? "주간 계정 사용량 확인 불가" : "주간 계정 사용 " + formatPercent(state.weeklyUsedPercent));
       }
       item.addEventListener("dragstart", function (event) {
         item.classList.add("dragging");
@@ -2111,27 +2122,32 @@
       branch: "Branch " + (state.branch || "—"),
       context: contextStatusLabel(),
       elapsed: "00:00",
-      queue: "Queue 0",
+      queue: "Queue " + state.queueCount,
       runtime: state.runtimeAvailable ? "Runtime 연결됨" : "Runtime 미연결"
     };
     return labels[itemId] || itemId;
   }
 
   function updateSendButton() {
-    sendButton.disabled = !state.running && (!state.runtimeAvailable || !state.capabilities || (prompt.value.trim().length === 0 && state.attachments.length === 0));
+    sendButton.disabled = !state.runtimeAvailable || !state.capabilities || (!state.running && !hasComposerContent());
   }
 
   function updateRunControls() {
+    const queuesMessage = state.running && hasComposerContent();
     updateExecutionControl();
-    sendButton.classList.toggle("is-running", state.running);
-    sendButton.setAttribute("aria-label", state.running ? "현재 실행 중지" : "메시지 전송");
-    sendButton.title = state.running ? "현재 실행 중지 (Esc)" : "전송 (Enter)";
-    sendIcon.hidden = state.running;
-    stopIcon.hidden = !state.running;
+    sendButton.classList.toggle("is-running", state.running && !queuesMessage);
+    sendButton.setAttribute("aria-label", queuesMessage ? "메시지를 Queue에 추가" : state.running ? "현재 실행 중지" : "메시지 전송");
+    sendButton.title = queuesMessage ? "Queue에 추가 (Enter)" : state.running ? "현재 실행 중지 (Esc)" : "전송 (Enter)";
+    sendIcon.hidden = state.running && !queuesMessage;
+    stopIcon.hidden = !state.running || queuesMessage;
     updateSessionControl();
     renderRunStatus();
     updateSendButton();
     renderGoal();
+  }
+
+  function hasComposerContent() {
+    return prompt.value.trim().length > 0 || state.attachments.length > 0;
   }
 
   function toggleMode(key) {
@@ -2344,6 +2360,7 @@
       workLoopMode: state.workLoopMode,
       contextUsedTokens: state.contextUsedTokens,
       contextWindowTokens: state.contextWindowTokens,
+      weeklyUsedPercent: state.weeklyUsedPercent,
       runProgress: state.runProgress,
       runStartedAt: state.runStartedAt,
       runPanelExpanded: state.runPanelExpanded,
@@ -2386,8 +2403,19 @@
   }
 
   function contextStatusLabel() {
-    if (state.contextUsedTokens === undefined || state.contextWindowTokens === undefined) return "Tokens —";
-    return "Tokens " + Math.max(0, state.contextWindowTokens - state.contextUsedTokens).toLocaleString("ko-KR") + " 남음";
+    if (state.contextUsedTokens === undefined || state.contextWindowTokens === undefined) return "컨텍스트 — · 주간 사용량 확인 불가";
+    const remaining = Math.max(0, state.contextWindowTokens - state.contextUsedTokens);
+    const remainingPercent = state.contextWindowTokens > 0
+      ? Math.round(remaining / state.contextWindowTokens * 100)
+      : 0;
+    const weekly = state.weeklyUsedPercent === undefined
+      ? "주간 사용량 확인 불가"
+      : "주간 " + formatPercent(state.weeklyUsedPercent) + " 사용";
+    return "컨텍스트 " + remainingPercent + "% 남음 (" + remaining.toLocaleString("ko-KR") + " tokens) · " + weekly;
+  }
+
+  function formatPercent(value) {
+    return value.toLocaleString("ko-KR", { maximumFractionDigits: 1 }) + "%";
   }
 
   function renderContextStatus(item) {
@@ -2414,6 +2442,12 @@
 
   function normalizeModel(value) {
     return typeof value === "string" && /^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$/.test(value) ? value : "";
+  }
+
+  function safePercentOrUndefined(value) {
+    return typeof value === "number" && Number.isFinite(value) && value >= 0 && value <= 100
+      ? value
+      : undefined;
   }
 
   function normalizeSettingValue(value, allowedValues) {

@@ -68,7 +68,9 @@ button {
   padding: 14px 12px 18px;
   font-family: var(--vscode-editor-font-family, monospace);
   font-size: var(--vscode-editor-font-size, 13px);
+  scrollbar-color: var(--vscode-scrollbarSlider-background, color-mix(in srgb, var(--af-cli-foreground) 35%, transparent)) var(--af-chat-background);
   scrollbar-gutter: stable;
+  scrollbar-width: thin;
 }
 
 .empty-state {

@@ -35,6 +35,7 @@ interface ManagedPanel {
   readonly subscriptions: vscode.Disposable[];
   readonly imageAttachments: Map<string, number>;
   imageMutation: Promise<void>;
+  chatSendPreparation: Promise<void>;
   controller?: ChatSessionController;
   controllerInitialization?: Promise<void>;
   sessionTransition?: Promise<void>;
@@ -231,7 +232,14 @@ export class ChatPanelManager implements vscode.Disposable {
     panel.webview.options = this.webviewOptions();
 
     const subscriptions: vscode.Disposable[] = [];
-    const managed: ManagedPanel = { panel, state, subscriptions, imageAttachments: new Map(), imageMutation: Promise.resolve() };
+    const managed: ManagedPanel = {
+      panel,
+      state,
+      subscriptions,
+      imageAttachments: new Map(),
+      imageMutation: Promise.resolve(),
+      chatSendPreparation: Promise.resolve()
+    };
     managed.runningTitle = new RunningTitle(() => managed.state.title, (title) => { panel.title = title; });
     subscriptions.push(managed.runningTitle);
     subscriptions.push(new vscode.Disposable(() => {
@@ -356,7 +364,9 @@ export class ChatPanelManager implements vscode.Disposable {
           goalMode: managed.state.goalMode === true,
           workLoopMode: managed.state.workLoopMode === true,
           contextUsedTokens: managed.state.contextUsedTokens,
-          contextWindowTokens: managed.state.contextWindowTokens
+          contextWindowTokens: managed.state.contextWindowTokens,
+          weeklyUsedPercent: managed.state.weeklyUsedPercent,
+          queueCount: managed.controller?.queueLength ?? 0
         });
         if (!connection.available) {
           await this.post(managed.panel, {
@@ -389,14 +399,19 @@ export class ChatPanelManager implements vscode.Disposable {
       case "execution.select":
         await this.selectExecutionMode(managed, message.mode);
         return;
-      case "chat.send":
+      case "chat.send": {
+        const sendPreparation = (managed.chatSendPreparation ?? Promise.resolve()).then(() =>
+          this.sendChat(managed, message.text, message.attachments, message.execution));
+        managed.chatSendPreparation = sendPreparation.then(() => undefined, () => undefined);
         try {
-          await this.sendChat(managed, message.text, message.attachments, message.execution);
+          await sendPreparation;
         } catch (error) {
           await this.post(managed.panel, { type: "host.notice", level: "error", text: error instanceof Error ? error.message : String(error) });
-          await this.post(managed.panel, { type: "run.state", running: false });
+          await this.post(managed.panel, { type: "run.state", running: managed.controller?.running === true });
+          await this.post(managed.panel, { type: "queue.updated", count: managed.controller?.queueLength ?? 0 });
         }
         return;
+      }
       case "decision.approve":
         if (!managed.controller?.approveDecision(message.runId, {
           ...((managed.state.role ?? "main") === "main" && (!managed.state.agentId || managed.executionModeExplicit) ? { executionMode: managed.executionMode ?? this.defaultExecutionMode() } : {}),
@@ -785,6 +800,9 @@ export class ChatPanelManager implements vscode.Disposable {
           void this.post(managed.panel, { type: "run.state", running });
           this.scheduleAgentList(managed, !running);
         },
+        onQueueChanged: (count) => {
+          void this.post(managed.panel, { type: "queue.updated", count });
+        },
         onAssistantText: (responseText, phase, runId) => {
           void this.post(managed.panel, { type: "chat.assistant", text: responseText, phase, runId });
         },
@@ -797,9 +815,9 @@ export class ChatPanelManager implements vscode.Disposable {
         onProgress: (progressText) => {
           void this.post(managed.panel, { type: "run.progress", text: progressText });
         },
-        onUsage: (usedTokens, contextWindowTokens) => {
-          managed.state = { ...managed.state, contextUsedTokens: usedTokens, contextWindowTokens };
-          void this.post(managed.panel, { type: "context.usage", usedTokens, contextWindowTokens });
+        onUsage: (usedTokens, contextWindowTokens, weeklyUsedPercent) => {
+          managed.state = { ...managed.state, contextUsedTokens: usedTokens, contextWindowTokens, weeklyUsedPercent };
+          void this.post(managed.panel, { type: "context.usage", usedTokens, contextWindowTokens, weeklyUsedPercent });
         },
         onActivity: (activity) => {
           void this.post(managed.panel, { type: "run.activity", ...activity });
