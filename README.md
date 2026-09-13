@@ -5,8 +5,8 @@ Agent Factory Main Agent sessions in VS Code editor tabs.
 ## Required companion plugin
 
 This extension requires an installed and enabled Agent Factory Codex plugin with
-the identical semantic base version. Extension `1.0.4` accepts plugin
-`1.0.4+codex.<token>`, for example, but not another semantic base version.
+the identical semantic base version. Extension `1.0.5` accepts plugin
+`1.0.5+codex.<token>`, for example, but not another semantic base version.
 
 During activation, the extension checks configured Codex marketplaces, prefers the
 official `agent-factory` marketplace, and attempts one compatible plugin installation
@@ -31,6 +31,15 @@ plugin.
 - Open Main Agent sessions in editor tabs; stream activity and resume sessions.
 - Render Markdown code fences, Bash commands, ANSI command output, and file diffs.
 - Submit, follow up, and cancel runs through the installed Agent Factory runtime.
+- Deliver browser PNG, JPEG, GIF, and WebP attachments through the plugin's
+  versioned image-input contract. The extension requires the runtime capability
+  flag and stops the request instead of reducing an unsupported image to text metadata.
+- Keep sent-image previews in restored chat history and open originals only through
+  host-owned attachment identifiers and validated storage paths.
+
+Image bytes are handled by the extension-host bundle that is already loaded for the
+chat tab. Installing a newer VSIX changes files on disk but does not replace that
+running bundle; reload the VS Code extension host before retrying an image attachment.
 - Use native Fast/Goal controls and inspect Work/Verification status.
 - Organize Main Agent chats in the Agent Factory activity-bar sidebar, with workspace-local names and groups.
 - Follow delegated Work and Verification runs in chat cards with live status, session links, and expandable command details.
@@ -71,9 +80,9 @@ npm run check
 
 ## Installation requirement
 
-Extension version 1.0.4 requires an installed and enabled Agent Factory plugin with the
-same semantic base version, 1.0.4. A plugin cachebuster suffix such as
-`1.0.4+codex.<token>` is accepted. During activation the extension checks configured
+Extension version 1.0.5 requires an installed and enabled Agent Factory plugin with the
+same semantic base version, 1.0.5. A plugin cachebuster suffix such as
+`1.0.5+codex.<token>` is accepted. During activation the extension checks configured
 Codex marketplaces and, when necessary, installs one compatible available plugin before
 registering its commands and views. The official `agent-factory` marketplace is preferred.
 
@@ -91,7 +100,7 @@ this plugin requirement.
 
 ## F5 manual test
 
-1. Configure a marketplace that provides Agent Factory plugin semantic version 1.0.4.
+1. Configure a marketplace that provides Agent Factory plugin semantic version 1.0.5.
    Activation installs the compatible plugin when needed. Confirm
    `skills/agent/scripts/exec.py` is present in the Codex plugin cache; if it is elsewhere,
    set `agentFactory.mainChat.runtimeExecPath` to its absolute path after satisfying the

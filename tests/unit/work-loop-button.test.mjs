@@ -22,16 +22,18 @@ function harness(overrides = {}, text = "오류 수정") {
   return { context, sent, run: code => runInNewContext(code, context) };
 }
 
-test("loop button sends explicit delegation with the draft, attachments and selected model", () => {
-  const { context, sent, run } = harness({ model: "chosen-model", attachments: [{ name: "input.txt" }] });
+test("loop button sends explicit delegation with the draft, actual image reference and selected model", () => {
+  const image = { id: "image-one", name: "input.png", kind: "image", uri: "file:///host/input.png", previewUri: "vscode-resource://input.png", mediaType: "image/png", size: 32 };
+  const { context, sent, run } = harness({ model: "chosen-model", attachments: [image] });
   run("submit()");
   assert.equal(sent.length, 1);
   assert.match(sent[0].text, /^오류 수정\n\n작업·검증 루프/);
   assert.match(sent[0].text, /Work → Verification/);
   assert.match(sent[0].text, /실패하면 같은 Work에서 수정한 뒤 재검증/);
-  assert.equal(sent[0].attachments[0].name, "input.txt");
+  assert.deepEqual(JSON.parse(JSON.stringify(sent[0].attachments[0])), { id: "image-one", name: "input.png", kind: "image", uri: "file:///host/input.png", mediaType: "image/png", size: 32 });
   assert.equal(sent[0].execution.model, "chosen-model");
   assert.equal(context.state.timeline[0].text, "오류 수정");
+  assert.equal(context.state.timeline[0].attachments[0].previewUri, "vscode-resource://input.png");
   assert.doesNotMatch(context.state.timeline[0].text, /Work → Verification/);
   assert.equal(context.prompt.value, "");
   run("submit()");

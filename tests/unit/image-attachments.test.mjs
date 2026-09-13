@@ -17,6 +17,9 @@ test("webview image messages validate exact bounded content", async function () 
   assert.equal(parseClientMessage({ ...valid, size: 12 }), undefined);
   assert.equal(parseClientMessage({ ...valid, mediaType: "image/svg+xml" }), undefined);
   assert.equal(parseClientMessage({ type: "attachment.open", id: "../escape" }), undefined);
+  const restore = { type: "attachments.restore", attachments: [{ id: "image-one", name: "one.png", target: "history" }] };
+  assert.deepEqual(parseClientMessage(restore), restore);
+  assert.equal(parseClientMessage({ ...restore, attachments: [{ ...restore.attachments[0], target: "arbitrary" }] }), undefined);
 });
 
 test("runtime image construction rejects blob URLs and emits local paths", async function () {
@@ -31,9 +34,22 @@ test("preview rendering opens only host-owned attachment identifiers and drops b
   assert.match(script, /type: "attachment\.open", id: attachment\.id/);
   assert.match(script, /!item\.previewUri\?\.startsWith\("blob:"\)/);
   assert.match(script, /const \{ previewUri, pending, \.\.\.reference \} = attachment/);
+  assert.match(script, /restoreImages\.push\(\{ id: item\.id, name: item\.name, target: "history" \}\)/);
+  assert.match(script, /postMessage\(\{ type: "attachments\.restore", attachments: restoreImages \}\)/);
+  assert.match(script, /function renderHistoryAttachments[\s\S]*type: "attachment\.open", id: attachment\.id/);
+  assert.match(script, /const \{ previewUri, pending, \.\.\.persisted \} = attachment/);
   assert.match(panel, /executeCommand\("vscode\.open", uri\)/);
   assert.match(panel, /O_NOFOLLOW/);
   assert.match(panel, /localResourceRoots: uniqueUris/);
+});
+
+test("sent image history retains host files while releasing only the composer budget", async function () {
+  const panel = await readFile(new URL("../../src/infrastructure/vscode/chat-panel-manager.ts", import.meta.url), "utf8");
+  const webview = await readFile(new URL("../../static/js/chat.js", import.meta.url), "utf8");
+  assert.match(panel, /finally\(\(\) => \{[\s\S]*managed\.imageAttachments\.delete\(item\.id\)/);
+  assert.doesNotMatch(panel, /finally\(\(\) => Promise\.all\(attachments[\s\S]*removeImageAttachment/);
+  assert.match(webview, /attachments: submittedAttachments/);
+  assert.match(webview, /case "attachments\.restored"/);
 });
 
 test("host image budget includes already staged images", async function () {
@@ -54,4 +70,15 @@ test("runtime adapter uses a versioned file contract for both submit and send", 
   assert.match(source, /this\.inputCommand\(\[\s*"send"/);
   assert.match(source, /"--input-file", contractPath/);
   assert.match(source, /rm\(directory, \{ recursive: true, force: true \}\)/);
+});
+
+test("runtime adapter refuses image metadata downgrade when plugin lacks image transport", async function () {
+  const { AgentFactoryClient } = await importTypeScript("src/infrastructure/agent-factory/agent-client.ts");
+  const client = new AgentFactoryClient("/unused/exec.py", "/unused/project");
+  const flags = { model: false, reasoning: false, fast: false, goal: false, images: false };
+  client.capabilities = async () => ({ submit: flags, send: flags });
+  client.command = async () => { throw new Error("image request must not reach an incompatible runtime"); };
+  const image = [{ path: "/tmp/one.png", mediaType: "image/png" }];
+  await assert.rejects(client.submit("main-test", "inspect", {}, image), /플러그인을.*업데이트.*익스텐션 호스트를 다시 로드/s);
+  await assert.rejects(client.send("main-test", "inspect", {}, image), /플러그인을.*업데이트.*익스텐션 호스트를 다시 로드/s);
 });

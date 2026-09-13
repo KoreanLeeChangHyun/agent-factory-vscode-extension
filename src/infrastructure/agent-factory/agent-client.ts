@@ -28,6 +28,7 @@ export interface ExecutionCapabilities {
   readonly reasoning: boolean;
   readonly fast: boolean;
   readonly goal: boolean;
+  readonly images?: boolean;
   readonly diagnostic?: string;
 }
 
@@ -192,7 +193,11 @@ export class AgentFactoryClient implements AgentRuntimeClient {
       for (const key of ["model", "reasoning", "fast", "goal"]) {
         if (typeof record[key] !== "boolean") throw new Error("Codex 기능 응답 형식이 올바르지 않습니다.");
       }
-      return { ...record, ...(typeof document.diagnostic === "string" ? { diagnostic: document.diagnostic } : {}) } as unknown as ExecutionCapabilities;
+      return {
+        ...record,
+        images: record.images === true,
+        ...(typeof document.diagnostic === "string" ? { diagnostic: document.diagnostic } : {})
+      } as unknown as ExecutionCapabilities;
     };
     return {
       submit: readCapabilities(document.submit), send: readCapabilities(document.send),
@@ -211,8 +216,15 @@ export class AgentFactoryClient implements AgentRuntimeClient {
     return { goal: readNativeGoal(document.goal), ...(typeof document.error === "string" ? { error: document.error } : {}) };
   }
 
-  private async checkedExecution(command: "submit" | "send", execution: ExecutionOptions, agentId?: string): Promise<string[]> {
+  private async checkedExecution(command: "submit" | "send", execution: ExecutionOptions, agentId?: string, hasImages = false): Promise<string[]> {
     const supported = (await this.capabilities(agentId))[command];
+    if (hasImages && supported.images !== true) {
+      throw new Error(
+        `현재 Agent Factory 런타임의 ${command} 이미지 전송 계약이 호환되지 않습니다. ` +
+        "Agent Factory 플러그인을 현재 익스텐션과 호환되는 버전으로 설치하거나 업데이트한 뒤, " +
+        "VS Code 익스텐션 호스트를 다시 로드하고 이미지 첨부를 다시 시도하세요."
+      );
+    }
     const unsupported = [
       execution.model && !supported.model ? "모델 변경" : "",
       execution.reasoningEffort && !supported.reasoning ? "추론 수준" : "",
@@ -260,7 +272,7 @@ export class AgentFactoryClient implements AgentRuntimeClient {
       "--role",
       "main",
       ...executionPolicyArguments(execution.executionMode),
-      ...await this.checkedExecution("submit", execution)
+      ...await this.checkedExecution("submit", execution, undefined, images.length > 0)
     ], message, images);
     return readAcceptance(document, agentId);
   }
@@ -273,7 +285,7 @@ export class AgentFactoryClient implements AgentRuntimeClient {
       "--agent",
       agentId,
       ...executionPolicyArguments(execution.executionMode),
-      ...await this.checkedExecution("send", execution, agentId)
+      ...await this.checkedExecution("send", execution, agentId, images.length > 0)
     ], message, images);
     return readAcceptance(document, agentId);
   }

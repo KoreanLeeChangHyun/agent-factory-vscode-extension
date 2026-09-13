@@ -10,7 +10,7 @@ import { RunningTitle } from "./running-title";
 import * as vscode from "vscode";
 import type { StatusItemId } from "../../core/config/types";
 import type { AttachmentReference } from "../../common/types/attachment";
-import { canStageImage } from "../../common/image-input";
+import { canStageImage, decodeBrowserImage, hasImageSignature } from "../../common/image-input";
 import {
   createDraftChatState,
   restoreChatState,
@@ -23,6 +23,7 @@ import type { ChatTemplateRenderer } from "./chat-template-renderer";
 import type { AgentRuntimeClient } from "../agent-factory/agent-client";
 import { readCodexModels } from "../agent-factory/model-catalog";
 import { ChatSessionController } from "../../modules/chat/session-controller";
+import { writeNewImageAttachment } from "./image-attachment-store";
 
 type RuntimeConnection =
   | { readonly available: true; readonly client: AgentRuntimeClient }
@@ -846,8 +847,11 @@ export class ChatPanelManager implements vscode.Disposable {
       goalObjective: execution.goalObjective,
       ...((managed.state.role ?? "main") !== "main" ? { actor: "human" as const } : {}),
       ...(managed.state.verifiedWorkRunId ? { verifiedWorkRunId: managed.state.verifiedWorkRunId } : {})
-    }).finally(() => Promise.all(attachments.filter(item => item.kind === "image")
-      .map(item => this.removeImageAttachment(managed, item.id, false))));
+    }).finally(() => {
+      for (const item of attachments) {
+        if (item.kind === "image") managed.imageAttachments.delete(item.id);
+      }
+    });
   }
 
   private async mutateImages(managed: ManagedPanel, action: () => Promise<void>): Promise<void> {
@@ -955,8 +959,7 @@ export class ChatPanelManager implements vscode.Disposable {
     message: Extract<import("../../protocol/messages").ClientMessage, { type: "attachments.createImage" }>
   ): Promise<void> {
     try {
-      const content = Buffer.from(message.data, "base64");
-      if (!hasImageSignature(content, message.mediaType)) throw new Error("이미지 내용과 미디어 형식이 일치하지 않습니다.");
+      const content = decodeBrowserImage(message.data, message.size, message.mediaType);
       const stagedBytes = [...managed.imageAttachments.values()].reduce((total, size) => total + size, 0);
       if (!canStageImage(managed.imageAttachments.size, stagedBytes, content.byteLength)) throw new Error("이미지 첨부 한도를 초과했습니다.");
       const attachment = await this.persistImage(managed.panel, managed.state.panelId, message.id, message.name, message.mediaType, content);
@@ -968,8 +971,8 @@ export class ChatPanelManager implements vscode.Disposable {
     }
   }
 
-  private async restoreImageAttachments(managed: ManagedPanel, references: readonly { readonly id: string; readonly name: string }[]): Promise<void> {
-    const attachments: AttachmentReference[] = [];
+  private async restoreImageAttachments(managed: ManagedPanel, references: readonly { readonly id: string; readonly name: string; readonly target: "composer" | "history" }[]): Promise<void> {
+    const attachments: (AttachmentReference & { readonly target: "composer" | "history" })[] = [];
     for (const reference of references) {
       const uri = await this.imageAttachmentPath(managed.state.panelId, reference.id);
       if (!uri) {
@@ -982,10 +985,10 @@ export class ChatPanelManager implements vscode.Disposable {
       const directory = vscode.Uri.joinPath(uri, "..");
       const roots = managed.panel.webview.options.localResourceRoots ?? this.templates.localResourceRoots;
       managed.panel.webview.options = { ...managed.panel.webview.options, localResourceRoots: uniqueUris([...roots, directory]) };
-      attachments.push({ id: reference.id, name: reference.name, kind: "image", uri: uri.toString(), previewUri: managed.panel.webview.asWebviewUri(uri).toString(), mediaType, size: info.size });
-      managed.imageAttachments.set(reference.id, info.size);
+      attachments.push({ id: reference.id, name: reference.name, kind: "image", uri: uri.toString(), previewUri: managed.panel.webview.asWebviewUri(uri).toString(), mediaType, size: info.size, target: reference.target });
+      if (reference.target === "composer") managed.imageAttachments.set(reference.id, info.size);
     }
-    if (attachments.length) await this.post(managed.panel, { type: "attachments.add", attachments });
+    if (attachments.length) await this.post(managed.panel, { type: "attachments.restored", attachments });
   }
 
   private async persistImage(panel: vscode.WebviewPanel, panelId: string, id: string, name: string, mediaType: string, content: Buffer): Promise<AttachmentReference> {
@@ -996,8 +999,7 @@ export class ChatPanelManager implements vscode.Disposable {
     const directory = vscode.Uri.joinPath(this.context.globalStorageUri, "chat-images", panelId, id.slice(0, 2));
     await vscode.workspace.fs.createDirectory(directory);
     const uri = vscode.Uri.joinPath(directory, `${id}${suffix}`);
-    const file = await openFile(uri.fsPath, fsConstants.O_WRONLY | fsConstants.O_CREAT | fsConstants.O_EXCL | fsConstants.O_NOFOLLOW, 0o600);
-    try { await file.writeFile(content); } finally { await file.close(); }
+    await writeNewImageAttachment(uri.fsPath, content);
     const roots = panel.webview.options.localResourceRoots ?? this.templates.localResourceRoots;
     panel.webview.options = { ...panel.webview.options, localResourceRoots: uniqueUris([...roots, directory]) };
     return { id, name, kind: "image", uri: uri.toString(), previewUri: panel.webview.asWebviewUri(uri).toString(), mediaType, size: content.byteLength };
@@ -1123,14 +1125,6 @@ function imageSuffix(mediaType: string): string {
   const suffix = ({ "image/png": ".png", "image/jpeg": ".jpg", "image/gif": ".gif", "image/webp": ".webp" } as Record<string, string>)[mediaType];
   if (!suffix) throw new Error("지원하지 않는 이미지 형식입니다.");
   return suffix;
-}
-
-function hasImageSignature(content: Buffer, mediaType: string): boolean {
-  if (mediaType === "image/png") return content.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]));
-  if (mediaType === "image/jpeg") return content.length >= 3 && content[0] === 0xff && content[1] === 0xd8 && content[2] === 0xff;
-  if (mediaType === "image/gif") return content.subarray(0, 6).toString("ascii") === "GIF87a" || content.subarray(0, 6).toString("ascii") === "GIF89a";
-  if (mediaType === "image/webp") return content.subarray(0, 4).toString("ascii") === "RIFF" && content.subarray(8, 12).toString("ascii") === "WEBP";
-  return false;
 }
 
 async function readSafeImage(path: string): Promise<Buffer> {

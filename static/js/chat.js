@@ -117,9 +117,14 @@
   renderAll();
   resizePrompt();
   vscode.postMessage({ type: "client.ready" });
-  if (state.attachments.some(function (item) { return item.kind === "image"; })) {
-    vscode.postMessage({ type: "attachments.restore", attachments: state.attachments.filter(function (item) { return item.kind === "image"; }).slice(0, 8).map(function (item) { return { id: item.id, name: item.name }; }) });
+  const restoreImages = state.attachments.filter(function (item) { return item.kind === "image"; })
+    .slice(0, 8).map(function (item) { return { id: item.id, name: item.name, target: "composer" }; });
+  for (const event of state.timeline) {
+    for (const item of Array.isArray(event.attachments) ? event.attachments : []) {
+      if (item.kind === "image" && restoreImages.length < 100) restoreImages.push({ id: item.id, name: item.name, target: "history" });
+    }
   }
+  if (restoreImages.length) vscode.postMessage({ type: "attachments.restore", attachments: restoreImages });
 
   runStatusToggle.addEventListener("click", function () {
     state.runPanelExpanded = !state.runPanelExpanded;
@@ -398,6 +403,24 @@
           addAttachments(message.attachments);
         }
         break;
+      case "attachments.restored":
+        if (Array.isArray(message.attachments)) {
+          const composer = message.attachments.filter(function (item) { return item.target === "composer"; });
+          if (composer.length) addAttachments(composer.map(function ({ target, ...item }) { return item; }));
+          for (const restored of message.attachments.filter(function (item) { return item.target === "history"; })) {
+            for (const event of state.timeline) {
+              if (!Array.isArray(event.attachments)) continue;
+              event.attachments = event.attachments.map(function (item) {
+                if (item.id !== restored.id) return item;
+                const { target, ...attachment } = restored;
+                return attachment;
+              });
+            }
+          }
+          renderTimeline();
+          persist();
+        }
+        break;
       case "attachment.rejected": {
         const rejected = state.attachments.find(function (item) { return item.id === message.id; });
         if (rejected?.previewUri?.startsWith("blob:")) URL.revokeObjectURL(rejected.previewUri);
@@ -589,10 +612,15 @@
     goalObjective.value = "";
     state.pendingDecisionRunId = undefined;
     state.decisionSubmitting = false;
+    const submittedAttachments = state.attachments.map(function (attachment) {
+      const { pending, ...submitted } = attachment;
+      return submitted;
+    });
     state.timeline.push({
       type: "user",
       id: message.id,
-      text: userText || state.attachments.map(function (attachment) { return "첨부: " + attachment.name; }).join("\n")
+      text: userText || state.attachments.map(function (attachment) { return "첨부: " + attachment.name; }).join("\n"),
+      attachments: submittedAttachments
     });
     state.draft = "";
     state.attachments = [];
@@ -1014,6 +1042,7 @@
       } else {
         content.textContent = event.text;
       }
+      if (event.type === "user" && Array.isArray(event.attachments)) renderHistoryAttachments(content, event.attachments);
       message.append(content);
       timeline.append(message);
       const display = displayStates.get(event.id);
@@ -1728,6 +1757,31 @@
     }
   }
 
+  function renderHistoryAttachments(container, attachments) {
+    const gallery = document.createElement("div");
+    gallery.className = "history-attachments";
+    for (const attachment of attachments) {
+      if (attachment.kind !== "image") continue;
+      const item = document.createElement(attachment.previewUri ? "button" : "div");
+      item.className = "history-attachment";
+      item.title = attachment.name;
+      if (attachment.previewUri) {
+        item.type = "button";
+        item.setAttribute("aria-label", attachment.name + " 원본 열기");
+        item.addEventListener("click", function () { vscode.postMessage({ type: "attachment.open", id: attachment.id }); });
+        const preview = document.createElement("img");
+        preview.src = attachment.previewUri;
+        preview.alt = attachment.name;
+        item.append(preview);
+      }
+      const name = document.createElement("span");
+      name.textContent = attachment.name;
+      item.append(name);
+      gallery.append(item);
+    }
+    if (gallery.childElementCount) container.append(gallery);
+  }
+
   function openSessionMenu() {
     closeSettingMenu(false);
     closeQuestionMenu(false);
@@ -2268,7 +2322,17 @@
         const { previewUri, ...persisted } = attachment;
         return persisted;
       }),
-      timeline: state.timeline.slice(-200),
+      timeline: state.timeline.slice(-200).map(function (event) {
+        if (!Array.isArray(event.attachments)) return event;
+        return {
+          ...event,
+          attachments: event.attachments.map(function (attachment) {
+            if (attachment.kind !== "image") return attachment;
+            const { previewUri, pending, ...persisted } = attachment;
+            return persisted;
+          })
+        };
+      }),
       statusItems: state.statusItems,
       projectName: state.projectName,
       runtimeAvailable: state.runtimeAvailable,

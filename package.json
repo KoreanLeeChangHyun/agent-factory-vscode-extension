@@ -2,7 +2,7 @@
   "name": "agent-factory-main-chat",
   "displayName": "Agent Factory Main Chat",
   "description": "Main Agent chat sessions in VS Code editor tabs.",
-  "version": "1.0.4",
+  "version": "1.0.5",
   "publisher": "agent-factory",
   "icon": "static/images/agent-factory.png",
   "license": "UNLICENSED",

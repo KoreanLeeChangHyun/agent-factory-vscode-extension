@@ -66,11 +66,12 @@ export function parseClientMessage(value: unknown): ClientMessage | undefined {
       return { type: value.type, id: value.id, name: value.name, mediaType: value.mediaType, size: value.size, data: value.data };
     }
     case "attachments.restore": {
-      if (!Array.isArray(value.attachments) || value.attachments.length > 8) return undefined;
-      const attachments = value.attachments.filter((item): item is { id: string; name: string } => isRecord(item)
+      if (!Array.isArray(value.attachments) || value.attachments.length > 100) return undefined;
+      const attachments = value.attachments.filter((item): item is { id: string; name: string; target: "composer" | "history" } => isRecord(item)
         && typeof item.id === "string" && /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(item.id)
-        && typeof item.name === "string" && item.name.length > 0 && item.name.length <= 255)
-        .map(item => ({ id: item.id, name: item.name }));
+        && typeof item.name === "string" && item.name.length > 0 && item.name.length <= 255
+        && (item.target === "composer" || item.target === "history"))
+        .map(item => ({ id: item.id, name: item.name, target: item.target }));
       if (attachments.length !== value.attachments.length) return undefined;
       return { type: value.type, attachments };
     }

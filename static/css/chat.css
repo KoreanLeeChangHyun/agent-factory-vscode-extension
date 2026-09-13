@@ -135,6 +135,40 @@ button {
   overflow-wrap: anywhere;
 }
 
+.history-attachments {
+  display: flex;
+  margin-top: 8px;
+  gap: 8px;
+  overflow-x: auto;
+}
+
+.history-attachment {
+  position: relative;
+  width: 104px;
+  height: 104px;
+  flex: 0 0 104px;
+  padding: 0;
+  overflow: hidden;
+  border: 1px solid var(--vscode-input-border, var(--vscode-panel-border));
+  border-radius: 12px;
+  color: #fff;
+  background: var(--vscode-editorWidget-background);
+}
+
+.history-attachment img { width: 100%; height: 100%; object-fit: cover; }
+.history-attachment span {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  padding: 16px 8px 7px;
+  overflow: hidden;
+  background: linear-gradient(transparent, rgba(0, 0, 0, 0.72));
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .message-heading {
   display: flex;
   min-height: 1.5em;

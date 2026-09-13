@@ -176,9 +176,17 @@ raise SystemExit(2)
 `);
   const client = new AgentFactoryClient(script, root);
   assert.deepEqual(await client.capabilities(), {
-    submit: { model: true, reasoning: false, fast: false, goal: false },
-    send: { model: false, reasoning: false, fast: false, goal: false }
+    submit: { model: true, reasoning: false, fast: false, goal: false, images: false },
+    send: { model: false, reasoning: false, fast: false, goal: false, images: false }
   });
+  const compatible = new AgentFactoryClient("/unused/exec.py", root);
+  compatible.command = async () => ({
+    kind: "execution-capabilities", schemaVersion: "0.1.0",
+    submit: { model: true, reasoning: false, fast: false, goal: false, images: true },
+    send: { model: false, reasoning: false, fast: false, goal: false, images: true }
+  });
+  assert.equal((await compatible.capabilities()).submit.images, true);
+  assert.equal((await compatible.capabilities()).send.images, true);
   await assert.rejects(client.submit('test', 'test', { reasoningEffort: 'medium', fast: false, goalMode: false }), /추론 수준/);
   await assert.rejects(client.send('test', 'test', { model: 'gpt-6-astra', fast: false, goalMode: false }), /모델 변경/);
   await assert.rejects(client.listSessions(), /specific runtime failure/);
