@@ -30,6 +30,11 @@ test("loop button sends explicit delegation with the draft, actual image referen
   assert.match(sent[0].text, /^오류 수정\n\n작업·검증 루프/);
   assert.match(sent[0].text, /Work → Verification/);
   assert.match(sent[0].text, /실패하면 같은 Work에서 수정한 뒤 재검증/);
+  assert.match(sent[0].text, /Work는 검증 테스트를 실행하지 마세요/);
+  assert.match(sent[0].text, /변경 동작에 직접 관련된 가장 작은 개별 테스트 케이스만 선택·실행/);
+  assert.match(sent[0].text, /전체 테스트를 간접 실행하는 집계 명령·스크립트를 사용하지 마세요/);
+  assert.match(sent[0].text, /전체 테스트는 절대 실행하지 마세요/);
+  assert.match(sent[0].text, /좁은 선택이 불가능하면 범위를 넓히지 말고 한계와 실행하지 않은 검사를 보고/);
   assert.deepEqual(JSON.parse(JSON.stringify(sent[0].attachments[0])), { id: "image-one", name: "input.png", kind: "image", uri: "file:///host/input.png", mediaType: "image/png", size: 32 });
   assert.equal(sent[0].execution.model, "chosen-model");
   assert.equal(context.state.timeline[0].text, "오류 수정");
