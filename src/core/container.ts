@@ -43,6 +43,12 @@ export function createContainer(context: vscode.ExtensionContext): Container {
     }
   );
 
+  context.subscriptions.push(vscode.workspace.onDidChangeConfiguration(event => {
+    if (event.affectsConfiguration("agentFactory.mainChat.statusItems")) {
+      void chatPanels.refreshStatusItems();
+    }
+  }));
+
   return { chatPanels };
 }
 

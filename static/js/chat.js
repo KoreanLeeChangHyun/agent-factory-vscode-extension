@@ -65,7 +65,38 @@
     reasoning: ["", "none", "low", "medium", "high", "xhigh", "max"],
     execution: ["cli-default", "workspace-write", "danger-full-access", "bypass"]
   };
-  const composerStatusItems = new Set(["model", "reasoning", "fast", "goal"]);
+  const defaultStatusItems = ["status", "agents", "project", "branch", "context", "queue"];
+  const statusCatalog = {
+    status: ["실행 상태", "현재 실행·대기·사용자 결정 상태"],
+    agents: ["진행 중인 Agent", "Main의 작업·검증 Agent 수"],
+    project: ["프로젝트", "현재 VS Code 작업 영역 이름"],
+    branch: ["Git 브랜치", "현재 프로젝트 브랜치, 미확인 시 —"],
+    context: ["컨텍스트 요약", "최근 수신한 컨텍스트 잔량과 주간 사용량"],
+    queue: ["대기 메시지", "현재 채팅에서 전송 대기 중인 메시지 수"],
+    agent: ["채팅 이름", "현재 채팅 탭 이름"],
+    role: ["Agent 역할", "Main·작업·검증 역할"],
+    elapsed: ["경과 시간", "현재 실행을 화면에서 관측한 시간, 실행 중에만 표시"],
+    runtime: ["런타임 연결", "현재 런타임 연결 확인 상태"],
+    model: ["선택 모델", "다음 전송에 적용할 선택값, 실제 서버 모델과 다를 수 있음"],
+    reasoning: ["선택 추론 강도", "다음 전송에 적용할 선택값"],
+    fast: ["Fast 설정", "다음 전송의 Fast 선택값, 지원 여부에 따름"],
+    task: ["작업 모드", "Main의 다음 전송에 적용할 작업 모드"],
+    execution: ["실행 권한", "현재 호스트에서 확인한 권한 설정"],
+    contextUsed: ["컨텍스트 사용 토큰", "최근 turn 입력 토큰, 세션 누적 사용량 아님"],
+    contextWindow: ["컨텍스트 기준 토큰", "런타임이 제공한 모델 컨텍스트 기준값"],
+    weekly: ["주간 사용량", "최근 수신한 7일 계정 한도 사용률, 없으면 확인 불가"],
+    agentsTotal: ["누적 Agent 호출", "Main에서 호출된 작업·검증 Agent 수"],
+    goal: ["Goal 상태", "Main의 Goal 설정과 최근 확인한 목표 상태"],
+    goalTokens: ["Goal 사용 토큰", "목표에서 보고한 누적 사용 토큰"],
+    goalTime: ["Goal 사용 시간", "목표에서 보고한 누적 사용 시간"],
+    goalBudget: ["Goal 토큰 예산", "목표에 지정된 토큰 예산, 미제공 시 확인 불가"]
+  };
+  const statusSettings = document.getElementById("status-settings");
+  const statusSettingsButton = document.getElementById("status-settings-button");
+  const statusCatalogList = document.getElementById("status-catalog");
+  const statusAnnouncement = document.getElementById("status-announcement");
+  let statusDragId;
+  let statusRenderPending = false;
   const longPasteThreshold = 8_000;
   let openSettingId;
 
@@ -107,6 +138,7 @@
     sessionsLoading: false,
     childAgents: Array.isArray(saved?.childAgents) ? saved.childAgents : [],
     agentsLoading: false,
+    workUnitsKnown: false,
     workUnits: {
       activeUnits: Number.isInteger(saved?.workUnits?.activeUnits) ? saved.workUnits.activeUnits : 0,
       workActive: Number.isInteger(saved?.workUnits?.workActive) ? saved.workUnits.workActive : 0,
@@ -222,6 +254,7 @@
 
   document.addEventListener("keydown", function (event) {
     if (event.key === "Escape") {
+      if (!statusSettings.hidden) { event.preventDefault(); closeStatusSettings(); return; }
       if (!sessionMenu.hidden) {
         event.preventDefault();
         closeSessionMenu(true);
@@ -364,13 +397,12 @@
           state.runStartedAt = undefined;
           state.runPanelExpanded = false;
         }
-        if (!state.statusItems.length) {
-          state.statusItems = normalizeStatusItems(message.statusItems);
-        }
+        state.statusItems = normalizeStatusItems(message.statusItems);
         updateModeControls();
         if (state.agentId && state.role === "main") vscode.postMessage({ type: "goal.control", action: "get" });
         renderTimeline();
         renderStatusBar();
+        renderStatusCatalog();
         updateRunControls();
         persist();
         break;
@@ -446,6 +478,7 @@
         if (Array.isArray(message.items)) {
           state.statusItems = normalizeStatusItems(message.items);
           renderStatusBar();
+          renderStatusCatalog();
           persist();
         }
         break;
@@ -461,6 +494,12 @@
         if (typeof message.agentId === "string" && message.agentId) {
           state.agentId = message.agentId;
           if (message.reset === true) {
+            state.contextUsedTokens = undefined;
+            state.contextWindowTokens = undefined;
+            state.weeklyUsedPercent = undefined;
+            state.workUnitsKnown = false;
+            nativeGoal = null;
+            goalError = undefined;
             state.pendingDecisionRunId = undefined;
             state.decisionSubmitting = false;
             state.timeline = [];
@@ -484,6 +523,7 @@
         renderSessionList();
         break;
       case "agents.list":
+        state.workUnitsKnown = Array.isArray(message.agents);
         state.agentsLoading = false;
         state.childAgents = Array.isArray(message.agents) ? message.agents.filter(isChildAgent) : [];
         state.workUnits = summarizeChildAgents(state.childAgents);
@@ -498,6 +538,7 @@
         state.pendingDecisionRunId = typeof message.runId === "string" ? message.runId : undefined;
         state.decisionSubmitting = false;
         renderTimeline();
+        renderStatusBar();
         break;
       case "chat.human-decision":
         if (typeof message.text === "string" && message.text) {
@@ -510,6 +551,7 @@
       case "execution.updated":
         state.executionMode = message.mode;
         updateExecutionControl();
+        renderStatusBar();
         break;
       case "chat.assistant":
         if (typeof message.text === "string" && message.text) {
@@ -572,6 +614,7 @@
         }
         break;
       case "workUnits.summary":
+        state.workUnitsKnown = true;
         state.workUnits = {
           activeUnits: safeCount(message.activeUnits),
           workActive: safeCount(message.workActive),
@@ -1616,6 +1659,12 @@
     runStatusLabel.textContent = state.runProgress || "작업 중";
     runStatusLabel.title = state.runProgress || "작업 중";
     runElapsed.textContent = formatElapsed(elapsed);
+    const elapsedItem = statusBar.querySelector('[data-item-id="elapsed"]');
+    if (elapsedItem) {
+      elapsedItem.textContent = statusLabel("elapsed");
+      elapsedItem.setAttribute("aria-label", elapsedItem.textContent + " · Alt+왼쪽/오른쪽으로 이동");
+    }
+    refreshStatusPreview();
     if (!elapsedTimerId) {
       elapsedTimerId = window.setInterval(renderRunStatus, 1000);
     }
@@ -1944,14 +1993,10 @@
   }
 
   function renderStatusBar() {
+    if (statusDragId) { statusRenderPending = true; return; }
+    const focusedId = statusBar.contains(document.activeElement) ? document.activeElement.dataset.itemId : undefined;
     statusBar.replaceChildren();
     for (const itemId of state.statusItems) {
-      if (itemId === "agents" && state.role !== "main") {
-        continue;
-      }
-      if (itemId === "status") {
-        continue;
-      }
       const item = document.createElement("span");
       item.className = "status-item";
       if (itemId === "runtime" && !state.runtimeAvailable) {
@@ -1961,10 +2006,12 @@
       item.tabIndex = 0;
       item.dataset.itemId = itemId;
       item.textContent = statusLabel(itemId);
-      if (itemId === "agents") {
+      item.title = statusCatalog[itemId][1];
+      item.setAttribute("aria-label", statusCatalog[itemId][0] + ": " + item.textContent + " · Alt+왼쪽/오른쪽으로 이동");
+      if (itemId === "agents" && state.role === "main") {
         item.classList.add("work-unit-activity");
         item.dataset.active = String(state.workUnits.activeUnits > 0);
-        item.title = "현재 진행 중인 Agent 작업 " + state.workUnits.activeUnits + " · 누적 호출 " + state.workUnits.totalCalled;
+        item.title = state.workUnitsKnown ? "현재 진행 중인 Agent 작업 " + state.workUnits.activeUnits + " · 누적 호출 " + state.workUnits.totalCalled : "Agent 현황 확인 불가 · 클릭하여 새로고침";
         item.setAttribute("role", "button");
         item.setAttribute("aria-haspopup", "listbox");
         item.setAttribute("aria-expanded", String(!agentsMenu.hidden));
@@ -1975,34 +2022,35 @@
             openAgentsMenu();
           }
         });
-      } else if (itemId === "context" && state.contextUsedTokens !== undefined && state.contextWindowTokens !== undefined) {
+      } else if (itemId === "context" && state.contextUsedTokens !== undefined && state.contextWindowTokens > 0) {
         renderContextStatus(item);
         item.title = "최근 turn 기준 사용 " + state.contextUsedTokens.toLocaleString("ko-KR") +
           " / 자동 컴팩트 기준 " + state.contextWindowTokens.toLocaleString("ko-KR") + " tokens · " +
           (state.weeklyUsedPercent === undefined ? "주간 계정 사용량 확인 불가" : "주간 계정 사용 " + formatPercent(state.weeklyUsedPercent));
       }
-      item.addEventListener("dragstart", function (event) {
-        item.classList.add("dragging");
-        event.dataTransfer?.setData("text/status-item", itemId);
-      });
-      item.addEventListener("dragend", function () {
-        item.classList.remove("dragging");
-      });
-      item.addEventListener("dragover", function (event) {
-        if (event.dataTransfer?.types.includes("text/status-item")) {
+      if ((itemId === "agents" && state.role === "main") || (itemId === "runtime" && !state.runtimeAvailable)) {
+        const indicator = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+        indicator.setAttribute("viewBox", "0 0 8 8");
+        indicator.setAttribute("aria-hidden", "true");
+        indicator.setAttribute("focusable", "false");
+        indicator.classList.add("status-indicator");
+        const circle = document.createElementNS("http://www.w3.org/2000/svg", "circle");
+        circle.setAttribute("cx", "4"); circle.setAttribute("cy", "4"); circle.setAttribute("r", "3");
+        circle.setAttribute("fill", "currentColor");
+        indicator.append(circle);
+        item.prepend(indicator);
+      }
+      bindStatusDrag(item, itemId, false);
+      item.addEventListener("keydown", function (event) {
+        if (event.altKey && ["ArrowLeft", "ArrowRight"].includes(event.key)) {
           event.preventDefault();
+          moveStatus(itemId, event.key === "ArrowLeft" ? -1 : 1);
         }
-      });
-      item.addEventListener("drop", function (event) {
-        const sourceId = event.dataTransfer?.getData("text/status-item");
-        if (!sourceId || sourceId === itemId) {
-          return;
-        }
-        event.preventDefault();
-        reorderStatus(sourceId, itemId);
       });
       statusBar.append(item);
     }
+    if (focusedId) statusBar.querySelector('[data-item-id="' + focusedId + '"]')?.focus();
+    refreshStatusPreview();
   }
 
   function openAgentsMenu() {
@@ -2097,31 +2145,186 @@
     return labels[status] || status;
   }
 
-  function reorderStatus(sourceId, targetId) {
-    const items = state.statusItems.slice();
-    const sourceIndex = items.indexOf(sourceId);
-    const targetIndex = items.indexOf(targetId);
-    if (sourceIndex < 0 || targetIndex < 0) {
-      return;
-    }
-    items.splice(sourceIndex, 1);
-    items.splice(targetIndex, 0, sourceId);
-    state.statusItems = items;
+  function setStatusItems(items, announcement) {
+    state.statusItems = normalizeStatusItems(items);
     renderStatusBar();
+    renderStatusCatalog();
     persist();
-    vscode.postMessage({ type: "status.reorder", items });
+    statusAnnouncement.textContent = announcement || "표시할 정보를 변경하였습니다.";
+    vscode.postMessage({ type: "status.reorder", items: state.statusItems });
   }
 
+  function reorderStatus(sourceId, targetId, after = false) {
+    const items = state.statusItems.slice();
+    if (sourceId === targetId || !items.includes(sourceId) || !items.includes(targetId)) return;
+    items.splice(items.indexOf(sourceId), 1);
+    items.splice(items.indexOf(targetId) + (after ? 1 : 0), 0, sourceId);
+    setStatusItems(items, statusCatalog[sourceId][0] + " 위치를 변경하였습니다.");
+  }
+
+  function moveStatus(itemId, offset) {
+    const index = state.statusItems.indexOf(itemId);
+    const target = state.statusItems[index + offset];
+    if (index >= 0 && target) reorderStatus(itemId, target, offset > 0);
+  }
+
+  function clearStatusDropTargets() {
+    for (const element of document.querySelectorAll(".status-drop-before, .status-drop-after")) {
+      element.classList.remove("status-drop-before", "status-drop-after");
+    }
+  }
+
+  function bindStatusDrag(element, itemId, vertical) {
+    element.draggable = true;
+    element.addEventListener("dragstart", function (event) {
+      if (!state.statusItems.includes(itemId)) { event.preventDefault(); return; }
+      statusDragId = itemId;
+      event.stopPropagation();
+      event.dataTransfer?.setData("text/status-item", itemId);
+      if (event.dataTransfer) event.dataTransfer.effectAllowed = "move";
+      element.classList.add("dragging");
+    });
+    element.addEventListener("dragend", function () {
+      statusDragId = undefined;
+      element.classList.remove("dragging");
+      clearStatusDropTargets();
+      if (statusRenderPending) { statusRenderPending = false; renderStatusBar(); renderStatusCatalog(); }
+    });
+    function isAfter(event) {
+      const rect = element.getBoundingClientRect();
+      return vertical ? event.clientY > rect.top + rect.height / 2 : event.clientX > rect.left + rect.width / 2;
+    }
+    element.addEventListener("dragover", function (event) {
+      if (!statusDragId || statusDragId === itemId || !state.statusItems.includes(itemId)) return;
+      event.preventDefault();
+      event.stopPropagation();
+      if (event.dataTransfer) event.dataTransfer.dropEffect = "move";
+      clearStatusDropTargets();
+      element.classList.add(isAfter(event) ? "status-drop-after" : "status-drop-before");
+    });
+    element.addEventListener("dragleave", function (event) {
+      if (!element.contains(event.relatedTarget)) element.classList.remove("status-drop-before", "status-drop-after");
+    });
+    element.addEventListener("drop", function (event) {
+      const sourceId = statusDragId;
+      if (!sourceId || event.dataTransfer?.getData("text/status-item") !== sourceId) return;
+      event.preventDefault();
+      event.stopPropagation();
+      statusDragId = undefined;
+      statusRenderPending = false;
+      clearStatusDropTargets();
+      reorderStatus(sourceId, itemId, isAfter(event));
+    });
+  }
+
+  function renderStatusCatalog() {
+    if (statusDragId) { statusRenderPending = true; return; }
+    if (statusSettings.hidden) return;
+    const focusKey = statusCatalogList.contains(document.activeElement) ? document.activeElement.dataset.focusKey : undefined;
+    statusCatalogList.replaceChildren();
+    const ids = [...state.statusItems, ...Object.keys(statusCatalog).filter(id => !state.statusItems.includes(id))];
+    for (const id of ids) {
+      const selected = state.statusItems.includes(id);
+      const row = document.createElement("div");
+      row.className = "status-catalog-row";
+      row.dataset.itemId = id;
+      const label = document.createElement("label");
+      const checkbox = document.createElement("input");
+      checkbox.type = "checkbox";
+      checkbox.checked = selected;
+      checkbox.dataset.focusKey = id + "-select";
+      checkbox.addEventListener("change", function () {
+        setStatusItems(checkbox.checked ? [...state.statusItems, id] : state.statusItems.filter(item => item !== id));
+      });
+      const name = document.createElement("span");
+      name.textContent = statusCatalog[id][0];
+      label.append(checkbox, name);
+      const description = document.createElement("small");
+      description.textContent = statusCatalog[id][1];
+      const preview = document.createElement("span");
+      preview.className = "status-preview";
+      preview.dataset.previewId = id;
+      preview.textContent = statusLabel(id);
+      const actions = document.createElement("div");
+      actions.className = "status-order-actions";
+      for (const [offset, title] of [[-1, "앞으로"], [1, "뒤로"]]) {
+        const button = document.createElement("button");
+        button.type = "button";
+        button.textContent = title;
+        button.dataset.focusKey = id + "-" + offset;
+        button.setAttribute("aria-label", statusCatalog[id][0] + " " + title + " 이동");
+        const index = state.statusItems.indexOf(id);
+        button.disabled = !selected || index + offset < 0 || index + offset >= state.statusItems.length;
+        button.addEventListener("click", function () { moveStatus(id, offset); });
+        actions.append(button);
+      }
+      row.append(label, actions, description, preview);
+      if (selected) bindStatusDrag(row, id, true);
+      statusCatalogList.append(row);
+    }
+    if (focusKey) {
+      const target = statusCatalogList.querySelector('[data-focus-key="' + focusKey + '"]');
+      (target?.disabled ? target.closest(".status-catalog-row").querySelector("input") : target)?.focus();
+    }
+  }
+
+  function refreshStatusPreview() {
+    for (const preview of statusCatalogList.querySelectorAll("[data-preview-id]")) {
+      preview.textContent = statusLabel(preview.dataset.previewId);
+    }
+  }
+
+  function closeStatusSettings() {
+    statusSettings.hidden = true;
+    statusSettingsButton.setAttribute("aria-expanded", "false");
+    statusSettingsButton.focus();
+  }
+
+  statusSettingsButton.addEventListener("click", function () {
+    if (!statusSettings.hidden) { closeStatusSettings(); return; }
+    statusSettings.hidden = false;
+    statusSettingsButton.setAttribute("aria-expanded", "true");
+    renderStatusCatalog();
+    statusCatalogList.querySelector("input")?.focus();
+  });
+  document.getElementById("status-settings-close").addEventListener("click", closeStatusSettings);
+  document.getElementById("status-reset").addEventListener("click", function () {
+    setStatusItems(defaultStatusItems, "기본 표시 항목과 순서로 되돌렸습니다.");
+  });
+  statusSettings.addEventListener("keydown", function (event) {
+    if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); closeStatusSettings(); }
+  });
+
   function statusLabel(itemId) {
+    const main = state.role === "main";
+    const count = value => safeCountOrUndefined(value) === undefined ? "확인 불가" : value.toLocaleString("ko-KR");
+    const goalLabels = { active: "진행 중", paused: "일시 정지", blocked: "입력 필요", usageLimited: "사용량 한도", budgetLimited: "목표 예산 한도", complete: "완료" };
+    const executionLabels = { "cli-default": "CLI 기본값", "workspace-write": "작업 영역 쓰기", "danger-full-access": "전체 접근", bypass: "전체 접근·승인 생략", "read-only": "읽기 전용" };
+    const supported = currentCapabilities();
     const labels = {
       agent: state.title,
-      agents: "작업 " + state.workUnits.workActive + " · 검증 " + state.workUnits.verificationActive,
+      status: state.pendingDecisionRunId ? "사용자 결정 필요" : state.running ? "실행 중" : state.runtimeAvailable ? "대기 중" : "연결 확인 불가",
+      role: { main: "Main", work: "작업 Agent", verification: "검증 Agent" }[state.role],
+      agents: main ? state.workUnitsKnown ? "작업 " + state.workUnits.workActive + " · 검증 " + state.workUnits.verificationActive : "Agent 현황 확인 불가" : "Agent 현황: Main 전용",
+      agentsTotal: main ? "누적 Agent " + (state.workUnitsKnown ? count(state.workUnits.totalCalled) : "확인 불가") : "누적 Agent: Main 전용",
       project: state.projectName || "Project —",
       branch: "Branch " + (state.branch || "—"),
       context: contextStatusLabel(),
-      elapsed: "00:00",
+      contextUsed: "최근 입력 " + count(state.contextUsedTokens) + " tokens",
+      contextWindow: "컨텍스트 기준 " + (state.contextWindowTokens > 0 ? count(state.contextWindowTokens) : "확인 불가") + " tokens",
+      weekly: "주간 " + (state.weeklyUsedPercent === undefined ? "확인 불가" : formatPercent(state.weeklyUsedPercent) + " 사용"),
+      elapsed: state.running && state.runStartedAt ? "경과 " + formatElapsed(Math.max(0, Date.now() - state.runStartedAt)) : "경과 —",
       queue: "Queue " + state.queueCount,
-      runtime: state.runtimeAvailable ? "Runtime 연결됨" : "Runtime 미연결"
+      runtime: state.runtimeAvailable ? "Runtime 연결됨" : "Runtime 미연결",
+      model: "선택 모델 " + (supported.model ? state.model || "기본값" : "지원 확인 불가"),
+      reasoning: "선택 추론 " + (supported.reasoning ? state.reasoning || "기본값" : "지원 확인 불가"),
+      fast: "Fast " + (supported.fast ? state.fastMode ? "켜짐" : "꺼짐" : "지원 확인 불가"),
+      task: main ? "다음 작업 " + taskModeNames[state.taskMode] : "작업 모드: Main 전용",
+      execution: "권한 " + (executionLabels[state.executionMode] || "확인 불가"),
+      goal: !main ? "Goal: Main 전용" : goalError ? "Goal 확인 불가" : nativeGoal ? "Goal " + (goalLabels[nativeGoal.status] || "확인 불가") : "Goal " + (state.goalMode ? "켜짐·목표 미확인" : "꺼짐"),
+      goalTokens: "Goal " + (main && !goalError ? count(nativeGoal?.tokensUsed) : "확인 불가") + " tokens",
+      goalBudget: "Goal 예산 " + (main && !goalError ? count(nativeGoal?.tokenBudget) : "확인 불가") + " tokens",
+      goalTime: "Goal 시간 " + (main && !goalError && safeCountOrUndefined(nativeGoal?.timeUsedSeconds) !== undefined ? formatElapsed(nativeGoal.timeUsedSeconds * 1000) : "확인 불가")
     };
     return labels[itemId] || itemId;
   }
@@ -2172,8 +2375,9 @@
   function updateModeControls() {
     updateExecutionControl();
     workLoopButton.parentElement.hidden = state.role !== "main";
-    workLoopButton.textContent = taskModeNames[state.taskMode];
-    workLoopButton.title = "다음 전송에 적용할 작업 모드 선택";
+    workLoopButton.replaceChildren(createTaskModeIcon(state.taskMode));
+    workLoopButton.title = "작업 모드: " + taskModeNames[state.taskMode] + " · 다음 전송에 적용할 모드 선택";
+    workLoopButton.setAttribute("aria-label", workLoopButton.title);
     const supported = currentCapabilities();
     modelButton.parentElement.hidden = supported.model !== true;
     reasoningButton.parentElement.hidden = supported.reasoning !== true;
@@ -2189,6 +2393,7 @@
     modelLabel.textContent = state.model || "Default";
     reasoningLabel.textContent = state.reasoning || "Default";
     renderGoal();
+    renderStatusBar();
   }
 
   function renderGoal() {
@@ -2245,7 +2450,11 @@
       check.append(checkPath);
       const label = document.createElement("span");
       label.textContent = setting === "task" ? taskModeNames[value] : setting === "execution" ? executionModeName(value) : value || "Default";
-      option.append(check, label);
+      if (setting === "task") {
+        option.append(createTaskModeIcon(value), label, check);
+      } else {
+        option.append(check, label);
+      }
       option.addEventListener("click", function () {
         if (setting === "task") {
           state.taskMode = value;
@@ -2266,6 +2475,24 @@
       option.addEventListener("keydown", handleSettingMenuKeydown);
       menu.append(option);
     }
+  }
+
+  function createTaskModeIcon(mode) {
+    const paths = {
+      direct: "m15 5 4 4M4 20l5-1L20 8a2.8 2.8 0 0 0-4-4L5 15l-1 5Z",
+      work: "M14 6a5 5 0 0 0-6 6L3 17a2.8 2.8 0 0 0 4 4l5-5a5 5 0 0 0 6-6l-3 3-4-4 3-3Z",
+      "work-verification": "M12 3 4 6v6c0 4 4 7 8 9 4-2 8-5 8-9V6l-8-3Zm-4 9 3 3 5-6",
+      "plan-work-verification": "M14 21H6a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2v6M8 7h6M8 11h4M8 15h2m4 2 3 3 5-6"
+    };
+    const icon = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+    icon.classList.add("task-mode-icon");
+    icon.setAttribute("viewBox", "0 0 24 24");
+    icon.setAttribute("aria-hidden", "true");
+    icon.setAttribute("focusable", "false");
+    const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+    path.setAttribute("d", paths[mode] || paths.work);
+    icon.append(path);
+    return icon;
   }
 
   function handleSettingMenuKeydown(event) {
@@ -2380,17 +2607,9 @@
   }
 
   function normalizeStatusItems(value) {
-    if (!Array.isArray(value)) return [];
-    const items = value.filter(function (item) { return !composerStatusItems.has(item); });
-    if (!items.includes("branch")) {
-      const projectIndex = items.indexOf("project");
-      items.splice(projectIndex < 0 ? 0 : projectIndex + 1, 0, "branch");
-    }
-    if (!items.includes("context")) {
-      const queueIndex = items.indexOf("queue");
-      items.splice(queueIndex < 0 ? items.length : queueIndex, 0, "context");
-    }
-    return items;
+    if (!Array.isArray(value)) return defaultStatusItems.slice();
+    const items = [...new Set(value.filter(item => typeof item === "string" && Object.hasOwn(statusCatalog, item)))];
+    return value.length === 0 || items.length ? items : defaultStatusItems.slice();
   }
 
   function saveComposerSettings() {
@@ -2406,7 +2625,7 @@
   }
 
   function contextStatusLabel() {
-    if (state.contextUsedTokens === undefined || state.contextWindowTokens === undefined) return "컨텍스트 — · 주간 사용량 확인 불가";
+    if (state.contextUsedTokens === undefined || !(state.contextWindowTokens > 0)) return "컨텍스트 — · 주간 사용량 확인 불가";
     const remaining = Math.max(0, state.contextWindowTokens - state.contextUsedTokens);
     const remainingPercent = state.contextWindowTokens > 0
       ? Math.round(remaining / state.contextWindowTokens * 100)
@@ -2438,7 +2657,7 @@
     const fill = document.createElement("span");
     fill.className = "context-token-meter-fill";
     fill.style.width = remainingRatio * 100 + "%";
-    fill.style.backgroundColor = "hsl(" + Math.round(remainingRatio * 120) + " 72% 45%)";
+    fill.style.backgroundColor = remainingRatio < 0.1 ? "var(--vscode-editorError-foreground)" : remainingRatio < 0.3 ? "var(--vscode-editorWarning-foreground)" : "var(--vscode-progressBar-background)";
     meter.append(fill);
     item.replaceChildren(label, meter);
   }

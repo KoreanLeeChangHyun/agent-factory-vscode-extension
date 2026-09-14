@@ -182,20 +182,20 @@ test("status bar includes active Work and Verification counts", function () {
   for (const duplicate of ["model", "reasoning", "fast", "goal"]) {
     assert.ok(!defaults.includes(duplicate));
   }
-  assert.match(chatScript, /composerStatusItems = new Set\(\["model", "reasoning", "fast", "goal"\]\)/);
+  assert.match(template, /id="status-settings-button"/);
   assert.match(chatScript, /case "context\.usage"/);
-  assert.match(chatScript, /if \(!items\.includes\("context"\)\)/);
+  assert.match(template, /id="status-catalog"/);
   assert.match(chatScript, /"컨텍스트 " \+ remainingPercent \+ "% 남음 \("/);
   assert.match(chatScript, /"주간 " \+ formatPercent\(state\.weeklyUsedPercent\) \+ " 사용"/);
   assert.match(chatScript, /"주간 사용량 확인 불가"/);
   assert.match(chatScript, /meter\.setAttribute\("role", "progressbar"\)/);
   assert.match(chatScript, /fill\.style\.width = remainingRatio \* 100 \+ "%"/);
-  assert.match(chatScript, /Math\.round\(remainingRatio \* 120\)/);
+  assert.match(chatScript, /var\(--vscode-progressBar-background\)/);
   assert.match(chatStyles, /\.context-token-meter/);
   assert.match(agentClient, /last_token_usage/);
   assert.match(agentClient, /model_context_window/);
   assert.match(agentClient, /window_minutes !== 7 \* 24 \* 60/);
-  assert.match(chatScript, /agents: "작업 " \+ state\.workUnits\.workActive \+ " · 검증 " \+ state\.workUnits\.verificationActive/);
+  assert.match(chatScript, /agents: main \? state\.workUnitsKnown \? "작업 " \+ state\.workUnits\.workActive \+ " · 검증 " \+ state\.workUnits\.verificationActive/);
   assert.match(template, /id="agents-menu"[^>]*aria-label="호출된 작업자와 검증자"/);
   assert.match(chatScript, /type: "agents\.request"/);
   assert.match(chatScript, /type: "agent\.open", agentId: agent\.agentId/);

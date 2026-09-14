@@ -175,10 +175,25 @@
               "context",
               "elapsed",
               "queue",
-              "runtime"
+              "runtime",
+              "role",
+              "model",
+              "reasoning",
+              "fast",
+              "goal",
+              "task",
+              "execution",
+              "contextUsed",
+              "contextWindow",
+              "weekly",
+              "agentsTotal",
+              "goalTokens",
+              "goalTime",
+              "goalBudget"
             ]
           },
-          "description": "Items displayed in the chat status bar, in display order."
+          "description": "채팅 하단의 상태 표시줄 설정에서 표시할 정보와 순서를 선택합니다. 드래그 또는 이동 버튼으로 정렬하며 빈 배열은 모든 정보를 숨깁니다.",
+          "uniqueItems": true
         },
         "agentFactory.mainChat.runtimeExecPath": {
           "type": "string",

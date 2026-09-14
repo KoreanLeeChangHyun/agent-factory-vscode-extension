@@ -1209,6 +1209,33 @@ button {
   padding: 0 7px;
 }
 
+.task-mode-button {
+  width: 28px;
+  min-width: 28px;
+  justify-content: center;
+  padding: 0;
+}
+
+.task-mode-icon {
+  width: 18px;
+  height: 18px;
+  flex: 0 0 auto;
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 1.8;
+}
+
+.task-mode-button[aria-expanded="true"] {
+  color: var(--vscode-foreground);
+  background: var(--vscode-toolbar-activeBackground, var(--vscode-toolbar-hoverBackground));
+}
+
+#task-mode-menu .setting-check {
+  margin-left: auto;
+}
+
 .setting-menu {
   position: absolute;
   z-index: 12;
@@ -1351,31 +1378,15 @@ button {
   opacity: 0.45;
 }
 
-.status-item.runtime-offline::before {
-  content: "";
-  display: inline-block;
-  width: 6px;
-  height: 6px;
+.status-indicator {
+  width: 8px;
+  height: 8px;
   margin-right: 5px;
-  border-radius: 50%;
-  background: var(--vscode-editorWarning-foreground);
+  color: var(--vscode-descriptionForeground);
 }
 
-.status-item.work-unit-activity::before {
-  content: "";
-  display: inline-block;
-  width: 6px;
-  height: 6px;
-  margin-right: 5px;
-  border-radius: 50%;
-  background: var(--vscode-descriptionForeground);
-  opacity: 0.65;
-}
-
-.status-item.work-unit-activity[data-active="true"]::before {
-  background: var(--af-color-accent);
-  opacity: 1;
-}
+.runtime-offline .status-indicator { color: var(--vscode-editorWarning-foreground); }
+.work-unit-activity[data-active="true"] .status-indicator { color: var(--vscode-progressBar-background); }
 
 .status-item.work-unit-activity {
   cursor: pointer;
@@ -1631,3 +1642,74 @@ button:focus-visible,
 .skill-read-document strong { color: var(--vscode-foreground); }
 .skill-read-document span { color: var(--af-cli-muted); }
 .skill-read-details > summary { cursor: pointer; color: var(--af-cli-muted); }
+
+/* Keep customization reachable when all fields are hidden or the bar overflows. */
+.status-footer {
+  display: flex;
+  flex: 0 0 auto;
+  min-width: 0;
+  margin-top: auto;
+  color: var(--vscode-statusBar-foreground);
+  background: var(--vscode-statusBar-background);
+}
+.status-footer .status-bar { flex: 1; min-width: 0; width: auto; margin-top: 0; }
+.status-settings-button {
+  flex: 0 0 auto;
+  border: 1px solid var(--vscode-statusBar-border, transparent);
+  background: transparent;
+  padding: 0 6px;
+  font-size: 11px;
+  cursor: pointer;
+}
+.status-settings {
+  /* Stay outside the shell's three grid tracks and above its 22px footer. */
+  position: absolute;
+  z-index: 20;
+  bottom: 22px;
+  left: 8px;
+  right: 8px;
+  max-width: 560px;
+  margin-left: auto;
+  min-height: 0;
+  max-height: min(55vh, calc(100% - 38px));
+  overflow: auto;
+  padding: 10px;
+  border: 1px solid var(--vscode-widget-border, var(--vscode-contrastBorder, transparent));
+  color: var(--vscode-editor-foreground);
+  background: var(--vscode-editorWidget-background, var(--vscode-editor-background));
+  font-size: 12px;
+}
+.status-settings[hidden] { display: none; }
+.status-settings-heading { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.status-settings p { color: var(--vscode-descriptionForeground); }
+.status-catalog-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 4px 8px;
+  padding: 7px 3px;
+  border-block: 2px solid transparent;
+}
+.status-catalog-row[draggable="true"] { cursor: grab; }
+.status-catalog-row label { display: flex; align-items: center; gap: 6px; }
+.status-catalog-row input { accent-color: var(--vscode-focusBorder); }
+.status-catalog-row small, .status-preview { grid-column: 1 / -1; overflow-wrap: anywhere; }
+.status-catalog-row small { color: var(--vscode-descriptionForeground); }
+.status-order-actions { display: flex; gap: 4px; }
+.status-settings button {
+  border: 1px solid var(--vscode-button-border, transparent);
+  color: var(--vscode-button-secondaryForeground);
+  background: var(--vscode-button-secondaryBackground);
+  padding: 3px 7px;
+  cursor: pointer;
+}
+.status-settings button:hover { background: var(--vscode-button-secondaryHoverBackground); }
+.status-settings button:disabled { opacity: 0.5; cursor: default; }
+.status-settings :focus-visible, .status-settings-button:focus-visible {
+  outline: 1px solid var(--vscode-focusBorder);
+  outline-offset: -1px;
+}
+.status-item.status-drop-before { box-shadow: inset 3px 0 var(--vscode-focusBorder); }
+.status-item.status-drop-after { box-shadow: inset -3px 0 var(--vscode-focusBorder); }
+.status-catalog-row.status-drop-before { border-top-color: var(--vscode-focusBorder); }
+.status-catalog-row.status-drop-after { border-bottom-color: var(--vscode-focusBorder); }
+.status-catalog-row.dragging { opacity: 0.5; }

@@ -6,7 +6,7 @@ const knownStatusItems = new Set<string>(STATUS_ITEM_IDS);
 export function resolveStatusItems(
   configured: readonly unknown[] | undefined
 ): readonly StatusItemId[] {
-  if (!configured) {
+  if (!Array.isArray(configured)) {
     return DEFAULT_STATUS_ITEMS;
   }
 
@@ -21,5 +21,5 @@ export function resolveStatusItems(
     }
   }
 
-  return resolved.length > 0 ? resolved : DEFAULT_STATUS_ITEMS;
+  return configured.length === 0 || resolved.length > 0 ? resolved : DEFAULT_STATUS_ITEMS;
 }

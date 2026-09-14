@@ -402,3 +402,41 @@ test("stop on an unbound idle panel reconciles state without repeated notices", 
   assert.equal(posted.length, 3);
   for (const message of posted) assert.deepEqual(JSON.parse(JSON.stringify(message)), { type: "run.state", running: false });
 });
+
+test("status customization serializes rapid edits, broadcasts saved empty selection and restores on failure", async () => {
+  let items = ['project'];
+  let fail = false;
+  const writes = [], posted = [[], []];
+  const original = vscode.workspace.getConfiguration;
+  const manager = new module.exports.ChatPanelManager({}, {}, () => items, async () => { throw new Error('not needed'); });
+  const panels = posted.map(messages => ({ webview: { async postMessage(message) { messages.push(message); } } }));
+  manager.panels.set('one', { panel: panels[0] });
+  manager.panels.set('two', { panel: panels[1] });
+  vscode.workspace.getConfiguration = () => ({ async update(key, value, scope) {
+    if (fail) throw new Error('settings read-only');
+    await Promise.resolve();
+    items = value;
+    writes.push({ key, value: [...value], scope });
+    await manager.refreshStatusItems();
+  } });
+  try {
+    await Promise.all([
+      manager.saveStatusItems(panels[0], ['weekly', 'project']),
+      manager.saveStatusItems(panels[0], [])
+    ]);
+    assert.deepEqual(writes.map(write => write.value), [['weekly', 'project'], []]);
+    assert.ok(writes.every(write => write.key === 'statusItems' && write.scope === vscode.ConfigurationTarget.Global));
+    for (const messages of posted) assert.deepEqual(messages.at(-1).items, []);
+    // New/revived views read the same configuration callback, independent of cached UI state.
+    assert.deepEqual(manager.statusItems(), []);
+    fail = true;
+    await manager.saveStatusItems(panels[0], ['runtime']);
+    assert.deepEqual(posted[0].at(-1).items, []);
+    assert.ok(posted[0].some(message => message.type === 'host.notice' && message.level === 'warning'));
+    fail = false;
+    await manager.saveStatusItems(panels[1], ['branch']);
+    for (const messages of posted) assert.deepEqual(messages.at(-1).items, ['branch']);
+  } finally {
+    vscode.workspace.getConfiguration = original;
+  }
+});

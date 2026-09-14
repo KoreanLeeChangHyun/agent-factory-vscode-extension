@@ -737,7 +737,7 @@ export class ChatPanelManager implements vscode.Disposable {
       managed.controller = undefined;
       managed.executionMode = undefined;
       managed.executionModeExplicit = false;
-      managed.state = { ...managed.state, agentId };
+      managed.state = { ...managed.state, agentId, contextUsedTokens: undefined, contextWindowTokens: undefined, weeklyUsedPercent: undefined };
       await this.post(managed.panel, { type: "execution.updated", mode: managed.executionMode });
       if (managed.disposed) return;
       await this.rememberAgent(managed.state);
@@ -791,7 +791,7 @@ export class ChatPanelManager implements vscode.Disposable {
       }
       managed.controller = new ChatSessionController(connection.client, {
         onBound: (agentId) => {
-          managed.state = { ...managed.state, agentId };
+          managed.state = { ...managed.state, agentId, contextUsedTokens: undefined, contextWindowTokens: undefined, weeklyUsedPercent: undefined };
           this.rememberAgent(managed.state);
           void this.post(managed.panel, { type: "execution.updated", mode: managed.executionMode ?? this.defaultExecutionMode() });
           void this.post(managed.panel, { type: "session.bound", agentId });
@@ -1060,17 +1060,36 @@ export class ChatPanelManager implements vscode.Disposable {
     }
   }
 
+  private statusItemsWrite: Promise<void> = Promise.resolve();
+  private pendingStatusWrites = 0;
+
+  public async refreshStatusItems(): Promise<void> {
+    if (this.pendingStatusWrites > 0) return;
+    const items = this.statusItems();
+    await Promise.all([...this.panels.values()].map(managed =>
+      this.post(managed.panel, { type: "status.updated", items })));
+  }
+
   private async saveStatusItems(
     panel: vscode.WebviewPanel,
     items: readonly StatusItemId[]
   ): Promise<void> {
-    const target = vscode.workspace.workspaceFolders?.length
-      ? vscode.ConfigurationTarget.Workspace
-      : vscode.ConfigurationTarget.Global;
-    await vscode.workspace
-      .getConfiguration("agentFactory.mainChat")
-      .update("statusItems", items, target);
-    await this.post(panel, { type: "status.updated", items });
+    // Serialize rapid checkbox/drop changes so the last edit remains authoritative.
+    this.pendingStatusWrites += 1;
+    this.statusItemsWrite = this.statusItemsWrite.then(async () => {
+      const target = vscode.workspace.workspaceFolders?.length
+        ? vscode.ConfigurationTarget.Workspace
+        : vscode.ConfigurationTarget.Global;
+      try {
+        await vscode.workspace.getConfiguration("agentFactory.mainChat").update("statusItems", items, target);
+      } catch {
+        await this.post(panel, { type: "host.notice", level: "warning", text: "상태 표시줄 설정을 저장하지 못했습니다. 저장된 설정을 다시 불러옵니다." });
+      } finally {
+        this.pendingStatusWrites -= 1;
+        await this.refreshStatusItems();
+      }
+    }).catch(() => undefined);
+    await this.statusItemsWrite;
   }
 
   private webviewOptions(): vscode.WebviewPanelOptions & vscode.WebviewOptions {

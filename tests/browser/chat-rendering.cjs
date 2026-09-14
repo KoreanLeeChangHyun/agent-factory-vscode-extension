@@ -3,6 +3,7 @@ const fs = require('node:fs');
 const http = require('node:http');
 const path = require('node:path');
 const { chromium } = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
+const { checkStatusCustomizationLayout } = require('./status-customization.cjs');
 
 const root = path.resolve(__dirname, '../..');
 const longCommand = Array.from({ length: 8 }, (_, index) => 'echo ' + index).join('\n');
@@ -82,6 +83,7 @@ async function main() {
       await page.waitForFunction(() => document.querySelector('.bash-command-text .syntax-code span'));
       await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
     };
+    await checkStatusCustomizationLayout(page);
     const unknown = page.locator('code.language-unknown');
     assert.equal(await unknown.textContent(), '<raw> preserved\n');
     assert.equal(await unknown.locator('span').count(), 0);

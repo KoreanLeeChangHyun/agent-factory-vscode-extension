@@ -79,7 +79,9 @@
                 <div id="execution-mode-menu" class="setting-menu" role="menu" aria-label="실행 권한 선택" hidden></div>
               </div>
               <div class="setting-control">
-                <button id="work-loop-button" class="setting-button" type="button" title="다음 전송에 적용할 작업 모드 선택" aria-label="작업 모드 선택" aria-haspopup="menu" aria-expanded="false" aria-controls="task-mode-menu">작업</button>
+                <button id="work-loop-button" class="setting-button task-mode-button" type="button" title="작업 모드: 작업 · 다음 전송에 적용할 모드 선택" aria-label="작업 모드: 작업 · 다음 전송에 적용할 모드 선택" aria-haspopup="menu" aria-expanded="false" aria-controls="task-mode-menu">
+                  <svg class="task-mode-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M14 6a5 5 0 0 0-6 6L3 17a2.8 2.8 0 0 0 4 4l5-5a5 5 0 0 0 6-6l-3 3-4-4 3-3Z"></path></svg>
+                </button>
                 <div id="task-mode-menu" class="setting-menu" role="menu" aria-label="작업 모드 선택" hidden></div>
               </div>
               <button id="fast-mode-button" class="mode-button" type="button" title="Fast mode off" aria-label="Fast mode off" aria-pressed="false">
@@ -129,7 +131,18 @@
       <div id="agents-menu" class="utility-list-menu agents-menu" role="listbox" aria-label="호출된 작업자와 검증자" hidden>
         <div id="agents-list" class="agents-list"></div>
       </div>
-      <div id="status-bar" class="status-bar" aria-label="Agent 상태"></div>
+      <section id="status-settings" class="status-settings" aria-label="상태 표시줄 설정" hidden>
+        <div class="status-settings-heading"><strong>상태 표시줄 설정</strong><button id="status-settings-close" type="button">닫기</button></div>
+        <p>표시할 정보를 선택하세요. 선택된 항목을 드래그하거나 앞으로·뒤로 버튼으로 순서를 바꾸면 아래에 바로 반영됩니다.</p>
+        <div id="status-catalog" class="status-catalog"></div>
+        <p>현재 미지원: 비용·잔여 크레딧, 한도 초기화 시각·단기 한도, 계정 전체 토큰 통계, 입력·출력·캐시 토큰 세부 통계, 처리 속도. 현재 연결에서 제공되지 않습니다.</p>
+        <button id="status-reset" type="button">기본값으로 재설정</button>
+        <span id="status-announcement" role="status" aria-live="polite"></span>
+      </section>
+      <div class="status-footer">
+        <div id="status-bar" class="status-bar" aria-label="Agent 상태"></div>
+        <button id="status-settings-button" class="status-settings-button" type="button" aria-controls="status-settings" aria-expanded="false">상태 표시줄 설정</button>
+      </div>
     </main>
     <script nonce="{{nonce}}" src="{{markdownScriptUri}}"></script>
     <script nonce="{{nonce}}" src="{{syntaxScriptUri}}"></script>

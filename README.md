@@ -42,6 +42,7 @@ Image bytes are handled by the extension-host bundle that is already loaded for 
 chat tab. Installing a newer VSIX changes files on disk but does not replace that
 running bundle; reload the VS Code extension host before retrying an image attachment.
 - Use native Fast/Goal controls and inspect Work/Verification status.
+- Choose status information and drag to reorder it with **상태 표시줄 설정** in the chat footer; see [status bar customization](docs/status-bar.md).
 - Organize Main Agent chats in the Agent Factory activity-bar sidebar, with workspace-local names and groups.
 - Follow delegated Work and Verification runs in chat cards with live status, session links, and expandable command details.
 
