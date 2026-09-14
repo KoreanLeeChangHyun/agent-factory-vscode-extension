@@ -33,7 +33,7 @@ function harness() {
   }
   const nodes = new Map();
   const context = {
-    document: { createElement: element, getElementById(id) { if (!nodes.has(id)) nodes.set(id, element()); return nodes.get(id); }, querySelectorAll: () => elements },
+    document: { createElement: element, createElementNS: (_namespace, _tag) => element(), getElementById(id) { if (!nodes.has(id)) nodes.set(id, element()); return nodes.get(id); }, querySelectorAll: () => elements },
     state: { statusItems: ["project", "branch", "queue"], title: "Main", role: "main", runtimeAvailable: true, workUnitsKnown: true, workUnits: { workActive: 1, verificationActive: 2, totalCalled: 3 }, queueCount: 0 },
     nativeGoal: null, goalError: undefined, taskModeNames: { work: "작업" },
     currentCapabilities: () => ({ model: true, reasoning: true, fast: true }),

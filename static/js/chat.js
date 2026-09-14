@@ -158,6 +158,7 @@
   let elapsedTimerId;
   let followLatest = true;
   let autoScrollFrame;
+  const messageRenderKeys = new WeakMap();
 
   prompt.value = state.draft;
   renderAll();
@@ -1043,7 +1044,9 @@
   function renderTimeline() {
     cancelAnimationFrame(autoScrollFrame);
     const shouldFollowLatest = state.autoScroll && followLatest;
-    const previousScroll = timeline.scrollTop;
+    const existingMessages = new Map(Array.from(timeline.querySelectorAll(".message"), element => [element.dataset.id, element]));
+    const retainedIds = new Set();
+    let previousMessage = emptyState;
     const displayStates = new Map();
     let focusedControl;
     for (const element of timeline.querySelectorAll(".message")) {
@@ -1056,14 +1059,23 @@
         scroll: Array.from(element.querySelectorAll("pre")).map(function (pre) { return { top: pre.scrollTop, left: pre.scrollLeft }; })
       });
     }
-    timeline.querySelectorAll(".message").forEach(function (element) {
-      element.remove();
-    });
     emptyState.hidden = state.timeline.length > 0;
     const managedByEvent = managedActivities();
     for (const event of state.timeline) {
       const managedGroup = managedByEvent.get(event.id);
       if (managedGroup && managedGroup.events[0] !== event) continue;
+      retainedIds.add(event.id);
+      const existing = existingMessages.get(event.id);
+      const renderKey = JSON.stringify([event, syntaxRevision,
+        event.type === "assistant" ? [state.role, state.childAgents.map(agent => [agent.agentId, agent.role])] : null,
+        event.type === "assistant" && event.runId === state.pendingDecisionRunId && event.runId
+          ? [state.pendingDecisionRunId, state.decisionSubmitting, state.running, state.runtimeAvailable] : null,
+        event.category === "command" ? [managedGroup, state.childAgents, state.role] : null]);
+      if (existing && messageRenderKeys.get(existing) === renderKey) {
+        if (previousMessage.nextElementSibling !== existing) previousMessage.after(existing);
+        previousMessage = existing;
+        continue;
+      }
       const message = document.createElement("article");
       message.className = "message message-" + event.type;
       message.dataset.id = event.id;
@@ -1136,7 +1148,6 @@
       }
       if (event.type === "user" && Array.isArray(event.attachments)) renderHistoryAttachments(content, event.attachments);
       message.append(content);
-      timeline.append(message);
       const display = displayStates.get(event.id);
       if (display) {
         const toggle = message.querySelector(".bash-command-toggle");
@@ -1146,6 +1157,15 @@
           const previous = display.details.find(function (item) { return item.className === details.className; });
           if (previous) details.open = previous.open;
         }
+      }
+      // Build the replacement at its final disclosure height before touching live DOM.
+      // Unchanged messages stay mounted, so OFF needs no scrollTop restoration.
+      if (existing) existing.replaceWith(message);
+      else previousMessage.after(message);
+      if (previousMessage.nextElementSibling !== message) previousMessage.after(message);
+      previousMessage = message;
+      messageRenderKeys.set(message, renderKey);
+      if (display) {
         message.querySelectorAll("pre").forEach(function (pre, index) {
           if (display.scroll[index]) {
             pre.scrollTop = display.scroll[index].top;
@@ -1161,7 +1181,9 @@
         }
       }
     }
-    if (!shouldFollowLatest) timeline.scrollTop = previousScroll;
+    for (const [id, element] of existingMessages) {
+      if (!retainedIds.has(id)) element.remove();
+    }
     updateQuestionControl();
     timeline.setAttribute("aria-busy", String(state.running));
     if (shouldFollowLatest) {
@@ -1179,7 +1201,6 @@
     autoScrollButton.title = label;
     autoScrollButton.setAttribute("aria-label", label);
     autoScrollButton.setAttribute("aria-pressed", String(state.autoScroll));
-    timeline.classList.toggle("auto-scroll-disabled", !state.autoScroll);
   }
 
   function activityKindLabel(category) {
@@ -2272,11 +2293,20 @@
     const focusKey = statusCatalogList.contains(document.activeElement) ? document.activeElement.dataset.focusKey : undefined;
     statusCatalogList.replaceChildren();
     const ids = [...state.statusItems, ...Object.keys(statusCatalog).filter(id => !state.statusItems.includes(id))];
+    let previousGroup;
     for (const id of ids) {
       const selected = state.statusItems.includes(id);
+      if (previousGroup !== selected) {
+        const heading = document.createElement("h3");
+        heading.className = "status-catalog-heading";
+        heading.textContent = selected ? "표시 중 · " + state.statusItems.length : "추가 가능";
+        statusCatalogList.append(heading);
+        previousGroup = selected;
+      }
       const row = document.createElement("div");
       row.className = "status-catalog-row";
       row.dataset.itemId = id;
+      row.dataset.selected = String(selected);
       const label = document.createElement("label");
       const checkbox = document.createElement("input");
       checkbox.type = "checkbox";
@@ -2288,8 +2318,8 @@
       const name = document.createElement("span");
       name.textContent = statusCatalog[id][0];
       label.append(checkbox, name);
-      const description = document.createElement("small");
-      description.textContent = statusCatalog[id][1];
+      label.title = statusCatalog[id][1];
+      checkbox.setAttribute("aria-description", statusCatalog[id][1]);
       const preview = document.createElement("span");
       preview.className = "status-preview";
       preview.dataset.previewId = id;
@@ -2299,7 +2329,15 @@
       for (const [offset, title] of [[-1, "앞으로"], [1, "뒤로"]]) {
         const button = document.createElement("button");
         button.type = "button";
-        button.textContent = title;
+        const icon = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+        icon.setAttribute("viewBox", "0 0 16 16");
+        icon.setAttribute("aria-hidden", "true");
+        icon.setAttribute("focusable", "false");
+        const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+        path.setAttribute("d", offset < 0 ? "m4 10 4-4 4 4" : "m4 6 4 4 4-4");
+        icon.append(path);
+        button.append(icon);
+        button.title = title + " 이동";
         button.dataset.focusKey = id + "-" + offset;
         button.setAttribute("aria-label", statusCatalog[id][0] + " " + title + " 이동");
         const index = state.statusItems.indexOf(id);
@@ -2307,7 +2345,8 @@
         button.addEventListener("click", function () { moveStatus(id, offset); });
         actions.append(button);
       }
-      row.append(label, actions, description, preview);
+      actions.hidden = !selected;
+      row.append(label, actions, preview);
       if (selected) bindStatusDrag(row, id, true);
       statusCatalogList.append(row);
     }

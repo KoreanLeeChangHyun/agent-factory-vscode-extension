@@ -59,6 +59,14 @@ async function checkStatusCustomizationLayout(page) {
       await source.dragTo(target, { targetPosition: { x: 12, y: 4 } });
       await page.waitForFunction(() => window.saved.statusItems[0] === 'agents');
       assert.deepEqual(await page.evaluate(() => window.saved.statusItems.slice(0, 2)), ['agents', 'status']);
+      const down = settings.locator('[data-item-id="agents"] button').last();
+      assert.equal(await down.locator('svg[aria-hidden="true"]').count(), 1);
+      assert.equal((await down.textContent()).trim(), '');
+      await down.focus();
+      await page.keyboard.press('Enter');
+      assert.deepEqual(await page.evaluate(() => window.saved.statusItems.slice(0, 2)), ['status', 'agents']);
+      assert.equal(await settings.locator('[data-item-id="agents"] button').last().evaluate(element => document.activeElement === element), true);
+      assert.ok(await settings.locator('[data-item-id="agents"]').evaluate(element => element.getBoundingClientRect().height < 60), 'Selected rows must stay compact');
       await settings.locator('[data-item-id="goalBudget"] input').scrollIntoViewIfNeeded();
       await settings.locator('[data-item-id="goalBudget"] input').check();
       assert.ok(await page.evaluate(() => window.saved.statusItems.includes('goalBudget')));

@@ -142,11 +142,10 @@
         <div id="agents-list" class="agents-list"></div>
       </div>
       <section id="status-settings" class="status-settings" aria-label="상태 표시줄 설정" hidden>
-        <div class="status-settings-heading"><strong>상태 표시줄 설정</strong><button id="status-settings-close" type="button">닫기</button></div>
-        <p>표시할 정보를 선택하세요. 선택된 항목을 드래그하거나 앞으로·뒤로 버튼으로 순서를 바꾸면 아래에 바로 반영됩니다.</p>
+        <div class="status-settings-heading"><strong>상태 표시줄</strong><button id="status-settings-close" type="button" aria-label="상태 표시줄 설정 닫기" title="닫기"><svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="m4 4 8 8M12 4l-8 8"></path></svg></button></div>
+        <p class="status-settings-hint">선택하여 표시 · 드래그나 화살표로 순서 변경</p>
         <div id="status-catalog" class="status-catalog"></div>
-        <p>현재 미지원: 비용·잔여 크레딧, 한도 초기화 시각·단기 한도, 계정 전체 토큰 통계, 입력·출력·캐시 토큰 세부 통계, 처리 속도. 현재 연결에서 제공되지 않습니다.</p>
-        <button id="status-reset" type="button">기본값으로 재설정</button>
+        <div class="status-settings-footer"><span tabindex="0" title="현재 연결은 비용·잔여 크레딧, 한도 초기화·단기 한도, 계정 전체 토큰, 입력·출력·캐시 세부 통계 및 처리 속도를 제공하지 않습니다.">일부 지표 미지원</span><button id="status-reset" type="button">기본값 복원</button></div>
         <span id="status-announcement" role="status" aria-live="polite"></span>
       </section>
       <div class="status-footer">

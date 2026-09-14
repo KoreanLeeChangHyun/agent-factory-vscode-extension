@@ -4,6 +4,7 @@ const http = require('node:http');
 const path = require('node:path');
 const { chromium } = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
 const { checkStatusCustomizationLayout } = require('./status-customization.cjs');
+const { checkAutoScroll } = require('./auto-scroll.cjs');
 
 const root = path.resolve(__dirname, '../..');
 const longCommand = Array.from({ length: 8 }, (_, index) => 'echo ' + index).join('\n');
@@ -276,7 +277,8 @@ async function main() {
     await emit({ type: 'run.activity', id: 'managed-pending', category: 'command', phase: 'started', text: managedSubmit });
     assert.equal(await page.locator('[data-id="managed-pending"] .managed-agent-status').textContent(), '상태 미확인');
     if (process.argv.includes('--managed-agents-only')) {
-      assert.deepEqual(errors, []);
+      await checkAutoScroll(page);
+    assert.deepEqual(errors, []);
       console.log('Managed agent cards: browser checks passed');
       return;
     }
@@ -437,6 +439,7 @@ async function main() {
     await emit({ type: 'run.state', running: false });
     assert.equal(await page.locator('#run-status').isHidden(), true);
     assert.equal(await page.locator('#run-status-toggle').getAttribute('aria-expanded'), 'false');
+    await checkAutoScroll(page);
     assert.deepEqual(errors, []);
     console.log('Strict CSP, aliases, ANSI, themes/contrast, streaming fences, fallback, live disclosures/focus, and multi-file diff rendering passed.');
   } finally {

@@ -91,7 +91,9 @@ Opening a bound chat reconnects to its existing accepted or active run and follo
 The compact down-arrow toggle beside Send controls automatic scrolling. Its tooltip
 shows **자동 스크롤 ON/OFF**, and its pressed state indicates ON. It defaults to ON.
 Turning it OFF preserves the transcript scroll position during new messages,
-streaming updates, rerenders, and queued-message acceptance. Turning it ON jumps
+streaming updates, rerenders, and queued-message acceptance. Unchanged messages stay
+mounted; OFF does not write the transcript scroll position or switch browser scroll
+anchoring. Changed messages are replaced in place without clearing the transcript. Turning it ON jumps
 to the latest content and resumes following. With ON selected, scrolling upward
 still pauses following until you return near the bottom, as before; submitting or
 accepting a message can resume following. With OFF selected, these events never
