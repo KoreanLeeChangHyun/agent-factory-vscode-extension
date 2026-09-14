@@ -186,6 +186,7 @@
               "contextUsed",
               "contextWindow",
               "weekly",
+              "weeklyRemaining",
               "agentsTotal",
               "goalTokens",
               "goalTime",

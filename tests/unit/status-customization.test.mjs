@@ -111,12 +111,66 @@ test("live labels distinguish absent values, zero usage, selected model and elap
   context.state.running = true; context.state.runStartedAt = Date.now() - 5000;
   assert.doesNotMatch(run('statusLabel("elapsed")'), /—/);
   context.state.contextWindowTokens = 0; context.state.contextUsedTokens = 0;
-  assert.match(run('statusLabel("context")'), /컨텍스트 —/);
+  assert.match(run('statusLabel("context")'), /Content 잔량 확인 불가/);
   context.nativeGoal = { tokensUsed: 0, timeUsedSeconds: 0, status: 'active' };
   assert.equal(run('statusLabel("goalTokens")'), 'Goal 0 tokens');
   assert.match(run('statusLabel("goalBudget")'), /확인 불가/);
   context.state.workUnitsKnown = false;
   assert.match(run('statusLabel("agents")'), /확인 불가/);
+});
+
+test("Content and Weekly used/remaining items are independently selectable and calculated", () => {
+  const { run, context, sent } = harness();
+  run('setStatusItems(["contextUsed", "context", "weekly", "weeklyRemaining"])');
+  assert.deepEqual(sent.at(-1).items, ['contextUsed', 'context', 'weekly', 'weeklyRemaining']);
+  Object.assign(context.state, { contextUsedTokens: 54_264, contextWindowTokens: 258_400, weeklyUsedPercent: 12.5 });
+  assert.equal(run('statusLabel("contextUsed")'), 'Content 사용량 21% (54,264 tokens)');
+  assert.equal(run('statusLabel("context")'), 'Content 잔량 79% (204,136 tokens)');
+  assert.equal(run('statusLabel("weekly")'), 'Weekly 사용량 12.5%');
+  assert.equal(run('statusLabel("weeklyRemaining")'), 'Weekly 잔량 87.5%');
+  context.state.contextUsedTokens = undefined;
+  assert.equal(run('statusLabel("contextUsed")'), 'Content 사용량 확인 불가');
+  assert.equal(run('statusLabel("context")'), 'Content 잔량 확인 불가');
+  assert.equal(run('statusLabel("weeklyRemaining")'), 'Weekly 잔량 87.5%');
+  context.state.weeklyUsedPercent = undefined;
+  assert.equal(run('statusLabel("weeklyRemaining")'), 'Weekly 잔량 확인 불가');
+  context.state.contextUsedTokens = 0;
+  assert.equal(run('statusLabel("contextUsed")'), 'Content 사용량 0% (0 tokens)');
+  assert.equal(run('statusLabel("context")'), 'Content 잔량 100% (258,400 tokens)');
+  for (const used of [0, 100]) {
+    context.state.weeklyUsedPercent = used;
+    assert.equal(run('statusLabel("weekly")'), `Weekly 사용량 ${used}%`);
+    assert.equal(run('statusLabel("weeklyRemaining")'), `Weekly 잔량 ${100 - used}%`);
+  }
+  context.state.contextUsedTokens = 300_000;
+  assert.equal(run('statusLabel("context")'), 'Content 잔량 0% (0 tokens)');
+  assert.equal(run('statusLabel("contextUsed")'), 'Content 사용량 116.1% (300,000 tokens)');
+  for (const window of [0, undefined]) {
+    context.state.contextWindowTokens = window;
+    assert.equal(run('statusLabel("context")'), 'Content 잔량 확인 불가');
+    assert.equal(run('statusLabel("contextUsed")'), 'Content 사용량 300,000 tokens (사용률 확인 불가)');
+    assert.equal(run('statusLabel("contextWindow")'), 'Content 기준 확인 불가 tokens');
+  }
+  context.state.branch = 'feature/status';
+  assert.equal(run('statusLabel("branch")'), 'feature/status');
+  context.state.branch = undefined;
+  assert.equal(run('statusLabel("branch")'), '—');
+});
+
+test("usage updates preserve unknown Content values and independent Weekly data", () => {
+  const { run, context } = harness();
+  run(section('  function safePercentOrUndefined(', '  function normalizeSettingValue('));
+  const update = section('      case "context.usage":', '      case "run.activity":');
+  context.message = { type: 'context.usage', usedTokens: -1, contextWindowTokens: 100, weeklyUsedPercent: 25 };
+  run('switch (message.type) {\n' + update + '\n}');
+  assert.equal(run('statusLabel("context")'), 'Content 잔량 확인 불가');
+  assert.equal(run('statusLabel("contextUsed")'), 'Content 사용량 확인 불가');
+  assert.equal(run('statusLabel("weeklyRemaining")'), 'Weekly 잔량 75%');
+  context.message = { type: 'context.usage', usedTokens: 0, contextWindowTokens: 100 };
+  run('switch (message.type) {\n' + update + '\n}');
+  assert.equal(run('statusLabel("context")'), 'Content 잔량 100% (100 tokens)');
+  assert.equal(run('statusLabel("weekly")'), 'Weekly 사용량 확인 불가');
+  assert.equal(run('statusLabel("weeklyRemaining")'), 'Weekly 잔량 확인 불가');
 });
 
 async function load(relative) {

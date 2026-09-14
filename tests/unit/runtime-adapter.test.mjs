@@ -195,15 +195,33 @@ raise SystemExit(2)
 test("composer shows only supported controls across draft and bound sessions", async function () {
   const script = await readFile(new URL('../../static/js/chat.js', import.meta.url), 'utf8');
   const functions = script.slice(script.indexOf('  function currentCapabilities()'), script.indexOf('  function openSetting(setting)'));
-  const button = () => ({ parentElement: {}, setAttribute() {} });
+  const iconFunction = script.slice(script.indexOf('  function createTaskModeIcon(mode)'), script.indexOf('  function handleSettingMenuKeydown(event)'));
+  const element = (namespaceURI, localName) => ({
+    namespaceURI, localName, children: [], attributes: {},
+    classList: { add() {} },
+    setAttribute(name, value) { this.attributes[name] = value; },
+    append(...children) { this.children.push(...children); },
+    replaceChildren(...children) { this.children = children; }
+  });
+  const button = () => Object.assign(element('http://www.w3.org/1999/xhtml', 'button'), { parentElement: {} });
+  let statusRenders = 0;
   const context = {
+    document: { createElementNS: element },
+    renderStatusBar() { statusRenders++; },
     state: { capabilities: { submit: { model: true }, send: {} }, model: 'gpt-6-astra', reasoning: 'medium', fastMode: true, goalMode: true },
     modelButton: button(), reasoningButton: button(), fastModeButton: button(), goalModeButton: button(), workLoopButton: button(),
     taskModeNames: { work: "작업" },
     executionModeButton: button(), executionModeLabel: {}, modelLabel: {}, reasoningLabel: {}, openSettingId: undefined,
     goalPanel: { querySelectorAll() { return []; } }, goalStatus: {}, nativeGoal: null, goalError: undefined
   };
-  runInNewContext(functions + '\nupdateModeControls();', context);
+  runInNewContext(functions + iconFunction + '\nupdateModeControls();', context);
+  assert.equal(context.workLoopButton.children.length, 1);
+  const icon = context.workLoopButton.children[0];
+  assert.equal(icon.namespaceURI, 'http://www.w3.org/2000/svg');
+  assert.equal(icon.localName, 'svg');
+  assert.equal(icon.children[0].localName, 'path');
+  assert.ok(icon.children[0].attributes.d);
+  assert.equal(statusRenders, 1);
   assert.equal(context.modelButton.parentElement.hidden, false);
   assert.equal(context.reasoningButton.parentElement.hidden, true);
   assert.equal(context.fastModeButton.hidden, true);
@@ -211,6 +229,9 @@ test("composer shows only supported controls across draft and bound sessions", a
   context.state.agentId = 'bound-session';
   runInNewContext('updateModeControls();', context);
   assert.equal(context.modelButton.parentElement.hidden, true);
+  assert.equal(context.workLoopButton.children.length, 1);
+  assert.notEqual(context.workLoopButton.children[0], icon);
+  assert.equal(statusRenders, 2);
   assert.equal(context.state.model, 'gpt-6-astra');
   assert.equal(context.state.reasoning, 'medium');
 });
@@ -282,7 +303,7 @@ test("webview persistence carries weekly usage through chat state restoration", 
   assert.equal(restoreChatState(serialized).weeklyUsedPercent, 12.5);
 });
 
-test("context footer distinguishes remaining context from used weekly account quota", async function () {
+test("Content remaining is independent of Weekly availability", async function () {
   const script = await readFile(new URL("../../static/js/chat.js", import.meta.url), "utf8");
   const functions = script.slice(
     script.indexOf("  function contextStatusLabel()"),
@@ -293,12 +314,12 @@ test("context footer distinguishes remaining context from used weekly account qu
   };
   assert.equal(
     runInNewContext(functions + "\ncontextStatusLabel();", context),
-    "컨텍스트 79% 남음 (204,136 tokens) · 주간 12.5% 사용"
+    "Content 잔량 79% (204,136 tokens)"
   );
   context.state.weeklyUsedPercent = undefined;
   assert.equal(
     runInNewContext("contextStatusLabel();", context),
-    "컨텍스트 79% 남음 (204,136 tokens) · 주간 사용량 확인 불가"
+    "Content 잔량 79% (204,136 tokens)"
   );
 });
 
@@ -756,14 +777,15 @@ test("Goal control serializes reopen requests before runtime acceptance", async 
   const first = controller.controlGoal("reopen");
   await new Promise(resolve => setImmediate(resolve));
   await controller.controlGoal("reopen");
-  await controller.send("racing request", [], {});
+  const queued = controller.send("racing request", [], {});
+  assert.equal(controller.queueLength, 1);
   assert.deepEqual(calls, [["main-exact", "reopen"]]);
   assert.deepEqual(errors, [
-    "이전 Goal 제어 요청이 처리 중입니다.",
-    "이전 Goal 제어 요청이 처리 중입니다. 완료된 뒤 다시 보내세요."
+    "이전 Goal 제어 요청이 처리 중입니다."
   ]);
   releaseGoal({ goal: null });
   await first;
+  await queued;
 });
 
 test("cancellation during Goal reopen acceptance targets the accepted run once", async function () {
@@ -1151,7 +1173,7 @@ test("reconnect with no active run hands racing input to the FIFO queue exactly 
   assert.equal(controller.queueLength, 0);
 });
 
-test("reconnect discovery failure still drains input queued during discovery", async () => {
+test("reconnect discovery failure preserves input until a successful reconnect", async () => {
   const { ChatSessionController } = await importTypeScript("src/modules/chat/session-controller.ts");
   let rejectDiscovery;
   const discovery = new Promise((_resolve, reject) => { rejectDiscovery = reject; });
@@ -1172,9 +1194,12 @@ test("reconnect discovery failure still drains input queued during discovery", a
   rejectDiscovery(new Error("discovery failed"));
 
   await assert.rejects(reconnecting, /discovery failed/);
+  assert.deepEqual(sent, []);
+  assert.equal(controller.queueLength, 1);
+  await controller.reconnect();
   await queued;
   assert.deepEqual(sent, ["preserved"]);
-  assert.equal(discoveries, 1);
+  assert.equal(discoveries, 2);
   assert.equal(controller.queueLength, 0);
 });
 

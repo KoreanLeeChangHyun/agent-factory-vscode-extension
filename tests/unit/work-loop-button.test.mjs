@@ -31,9 +31,9 @@ test("mode submission preserves the draft, actual image reference and selected m
   assert.equal(sent[0].execution.taskMode, "work");
   assert.deepEqual(JSON.parse(JSON.stringify(sent[0].attachments[0])), { id: "image-one", name: "input.png", kind: "image", uri: "file:///host/input.png", mediaType: "image/png", size: 32 });
   assert.equal(sent[0].execution.model, "chosen-model");
-  assert.equal(context.state.timeline[0].text, "오류 수정");
-  assert.equal(context.state.timeline[0].attachments[0].previewUri, "vscode-resource://input.png");
-  assert.doesNotMatch(context.state.timeline[0].text, /Work → Verification/);
+  assert.equal(context.state.pendingRequests[0].text, "오류 수정");
+  assert.equal(context.state.pendingRequests[0].attachments[0].previewUri, "vscode-resource://input.png");
+  assert.doesNotMatch(context.state.pendingRequests[0].text, /Work → Verification/);
   assert.equal(context.prompt.value, "");
   run("submit()");
   assert.equal(sent.length, 1);
@@ -45,12 +45,17 @@ test("enabled mode never sends an empty message, even in an existing session", (
   assert.equal(sent.length, 0);
 });
 
-test("running sessions send the draft to the host queue", () => {
-  const { sent, run } = harness({ running: true });
+test("running sessions retain active UI identity and keep submitted drafts outside the transcript", () => {
+  const { context, sent, run } = harness({ running: true, runStartedAt: 17, runProgress: "기존 작업", childAgents: [{ agentId: "work-active" }] });
   run("submit()");
   assert.equal(sent.length, 1);
   assert.equal(sent[0].text, "오류 수정");
   assert.equal(sent[0].execution.taskMode, "work");
+  assert.equal(context.state.timeline.length, 0);
+  assert.equal(context.state.pendingRequests.length, 1);
+  assert.equal(context.state.runStartedAt, 17);
+  assert.equal(context.state.runProgress, "기존 작업");
+  assert.equal(context.state.childAgents[0].agentId, "work-active");
 });
 
 test("sessions without a runtime do not send", () => {
@@ -95,7 +100,8 @@ test("four modes snapshot each queued submission independently", () => {
 test("attachment-only loop requests show attachment names without injected instructions", () => {
   const { context, sent, run } = harness({ attachments: [{ name: "input.txt" }] }, "");
   run("submit()");
-  assert.equal(context.state.timeline[0].text, "첨부: input.txt");
+  assert.equal(context.state.timeline.length, 0);
+  assert.equal(context.state.pendingRequests[0].attachments[0].name, "input.txt");
   assert.equal(sent[0].text, "");
   assert.equal(sent[0].execution.taskMode, "work");
 });

@@ -51,6 +51,7 @@ export class ChatSessionController {
     readonly attachments: readonly AttachmentReference[];
     readonly execution: ExecutionOptions;
     readonly resolve: () => void;
+    readonly onStarted?: () => void;
   }> = [];
 
   public constructor(
@@ -76,12 +77,18 @@ export class ChatSessionController {
   }
 
   public async reconnect(): Promise<boolean> {
-    if (this.disposed || !this.agentId || this.running) return this.running;
+    if (this.disposed || this.running) return this.running;
+    if (!this.agentId) {
+      this.releaseBusyAndDrainQueue();
+      return this.running;
+    }
     this.cancelRequested = false;
     this.busy = true;
     this.events.onRunningChanged(true);
     try {
-      const active = await this.runtime.activeRun?.(this.agentId);
+      const active = this.currentRunId && this.currentRunAgentId
+        ? { runId: this.currentRunId, agentId: this.currentRunAgentId }
+        : await this.runtime.activeRun?.(this.agentId);
       if (this.disposed) return false;
       if (active) {
         this.currentRunId = active.runId;
@@ -94,16 +101,22 @@ export class ChatSessionController {
       this.releaseBusyAndDrainQueue();
       return false;
     } catch (error) {
-      this.releaseBusyAndDrainQueue();
+      this.busy = false;
+      this.events.onRunningChanged(false);
       throw error;
     }
   }
 
   private async followExistingRun(agentId: string, runId: string): Promise<void> {
-    try { await this.pollUntilTerminal(agentId, runId); }
-    catch (error) { if (!this.disposed) this.events.onError(errorMessage(error)); }
-    finally {
+    try {
+      await this.pollUntilTerminal(agentId, runId);
       this.releaseBusyAndDrainQueue();
+    } catch (error) {
+      this.busy = false;
+      if (!this.disposed) {
+        this.events.onError(errorMessage(error));
+        this.events.onRunningChanged(false);
+      }
     }
   }
 
@@ -112,10 +125,10 @@ export class ChatSessionController {
     this.currentRunAgentId = undefined;
     this.cancelRequested = false;
     this.busy = false;
-    const queued = this.queuedSends.shift();
+    const queued = this.pendingDecisionRunId ? undefined : this.queuedSends.shift();
     if (queued) this.events.onQueueChanged?.(this.queuedSends.length);
     if (queued && !this.disposed) {
-      void this.sendAndDrainQueue(queued.text, queued.attachments, queued.execution, false).finally(queued.resolve);
+      void this.sendAndDrainQueue(queued.text, queued.attachments, queued.execution, false, queued.onStarted).finally(queued.resolve);
     } else if (!this.disposed) {
       this.events.onRunningChanged(false);
     } else {
@@ -126,59 +139,95 @@ export class ChatSessionController {
   public async send(
     text: string,
     attachments: readonly AttachmentReference[],
-    execution: ExecutionOptions
+    execution: ExecutionOptions,
+    onStarted?: () => void
   ): Promise<void> {
     if (this.disposed) return;
     execution = { ...execution };
+    attachments = attachments.map(attachment => ({ ...attachment }));
+    if (this.busy || (this.goalControlPending && this.pendingGoalAction === "reopen")) {
+      return new Promise((resolve) => {
+        this.queuedSends.push({ text, attachments, execution, resolve, onStarted });
+        this.events.onQueueChanged?.(this.queuedSends.length);
+      });
+    }
     if (this.goalControlPending) {
       this.events.onError("이전 Goal 제어 요청이 처리 중입니다. 완료된 뒤 다시 보내세요.");
       if (!this.running) this.events.onRunningChanged(false);
       return;
     }
-    if (this.busy) {
-      return new Promise((resolve) => {
-        this.queuedSends.push({ text, attachments, execution, resolve });
+    if ((this.queuedSends.length || this.currentRunId) && !this.pendingDecisionRunId) {
+      const queued = new Promise<void>(resolve => {
+        this.queuedSends.push({ text, attachments, execution, resolve, onStarted });
         this.events.onQueueChanged?.(this.queuedSends.length);
       });
+      await this.reconnect();
+      return queued;
     }
-    await this.sendAndDrainQueue(text, attachments, execution);
+    await this.sendAndDrainQueue(text, attachments, execution, true, onStarted);
   }
 
   private async sendAndDrainQueue(
     text: string,
     attachments: readonly AttachmentReference[],
     execution: ExecutionOptions,
-    checkActiveRun = true
+    checkActiveRun = true,
+    onStarted?: () => void
   ): Promise<void> {
     this.busy = true;
     this.events.onRunningChanged(true);
-    let next: { readonly text: string; readonly attachments: readonly AttachmentReference[]; readonly execution: ExecutionOptions; readonly resolve?: () => void } | undefined = {
-      text, attachments, execution
+    let next: { readonly text: string; readonly attachments: readonly AttachmentReference[]; readonly execution: ExecutionOptions; readonly resolve?: () => void; readonly onStarted?: () => void } | undefined = {
+      text, attachments, execution, onStarted
     };
+    let retainedCompletion: Promise<void> | undefined;
+    let interrupted = false;
     while (next && !this.disposed) {
-      await this.sendOne(next.text, next.attachments, next.execution, checkActiveRun);
+      let started = false;
+      let dispatched = false;
+      try {
+        await this.sendOne(next.text, next.attachments, next.execution, checkActiveRun, () => {
+          started = true;
+          next?.onStarted?.();
+        }, () => { dispatched = true; });
+      } catch (error) {
+        // Discovery/transport errors cannot establish that the active execution ended.
+        interrupted = true;
+        if (!started && !dispatched) {
+          let resolve = next.resolve;
+          if (!resolve) retainedCompletion = new Promise<void>(done => { resolve = done; });
+          this.queuedSends.unshift({ ...next, resolve: resolve! });
+          this.events.onQueueChanged?.(this.queuedSends.length);
+        } else next.resolve?.();
+        this.events.onError(errorMessage(error));
+        break;
+      }
       checkActiveRun = false;
       next.resolve?.();
+      if (this.pendingDecisionRunId) break;
       next = this.queuedSends.shift();
       if (next) this.events.onQueueChanged?.(this.queuedSends.length);
     }
-    for (const queued of this.queuedSends.splice(0)) queued.resolve();
-    this.currentRunId = undefined;
-    this.currentRunAgentId = undefined;
-    this.cancelRequested = false;
+    if (!interrupted) {
+      this.currentRunId = undefined;
+      this.currentRunAgentId = undefined;
+      this.cancelRequested = false;
+    }
     this.busy = false;
     if (!this.disposed) this.events.onRunningChanged(false);
+    await retainedCompletion;
   }
 
   private async sendOne(
     text: string,
     attachments: readonly AttachmentReference[],
     execution: ExecutionOptions,
-    checkActiveRun = true
+    checkActiveRun = true,
+    onStarted?: () => void,
+    onDispatch?: () => void
   ): Promise<void> {
     this.clearDecision();
     this.cancelRequested = false;
-    try {
+    {
       if (this.agentId && checkActiveRun) {
         const active = await this.runtime.activeRun?.(this.agentId);
         if (active) {
@@ -190,9 +239,12 @@ export class ChatSessionController {
           this.currentRunId = undefined;
           this.currentRunAgentId = undefined;
           this.cancelRequested = false;
+          if (this.pendingDecisionRunId) throw new Error("사용자 결정 후 대기 메시지를 이어서 처리합니다.");
         }
       }
+      if (this.disposed) return;
       this.submittedTaskMode = execution.taskMode;
+      onDispatch?.();
       const request = withAttachmentReferences(text, attachments);
       const images = runtimeImages(attachments);
       if (!this.agentId) {
@@ -200,33 +252,30 @@ export class ChatSessionController {
         const accepted = await this.runtime.submit(candidateAgentId, request, execution, images);
         this.agentId = accepted.agentId;
         this.events.onBound(this.agentId);
+        onStarted?.();
         this.currentRunId = accepted.runId;
         this.currentRunAgentId = accepted.agentId;
         await this.flushCancellation();
         await this.pollUntilTerminal(accepted.agentId, accepted.runId);
       } else {
         const accepted = await this.runtime.send(this.agentId, request, execution, images);
+        onStarted?.();
         this.currentRunId = accepted.runId;
         this.currentRunAgentId = accepted.agentId;
         await this.flushCancellation();
         await this.pollUntilTerminal(accepted.agentId, accepted.runId);
       }
-    } catch (error) {
-      this.events.onError(errorMessage(error));
-    } finally {
-      this.currentRunId = undefined;
-      this.currentRunAgentId = undefined;
-      this.cancelRequested = false;
     }
+    this.currentRunId = undefined;
+    this.currentRunAgentId = undefined;
+    this.cancelRequested = false;
   }
 
   public approveDecision(runId: string, execution: ExecutionOptions): boolean {
     if (this.busy || this.goalControlPending || this.pendingDecisionRunId !== runId) return false;
     const text = "바로 위 응답에서 제안한 범위와 조건대로 진행하세요.";
     const taskMode = this.pendingDecisionTaskMode;
-    this.clearDecision();
-    this.events.onHumanDecision?.(text);
-    void this.send(text, [], { ...execution, ...(taskMode ? { taskMode } : {}), actor: "human" });
+    void this.sendAndDrainQueue(text, [], { ...execution, ...(taskMode ? { taskMode } : {}), actor: "human" }, true, () => this.events.onHumanDecision?.(text));
     return true;
   }
 
@@ -282,27 +331,21 @@ export class ChatSessionController {
         this.clearDecision();
         this.busy = true;
         this.events.onRunningChanged(true);
-        try {
-          await this.flushCancellation();
-          await this.pollUntilTerminal(result.accepted.agentId, result.accepted.runId);
-        } finally {
-          this.currentRunId = undefined;
-          this.currentRunAgentId = undefined;
-          this.cancelRequested = false;
-          this.busy = false;
-          if (!this.disposed) this.events.onRunningChanged(false);
-        }
+        await this.flushCancellation();
+        await this.pollUntilTerminal(result.accepted.agentId, result.accepted.runId);
+        this.releaseBusyAndDrainQueue();
       } else if (action === "reopen") {
-        this.cancelRequested = false;
-        if (!this.disposed) this.events.onRunningChanged(this.busy);
+        this.releaseBusyAndDrainQueue();
       }
     } catch (error) {
+      this.busy = false;
+      this.events.onRunningChanged(false);
       this.events.onError(errorMessage(error));
     }
   }
 
   public async cancel(): Promise<void> {
-    if (!this.busy) {
+    if (!this.busy && !this.currentRunId) {
       if (this.goalControlPending && this.pendingGoalAction === "reopen") {
         this.cancelRequested = true;
         this.events.onProgress("Goal 실행 접수 즉시 취소하도록 요청했습니다.");

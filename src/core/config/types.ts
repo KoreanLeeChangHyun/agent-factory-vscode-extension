@@ -18,6 +18,7 @@ export const STATUS_ITEM_IDS = [
   "contextUsed",
   "contextWindow",
   "weekly",
+  "weeklyRemaining",
   "agentsTotal",
   "goalTokens",
   "goalTime",

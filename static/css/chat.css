@@ -1713,3 +1713,28 @@ button:focus-visible,
 .status-catalog-row.status-drop-before { border-top-color: var(--vscode-focusBorder); }
 .status-catalog-row.status-drop-after { border-bottom-color: var(--vscode-focusBorder); }
 .status-catalog-row.dragging { opacity: 0.5; }
+
+#pending-message-queue {
+  max-height: 180px;
+  overflow: auto;
+  padding: 8px 12px;
+  border: 1px solid var(--vscode-widget-border);
+  border-radius: 6px;
+  color: var(--vscode-descriptionForeground);
+  background: var(--vscode-editor-background);
+  font-size: 12px;
+}
+
+#pending-message-queue summary { cursor: pointer; }
+#pending-message-queue p { white-space: pre-wrap; overflow-wrap: anywhere; }
+#pending-message-queue button {
+  margin: 4px 8px 4px 0;
+  padding: 4px 8px;
+  color: var(--vscode-button-secondaryForeground);
+  background: var(--vscode-button-secondaryBackground);
+  border: 0;
+  border-radius: 4px;
+}
+#pending-message-queue button:focus-visible,
+#pending-message-queue summary:focus-visible { outline: 1px solid var(--vscode-focusBorder); }
+#pending-message-queue button:disabled { opacity: 0.5; }

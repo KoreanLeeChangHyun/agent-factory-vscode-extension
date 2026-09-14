@@ -22,6 +22,7 @@ export type ClientMessage =
     }
   | { readonly type: "decision.approve"; readonly runId: string }
   | { readonly type: "goal.control"; readonly action: import("../infrastructure/agent-factory/agent-client").GoalAction }
+  | { readonly type: "queue.resume" }
   | { readonly type: "run.cancel" }
   | { readonly type: "sessions.request" }
   | { readonly type: "models.request" }
@@ -49,6 +50,8 @@ export type ClientMessage =
     };
 
 export type HostMessage =
+  | { readonly type: "chat.rejected"; readonly id: string }
+  | { readonly type: "chat.started"; readonly id: string; readonly text: string; readonly attachments: readonly AttachmentReference[] }
   | { readonly type: "execution.updated"; readonly mode?: import("../infrastructure/agent-factory/agent-client").ExecutionMode | "read-only" }
   | { readonly type: "syntax.theme"; readonly selection: import("../infrastructure/agent-factory/cli-theme").CliTheme }
   | { readonly type: "branch.updated"; readonly branch?: string }
@@ -76,6 +79,7 @@ export type HostMessage =
       readonly contextWindowTokens?: number;
       readonly weeklyUsedPercent?: number;
       readonly queueCount: number;
+      readonly pendingMessageIds?: readonly string[];
     }
   | {
       readonly type: "attachments.add";

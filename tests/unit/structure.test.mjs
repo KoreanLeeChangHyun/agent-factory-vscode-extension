@@ -142,9 +142,9 @@ test("composer uses one SVG send button that becomes the stop control", function
 test("composer submits active-run input to the host queue and retains the empty-composer stop control", function () {
   assert.doesNotMatch(chatScript, /state\.running \|\| !state\.capabilities/);
   assert.match(chatScript, /state\.running && !hasComposerContent\(\)/);
-  assert.match(chatScript, /"메시지를 Queue에 추가"/);
+  assert.match(chatScript, /"메시지를 대기열에 추가"/);
   assert.match(chatScript, /case "queue\.updated"/);
-  assert.match(chatScript, /queue: "Queue " \+ state\.queueCount/);
+  assert.match(chatScript, /queue: "대기 메시지 " \+ Math\.max/);
   assert.match(panelManager, /onQueueChanged: \(count\)/);
   assert.match(panelManager, /managed\.chatSendPreparation = sendPreparation\.then/);
 });
@@ -185,9 +185,6 @@ test("status bar includes active Work and Verification counts", function () {
   assert.match(template, /id="status-settings-button"/);
   assert.match(chatScript, /case "context\.usage"/);
   assert.match(template, /id="status-catalog"/);
-  assert.match(chatScript, /"컨텍스트 " \+ remainingPercent \+ "% 남음 \("/);
-  assert.match(chatScript, /"주간 " \+ formatPercent\(state\.weeklyUsedPercent\) \+ " 사용"/);
-  assert.match(chatScript, /"주간 사용량 확인 불가"/);
   assert.match(chatScript, /meter\.setAttribute\("role", "progressbar"\)/);
   assert.match(chatScript, /fill\.style\.width = remainingRatio \* 100 \+ "%"/);
   assert.match(chatScript, /var\(--vscode-progressBar-background\)/);

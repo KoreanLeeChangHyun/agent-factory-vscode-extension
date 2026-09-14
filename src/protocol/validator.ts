@@ -81,6 +81,7 @@ export function parseClientMessage(value: unknown): ClientMessage | undefined {
       if (typeof value.id !== "string" || !/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(value.id)) return undefined;
       return { type: value.type, id: value.id };
     case "client.ready":
+    case "queue.resume":
     case "run.cancel":
     case "sessions.request":
     case "models.request":

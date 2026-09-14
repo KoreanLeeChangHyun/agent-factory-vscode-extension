@@ -71,7 +71,7 @@
     agents: ["진행 중인 Agent", "Main의 작업·검증 Agent 수"],
     project: ["프로젝트", "현재 VS Code 작업 영역 이름"],
     branch: ["Git 브랜치", "현재 프로젝트 브랜치, 미확인 시 —"],
-    context: ["컨텍스트 요약", "최근 수신한 컨텍스트 잔량과 주간 사용량"],
+    context: ["Content 잔량", "Content 기준 토큰에서 현재 사용 토큰을 뺀 잔량, 기준 미제공 시 확인 불가"],
     queue: ["대기 메시지", "현재 채팅에서 전송 대기 중인 메시지 수"],
     agent: ["채팅 이름", "현재 채팅 탭 이름"],
     role: ["Agent 역할", "Main·작업·검증 역할"],
@@ -82,9 +82,10 @@
     fast: ["Fast 설정", "다음 전송의 Fast 선택값, 지원 여부에 따름"],
     task: ["작업 모드", "Main의 다음 전송에 적용할 작업 모드"],
     execution: ["실행 권한", "현재 호스트에서 확인한 권한 설정"],
-    contextUsed: ["컨텍스트 사용 토큰", "최근 turn 입력 토큰, 세션 누적 사용량 아님"],
-    contextWindow: ["컨텍스트 기준 토큰", "런타임이 제공한 모델 컨텍스트 기준값"],
-    weekly: ["주간 사용량", "최근 수신한 7일 계정 한도 사용률, 없으면 확인 불가"],
+    contextUsed: ["Content 사용량", "현재 Content 사용 토큰과 기준 대비 사용률; 최근 turn 입력 토큰이며 누적 소비량 아님"],
+    contextWindow: ["Content 기준 토큰", "런타임이 제공한 모델 Content 기준값"],
+    weekly: ["Weekly 사용량", "최근 수신한 7일 계정 한도 사용률, 없으면 확인 불가"],
+    weeklyRemaining: ["Weekly 잔량", "100%에서 Weekly 사용률을 뺀 잔량; 절대 토큰 수는 제공되지 않음"],
     agentsTotal: ["누적 Agent 호출", "Main에서 호출된 작업·검증 Agent 수"],
     goal: ["Goal 상태", "Main의 Goal 설정과 최근 확인한 목표 상태"],
     goalTokens: ["Goal 사용 토큰", "목표에서 보고한 누적 사용 토큰"],
@@ -111,6 +112,8 @@
     attachments: Array.isArray(saved?.attachments) ? saved.attachments.filter(function (item) {
       return item && !item.pending && !item.previewUri?.startsWith("blob:") && item.data === undefined;
     }) : [],
+    startedMessageIds: Array.isArray(saved?.startedMessageIds) ? saved.startedMessageIds : [],
+    pendingRequests: Array.isArray(saved?.pendingRequests) ? saved.pendingRequests : [],
     timeline: collapseAdjacentReads(Array.isArray(saved?.timeline) ? saved.timeline : []),
     statusItems: normalizeStatusItems(saved?.statusItems),
     projectName: typeof saved?.projectName === "string" ? saved.projectName : "",
@@ -157,7 +160,7 @@
   vscode.postMessage({ type: "client.ready" });
   const restoreImages = state.attachments.filter(function (item) { return item.kind === "image"; })
     .slice(0, 8).map(function (item) { return { id: item.id, name: item.name, target: "composer" }; });
-  for (const event of state.timeline) {
+  for (const event of [...state.timeline, ...state.pendingRequests]) {
     for (const item of Array.isArray(event.attachments) ? event.attachments : []) {
       if (item.kind === "image" && restoreImages.length < 100) restoreImages.push({ id: item.id, name: item.name, target: "history" });
     }
@@ -391,6 +394,11 @@
         state.contextWindowTokens = safeCountOrUndefined(message.contextWindowTokens);
         state.weeklyUsedPercent = safePercentOrUndefined(message.weeklyUsedPercent);
         state.queueCount = safeCount(message.queueCount);
+        if (Array.isArray(message.pendingMessageIds)) {
+          for (const item of state.pendingRequests || []) {
+            if (!message.pendingMessageIds.includes(item.id)) item.rejected = true;
+          }
+        }
         if (state.running && !state.runStartedAt) {
           state.runStartedAt = Date.now();
         } else if (!state.running) {
@@ -449,7 +457,7 @@
           const composer = message.attachments.filter(function (item) { return item.target === "composer"; });
           if (composer.length) addAttachments(composer.map(function ({ target, ...item }) { return item; }));
           for (const restored of message.attachments.filter(function (item) { return item.target === "history"; })) {
-            for (const event of state.timeline) {
+            for (const event of [...state.timeline, ...state.pendingRequests]) {
               if (!Array.isArray(event.attachments)) continue;
               event.attachments = event.attachments.map(function (item) {
                 if (item.id !== restored.id) return item;
@@ -537,6 +545,7 @@
       case "decision.pending":
         state.pendingDecisionRunId = typeof message.runId === "string" ? message.runId : undefined;
         state.decisionSubmitting = false;
+        renderPendingQueue();
         renderTimeline();
         renderStatusBar();
         break;
@@ -578,7 +587,34 @@
         renderStatusBar();
         persist();
         break;
+      case "chat.rejected": {
+        const pending = (state.pendingRequests || []).find(function (item) { return item.id === message.id; });
+        if (pending) pending.rejected = true;
+        renderPendingQueue();
+        persist();
+        break;
+      }
+      case "chat.started": {
+        const pending = (state.pendingRequests || []).find(function (item) { return item.id === message.id; });
+        state.pendingRequests = (state.pendingRequests || []).filter(function (item) { return item.id !== message.id; });
+        if (!(state.startedMessageIds || []).includes(message.id) && !state.timeline.some(function (item) { return item.type === "user" && item.id === message.id; })) {
+          state.timeline.push({ type: "user", id: message.id,
+            text: message.text || message.attachments.map(function (item) { return "첨부: " + item.name; }).join("\n"),
+            attachments: pending ? pending.attachments : message.attachments });
+          state.pendingDecisionRunId = undefined;
+          state.decisionSubmitting = false;
+          state.childAgents = [];
+          state.workUnits = summarizeChildAgents([]);
+          state.runStartedAt = Date.now();
+          state.runProgress = "Main Agent 실행 중";
+        }
+        state.startedMessageIds = [...new Set([...(state.startedMessageIds || []), message.id])].slice(-400);
+        renderAll();
+        persist();
+        break;
+      }
       case "queue.updated":
+        renderPendingQueue();
         state.queueCount = safeCount(message.count);
         renderStatusBar();
         updateSendButton();
@@ -591,13 +627,11 @@
         }
         break;
       case "context.usage":
-        if (Number.isSafeInteger(message.usedTokens) && Number.isSafeInteger(message.contextWindowTokens)) {
-          state.contextUsedTokens = Math.max(0, message.usedTokens);
-          state.contextWindowTokens = Math.max(0, message.contextWindowTokens);
-          state.weeklyUsedPercent = safePercentOrUndefined(message.weeklyUsedPercent);
-          renderStatusBar();
-          persist();
-        }
+        state.contextUsedTokens = safeCountOrUndefined(message.usedTokens);
+        state.contextWindowTokens = safeCountOrUndefined(message.contextWindowTokens);
+        state.weeklyUsedPercent = safePercentOrUndefined(message.weeklyUsedPercent);
+        renderStatusBar();
+        persist();
         break;
       case "run.activity":
         if (
@@ -660,25 +694,13 @@
       return;
     }
     goalObjective.value = "";
-    state.pendingDecisionRunId = undefined;
-    state.decisionSubmitting = false;
     const submittedAttachments = state.attachments.map(function (attachment) {
       const { pending, ...submitted } = attachment;
       return submitted;
     });
-    state.timeline.push({
-      type: "user",
-      id: message.id,
-      text: userText || state.attachments.map(function (attachment) { return "첨부: " + attachment.name; }).join("\n"),
-      attachments: submittedAttachments
-    });
+    (state.pendingRequests ??= []).push({ ...message, attachments: submittedAttachments });
     state.draft = "";
     state.attachments = [];
-    state.childAgents = [];
-    state.workUnits = summarizeChildAgents([]);
-    state.running = true;
-    state.runProgress = "Main Agent 시작 중";
-    state.runStartedAt = Date.now();
     followLatest = true;
     prompt.value = "";
     renderAll();
@@ -872,6 +894,7 @@
   }
 
   function renderAll() {
+    renderPendingQueue();
     renderTimeline();
     renderAttachments();
     renderStatusBar();
@@ -2024,9 +2047,7 @@
         });
       } else if (itemId === "context" && state.contextUsedTokens !== undefined && state.contextWindowTokens > 0) {
         renderContextStatus(item);
-        item.title = "최근 turn 기준 사용 " + state.contextUsedTokens.toLocaleString("ko-KR") +
-          " / 자동 컴팩트 기준 " + state.contextWindowTokens.toLocaleString("ko-KR") + " tokens · " +
-          (state.weeklyUsedPercent === undefined ? "주간 계정 사용량 확인 불가" : "주간 계정 사용 " + formatPercent(state.weeklyUsedPercent));
+        item.title = statusCatalog.context[1] + " · Content 기준 " + state.contextWindowTokens.toLocaleString("ko-KR") + " tokens";
       }
       if ((itemId === "agents" && state.role === "main") || (itemId === "runtime" && !state.runtimeAvailable)) {
         const indicator = document.createElementNS("http://www.w3.org/2000/svg", "svg");
@@ -2308,13 +2329,14 @@
       agents: main ? state.workUnitsKnown ? "작업 " + state.workUnits.workActive + " · 검증 " + state.workUnits.verificationActive : "Agent 현황 확인 불가" : "Agent 현황: Main 전용",
       agentsTotal: main ? "누적 Agent " + (state.workUnitsKnown ? count(state.workUnits.totalCalled) : "확인 불가") : "누적 Agent: Main 전용",
       project: state.projectName || "Project —",
-      branch: "Branch " + (state.branch || "—"),
+      branch: state.branch || "—",
       context: contextStatusLabel(),
-      contextUsed: "최근 입력 " + count(state.contextUsedTokens) + " tokens",
-      contextWindow: "컨텍스트 기준 " + (state.contextWindowTokens > 0 ? count(state.contextWindowTokens) : "확인 불가") + " tokens",
-      weekly: "주간 " + (state.weeklyUsedPercent === undefined ? "확인 불가" : formatPercent(state.weeklyUsedPercent) + " 사용"),
+      contextUsed: contextUsedStatusLabel(),
+      contextWindow: "Content 기준 " + (state.contextWindowTokens > 0 ? count(state.contextWindowTokens) : "확인 불가") + " tokens",
+      weekly: "Weekly 사용량 " + (state.weeklyUsedPercent === undefined ? "확인 불가" : formatPercent(state.weeklyUsedPercent)),
+      weeklyRemaining: "Weekly 잔량 " + (state.weeklyUsedPercent === undefined ? "확인 불가" : formatPercent(100 - state.weeklyUsedPercent)),
       elapsed: state.running && state.runStartedAt ? "경과 " + formatElapsed(Math.max(0, Date.now() - state.runStartedAt)) : "경과 —",
-      queue: "Queue " + state.queueCount,
+      queue: "대기 메시지 " + Math.max(state.queueCount, (state.pendingRequests || []).length),
       runtime: state.runtimeAvailable ? "Runtime 연결됨" : "Runtime 미연결",
       model: "선택 모델 " + (supported.model ? state.model || "기본값" : "지원 확인 불가"),
       reasoning: "선택 추론 " + (supported.reasoning ? state.reasoning || "기본값" : "지원 확인 불가"),
@@ -2329,16 +2351,68 @@
     return labels[itemId] || itemId;
   }
 
+  function renderPendingQueue() {
+    let queue = document.getElementById("pending-message-queue");
+    if (!queue) {
+      queue = document.createElement("details");
+      queue.id = "pending-message-queue";
+      queue.setAttribute("aria-label", "대기 메시지");
+      prompt.parentElement.before(queue);
+    }
+    queue.replaceChildren();
+    const pending = state.pendingRequests || [];
+    queue.hidden = pending.length === 0;
+    const summary = document.createElement("summary");
+    summary.textContent = "대기 메시지 " + pending.length + " · " + (state.pendingDecisionRunId ? "사용자 결정 후 계속됩니다" : "실행 접수 후 대화에 표시됩니다");
+    queue.append(summary);
+    if (pending.some(function (item) { return !item.rejected; }) && !state.running && !state.pendingDecisionRunId) {
+      const resume = document.createElement("button");
+      resume.type = "button";
+      resume.textContent = "실행 상태 확인 후 대기열 계속";
+      resume.addEventListener("click", function () { vscode.postMessage({ type: "queue.resume" }); });
+      queue.append(resume);
+    }
+    pending.forEach(function (item) {
+      const entry = document.createElement("p");
+      entry.textContent = item.text + (item.attachments.length ? " · " + item.attachments.map(function (attachment) { return attachment.name; }).join(", ") : "");
+      queue.append(entry);
+      if (item.rejected) {
+        const recover = document.createElement("button");
+        recover.type = "button";
+        recover.textContent = "접수 확인 실패 · 입력창으로 복원";
+        recover.disabled = hasComposerContent();
+        recover.addEventListener("click", function () {
+          if (hasComposerContent()) return;
+          state.pendingRequests = state.pendingRequests.filter(function (request) { return request.id !== item.id; });
+          state.draft = item.text;
+          prompt.value = item.text;
+          state.attachments = item.attachments;
+          state.taskMode = item.execution.taskMode || state.taskMode;
+          state.model = item.execution.model;
+          state.reasoning = item.execution.reasoningEffort;
+          state.fastMode = item.execution.fast;
+          state.goalMode = item.execution.goal;
+          goalObjective.value = item.execution.goalObjective || "";
+          renderAll();
+          resizePrompt();
+          persist();
+        });
+        queue.append(recover);
+      }
+    });
+  }
+
   function updateSendButton() {
     sendButton.disabled = !state.runtimeAvailable || !state.capabilities || (!state.running && !hasComposerContent());
   }
 
   function updateRunControls() {
-    const queuesMessage = state.running && hasComposerContent();
+    renderPendingQueue();
+    const queuesMessage = (state.running || (state.pendingRequests || []).length > 0) && hasComposerContent();
     updateExecutionControl();
     sendButton.classList.toggle("is-running", state.running && !queuesMessage);
-    sendButton.setAttribute("aria-label", queuesMessage ? "메시지를 Queue에 추가" : state.running ? "현재 실행 중지" : "메시지 전송");
-    sendButton.title = queuesMessage ? "Queue에 추가 (Enter)" : state.running ? "현재 실행 중지 (Esc)" : "전송 (Enter)";
+    sendButton.setAttribute("aria-label", queuesMessage ? "메시지를 대기열에 추가" : state.running ? "현재 실행 중지" : "메시지 전송");
+    sendButton.title = queuesMessage ? "대기열에 추가 (Enter)" : state.running ? "현재 실행 중지 (Esc)" : "전송 (Enter)";
     sendIcon.hidden = state.running && !queuesMessage;
     stopIcon.hidden = !state.running || queuesMessage;
     updateSessionControl();
@@ -2553,6 +2627,8 @@
 
   function persist() {
     vscode.setState({
+      startedMessageIds: state.startedMessageIds,
+      pendingRequests: state.pendingRequests,
       panelId: state.panelId,
       agentId: state.agentId,
       title: state.title,
@@ -2625,15 +2701,18 @@
   }
 
   function contextStatusLabel() {
-    if (state.contextUsedTokens === undefined || !(state.contextWindowTokens > 0)) return "컨텍스트 — · 주간 사용량 확인 불가";
+    if (state.contextUsedTokens === undefined || !(state.contextWindowTokens > 0)) return "Content 잔량 확인 불가";
     const remaining = Math.max(0, state.contextWindowTokens - state.contextUsedTokens);
-    const remainingPercent = state.contextWindowTokens > 0
-      ? Math.round(remaining / state.contextWindowTokens * 100)
-      : 0;
-    const weekly = state.weeklyUsedPercent === undefined
-      ? "주간 사용량 확인 불가"
-      : "주간 " + formatPercent(state.weeklyUsedPercent) + " 사용";
-    return "컨텍스트 " + remainingPercent + "% 남음 (" + remaining.toLocaleString("ko-KR") + " tokens) · " + weekly;
+    return "Content 잔량 " + formatPercent(remaining / state.contextWindowTokens * 100) +
+      " (" + remaining.toLocaleString("ko-KR") + " tokens)";
+  }
+
+  function contextUsedStatusLabel() {
+    if (state.contextUsedTokens === undefined) return "Content 사용량 확인 불가";
+    const tokens = state.contextUsedTokens.toLocaleString("ko-KR") + " tokens";
+    return "Content 사용량 " + (state.contextWindowTokens > 0
+      ? formatPercent(state.contextUsedTokens / state.contextWindowTokens * 100) + " (" + tokens + ")"
+      : tokens + " (사용률 확인 불가)");
   }
 
   function formatPercent(value) {
@@ -2650,7 +2729,7 @@
     const meter = document.createElement("span");
     meter.className = "context-token-meter";
     meter.setAttribute("role", "progressbar");
-    meter.setAttribute("aria-label", "컨텍스트 토큰 잔량");
+    meter.setAttribute("aria-label", "Content 토큰 잔량");
     meter.setAttribute("aria-valuemin", "0");
     meter.setAttribute("aria-valuemax", String(compactAt));
     meter.setAttribute("aria-valuenow", String(remaining));

@@ -17,13 +17,22 @@
 | `queue` | 전송 대기 메시지 수 | 현재 채팅 큐 이벤트 |
 | `runtime` | 연결 확인 상태 | 기존 연결 결과; 네트워크 지연 측정값 아님 |
 | `elapsed` | 현재 실행 경과 시간 | 웹뷰가 실행을 관측한 시작 시각; 초 단위 갱신, 복원 시 저장 시각 사용, 미실행 시 — |
-| `context` | 컨텍스트 잔량·주간 요약 | 기존 `context.usage`; 기준값 0/미제공 시 잔량을 계산하지 않음 |
-| `contextUsed`, `contextWindow` | 최근 입력 토큰·컨텍스트 기준 | `last_token_usage.input_tokens`, `model_context_window`; 누적 소비량 아님 |
-| `weekly` | 주간 계정 사용률 | `rate_limits`의 7일 창 `used_percent`; 최근 수신값이며 미제공 시 확인 불가 |
+| `context` | Content 잔량 | 기준 − 현재 사용 토큰, 최소 0; 잔량 토큰과 기준 대비 비율; 사용량 미제공 또는 기준 0/미제공 시 확인 불가 |
+| `contextUsed` | Content 사용량 | `last_token_usage.input_tokens`; 현재 Content 사용 토큰과 기준 대비 사용률이며 세션 누적 소비량 아님; 기준이 없어도 수신한 토큰 수는 표시 |
+| `contextWindow` | Content 기준 토큰 | `model_context_window`; 0/미제공 시 확인 불가 |
+| `weekly` | Weekly 사용량 | `rate_limits`의 7일 창 `used_percent`; 최근 수신값이며 미제공 시 확인 불가 |
+| `weeklyRemaining` | Weekly 잔량 | `100 − used_percent`; Weekly 사용률 미제공 시 확인 불가; 절대 토큰 수를 추정하지 않음 |
 | `model`, `reasoning`, `fast` | 선택한 다음 전송 옵션 | 현재 composer 상태와 capability; 서버가 실제 실행한 모델이라는 보장 없음 |
 | `task`, `execution` | 다음 작업 모드·실행 권한 | 기존 작업 모드 및 호스트 권한 값; 작업 모드는 Main 전용 |
 | `goal` | 목표 상태·켜짐 여부 | 기존 Goal 관측 결과; Main 전용 |
 | `goalTokens`, `goalTime`, `goalBudget` | 목표 사용 토큰·시간·예산 | `NativeGoal.tokensUsed`, `timeUsedSeconds`, `tokenBudget`; 미제공·오류 시 확인 불가 |
+
+### 독립 선택과 기존 설정 호환
+
+- Content 사용량·잔량, Weekly 사용량·잔량은 각각 독립적으로 선택하고 정렬합니다. Content 항목에는 Weekly 값을 합치지 않습니다.
+- 기존 `context`는 Content 잔량, `contextUsed`는 Content 사용량, `weekly`는 Weekly 사용량으로 유지합니다. Weekly 잔량만 `weeklyRemaining`으로 추가합니다. 기본 배열은 유지되므로 Weekly 표시는 별도로 선택합니다.
+- 비율은 소수점 최대 한 자리로 표시합니다. Content 사용량이 기준을 초과하면 실제 사용률은 100%를 넘을 수 있으며 잔량은 0으로 제한합니다. 미제공 값은 0으로 대체하지 않습니다.
+- `branch`는 실제 브랜치 이름만 표시합니다. 표시 접두어 `Branch`만 제거하며 Git 기능과 저장된 선택은 유지합니다.
 
 소스 소유자는 `static/js/chat.js`의 카탈로그·렌더러, `src/core/config/`의 설정 정의, `src/protocol/validator.ts`의 메시지 검증, `chat-panel-manager.ts`의 설정 저장·상태 전달입니다. 사용량 근거는 `agent-client.ts`의 `readLatestTokenCount`/`readWeeklyUsedPercent`와 `NativeGoal`입니다. 새 항목을 추가할 때에는 카탈로그, 타입, package 설정 enum을 함께 갱신합니다.
 
@@ -40,7 +49,7 @@ VS Code 설정 저장 범위와 변경 이벤트는 공식 `WorkspaceConfigurati
 Work는 테스트·빌드·검증을 실행하지 않았습니다. Main에서 아래 범위를 확인해 주십시오.
 
 ```sh
-node --test tests/unit/status-customization.test.mjs tests/unit/panel-decision.test.mjs tests/unit/structure.test.mjs tests/unit/work-loop-button.test.mjs
+node --test tests/unit/status-customization.test.mjs tests/unit/runtime-adapter.test.mjs tests/unit/structure.test.mjs
 npm run typecheck
 npm run check:static
 ```

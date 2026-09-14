@@ -36,6 +36,8 @@ interface ManagedPanel {
   readonly imageAttachments: Map<string, number>;
   imageMutation: Promise<void>;
   chatSendPreparation: Promise<void>;
+  pendingMessageIds?: Set<string>;
+  startedMessages?: Extract<HostMessage, { type: "chat.started" }>[];
   controller?: ChatSessionController;
   controllerInitialization?: Promise<void>;
   sessionTransition?: Promise<void>;
@@ -367,8 +369,10 @@ export class ChatPanelManager implements vscode.Disposable {
           contextUsedTokens: managed.state.contextUsedTokens,
           contextWindowTokens: managed.state.contextWindowTokens,
           weeklyUsedPercent: managed.state.weeklyUsedPercent,
+          pendingMessageIds: [...(managed.pendingMessageIds ?? [])],
           queueCount: managed.controller?.queueLength ?? 0
         });
+        for (const started of managed.startedMessages ?? []) await this.post(managed.panel, started);
         if (!connection.available) {
           await this.post(managed.panel, {
             type: "host.notice",
@@ -401,12 +405,21 @@ export class ChatPanelManager implements vscode.Disposable {
         await this.selectExecutionMode(managed, message.mode);
         return;
       case "chat.send": {
+        const previous = managed.startedMessages?.find(item => item.id === message.id);
+        if (previous) { await this.post(managed.panel, previous); return; }
+        if (managed.pendingMessageIds?.has(message.id)) return;
+        (managed.pendingMessageIds ??= new Set()).add(message.id);
+        // Capture permissions before asynchronous attachment preparation or setting changes.
+        const executionMode = managed.executionMode ?? this.defaultExecutionMode();
+        const executionModeExplicit = managed.executionModeExplicit || !managed.state.agentId;
         const sendPreparation = (managed.chatSendPreparation ?? Promise.resolve()).then(() =>
-          this.sendChat(managed, message.text, message.attachments, message.execution));
+          this.sendChat(managed, message.text, message.attachments, message.execution, message.id, executionMode, executionModeExplicit));
         managed.chatSendPreparation = sendPreparation.then(() => undefined, () => undefined);
         try {
           await sendPreparation;
         } catch (error) {
+          managed.pendingMessageIds?.delete(message.id);
+          await this.post(managed.panel, { type: "chat.rejected", id: message.id });
           await this.post(managed.panel, { type: "host.notice", level: "error", text: error instanceof Error ? error.message : String(error) });
           await this.post(managed.panel, { type: "run.state", running: managed.controller?.running === true });
           await this.post(managed.panel, { type: "queue.updated", count: managed.controller?.queueLength ?? 0 });
@@ -438,6 +451,10 @@ export class ChatPanelManager implements vscode.Disposable {
         if ((managed.state.role ?? "main") !== "main") return;
         await this.ensureController(managed);
         void managed.controller?.controlGoal(message.action);
+        return;
+      case "queue.resume":
+        try { await managed.controller?.reconnect(); }
+        catch (error) { await this.post(managed.panel, { type: "host.notice", level: "error", text: String(error) }); }
         return;
       case "run.cancel":
         if (!managed.controller) {
@@ -687,7 +704,7 @@ export class ChatPanelManager implements vscode.Disposable {
     }
     if (managed.controllerInitialization) await managed.controllerInitialization;
     if (managed.disposed) return;
-    if (managed.controller?.running) {
+    if (managed.controller?.running || managed.controller?.queueLength || managed.pendingMessageIds?.size) {
       await this.post(managed.panel, {
         type: "host.notice",
         level: "warning",
@@ -719,7 +736,7 @@ export class ChatPanelManager implements vscode.Disposable {
         await this.post(managed.panel, { type: "sessions.list", sessions });
         return;
       }
-      if (managed.controller?.running) {
+      if (managed.controller?.running || managed.controller?.queueLength || managed.pendingMessageIds?.size) {
         await this.post(managed.panel, {
           type: "host.notice",
           level: "warning",
@@ -734,6 +751,7 @@ export class ChatPanelManager implements vscode.Disposable {
         return;
       }
       managed.controller?.dispose();
+      managed.startedMessages = [];
       managed.controller = undefined;
       managed.executionMode = undefined;
       managed.executionModeExplicit = false;
@@ -842,14 +860,17 @@ export class ChatPanelManager implements vscode.Disposable {
     managed: ManagedPanel,
     text: string,
     attachments: readonly AttachmentReference[],
-    execution: Extract<import("../../protocol/messages").ClientMessage, { type: "chat.send" }>["execution"]
+    execution: Extract<import("../../protocol/messages").ClientMessage, { type: "chat.send" }>["execution"],
+    id: string,
+    executionMode = managed.executionMode ?? this.defaultExecutionMode(),
+    executionModeExplicit = managed.executionModeExplicit
   ): Promise<void> {
     if (managed.sessionTransition) {
       await managed.sessionTransition;
       if (managed.disposed) return;
     }
     await this.ensureController(managed);
-    if (!managed.controller) return;
+    if (!managed.controller) throw new Error("런타임에 연결하지 못했습니다. 대기 메시지를 보존합니다.");
     const preparedAttachments = await Promise.all(attachments.map(async (attachment) => {
       if (attachment.kind !== "image") return attachment;
       const uri = await this.imageAttachmentPath(managed.state.panelId, attachment.id);
@@ -859,8 +880,9 @@ export class ChatPanelManager implements vscode.Disposable {
       const info = await vscode.workspace.fs.stat(uri);
       return { ...attachment, uri: uri.toString(), mediaType, size: info.size, previewUri: undefined };
     }));
+    let started = false;
     void managed.controller.send(text, preparedAttachments, {
-      ...((managed.state.role ?? "main") === "main" && (!managed.state.agentId || managed.executionModeExplicit) ? { executionMode: managed.executionMode ?? this.defaultExecutionMode() } : {}),
+      ...((managed.state.role ?? "main") === "main" && (!managed.state.agentId || executionModeExplicit) ? { executionMode } : {}),
       ...((managed.state.role ?? "main") === "main" ? { taskMode: execution.taskMode ?? "work" } : {}),
       model: execution.model,
       reasoningEffort: execution.reasoningEffort,
@@ -869,7 +891,21 @@ export class ChatPanelManager implements vscode.Disposable {
       goalObjective: execution.goalObjective,
       ...((managed.state.role ?? "main") !== "main" ? { actor: "human" as const } : {}),
       ...(managed.state.verifiedWorkRunId ? { verifiedWorkRunId: managed.state.verifiedWorkRunId } : {})
+    }, () => {
+      started = true;
+      managed.pendingMessageIds?.delete(id);
+      const event: Extract<HostMessage, { type: "chat.started" }> = { type: "chat.started", id, text, attachments };
+      (managed.startedMessages ??= []).push(event);
+      managed.startedMessages = managed.startedMessages.slice(-200);
+      void this.post(managed.panel, event);
+    }).catch(error => {
+      void this.post(managed.panel, { type: "host.notice", level: "error", text: String(error) });
     }).finally(() => {
+      if (!started) {
+        managed.pendingMessageIds?.delete(id);
+        void this.post(managed.panel, { type: "chat.rejected", id });
+        return;
+      }
       for (const item of attachments) {
         if (item.kind === "image") managed.imageAttachments.delete(item.id);
       }
