@@ -92,16 +92,18 @@
       const role = script[1] === "loop" ? "work" : option("--role") || child?.role;
       let runId = option(script[1] === "loop" ? "--loop-id" : "--run-id");
       let observedStatus;
+      let taskMode = option("--task-mode");
       try {
         const data = JSON.parse(output);
         const run = data.run || data;
         const outputId = script[1] === "loop" ? run.loopId : run.runId;
-        if ((!data.agentId || data.agentId === agentId) && (!run.agentId || run.agentId === agentId) && (!runId || outputId === runId)) {
+        if ((!data.agentId || data.agentId === agentId) && (!run.agentId || run.agentId === agentId) && (!run.workAgentId || run.workAgentId === agentId) && (!runId || outputId === runId)) {
           runId = runId || outputId;
           observedStatus = run.status;
+          taskMode = run.taskMode || taskMode;
         }
       } catch { /* Command output remains available as raw evidence. */ }
-      candidates.push({ agentId, role: ["work", "verification"].includes(role) ? role : undefined, runId, observedStatus, action, kind: script[1] });
+      candidates.push({ ...(["direct", "work", "work-verification", "plan-work-verification"].includes(taskMode) ? { taskMode } : {}), agentId, role: ["work", "verification"].includes(role) ? role : undefined, runId, observedStatus, action, kind: script[1] });
     }
     return candidates.length === 1 ? candidates[0] : undefined;
   }

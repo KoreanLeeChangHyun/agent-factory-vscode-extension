@@ -30,12 +30,17 @@ export interface ExecutionCapabilities {
   readonly fast: boolean;
   readonly goal: boolean;
   readonly images?: boolean;
+  readonly taskModes?: readonly TaskMode[];
   readonly diagnostic?: string;
 }
+
+export const TASK_MODES = ["direct", "work", "work-verification", "plan-work-verification"] as const;
+export type TaskMode = typeof TASK_MODES[number];
 
 export type ExecutionMode = "cli-default" | "workspace-write" | "danger-full-access" | "bypass";
 
 export interface ExecutionOptions {
+  readonly taskMode?: TaskMode;
   readonly executionMode?: ExecutionMode;
   readonly model?: string;
   readonly reasoningEffort?: "none" | "low" | "medium" | "high" | "xhigh" | "max";
@@ -68,6 +73,7 @@ export interface RuntimeImageInput {
 }
 
 export interface RunStatus {
+  readonly taskMode?: TaskMode;
   readonly error?: { readonly code: string; readonly message: string };
   readonly goalError?: string;
   readonly status: string;
@@ -198,6 +204,7 @@ export class AgentFactoryClient implements AgentRuntimeClient {
       return {
         ...record,
         images: record.images === true,
+        taskModes: Array.isArray(record.taskModes) ? record.taskModes.filter((mode): mode is TaskMode => TASK_MODES.includes(mode as TaskMode)) : [],
         ...(typeof document.diagnostic === "string" ? { diagnostic: document.diagnostic } : {})
       } as unknown as ExecutionCapabilities;
     };
@@ -220,6 +227,9 @@ export class AgentFactoryClient implements AgentRuntimeClient {
 
   private async checkedExecution(command: "submit" | "send", execution: ExecutionOptions, agentId?: string, hasImages = false): Promise<string[]> {
     const supported = (await this.capabilities(agentId))[command];
+    if (execution.taskMode && !supported.taskModes?.includes(execution.taskMode)) {
+      throw new Error("선택한 작업 모드를 지원하는 Agent Factory 플러그인과 Codex로 업데이트해 주세요.");
+    }
     if (hasImages && supported.images !== true) {
       throw new Error(
         `현재 Agent Factory 런타임의 ${command} 이미지 전송 계약이 호환되지 않습니다. ` +
@@ -334,7 +344,9 @@ export class AgentFactoryClient implements AgentRuntimeClient {
       "--run-id",
       runId
     ]);
-    return { status: readRunStatus(document), ...runDiagnostics(readRecord(document.run, "status run")) };
+    const run = readRecord(document.run, "status run");
+    return { status: readRunStatus(document), ...runDiagnostics(run),
+      ...(TASK_MODES.includes(run.taskMode as TaskMode) ? { taskMode: run.taskMode as TaskMode } : {}) };
   }
 
   public async activeRun(agentId: string): Promise<RunAcceptance | undefined> {
@@ -741,6 +753,7 @@ export function executionPolicyArguments(mode: ExecutionMode = "cli-default"): s
 
 function executionArguments(execution: ExecutionOptions): string[] {
   const arguments_: string[] = [];
+  if (execution.taskMode) arguments_.push("--task-mode", execution.taskMode);
   if (execution.model) arguments_.push("--model", execution.model);
   if (execution.reasoningEffort) arguments_.push("--reasoning-effort", execution.reasoningEffort);
   if (execution.fast !== undefined) arguments_.push(execution.fast ? "--fast" : "--no-fast");

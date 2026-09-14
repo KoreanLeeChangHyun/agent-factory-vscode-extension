@@ -1,3 +1,4 @@
+import { TASK_MODES, type TaskMode } from "../../infrastructure/agent-factory/agent-client";
 import { randomUUID } from "node:crypto";
 
 export interface ChatPanelState {
@@ -11,6 +12,7 @@ export interface ChatPanelState {
   readonly fastMode?: boolean;
   readonly goalMode?: boolean;
   readonly workLoopMode?: boolean;
+  readonly taskMode?: TaskMode;
   readonly contextUsedTokens?: number;
   readonly contextWindowTokens?: number;
   readonly weeklyUsedPercent?: number;
@@ -18,7 +20,7 @@ export interface ChatPanelState {
 
 export type ComposerPreferences = Pick<
   ChatPanelState,
-  "model" | "reasoning" | "fastMode" | "goalMode" | "workLoopMode"
+  "model" | "reasoning" | "fastMode" | "goalMode" | "workLoopMode" | "taskMode"
 >;
 
 export function createDraftChatState(preferences: ComposerPreferences = {}): ChatPanelState {
@@ -50,6 +52,7 @@ export function restoreChatState(
       : preferences.reasoning ? { reasoning: preferences.reasoning } : {}),
     fastMode: typeof value.fastMode === "boolean" ? value.fastMode : preferences.fastMode === true,
     goalMode: typeof value.goalMode === "boolean" ? value.goalMode : preferences.goalMode === true,
+    taskMode: TASK_MODES.includes(value.taskMode as TaskMode) ? value.taskMode as TaskMode : value.workLoopMode === true ? "work-verification" : preferences.taskMode ?? "work",
     workLoopMode: typeof value.workLoopMode === "boolean" ? value.workLoopMode : preferences.workLoopMode === true,
     ...(readCount(value.contextUsedTokens) !== undefined
       ? { contextUsedTokens: readCount(value.contextUsedTokens) }

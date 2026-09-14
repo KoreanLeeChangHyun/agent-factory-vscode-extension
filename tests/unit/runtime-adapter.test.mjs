@@ -176,8 +176,8 @@ raise SystemExit(2)
 `);
   const client = new AgentFactoryClient(script, root);
   assert.deepEqual(await client.capabilities(), {
-    submit: { model: true, reasoning: false, fast: false, goal: false, images: false },
-    send: { model: false, reasoning: false, fast: false, goal: false, images: false }
+    submit: { model: true, reasoning: false, fast: false, goal: false, images: false, taskModes: [] },
+    send: { model: false, reasoning: false, fast: false, goal: false, images: false, taskModes: [] }
   });
   const compatible = new AgentFactoryClient("/unused/exec.py", root);
   compatible.command = async () => ({
@@ -199,6 +199,7 @@ test("composer shows only supported controls across draft and bound sessions", a
   const context = {
     state: { capabilities: { submit: { model: true }, send: {} }, model: 'gpt-6-astra', reasoning: 'medium', fastMode: true, goalMode: true },
     modelButton: button(), reasoningButton: button(), fastModeButton: button(), goalModeButton: button(), workLoopButton: button(),
+    taskModeNames: { work: "작업" },
     executionModeButton: button(), executionModeLabel: {}, modelLabel: {}, reasoningLabel: {}, openSettingId: undefined,
     goalPanel: { querySelectorAll() { return []; } }, goalStatus: {}, nativeGoal: null, goalError: undefined
   };
@@ -235,6 +236,7 @@ test("chat panel restoration preserves composer settings and context usage", asy
     fastMode: true,
     goalMode: true,
     workLoopMode: true,
+    taskMode: "work-verification",
     contextUsedTokens: 39_300,
     contextWindowTokens: 1_050_000,
     weeklyUsedPercent: 12.5
@@ -995,7 +997,7 @@ test("human decision approvals are explicit, once-only and bound to the pending 
     onError(error) { errors.push(error); }
   };
   const controller = new ChatSessionController(runtime, events, undefined, { pollIntervalMs: 0, maxPolls: 1 });
-  await controller.send("task", [], {});
+  await controller.send("task", [], { taskMode: "plan-work-verification" });
   assert.deepEqual(errors, []);
   assert.equal(decisions.at(-1), "proposal-run");
   assert.deepEqual(texts.at(-1), { text: "제안한 범위로 진행할까요?", phase: "final", runId: "proposal-run" });
@@ -1009,6 +1011,7 @@ test("human decision approvals are explicit, once-only and bound to the pending 
   await new Promise(resolve => setImmediate(resolve));
   assert.equal(sent.length, 1);
   assert.equal(sent[0].execution.actor, "human");
+  assert.equal(sent[0].execution.taskMode, "plan-work-verification");
   assert.equal(sent[0].text, human[0]);
   assert.equal(controller.approveDecision("proposal-run", {}), false);
   nextStatus = "needs-human-decision";
@@ -1401,4 +1404,27 @@ test("internal result reads stay hidden while child, mixed and failed reads rema
   const client = new AgentFactoryClient(new URL('../fixtures/fake-exec.py', import.meta.url).pathname, root);
   const { updates } = await client.updates('main-test', 'run-fake', 0);
   assert.deepEqual(updates.filter(update => update.kind === 'activity').map(update => update.id), ['child', 'mixed', 'failed']);
+});
+
+
+test("task mode protocol rejects unknown routes and preserves valid snapshots", async () => {
+  const { parseClientMessage } = await importTypeScript("src/protocol/validator.ts");
+  for (const taskMode of ["direct", "work", "work-verification", "plan-work-verification"]) {
+    const message = { type: "chat.send", id: "message", text: "request", attachments: [], execution: { taskMode, fast: false, goal: false } };
+    assert.equal(parseClientMessage(message).execution.taskMode, taskMode);
+    assert.equal(parseClientMessage({ ...message, execution: { ...message.execution, taskMode: "plan-agent" } }), undefined);
+  }
+  const { restoreChatState } = await importTypeScript("src/modules/chat/chat-state.ts");
+  assert.equal(restoreChatState({}).taskMode, "work");
+  assert.equal(restoreChatState({ taskMode: "direct", workLoopMode: true }).taskMode, "direct");
+  assert.equal(restoreChatState({ taskMode: "invalid" }).taskMode, "work");
+});
+
+test("mode capability negotiation rejects old runtimes and forwards supported flags", async () => {
+  const { AgentFactoryClient } = await importTypeScript("src/infrastructure/agent-factory/agent-client.ts");
+  const client = new AgentFactoryClient("unused", "/project");
+  client.capabilities = async () => ({ submit: {}, send: { taskModes: ["direct", "work"] } });
+  await assert.rejects(client.checkedExecution("submit", { taskMode: "work" }), /업데이트/);
+  await assert.rejects(client.checkedExecution("send", { taskMode: "plan-work-verification" }), /업데이트/);
+  assert.deepEqual(await client.checkedExecution("send", { taskMode: "direct" }), ["--task-mode", "direct"]);
 });

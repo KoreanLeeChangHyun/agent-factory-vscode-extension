@@ -360,6 +360,7 @@ export class ChatPanelManager implements vscode.Disposable {
           statusItems: this.statusItems(),
           model: managed.state.model,
           reasoning: managed.state.reasoning,
+          taskMode: managed.state.taskMode ?? "work",
           fastMode: managed.state.fastMode === true,
           goalMode: managed.state.goalMode === true,
           workLoopMode: managed.state.workLoopMode === true,
@@ -424,6 +425,7 @@ export class ChatPanelManager implements vscode.Disposable {
       case "composer.settings":
         managed.state = {
           ...managed.state,
+          taskMode: message.taskMode ?? managed.state.taskMode,
           model: message.model,
           reasoning: message.reasoning,
           fastMode: message.fastMode,
@@ -667,6 +669,7 @@ export class ChatPanelManager implements vscode.Disposable {
     await this.context.globalState.update(COMPOSER_PREFERENCES_KEY, {
       model: state.model,
       reasoning: state.reasoning,
+      taskMode: state.taskMode ?? "work",
       fastMode: state.fastMode === true,
       goalMode: state.goalMode === true,
       workLoopMode: state.workLoopMode === true
@@ -858,6 +861,7 @@ export class ChatPanelManager implements vscode.Disposable {
     }));
     void managed.controller.send(text, preparedAttachments, {
       ...((managed.state.role ?? "main") === "main" && (!managed.state.agentId || managed.executionModeExplicit) ? { executionMode: managed.executionMode ?? this.defaultExecutionMode() } : {}),
+      ...((managed.state.role ?? "main") === "main" ? { taskMode: execution.taskMode ?? "work" } : {}),
       model: execution.model,
       reasoningEffort: execution.reasoningEffort,
       fast: execution.fast,

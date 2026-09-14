@@ -1,3 +1,4 @@
+import { TASK_MODES, type TaskMode } from "../infrastructure/agent-factory/agent-client";
 import { STATUS_ITEM_IDS, type StatusItemId } from "../core/config/types";
 import type { AttachmentKind, AttachmentReference } from "../common/types/attachment";
 import type { ClientMessage } from "./messages";
@@ -94,6 +95,7 @@ export function parseClientMessage(value: unknown): ClientMessage | undefined {
       return { type: value.type, agentId: value.agentId };
     case "composer.settings":
       if (
+        (value.taskMode !== undefined && !TASK_MODES.includes(value.taskMode as TaskMode)) ||
         (value.model !== undefined && (typeof value.model !== "string" || value.model.length > 100)) ||
         (value.reasoning !== undefined && (typeof value.reasoning !== "string" || !reasoningEfforts.has(value.reasoning))) ||
         typeof value.fastMode !== "boolean" ||
@@ -108,6 +110,7 @@ export function parseClientMessage(value: unknown): ClientMessage | undefined {
         ...(typeof value.reasoning === "string"
           ? { reasoning: value.reasoning as "none" | "low" | "medium" | "high" | "xhigh" | "max" }
           : {}),
+        ...(value.taskMode !== undefined ? { taskMode: value.taskMode as TaskMode } : {}),
         fastMode: value.fastMode,
         goalMode: value.goalMode,
         ...(typeof value.workLoopMode === "boolean" ? { workLoopMode: value.workLoopMode } : {})
@@ -120,6 +123,7 @@ export function parseClientMessage(value: unknown): ClientMessage | undefined {
         value.text.length > 100_000 ||
         !Array.isArray(value.attachments) ||
         !isRecord(value.execution) ||
+        (value.execution.taskMode !== undefined && !TASK_MODES.includes(value.execution.taskMode as TaskMode)) ||
         (value.execution.model !== undefined && (
           typeof value.execution.model !== "string" || value.execution.model.length > 100
         )) ||
@@ -148,6 +152,7 @@ export function parseClientMessage(value: unknown): ClientMessage | undefined {
         text: value.text,
         attachments,
         execution: {
+          ...(value.execution.taskMode !== undefined ? { taskMode: value.execution.taskMode as TaskMode } : {}),
           ...(typeof value.execution.model === "string" && value.execution.model
             ? { model: value.execution.model }
             : {}),

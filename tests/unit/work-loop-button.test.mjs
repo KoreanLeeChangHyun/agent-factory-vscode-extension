@@ -10,7 +10,7 @@ const controls = script.slice(script.indexOf("  function updateSendButton()"), s
 function harness(overrides = {}, text = "오류 수정") {
   const sent = [];
   const context = {
-    state: { role: "main", workLoopMode: true, attachments: [], timeline: [], capabilities: {}, runtimeAvailable: true, ...overrides },
+    state: { role: "main", taskMode: "work", attachments: [], timeline: [], capabilities: {}, runtimeAvailable: true, ...overrides },
     prompt: { value: text }, goalObjective: { value: "" }, nativeGoal: null,
     currentCapabilities: () => ({ model: true, reasoning: true, fast: true, goal: true }),
     createId: () => "message-id", renderAll() {}, resizePrompt() {}, persist() {},
@@ -22,19 +22,13 @@ function harness(overrides = {}, text = "오류 수정") {
   return { context, sent, run: code => runInNewContext(code, context) };
 }
 
-test("loop button sends explicit delegation with the draft, actual image reference and selected model", () => {
+test("mode submission preserves the draft, actual image reference and selected model", () => {
   const image = { id: "image-one", name: "input.png", kind: "image", uri: "file:///host/input.png", previewUri: "vscode-resource://input.png", mediaType: "image/png", size: 32 };
   const { context, sent, run } = harness({ model: "chosen-model", attachments: [image] });
   run("submit()");
   assert.equal(sent.length, 1);
-  assert.match(sent[0].text, /^오류 수정\n\n작업·검증 루프/);
-  assert.match(sent[0].text, /Work → Verification/);
-  assert.match(sent[0].text, /실패하면 같은 Work에서 수정한 뒤 재검증/);
-  assert.match(sent[0].text, /Work는 검증 테스트를 실행하지 마세요/);
-  assert.match(sent[0].text, /변경 동작에 직접 관련된 가장 작은 개별 테스트 케이스만 선택·실행/);
-  assert.match(sent[0].text, /전체 테스트를 간접 실행하는 집계 명령·스크립트를 사용하지 마세요/);
-  assert.match(sent[0].text, /전체 테스트는 절대 실행하지 마세요/);
-  assert.match(sent[0].text, /좁은 선택이 불가능하면 범위를 넓히지 말고 한계와 실행하지 않은 검사를 보고/);
+  assert.equal(sent[0].text, "오류 수정");
+  assert.equal(sent[0].execution.taskMode, "work");
   assert.deepEqual(JSON.parse(JSON.stringify(sent[0].attachments[0])), { id: "image-one", name: "input.png", kind: "image", uri: "file:///host/input.png", mediaType: "image/png", size: 32 });
   assert.equal(sent[0].execution.model, "chosen-model");
   assert.equal(context.state.timeline[0].text, "오류 수정");
@@ -55,7 +49,8 @@ test("running sessions send the draft to the host queue", () => {
   const { sent, run } = harness({ running: true });
   run("submit()");
   assert.equal(sent.length, 1);
-  assert.match(sent[0].text, /^오류 수정\n\n작업·검증 루프/);
+  assert.equal(sent[0].text, "오류 수정");
+  assert.equal(sent[0].execution.taskMode, "work");
 });
 
 test("sessions without a runtime do not send", () => {
@@ -78,25 +73,58 @@ test("disabled mode and child sessions preserve the original request", () => {
   }
 });
 
-test("icon click toggles mode without submitting and keeps its setting", () => {
+test("mode click opens choices without submitting or granting approval", () => {
   const handler = script.match(/workLoopButton\.addEventListener\("click", function \(\) \{([\s\S]*?)\n  \}\);/)[1];
-  const toggle = script.slice(script.indexOf("  function toggleMode(key)"), script.indexOf("  function currentCapabilities()"));
   const calls = [];
-  const context = {
-    state: { workLoopMode: false },
-    updateModeControls() {}, renderStatusBar() {}, persist() {},
-    saveComposerSettings() { calls.push(context.state.workLoopMode); }
-  };
-  runInNewContext(toggle + handler, context);
-  assert.equal(context.state.workLoopMode, true);
-  runInNewContext(handler, context);
-  assert.equal(context.state.workLoopMode, false);
-  assert.deepEqual(calls, [true, false]);
+  runInNewContext(handler, { openSetting: setting => calls.push(setting) });
+  assert.deepEqual(calls, ["task"]);
+});
+
+test("four modes snapshot each queued submission independently", () => {
+  const { context, sent, run } = harness({ running: true });
+  for (const taskMode of ["direct", "work", "work-verification", "plan-work-verification"]) {
+    context.state.taskMode = taskMode;
+    context.prompt.value = "동일 요청";
+    run("submit()");
+  }
+  context.state.taskMode = "direct";
+  assert.deepEqual(sent.map(message => message.execution.taskMode), ["direct", "work", "work-verification", "plan-work-verification"]);
+  assert.ok(sent.every(message => message.text === "동일 요청"));
 });
 
 test("attachment-only loop requests show attachment names without injected instructions", () => {
   const { context, sent, run } = harness({ attachments: [{ name: "input.txt" }] }, "");
   run("submit()");
   assert.equal(context.state.timeline[0].text, "첨부: input.txt");
-  assert.match(sent[0].text, /Work → Verification/);
+  assert.equal(sent[0].text, "");
+  assert.equal(sent[0].execution.taskMode, "work");
+});
+
+test("mode menu displays four choices and persists a supported next-task selection during execution", () => {
+  function element() {
+    return { children: [], dataset: {}, handlers: {}, classList: { add() {} },
+      setAttribute() {}, append(...children) { this.children.push(...children); },
+      addEventListener(name, handler) { this.handlers[name] = handler; },
+      replaceChildren() { this.children = []; } };
+  }
+  const names = { direct: "직접 수정", work: "작업", "work-verification": "작업 · 검증", "plan-work-verification": "계획 · 작업 · 검증" };
+  const menu = element();
+  const calls = [];
+  const context = {
+    state: { taskMode: "work", running: true }, taskModeNames: names,
+    settingOptions: { task: Object.keys(names) }, menu,
+    document: { createElement: element, createElementNS: element },
+    currentCapabilities: () => ({ taskModes: ["direct", "work", "work-verification"] }),
+    handleSettingMenuKeydown() {}, updateModeControls() {}, renderStatusBar() {},
+    persist() { calls.push("persist"); }, saveComposerSettings() { calls.push("save"); }, closeSettingMenu() {}
+  };
+  const renderer = script.slice(script.indexOf("  function renderSettingMenu("), script.indexOf("  function handleSettingMenuKeydown("));
+  runInNewContext(renderer + '\nrenderSettingMenu("task", menu);', context);
+  assert.equal(menu.children.length, 4);
+  assert.equal(menu.children[3].disabled, true);
+  assert.equal(menu.children[0].disabled, false);
+  menu.children[0].handlers.click();
+  assert.equal(context.state.taskMode, "direct");
+  assert.equal(context.state.running, true);
+  assert.deepEqual(calls, ["persist", "save"]);
 });

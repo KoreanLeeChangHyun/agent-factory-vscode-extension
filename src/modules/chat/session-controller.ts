@@ -39,6 +39,8 @@ export class ChatSessionController {
   private currentRunAgentId: string | undefined;
   private busy = false;
   private pendingDecisionRunId: string | undefined;
+  private pendingDecisionTaskMode: ExecutionOptions["taskMode"];
+  private submittedTaskMode: ExecutionOptions["taskMode"];
   private cancelRequested = false;
   private cancellationInFlight: Promise<void> | undefined;
   private goalControlPending = false;
@@ -127,6 +129,7 @@ export class ChatSessionController {
     execution: ExecutionOptions
   ): Promise<void> {
     if (this.disposed) return;
+    execution = { ...execution };
     if (this.goalControlPending) {
       this.events.onError("이전 Goal 제어 요청이 처리 중입니다. 완료된 뒤 다시 보내세요.");
       if (!this.running) this.events.onRunningChanged(false);
@@ -189,6 +192,7 @@ export class ChatSessionController {
           this.cancelRequested = false;
         }
       }
+      this.submittedTaskMode = execution.taskMode;
       const request = withAttachmentReferences(text, attachments);
       const images = runtimeImages(attachments);
       if (!this.agentId) {
@@ -219,14 +223,16 @@ export class ChatSessionController {
   public approveDecision(runId: string, execution: ExecutionOptions): boolean {
     if (this.busy || this.goalControlPending || this.pendingDecisionRunId !== runId) return false;
     const text = "바로 위 응답에서 제안한 범위와 조건대로 진행하세요.";
+    const taskMode = this.pendingDecisionTaskMode;
     this.clearDecision();
     this.events.onHumanDecision?.(text);
-    void this.send(text, [], { ...execution, actor: "human" });
+    void this.send(text, [], { ...execution, ...(taskMode ? { taskMode } : {}), actor: "human" });
     return true;
   }
 
   private clearDecision(): void {
     this.pendingDecisionRunId = undefined;
+    this.pendingDecisionTaskMode = undefined;
     this.events.onDecision?.(null);
   }
 
@@ -378,6 +384,7 @@ export class ChatSessionController {
           }
           if (result.status === "needs-human-decision" && result.text.trim() && !diagnostic && !goalError) {
             this.pendingDecisionRunId = runId;
+            this.pendingDecisionTaskMode = status.taskMode ?? this.submittedTaskMode;
             this.events.onDecision?.(runId);
           }
           return;

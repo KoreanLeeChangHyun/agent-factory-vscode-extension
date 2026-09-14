@@ -118,7 +118,7 @@ this plugin requirement.
 
 ## Runtime notes
 
-- **바이패스** uses the same unrestricted sandbox and `never` execution approval policy as **전체 접근**, and additionally authorizes Main to pass the delegation gate without asking the Human to approve its plan again. Main proceeds with the best bounded interpretation of the request, while missing credentials or genuinely unresolved required Human decisions may still require input. Work and Verification remain required.
+- **바이패스** uses the same unrestricted sandbox and `never` execution approval policy as **전체 접근**, and additionally authorizes Main to pass the delegation gate without asking the Human to approve its plan again. Main proceeds with the best bounded interpretation of the request, while missing credentials or genuinely unresolved required Human decisions may still require input. The captured task mode remains unchanged.
 - New chats default to **전체 접근**: full filesystem and network access with approval policy `never` (no additional execution approval). Between runs, use **권한** to choose workspace write or CLI defaults instead. The selection is saved in the machine-scoped `agentFactory.mainChat.executionMode` setting; previously configured alternatives are preserved. Workspace write also uses `never`; CLI defaults use Codex settings for new sessions and are labeled **현재 정책 유지** in existing sessions, preserving the stored policy. Changes apply to the next message, including in existing sessions; active runs are unchanged. Resumed sessions preserve their stored policy until you explicitly choose a mode in that panel.
 
 - Attachments are passed as textual references. Browser-only pasted files need a filesystem path before the runtime can use them.
@@ -134,3 +134,18 @@ Main; Work and Verification remain bounded.
 The workspace extension host initializes and discovers the private runtime through `exec.py init`, then pins the returned home/project binding. On SSH/container hosts this uses the executing host’s `AGENT_FACTORY_HOME` or `~/.agent-factory`, not the UI machine’s home. Restart the connection after explicit project rebind. The extension no longer builds checkout-local runtime paths.
 
 If a plugin reinstall replaces the versioned cache directory while a chat tab is open, the client rediscovers the newest installed `exec.py` and retries the interrupted runtime command once. Main chat polling also refreshes referenced Work and Verification state while a turn runs; transient refresh failures preserve the last known counts instead of resetting them to zero.
+
+### Task modes
+
+The selector beside the composer offers **직접 수정**, **작업** (default),
+**작업 · 검증**, and **계획 · 작업 · 검증**. Selection persists and applies to
+the next submitted message, including queued messages. Running tasks retain
+their captured mode. Conversation always stays with Main.
+
+Direct mode uses Main; Work mode delegates implementation and ends after Main’s
+appropriate checks without separate Verification. Verification modes reuse the
+same Work and Verification sessions after findings. Plan mode uses actual Codex
+Plan/default collaboration turns in one Work session before Verification, with
+automatic transition. Human approval and execution permissions remain separate.
+Unsupported modes are disabled and dispatch fails with an update diagnostic;
+older plugins are never silently treated as supporting these routes.

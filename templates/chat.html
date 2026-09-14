@@ -78,9 +78,10 @@
                 </button>
                 <div id="execution-mode-menu" class="setting-menu" role="menu" aria-label="실행 권한 선택" hidden></div>
               </div>
-              <button id="work-loop-button" class="mode-button" type="button" title="작업·검증 모드 꺼짐" aria-label="작업·검증 모드 꺼짐" aria-pressed="false">
-                <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M20 7a9 9 0 0 0-15-2L2 8m0-5v5h5M4 17a9 9 0 0 0 15 2l3-3m0 5v-5h-5M8 12l3 3 5-6"></path></svg>
-              </button>
+              <div class="setting-control">
+                <button id="work-loop-button" class="setting-button" type="button" title="다음 전송에 적용할 작업 모드 선택" aria-label="작업 모드 선택" aria-haspopup="menu" aria-expanded="false" aria-controls="task-mode-menu">작업</button>
+                <div id="task-mode-menu" class="setting-menu" role="menu" aria-label="작업 모드 선택" hidden></div>
+              </div>
               <button id="fast-mode-button" class="mode-button" type="button" title="Fast mode off" aria-label="Fast mode off" aria-pressed="false">
                 <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M13 2 4 14h7l-1 8 10-13h-7l1-7Z"></path></svg>
               </button>

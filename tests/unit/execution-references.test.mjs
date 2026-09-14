@@ -72,3 +72,12 @@ test("skill reads identify entrypoint and reference ownership without labeling q
   assert.deepEqual(docs(`echo 'cat ${prefix}agent/SKILL.md'`), []);
   assert.deepEqual(docs('cat README.md'), []);
 });
+
+test("managed loop cards retain the captured route from matching command output", () => {
+  const loop = 'python3 skills/agent/scripts/loop.py';
+  assert.equal(managed(loop + ' start --work-agent work-1 --task-mode work').taskMode, 'work');
+  const status = loop + ' status --work-agent work-1 --loop-id loop-1';
+  assert.equal(managed(status, JSON.stringify({ workAgentId: 'work-1', loopId: 'loop-1', taskMode: 'plan-work-verification', status: 'active' })).taskMode, 'plan-work-verification');
+  assert.equal(managed(status, JSON.stringify({ workAgentId: 'other', loopId: 'loop-1', taskMode: 'work' })).taskMode, undefined);
+  assert.equal(managed(status, JSON.stringify({ workAgentId: 'work-1', loopId: 'other', taskMode: 'work' })).taskMode, undefined);
+});

@@ -12,6 +12,7 @@ export type ClientMessage =
       readonly text: string;
       readonly attachments: readonly AttachmentReference[];
       readonly execution: {
+        readonly taskMode?: import("../infrastructure/agent-factory/agent-client").TaskMode;
         readonly model?: string;
         readonly reasoningEffort?: "none" | "low" | "medium" | "high" | "xhigh" | "max";
         readonly fast: boolean;
@@ -40,6 +41,7 @@ export type ClientMessage =
       readonly fastMode: boolean;
       readonly goalMode: boolean;
       readonly workLoopMode?: boolean;
+      readonly taskMode?: import("../infrastructure/agent-factory/agent-client").TaskMode;
     }
   | {
       readonly type: "status.reorder";
@@ -69,6 +71,7 @@ export type HostMessage =
       readonly fastMode: boolean;
       readonly goalMode: boolean;
       readonly workLoopMode?: boolean;
+      readonly taskMode?: import("../infrastructure/agent-factory/agent-client").TaskMode;
       readonly contextUsedTokens?: number;
       readonly contextWindowTokens?: number;
       readonly weeklyUsedPercent?: number;

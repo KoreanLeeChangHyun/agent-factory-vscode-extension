@@ -28,6 +28,8 @@
   const fastModeButton = document.getElementById("fast-mode-button");
   const goalModeButton = document.getElementById("goal-mode-button");
   const workLoopButton = document.getElementById("work-loop-button");
+  const taskModeMenu = document.getElementById("task-mode-menu");
+  const taskModeNames = { direct: "직접 수정", work: "작업", "work-verification": "작업 · 검증", "plan-work-verification": "계획 · 작업 · 검증" };
   const goalPanel = document.getElementById("goal-panel");
   const goalObjective = document.getElementById("goal-objective");
   const goalStatus = document.getElementById("goal-status");
@@ -58,6 +60,7 @@
   const agentsList = document.getElementById("agents-list");
   const dropOverlay = document.getElementById("drop-overlay");
   const settingOptions = {
+    task: Object.keys(taskModeNames),
     model: [""],
     reasoning: ["", "none", "low", "medium", "high", "xhigh", "max"],
     execution: ["cli-default", "workspace-write", "danger-full-access", "bypass"]
@@ -91,6 +94,7 @@
     reasoning: normalizeSettingValue(saved?.reasoning, settingOptions.reasoning),
     fastMode: saved?.fastMode === true,
     goalMode: saved?.goalMode === true,
+    taskMode: Object.hasOwn(taskModeNames, saved?.taskMode) ? saved.taskMode : saved?.workLoopMode === true ? "work-verification" : "work",
     workLoopMode: saved?.workLoopMode === true,
     queueCount: 0,
     contextUsedTokens: safeCountOrUndefined(saved?.contextUsedTokens),
@@ -189,7 +193,7 @@
     toggleMode("fastMode");
   });
   workLoopButton.addEventListener("click", function () {
-    toggleMode("workLoopMode");
+    openSetting("task");
   });
   goalModeButton.addEventListener("click", function () {
     toggleMode("goalMode");
@@ -346,6 +350,7 @@
         state.running = message.running === true;
         state.model = normalizeModel(message.model);
         state.reasoning = normalizeSettingValue(message.reasoning, settingOptions.reasoning);
+        state.taskMode = Object.hasOwn(taskModeNames, message.taskMode) ? message.taskMode : state.taskMode;
         state.fastMode = message.fastMode === true;
         state.goalMode = message.goalMode === true;
         state.workLoopMode = message.workLoopMode === true;
@@ -584,17 +589,6 @@
     const userText = prompt.value.trim();
     let text = userText;
     if (!text && state.attachments.length === 0) return;
-    if (state.workLoopMode && state.role === "main") {
-      text = (text ? text + "\n\n" : "") +
-        "작업·검증 루프를 지금 실행하세요. 이 메시지는 작업 실행과 위임에 대한 명시적 승인입니다. " +
-        "위 요청과 첨부 자료를 대상으로 하며, 없으면 현재 대화에서 합의한 작업을 대상으로 합니다. " +
-        "Main이 직접 작업을 대신하지 말고 Agent Factory의 관리되는 Work → Verification 루프를 시작하세요. " +
-        "독립 Verification이 완료된 Work 실행을 검증하고, 실패하면 같은 Work에서 수정한 뒤 재검증하세요. " +
-        "Work는 검증 테스트를 실행하지 마세요. Verification은 변경 동작에 직접 관련된 가장 작은 개별 테스트 케이스만 선택·실행하고, 넓은 테스트 파일·스위트와 전체 테스트를 간접 실행하는 집계 명령·스크립트를 사용하지 마세요. " +
-        "전체 테스트는 절대 실행하지 마세요. 좁은 선택이 불가능하면 범위를 넓히지 말고 한계와 실행하지 않은 검사를 보고하세요. " +
-        "검증 통과까지 진행하고 실제 작업·검증 실행 ID와 결과를 보고하세요. " +
-        "실행할 작업이 불명확하면 필요한 내용만 질문하고, 실행 실패를 완료로 보고하지 마세요.";
-    }
     if ((!text && state.attachments.length === 0) || !state.capabilities || !state.runtimeAvailable) {
       return;
     }
@@ -610,6 +604,7 @@
         return reference;
       }),
       execution: {
+        ...(state.role === "main" ? { taskMode: state.taskMode } : {}),
         model: currentCapabilities().model ? state.model || undefined : undefined,
         reasoningEffort: currentCapabilities().reasoning ? state.reasoning || undefined : undefined,
         fast: currentCapabilities().fast === true && state.fastMode,
@@ -903,10 +898,11 @@
     const heading = document.createElement("div");
     heading.className = "managed-agent-heading";
     const label = document.createElement("strong");
-    label.textContent = managed.kind === "loop" ? "작업 · 검증" : role === "verification" ? "검증 에이전트" : role === "work" ? "작업 에이전트" : "에이전트";
+    label.textContent = managed.kind === "loop" ? taskModeNames[managed.taskMode] || "작업 · 검증" : role === "verification" ? "검증 에이전트" : role === "work" ? "작업 에이전트" : "에이전트";
     const badge = document.createElement("span");
     badge.className = "managed-agent-status";
     badge.textContent = status === "active" ? "진행 중" : status === "runtime-error" ? "실행 오류" : childAgentStatusLabel(status);
+    if (managed.taskMode === "work" && status === "completed") badge.textContent += " · 별도 검증 요청 없음";
     heading.append(label, badge);
     const identity = document.createElement("div");
     identity.className = "managed-agent-identity";
@@ -914,7 +910,7 @@
     const progress = document.createElement("div");
     progress.className = "managed-agent-progress";
     const last = events[events.length - 1];
-    const actions = { submit: "실행 요청", start: "작업 · 검증 시작 요청", send: "추가 요청", status: "상태 확인", result: "결과 조회", updates: "진행 내용 조회", cancel: "취소 요청", resume: "재개 요청", reconcile: "작업 · 검증 진행 확인", "recover-receipt": "실행 복구 요청", skip: "검증 생략 요청" };
+    const actions = { submit: "실행 요청", start: "작업 시작 요청", send: "추가 요청", status: "상태 확인", result: "결과 조회", updates: "진행 내용 조회", cancel: "취소 요청", resume: "재개 요청", reconcile: "작업 진행 확인", "recover-receipt": "실행 복구 요청", skip: "검증 생략 요청" };
     progress.textContent = (actions[managed.action] || "실행 확인") + (last.phase === "failed" ? " 실패" : last.phase === "started" ? " 중" : " 처리됨");
     container.append(heading, identity, progress);
     if (child && state.role === "main") {
@@ -2175,16 +2171,15 @@
 
   function updateModeControls() {
     updateExecutionControl();
-    workLoopButton.hidden = state.role !== "main";
-    workLoopButton.setAttribute("aria-pressed", String(state.workLoopMode));
-    workLoopButton.title = state.workLoopMode ? "작업·검증 모드 켜짐: 전송할 요청에 작업·검증 루프 적용" : "작업·검증 모드 꺼짐";
-    workLoopButton.setAttribute("aria-label", workLoopButton.title);
+    workLoopButton.parentElement.hidden = state.role !== "main";
+    workLoopButton.textContent = taskModeNames[state.taskMode];
+    workLoopButton.title = "다음 전송에 적용할 작업 모드 선택";
     const supported = currentCapabilities();
     modelButton.parentElement.hidden = supported.model !== true;
     reasoningButton.parentElement.hidden = supported.reasoning !== true;
     fastModeButton.hidden = supported.fast !== true;
     goalModeButton.hidden = supported.goal !== true || (state.role && state.role !== "main");
-    if (openSettingId && openSettingId !== "execution" && supported[openSettingId] !== true) closeSettingMenu(false);
+    if (openSettingId && openSettingId !== "execution" && openSettingId !== "task" && supported[openSettingId] !== true) closeSettingMenu(false);
     fastModeButton.setAttribute("aria-pressed", String(state.fastMode));
     fastModeButton.setAttribute("aria-label", state.fastMode ? "Fast mode on" : "Fast mode off");
     fastModeButton.title = state.fastMode ? "Fast mode on" : "Fast mode off";
@@ -2223,17 +2218,19 @@
     renderSettingMenu(setting, menu);
     menu.hidden = false;
     button.setAttribute("aria-expanded", "true");
-    const selected = menu.querySelector('[aria-checked="true"]');
-    (selected || menu.querySelector("button"))?.focus();
+    const selected = menu.querySelector('[aria-checked="true"]:not(:disabled)');
+    (selected || menu.querySelector("button:not(:disabled)"))?.focus();
   }
 
   function renderSettingMenu(setting, menu) {
-    const current = setting === "model" ? state.model : setting === "reasoning" ? state.reasoning : state.executionMode ?? "cli-default";
+    const current = setting === "task" ? state.taskMode : setting === "model" ? state.model : setting === "reasoning" ? state.reasoning : state.executionMode ?? "cli-default";
     menu.replaceChildren();
     const values = setting === "model" ? [...new Set([...settingOptions.model, state.model])] : settingOptions[setting];
     for (const value of values) {
       const option = document.createElement("button");
       option.type = "button";
+      option.disabled = setting === "task" && !currentCapabilities().taskModes?.includes(value);
+      if (option.disabled) option.title = "이 모드를 지원하는 플러그인과 Codex가 필요합니다.";
       option.className = "setting-option";
       option.setAttribute("role", "menuitemradio");
       option.setAttribute("aria-checked", String(value === current));
@@ -2247,10 +2244,12 @@
       checkPath.setAttribute("d", "m3 8 3 3 7-7");
       check.append(checkPath);
       const label = document.createElement("span");
-      label.textContent = setting === "execution" ? executionModeName(value) : value || "Default";
+      label.textContent = setting === "task" ? taskModeNames[value] : setting === "execution" ? executionModeName(value) : value || "Default";
       option.append(check, label);
       option.addEventListener("click", function () {
-        if (setting === "model") {
+        if (setting === "task") {
+          state.taskMode = value;
+        } else if (setting === "model") {
           state.model = value;
         } else if (setting === "reasoning") {
           state.reasoning = value;
@@ -2270,7 +2269,7 @@
   }
 
   function handleSettingMenuKeydown(event) {
-    const options = Array.from(event.currentTarget.parentElement.querySelectorAll(".setting-option"));
+    const options = Array.from(event.currentTarget.parentElement.querySelectorAll(".setting-option:not(:disabled)"));
     const index = options.indexOf(event.currentTarget);
     let target;
     if (event.key === "ArrowDown") {
@@ -2303,11 +2302,11 @@
   }
 
   function settingButton(setting) {
-    return setting === "model" ? modelButton : setting === "reasoning" ? reasoningButton : executionModeButton;
+    return setting === "task" ? workLoopButton : setting === "model" ? modelButton : setting === "reasoning" ? reasoningButton : executionModeButton;
   }
 
   function settingMenu(setting) {
-    return setting === "model" ? modelMenu : setting === "reasoning" ? reasoningMenu : executionModeMenu;
+    return setting === "task" ? taskModeMenu : setting === "model" ? modelMenu : setting === "reasoning" ? reasoningMenu : executionModeMenu;
   }
 
   function executionModeName(mode) {
@@ -2359,6 +2358,7 @@
       reasoning: state.reasoning,
       fastMode: state.fastMode,
       goalMode: state.goalMode,
+      taskMode: state.taskMode,
       workLoopMode: state.workLoopMode,
       contextUsedTokens: state.contextUsedTokens,
       contextWindowTokens: state.contextWindowTokens,
@@ -2400,6 +2400,7 @@
       reasoning: state.reasoning || undefined,
       fastMode: state.fastMode,
       goalMode: state.goalMode,
+      taskMode: state.taskMode,
       workLoopMode: state.workLoopMode
     });
   }
