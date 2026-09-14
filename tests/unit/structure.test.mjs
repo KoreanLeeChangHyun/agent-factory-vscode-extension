@@ -374,3 +374,14 @@ test("reasoning options match the installed runtime capability", function () {
   assert.match(chatScript, /reasoning: \["", "none", "low", "medium", "high", "xhigh", "max"\]/);
   assert.doesNotMatch(chatScript, /reasoning: \[[^\]]*"minimal"/);
 });
+
+
+test("status settings uses an accessible SVG-only button", function () {
+  const button = template.match(/<button\b[^>]*id="status-settings-button"[^>]*>([\s\S]*?)<\/button>/);
+  assert.ok(button);
+  assert.match(button[0], /aria-label="상태 표시줄 설정"/);
+  assert.match(button[0], /title="상태 표시줄 설정"/);
+  assert.match(button[0], /aria-controls="status-settings"/);
+  assert.match(button[1], /<svg[^>]*aria-hidden="true"[^>]*focusable="false"/);
+  assert.equal(button[1].replace(/<[^>]*>/g, '').trim(), '');
+});

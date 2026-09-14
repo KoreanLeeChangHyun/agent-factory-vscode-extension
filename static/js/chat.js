@@ -71,7 +71,7 @@
     agents: ["진행 중인 Agent", "Main의 작업·검증 Agent 수"],
     project: ["프로젝트", "현재 VS Code 작업 영역 이름"],
     branch: ["Git 브랜치", "현재 프로젝트 브랜치, 미확인 시 —"],
-    context: ["Content 잔량", "Content 기준 토큰에서 현재 사용 토큰을 뺀 잔량, 기준 미제공 시 확인 불가"],
+    context: ["Content 잔여 비율", "Content 기준 대비 잔여 비율만 표시, 사용량 또는 기준 미제공 시 확인 불가"],
     queue: ["대기 메시지", "현재 채팅에서 전송 대기 중인 메시지 수"],
     agent: ["채팅 이름", "현재 채팅 탭 이름"],
     role: ["Agent 역할", "Main·작업·검증 역할"],
@@ -82,7 +82,9 @@
     fast: ["Fast 설정", "다음 전송의 Fast 선택값, 지원 여부에 따름"],
     task: ["작업 모드", "Main의 다음 전송에 적용할 작업 모드"],
     execution: ["실행 권한", "현재 호스트에서 확인한 권한 설정"],
-    contextUsed: ["Content 사용량", "현재 Content 사용 토큰과 기준 대비 사용률; 최근 turn 입력 토큰이며 누적 소비량 아님"],
+    contextUsed: ["Content 사용 토큰", "현재 Content 사용 토큰 수만 표시; 최근 turn 입력 토큰이며 누적 소비량 아님"],
+    contextRemainingTokens: ["Content 잔여 토큰", "Content 기준에서 현재 사용 토큰을 뺀 토큰 수만 표시, 최소 0"],
+    contextUsedPercent: ["Content 사용 비율", "Content 기준 대비 현재 사용 비율만 표시"],
     contextWindow: ["Content 기준 토큰", "런타임이 제공한 모델 Content 기준값"],
     weekly: ["Weekly 사용량", "최근 수신한 7일 계정 한도 사용률, 없으면 확인 불가"],
     weeklyRemaining: ["Weekly 잔량", "100%에서 Weekly 사용률을 뺀 잔량; 절대 토큰 수는 제공되지 않음"],
@@ -2047,7 +2049,6 @@
         });
       } else if (itemId === "context" && state.contextUsedTokens !== undefined && state.contextWindowTokens > 0) {
         renderContextStatus(item);
-        item.title = statusCatalog.context[1] + " · Content 기준 " + state.contextWindowTokens.toLocaleString("ko-KR") + " tokens";
       }
       if ((itemId === "agents" && state.role === "main") || (itemId === "runtime" && !state.runtimeAvailable)) {
         const indicator = document.createElementNS("http://www.w3.org/2000/svg", "svg");
@@ -2332,6 +2333,8 @@
       branch: state.branch || "—",
       context: contextStatusLabel(),
       contextUsed: contextUsedStatusLabel(),
+      contextRemainingTokens: contextRemainingTokensLabel(),
+      contextUsedPercent: contextUsedPercentLabel(),
       contextWindow: "Content 기준 " + (state.contextWindowTokens > 0 ? count(state.contextWindowTokens) : "확인 불가") + " tokens",
       weekly: "Weekly 사용량 " + (state.weeklyUsedPercent === undefined ? "확인 불가" : formatPercent(state.weeklyUsedPercent)),
       weeklyRemaining: "Weekly 잔량 " + (state.weeklyUsedPercent === undefined ? "확인 불가" : formatPercent(100 - state.weeklyUsedPercent)),
@@ -2352,19 +2355,27 @@
   }
 
   function renderPendingQueue() {
-    let queue = document.getElementById("pending-message-queue");
-    if (!queue) {
-      queue = document.createElement("details");
-      queue.id = "pending-message-queue";
-      queue.setAttribute("aria-label", "대기 메시지");
-      prompt.parentElement.before(queue);
-    }
-    queue.replaceChildren();
+    const queue = document.getElementById("pending-message-queue");
+    const toggle = document.getElementById("pending-queue-toggle");
+    const label = document.getElementById("pending-queue-label");
     const pending = state.pendingRequests || [];
-    queue.hidden = pending.length === 0;
-    const summary = document.createElement("summary");
-    summary.textContent = "대기 메시지 " + pending.length + " · " + (state.pendingDecisionRunId ? "사용자 결정 후 계속됩니다" : "실행 접수 후 대화에 표시됩니다");
-    queue.append(summary);
+    const expanded = pending.length > 0 && toggle.getAttribute("aria-expanded") === "true";
+    toggle.hidden = pending.length === 0;
+    toggle.setAttribute("aria-expanded", String(expanded));
+    label.textContent = "대기 " + pending.length;
+    toggle.setAttribute("aria-label", "대기 메시지 " + pending.length + "개");
+    toggle.title = "대기 메시지 " + pending.length + "개 · 목록 펼치기/접기";
+    toggle.onclick = function () {
+      const open = toggle.getAttribute("aria-expanded") !== "true";
+      toggle.setAttribute("aria-expanded", String(open));
+      queue.hidden = !open;
+    };
+    queue.hidden = !expanded;
+    queue.replaceChildren();
+    const description = document.createElement("p");
+    description.className = "pending-queue-description";
+    description.textContent = state.pendingDecisionRunId ? "사용자 결정 후 대기 메시지를 모아 실행합니다" : "대기 메시지를 모아 한 번에 실행합니다. 작업 모드·모델·추론은 첫 메시지 기준입니다.";
+    queue.append(description);
     if (pending.some(function (item) { return !item.rejected; }) && !state.running && !state.pendingDecisionRunId) {
       const resume = document.createElement("button");
       resume.type = "button";
@@ -2703,16 +2714,22 @@
   function contextStatusLabel() {
     if (state.contextUsedTokens === undefined || !(state.contextWindowTokens > 0)) return "Content 잔량 확인 불가";
     const remaining = Math.max(0, state.contextWindowTokens - state.contextUsedTokens);
-    return "Content 잔량 " + formatPercent(remaining / state.contextWindowTokens * 100) +
-      " (" + remaining.toLocaleString("ko-KR") + " tokens)";
+    return "Content 잔량 " + formatPercent(remaining / state.contextWindowTokens * 100);
   }
 
   function contextUsedStatusLabel() {
-    if (state.contextUsedTokens === undefined) return "Content 사용량 확인 불가";
-    const tokens = state.contextUsedTokens.toLocaleString("ko-KR") + " tokens";
-    return "Content 사용량 " + (state.contextWindowTokens > 0
-      ? formatPercent(state.contextUsedTokens / state.contextWindowTokens * 100) + " (" + tokens + ")"
-      : tokens + " (사용률 확인 불가)");
+    return "Content 사용 토큰 " + (state.contextUsedTokens === undefined
+      ? "확인 불가" : state.contextUsedTokens.toLocaleString("ko-KR") + " tokens");
+  }
+
+  function contextRemainingTokensLabel() {
+    if (state.contextUsedTokens === undefined || !(state.contextWindowTokens > 0)) return "Content 잔여 토큰 확인 불가";
+    return "Content 잔여 토큰 " + Math.max(0, state.contextWindowTokens - state.contextUsedTokens).toLocaleString("ko-KR") + " tokens";
+  }
+
+  function contextUsedPercentLabel() {
+    return "Content 사용률 " + (state.contextUsedTokens === undefined || !(state.contextWindowTokens > 0)
+      ? "확인 불가" : formatPercent(state.contextUsedTokens / state.contextWindowTokens * 100));
   }
 
   function formatPercent(value) {
@@ -2729,14 +2746,14 @@
     const meter = document.createElement("span");
     meter.className = "context-token-meter";
     meter.setAttribute("role", "progressbar");
-    meter.setAttribute("aria-label", "Content 토큰 잔량");
+    meter.setAttribute("aria-label", "Content 잔여 비율");
     meter.setAttribute("aria-valuemin", "0");
-    meter.setAttribute("aria-valuemax", String(compactAt));
-    meter.setAttribute("aria-valuenow", String(remaining));
+    meter.setAttribute("aria-valuemax", "100");
+    meter.setAttribute("aria-valuenow", String(remainingRatio * 100));
     const fill = document.createElement("span");
     fill.className = "context-token-meter-fill";
     fill.style.width = remainingRatio * 100 + "%";
-    fill.style.backgroundColor = remainingRatio < 0.1 ? "var(--vscode-editorError-foreground)" : remainingRatio < 0.3 ? "var(--vscode-editorWarning-foreground)" : "var(--vscode-progressBar-background)";
+    fill.dataset.level = remainingRatio < 0.1 ? "critical" : remainingRatio < 0.3 ? "warning" : "healthy";
     meter.append(fill);
     item.replaceChildren(label, meter);
   }

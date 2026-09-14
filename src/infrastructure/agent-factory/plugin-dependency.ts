@@ -1,4 +1,5 @@
 import { execFile } from "node:child_process";
+import { runtimeEnvironment } from "./process-environment";
 
 const CODEX_COMMAND = "codex";
 const LIST_INSTALLED_ARGUMENTS = ["plugin", "list", "--json"] as const;
@@ -219,6 +220,7 @@ function isTimedOutProcess(error: unknown): boolean {
 
 export const runProcess: ProcessRunner = (executable, arguments_, options) => new Promise((resolve, reject) => {
   execFile(executable, [...arguments_], {
+    env: runtimeEnvironment(),
     encoding: "utf8",
     timeout: options.timeout,
     maxBuffer: options.maxBuffer,

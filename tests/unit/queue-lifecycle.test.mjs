@@ -22,14 +22,14 @@ function runtime(extra = {}) {
   };
 }
 
-test('queue promotes only accepted requests and preserves FIFO snapshots and active identity', async () => {
+test('queue promotes only accepted requests and batches snapshots and active identity', async () => {
   const terminal = deferred(), acceptance = deferred();
   const calls = [], promoted = [], cancelled = [];
   const controller = new ChatSessionController(runtime({
     async send(agentId, text, options, images) {
       calls.push({ text, options, images });
-      if (text.startsWith('second')) await acceptance.promise;
-      return { agentId, runId: text.startsWith('second') ? 'second' : text };
+      if (text.includes('second')) await acceptance.promise;
+      return { agentId, runId: text.includes('second') ? 'second' : text };
     },
     async status(_agentId, runId) { if (runId === 'first') await terminal.promise; return { status: 'completed' }; },
     async cancel(...args) { cancelled.push(args); }
@@ -39,7 +39,7 @@ test('queue promotes only accepted requests and preserves FIFO snapshots and act
   const options = { taskMode: 'work-verification', model: 'original', reasoningEffort: 'high', fast: true, goalMode: true, goalObjective: 'objective', executionMode: 'workspace-write' };
   const image = { id: 'image', kind: 'image', name: 'input.png', uri: 'file:///tmp/original.png', mediaType: 'image/png' };
   const second = controller.send('second', [image], options, () => promoted.push('second'));
-  const third = controller.send('third', [], { taskMode: 'direct' }, () => promoted.push('third'));
+  const third = controller.send('third', [], { taskMode: 'direct', executionMode: 'bypass' }, () => promoted.push('third'));
   options.model = 'changed'; image.uri = 'file:///tmp/changed.png';
   assert.equal(controller.runId, 'first');
   assert.equal(controller.queueLength, 2);
@@ -47,8 +47,14 @@ test('queue promotes only accepted requests and preserves FIFO snapshots and act
   assert.deepEqual(cancelled, []);
   terminal.resolve(); await tick();
   assert.deepEqual(promoted, ['first']);
-  acceptance.resolve(); await Promise.all([first, second, third]);
-  assert.deepEqual(promoted, ['first', 'second', 'third']);
+  const fourth = controller.send('fourth', [], {}, () => promoted.push('fourth'));
+  assert.equal(controller.queueLength, 1);
+  acceptance.resolve(); await Promise.all([first, second, third, fourth]);
+  assert.deepEqual(promoted, ['first', 'second', 'third', 'fourth']);
+  assert.equal(calls.length, 3);
+  assert.match(calls[1].text, /대기 메시지 2 시작 ---\nthird/);
+  assert.equal(calls[2].text, 'fourth');
+  assert.equal(calls[1].options.goalMode, false);
   assert.equal(calls[1].options.model, 'original');
   assert.equal(calls[1].options.taskMode, 'work-verification');
   assert.equal(calls[1].options.executionMode, 'workspace-write');
@@ -56,7 +62,7 @@ test('queue promotes only accepted requests and preserves FIFO snapshots and act
   assert.equal(controller.queueLength, 0);
 });
 
-test('decision-required pauses FIFO until an explicit answer is accepted', async () => {
+test('decision-required pauses batching until an explicit answer is accepted', async () => {
   const terminal = deferred(), sent = [], promoted = [];
   const controller = new ChatSessionController(runtime({
     async send(agentId, text) { sent.push(text); return { agentId, runId: text === 'proposal' ? 'proposal' : 'next' }; },
@@ -66,16 +72,18 @@ test('decision-required pauses FIFO until an explicit answer is accepted', async
   const first = controller.send('proposal', [], { taskMode: 'work' });
   await tick();
   const second = controller.send('queued', [], {}, () => promoted.push('queued'));
+  const third = controller.send('also queued', [], {}, () => promoted.push('also queued'));
   terminal.resolve(); await first;
-  assert.equal(controller.queueLength, 1);
+  assert.equal(controller.queueLength, 2);
   assert.deepEqual(sent, ['proposal']);
   assert.deepEqual(promoted, []);
   assert.equal(controller.approveDecision('proposal', {}), true);
-  await second;
+  await Promise.all([second, third]);
   assert.equal(sent.length, 3);
   assert.match(sent[1], /제안한 범위/);
-  assert.equal(sent[2], 'queued');
-  assert.deepEqual(promoted, ['queued']);
+  assert.match(sent[2], /대기 메시지 1 시작 ---\nqueued/);
+  assert.match(sent[2], /대기 메시지 2 시작 ---\nalso queued/);
+  assert.deepEqual(promoted, ['queued', 'also queued']);
 });
 
 test('polling loss preserves the current run and cannot dispatch queued input before reconnect completes', async () => {
@@ -136,12 +144,12 @@ test('webview acceptance replay promotes exactly once and preserves queued image
   assert.equal(context.state.pendingRequests.length, 0);
 });
 
-test('known failure drains FIFO while an unacknowledged dispatch is never automatically repeated', async () => {
+test('known failure drains a batch while an unacknowledged dispatch is never automatically repeated', async () => {
   const terminal = deferred(), sent = [], promoted = [];
   const controller = new ChatSessionController(runtime({
     async send(agentId, text) {
       sent.push(text);
-      if (text === 'unacknowledged') throw new Error('acceptance response lost');
+      if (text.includes('unacknowledged')) throw new Error('acceptance response lost');
       return { agentId, runId: text };
     },
     async status(_agentId, runId) { if (runId === 'failed') await terminal.promise; return { status: 'completed' }; },
@@ -150,13 +158,15 @@ test('known failure drains FIFO while an unacknowledged dispatch is never automa
   const first = controller.send('failed', [], {}); await tick();
   const second = controller.send('unacknowledged', [], {}, () => promoted.push('unacknowledged'));
   const third = controller.send('third', [], {}, () => promoted.push('third'));
-  terminal.resolve(); await Promise.all([first, second]);
-  assert.deepEqual(sent, ['failed', 'unacknowledged']);
-  assert.equal(controller.queueLength, 1);
+  terminal.resolve(); await Promise.all([first, second, third]);
+  assert.equal(sent.length, 2);
+  assert.match(sent[1], /unacknowledged/);
+  assert.match(sent[1], /third/);
+  assert.equal(controller.queueLength, 0);
   assert.deepEqual(promoted, []);
-  await controller.reconnect(); await third;
-  assert.deepEqual(sent, ['failed', 'unacknowledged', 'third']);
-  assert.deepEqual(promoted, ['third']);
+  await controller.reconnect();
+  assert.equal(sent.length, 2);
+  assert.deepEqual(promoted, []);
 });
 
 test('input during Goal reopen acceptance waits for the accepted Goal run to finish', async () => {
@@ -175,4 +185,111 @@ test('input during Goal reopen acceptance waits for the accepted Goal run to fin
   assert.deepEqual(sent, []);
   terminal.resolve(); await Promise.all([goal, queued]);
   assert.deepEqual(sent, ['queued']);
+});
+
+test('batch permissions intersect explicit policies and never combine unknown inheritance with explicit authority', async () => {
+  for (const [modes, expected] of [
+    [['bypass', 'danger-full-access'], 'danger-full-access'],
+    [['bypass', 'workspace-write'], 'workspace-write'],
+    [['workspace-write', 'bypass'], 'workspace-write'],
+    [[undefined, 'cli-default'], undefined],
+    [[undefined, 'workspace-write'], 'rejected'],
+    [['bypass', 'cli-default'], 'rejected']
+  ]) {
+    const terminal = deferred(), calls = [], promoted = [], errors = [];
+    const controller = new ChatSessionController(runtime({
+      async send(agentId, text, options) { calls.push({ text, options }); return { agentId, runId: calls.length === 1 ? 'active' : 'batch' }; },
+      async status(_agentId, runId) { if (runId === 'active') await terminal.promise; return { status: 'completed' }; }
+    }), events({ onError(error) { errors.push(error); } }), 'main-existing', { pollIntervalMs: 0 });
+    const active = controller.send('active', [], {}); await tick();
+    const first = controller.send('first', [], { executionMode: modes[0] }, () => promoted.push('first'));
+    const second = controller.send('second', [], { executionMode: modes[1] }, () => promoted.push('second'));
+    terminal.resolve(); await Promise.all([active, first, second]);
+    if (expected === 'rejected') {
+      assert.equal(calls.length, 1);
+      assert.deepEqual(promoted, []);
+      assert.match(errors[0], /상속 권한과 명시 권한/);
+    } else {
+      assert.equal(calls.length, 2);
+      assert.equal(calls[1].options.executionMode, expected);
+      assert.deepEqual(promoted, ['first', 'second']);
+      assert.deepEqual(errors, []);
+    }
+    assert.equal(controller.queueLength, 0);
+  }
+});
+
+test('batching cannot transfer a human actor or verification target between original requests', async () => {
+  for (const field of ['actor', 'verifiedWorkRunId']) {
+    const terminal = deferred(), calls = [], promoted = [], errors = [];
+    const controller = new ChatSessionController(runtime({
+      async send(agentId, text) { calls.push(text); return { agentId, runId: 'active' }; },
+      async status() { await terminal.promise; return { status: 'completed' }; }
+    }), events({ onError(error) { errors.push(error); } }), 'main-existing', { pollIntervalMs: 0 });
+    const active = controller.send('active', [], {}); await tick();
+    const first = controller.send('first', [], {}, () => promoted.push('first'));
+    const second = controller.send('second', [], { [field]: field === 'actor' ? 'human' : 'verified-other' }, () => promoted.push('second'));
+    terminal.resolve(); await Promise.all([active, first, second]);
+    assert.deepEqual(calls, ['active']);
+    assert.deepEqual(promoted, []);
+    assert.match(errors[0], /실행 주체 또는 검증 대상/);
+  }
+});
+
+test('batch includes all prepared images and preserves attachment-only message boundaries', async () => {
+  const terminal = deferred(), calls = [];
+  const controller = new ChatSessionController(runtime({
+    async send(agentId, text, options, images) { calls.push({ text, options, images }); return { agentId, runId: calls.length === 1 ? 'active' : 'batch' }; },
+    async status(_agentId, runId) { if (runId === 'active') await terminal.promise; return { status: 'completed' }; }
+  }), events(), 'main-existing', { pollIntervalMs: 0 });
+  const active = controller.send('active', [], {}); await tick();
+  const image = name => ({ id: name, name, kind: 'image', uri: `file:///tmp/${name}`, mediaType: 'image/png' });
+  const options = { model: 'first-model', reasoningEffort: 'high', fast: true, goalMode: true, goalObjective: 'shared' };
+  const first = controller.send('', [image('one.png')], options);
+  const second = controller.send('second text', [image('two.png'), { id: 'file', kind: 'file', name: 'notes.md', uri: 'file:///tmp/notes.md' }], { ...options, model: 'later-model' });
+  terminal.resolve(); await Promise.all([active, first, second]);
+  assert.equal(calls.length, 2);
+  assert.deepEqual(calls[1].images.map(image => image.path), ['/tmp/one.png', '/tmp/two.png']);
+  assert.match(calls[1].text, /대기 메시지 1 시작 ---[\s\S]*one\.png[\s\S]*대기 메시지 1 끝/);
+  assert.match(calls[1].text, /대기 메시지 2 시작 ---\nsecond text[\s\S]*notes\.md/);
+  assert.equal(calls[1].options.model, 'first-model');
+  assert.equal(calls[1].options.goalMode, true);
+  assert.equal(calls[1].options.goalObjective, 'shared');
+});
+
+test('discovery failure retains original batch members for a single later dispatch', async () => {
+  const discovery = deferred(), calls = [], promoted = [];
+  let firstDiscovery = true;
+  const controller = new ChatSessionController(runtime({
+    async activeRun() { if (firstDiscovery) { firstDiscovery = false; await discovery.promise; throw new Error('offline'); } },
+    async send(agentId, text) { calls.push(text); return { agentId, runId: 'batch' }; }
+  }), events(), 'main-existing', { pollIntervalMs: 0 });
+  const first = controller.send('first', [], {}, () => promoted.push('first'));
+  const second = controller.send('second', [], {}, () => promoted.push('second'));
+  discovery.resolve(); await tick();
+  assert.equal(controller.queueLength, 2);
+  assert.deepEqual(calls, []);
+  assert.deepEqual(promoted, []);
+  await controller.reconnect(); await Promise.all([first, second]);
+  assert.equal(calls.length, 1);
+  assert.ok(calls[0].indexOf('first') < calls[0].indexOf('second'));
+  assert.deepEqual(promoted, ['first', 'second']);
+});
+
+test('batch drain waits for already received attachment preparation before taking its snapshot', async () => {
+  const terminal = deferred(), preparation = deferred(), calls = [];
+  let preparing = false;
+  const controller = new ChatSessionController(runtime({
+    async send(agentId, text) { calls.push(text); return { agentId, runId: calls.length === 1 ? 'active' : 'batch' }; },
+    async status(_agentId, runId) { if (runId === 'active') await terminal.promise; return { status: 'completed' }; }
+  }), events({ async onBeforeQueueDrain() { if (preparing) await preparation.promise; } }), 'main-existing', { pollIntervalMs: 0 });
+  const active = controller.send('active', [], {}); await tick();
+  const first = controller.send('ready', [], {});
+  preparing = true;
+  terminal.resolve(); await tick();
+  assert.deepEqual(calls, ['active']);
+  const second = controller.send('prepared image', [{ id: 'image', name: 'image.png', kind: 'image', uri: 'file:///tmp/image.png', mediaType: 'image/png' }], {});
+  preparation.resolve(); await Promise.all([active, first, second]);
+  assert.equal(calls.length, 2);
+  assert.match(calls[1], /ready[\s\S]*prepared image/);
 });

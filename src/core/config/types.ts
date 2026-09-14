@@ -16,6 +16,8 @@ export const STATUS_ITEM_IDS = [
   "task",
   "execution",
   "contextUsed",
+  "contextRemainingTokens",
+  "contextUsedPercent",
   "contextWindow",
   "weekly",
   "weeklyRemaining",

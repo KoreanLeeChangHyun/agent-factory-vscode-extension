@@ -124,37 +124,66 @@ test("Content and Weekly used/remaining items are independently selectable and c
   run('setStatusItems(["contextUsed", "context", "weekly", "weeklyRemaining"])');
   assert.deepEqual(sent.at(-1).items, ['contextUsed', 'context', 'weekly', 'weeklyRemaining']);
   Object.assign(context.state, { contextUsedTokens: 54_264, contextWindowTokens: 258_400, weeklyUsedPercent: 12.5 });
-  assert.equal(run('statusLabel("contextUsed")'), 'Content 사용량 21% (54,264 tokens)');
-  assert.equal(run('statusLabel("context")'), 'Content 잔량 79% (204,136 tokens)');
+  assert.equal(run('statusLabel("contextUsed")'), 'Content 사용 토큰 54,264 tokens');
+  assert.equal(run('statusLabel("context")'), 'Content 잔량 79%');
   assert.equal(run('statusLabel("weekly")'), 'Weekly 사용량 12.5%');
   assert.equal(run('statusLabel("weeklyRemaining")'), 'Weekly 잔량 87.5%');
   context.state.contextUsedTokens = undefined;
-  assert.equal(run('statusLabel("contextUsed")'), 'Content 사용량 확인 불가');
+  assert.equal(run('statusLabel("contextUsed")'), 'Content 사용 토큰 확인 불가');
   assert.equal(run('statusLabel("context")'), 'Content 잔량 확인 불가');
   assert.equal(run('statusLabel("weeklyRemaining")'), 'Weekly 잔량 87.5%');
   context.state.weeklyUsedPercent = undefined;
   assert.equal(run('statusLabel("weeklyRemaining")'), 'Weekly 잔량 확인 불가');
   context.state.contextUsedTokens = 0;
-  assert.equal(run('statusLabel("contextUsed")'), 'Content 사용량 0% (0 tokens)');
-  assert.equal(run('statusLabel("context")'), 'Content 잔량 100% (258,400 tokens)');
+  assert.equal(run('statusLabel("contextUsed")'), 'Content 사용 토큰 0 tokens');
+  assert.equal(run('statusLabel("context")'), 'Content 잔량 100%');
   for (const used of [0, 100]) {
     context.state.weeklyUsedPercent = used;
     assert.equal(run('statusLabel("weekly")'), `Weekly 사용량 ${used}%`);
     assert.equal(run('statusLabel("weeklyRemaining")'), `Weekly 잔량 ${100 - used}%`);
   }
   context.state.contextUsedTokens = 300_000;
-  assert.equal(run('statusLabel("context")'), 'Content 잔량 0% (0 tokens)');
-  assert.equal(run('statusLabel("contextUsed")'), 'Content 사용량 116.1% (300,000 tokens)');
+  assert.equal(run('statusLabel("context")'), 'Content 잔량 0%');
+  assert.equal(run('statusLabel("contextUsed")'), 'Content 사용 토큰 300,000 tokens');
   for (const window of [0, undefined]) {
     context.state.contextWindowTokens = window;
     assert.equal(run('statusLabel("context")'), 'Content 잔량 확인 불가');
-    assert.equal(run('statusLabel("contextUsed")'), 'Content 사용량 300,000 tokens (사용률 확인 불가)');
+    assert.equal(run('statusLabel("contextUsed")'), 'Content 사용 토큰 300,000 tokens');
     assert.equal(run('statusLabel("contextWindow")'), 'Content 기준 확인 불가 tokens');
   }
   context.state.branch = 'feature/status';
   assert.equal(run('statusLabel("branch")'), 'feature/status');
   context.state.branch = undefined;
   assert.equal(run('statusLabel("branch")'), '—');
+});
+
+test("Content percentage and token counts remain separate through selection and missing data", () => {
+  const { run, context, sent } = harness();
+  const items = ['weekly', 'contextRemainingTokens', 'contextUsed', 'branch', 'context', 'contextUsedPercent'];
+  context.items = items;
+  run('setStatusItems(items)');
+  assert.deepEqual(sent.at(-1).items, items);
+  Object.assign(context.state, { contextUsedTokens: 25, contextWindowTokens: 100 });
+  assert.equal(run('statusLabel("context")'), 'Content 잔량 75%');
+  assert.equal(run('statusLabel("contextUsed")'), 'Content 사용 토큰 25 tokens');
+  assert.equal(run('statusLabel("contextRemainingTokens")'), 'Content 잔여 토큰 75 tokens');
+  assert.equal(run('statusLabel("contextUsedPercent")'), 'Content 사용률 25%');
+  context.state.contextUsedTokens = 150;
+  assert.equal(run('statusLabel("contextRemainingTokens")'), 'Content 잔여 토큰 0 tokens');
+  assert.equal(run('statusLabel("contextUsedPercent")'), 'Content 사용률 150%');
+  context.state.contextUsedTokens = 0;
+  assert.equal(run('statusLabel("contextRemainingTokens")'), 'Content 잔여 토큰 100 tokens');
+  assert.equal(run('statusLabel("contextUsedPercent")'), 'Content 사용률 0%');
+  for (const window of [undefined, 0]) {
+    context.state.contextWindowTokens = window;
+    assert.equal(run('statusLabel("contextRemainingTokens")'), 'Content 잔여 토큰 확인 불가');
+    assert.equal(run('statusLabel("contextUsedPercent")'), 'Content 사용률 확인 불가');
+    assert.equal(run('statusLabel("contextUsed")'), 'Content 사용 토큰 0 tokens');
+  }
+  context.state.contextWindowTokens = 100;
+  context.state.contextUsedTokens = undefined;
+  assert.equal(run('statusLabel("contextRemainingTokens")'), 'Content 잔여 토큰 확인 불가');
+  assert.equal(run('statusLabel("contextUsedPercent")'), 'Content 사용률 확인 불가');
 });
 
 test("usage updates preserve unknown Content values and independent Weekly data", () => {
@@ -164,11 +193,11 @@ test("usage updates preserve unknown Content values and independent Weekly data"
   context.message = { type: 'context.usage', usedTokens: -1, contextWindowTokens: 100, weeklyUsedPercent: 25 };
   run('switch (message.type) {\n' + update + '\n}');
   assert.equal(run('statusLabel("context")'), 'Content 잔량 확인 불가');
-  assert.equal(run('statusLabel("contextUsed")'), 'Content 사용량 확인 불가');
+  assert.equal(run('statusLabel("contextUsed")'), 'Content 사용 토큰 확인 불가');
   assert.equal(run('statusLabel("weeklyRemaining")'), 'Weekly 잔량 75%');
   context.message = { type: 'context.usage', usedTokens: 0, contextWindowTokens: 100 };
   run('switch (message.type) {\n' + update + '\n}');
-  assert.equal(run('statusLabel("context")'), 'Content 잔량 100% (100 tokens)');
+  assert.equal(run('statusLabel("context")'), 'Content 잔량 100%');
   assert.equal(run('statusLabel("weekly")'), 'Weekly 사용량 확인 불가');
   assert.equal(run('statusLabel("weeklyRemaining")'), 'Weekly 잔량 확인 불가');
 });

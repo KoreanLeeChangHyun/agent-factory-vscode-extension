@@ -314,12 +314,12 @@ test("Content remaining is independent of Weekly availability", async function (
   };
   assert.equal(
     runInNewContext(functions + "\ncontextStatusLabel();", context),
-    "Content 잔량 79% (204,136 tokens)"
+    "Content 잔량 79%"
   );
   context.state.weeklyUsedPercent = undefined;
   assert.equal(
     runInNewContext("contextStatusLabel();", context),
-    "Content 잔량 79% (204,136 tokens)"
+    "Content 잔량 79%"
   );
 });
 
@@ -676,7 +676,7 @@ test("session controller binds once, sends later turns, and retains attachment r
   assert.deepEqual(messages.filter((message) => message[0] === "status"), [["status", "completed"], ["status", "completed"]]);
 });
 
-test("session controller queues concurrent sends in order without dropping attachments or settings", async function () {
+test("session controller batches concurrent sends in order without dropping attachments or first settings", async function () {
   const { ChatSessionController } = await importTypeScript("src/modules/chat/session-controller.ts");
   let releaseStatus;
   let statusCalls = 0;
@@ -720,12 +720,12 @@ test("session controller queues concurrent sends in order without dropping attac
   releaseStatus({ status: "completed" });
   await Promise.all([first, second, third]);
 
-  assert.deepEqual(calls.map(call => call[0]), ["submit", "send", "send"]);
-  assert.match(calls[1][1], /^second\n\n첨부 참조:/);
+  assert.deepEqual(calls.map(call => call[0]), ["submit", "send"]);
+  assert.match(calls[1][1], /대기 메시지 1 시작 ---\nsecond\n\n첨부 참조:/);
   assert.match(calls[1][1], /queued\.md: file:\/\/\/tmp\/queued\.md/);
-  assert.equal(calls[2][1], "third");
+  assert.match(calls[1][1], /대기 메시지 2 시작 ---\nthird/);
   assert.deepEqual(calls[1][2], secondExecution);
-  assert.deepEqual(queueCounts, [1, 2, 1, 0]);
+  assert.deepEqual(queueCounts, [1, 2, 0]);
   assert.deepEqual(running, [true, false]);
   assert.deepEqual(errors, []);
   assert.equal(controller.queueLength, 0);
@@ -1142,7 +1142,7 @@ test("active run discovery includes queued runs, skips terminal runs and validat
   assert.equal(await client.activeRun("main-test"), undefined);
 });
 
-test("reconnect with no active run hands racing input to the FIFO queue exactly once", async () => {
+test("reconnect with no active run hands racing input to the pending batch exactly once", async () => {
   const { ChatSessionController } = await importTypeScript("src/modules/chat/session-controller.ts");
   let resolveDiscovery;
   const discovery = new Promise(resolve => { resolveDiscovery = resolve; });
@@ -1167,8 +1167,10 @@ test("reconnect with no active run hands racing input to the FIFO queue exactly 
 
   assert.equal(await reconnecting, false);
   await Promise.all([first, second, third]);
-  assert.deepEqual(sent, ["first", "second", "third"]);
-  assert.deepEqual(queueCounts, [1, 2, 3, 2, 1, 0]);
+  assert.equal(sent.length, 1);
+  assert.ok(sent[0].indexOf("first") < sent[0].indexOf("second"));
+  assert.ok(sent[0].indexOf("second") < sent[0].indexOf("third"));
+  assert.deepEqual(queueCounts, [1, 2, 3, 0]);
   assert.equal(discoveries, 1);
   assert.equal(controller.queueLength, 0);
 });

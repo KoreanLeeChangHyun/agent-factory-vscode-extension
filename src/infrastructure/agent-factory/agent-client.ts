@@ -1,5 +1,6 @@
 import { constants as fsConstants } from "node:fs";
 import { spawn } from "node:child_process";
+import { runtimeEnvironment } from "./process-environment";
 import { lstat, mkdtemp, open as openFile, readFile, readdir, realpath, rm, writeFile } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
@@ -1207,7 +1208,7 @@ export function runBoundedProcess(
   maxOutputBytes: number
 ): Promise<ProcessOutput> {
   return new Promise((resolvePromise, reject) => {
-    const child = spawn(executable, [...arguments_], { stdio: ["ignore", "pipe", "pipe"] });
+    const child = spawn(executable, [...arguments_], { stdio: ["ignore", "pipe", "pipe"], env: runtimeEnvironment() });
     const stdout: Buffer[] = [];
     const stderr: Buffer[] = [];
     let outputBytes = 0;

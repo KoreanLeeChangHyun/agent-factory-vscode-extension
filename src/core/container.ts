@@ -27,11 +27,12 @@ export function createContainer(context: vscode.ExtensionContext): Container {
       const configuredPath = vscode.workspace
         .getConfiguration("agentFactory.mainChat")
         .get<string>("runtimeExecPath");
-      const key = JSON.stringify([projectRoot, configuredPath, process.env.CODEX_HOME, process.env.PATH]);
+      const pythonPath = vscode.workspace.getConfiguration("agentFactory.mainChat").get<string>("pythonPath")?.trim() || "python3";
+      const key = JSON.stringify([projectRoot, configuredPath, pythonPath, process.env.CODEX_HOME, process.env.PATH]);
       return connections.get(key, async () => {
         const location = await locateAgentFactoryExec({ configuredPath });
         if (!location.available) return location;
-        const client = new AgentFactoryClient(location.execPath, projectRoot, "python3", undefined, async () => {
+        const client = new AgentFactoryClient(location.execPath, projectRoot, pythonPath, undefined, async () => {
           const refreshed = await locateAgentFactoryExec({ configuredPath });
           if (!refreshed.available) throw new Error(refreshed.diagnostic);
           return refreshed.execPath;

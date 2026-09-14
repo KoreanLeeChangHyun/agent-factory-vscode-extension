@@ -821,6 +821,14 @@ export class ChatPanelManager implements vscode.Disposable {
           void this.post(managed.panel, { type: "run.state", running });
           this.scheduleAgentList(managed, !running);
         },
+        onBeforeQueueDrain: async () => {
+          // Include inputs already received while their attachments were preparing.
+          let preparation: Promise<void>;
+          do {
+            preparation = managed.chatSendPreparation;
+            await preparation;
+          } while (preparation !== managed.chatSendPreparation);
+        },
         onQueueChanged: (count) => {
           void this.post(managed.panel, { type: "queue.updated", count });
         },

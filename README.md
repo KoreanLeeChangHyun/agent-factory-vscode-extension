@@ -27,6 +27,36 @@ and extension are released together and must stay on matching semantic base vers
 The extension invokes Codex plugin installation; it does not contain or bundle the
 plugin.
 
+## macOS setup
+
+1. Install Python 3.10+ and Codex CLI on the **workspace extension host**, and
+   configure the matching companion plugin described above. SSH/container windows
+   use the remote host's tools and paths.
+2. Ensure `codex` and its interpreter (for example, Node for an npm installation)
+   are on the host's `PATH`. On macOS, child processes also search
+   `/opt/homebrew/bin`, `/usr/local/bin`, and `~/.local/bin` after inherited entries.
+   Custom version-manager paths must be present in VS Code's environment; launch
+   VS Code from the configured terminal if needed. Shell startup files are not executed
+   by the extension to discover tools.
+3. Set `agentFactory.mainChat.pythonPath` to your Python 3.10+ executable if
+   `python3` resolves to an older system Python, for example
+   `/opt/homebrew/bin/python3` on an Apple Silicon Homebrew installation or
+   `/usr/local/bin/python3` on an Intel installation. Use the actual installed
+   path, without shell arguments. Paths containing spaces are supported.
+4. The plugin is normally discovered under `$CODEX_HOME/plugins/cache` or
+   `~/.codex/plugins/cache`. `agentFactory.mainChat.runtimeExecPath` can select
+   its `skills/agent/scripts/exec.py` explicitly. Run that script's `doctor`
+   command with the selected Python before the first managed run.
+
+The companion runtime's macOS backend uses kernel boot/process identity and private
+process groups. Descendants that create another session can escape group cancellation;
+this has weaker lifecycle containment than Linux cgroups. Codex sandbox policy remains
+separate, and a sandbox failure never triggers a wider permission fallback. `doctor`
+does not prove native sandbox readiness. Validate submit, follow-up, cancellation and
+the intended permissions on the actual Mac; this change has not been validated on
+Mac hardware. See the plugin's `skills/agent/references/home-runtime.md` for the
+containment and host-readiness contract.
+
 ## Features
 
 - Open Main Agent sessions in editor tabs; stream activity and resume sessions.

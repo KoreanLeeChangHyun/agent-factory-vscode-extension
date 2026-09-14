@@ -9,6 +9,7 @@ export interface SessionControllerEvents {
   readonly onBound: (agentId: string) => void;
   readonly onRunningChanged: (running: boolean) => void;
   readonly onQueueChanged?: (count: number) => void;
+  readonly onBeforeQueueDrain?: () => Promise<void>;
   readonly onAssistantText: (text: string, phase?: "commentary" | "final", runId?: string) => void;
   readonly onProgress: (text: string) => void;
   readonly onUsage: (usedTokens: number, contextWindowTokens: number, weeklyUsedPercent?: number) => void;
@@ -33,6 +34,14 @@ export interface SessionControllerOptions {
   readonly maxPolls?: number;
 }
 
+interface PendingSend {
+  readonly text: string;
+  readonly attachments: readonly AttachmentReference[];
+  readonly execution: ExecutionOptions;
+  readonly resolve?: () => void;
+  readonly onStarted?: () => void;
+}
+
 export class ChatSessionController {
   private agentId: string | undefined;
   private currentRunId: string | undefined;
@@ -46,13 +55,7 @@ export class ChatSessionController {
   private goalControlPending = false;
   private pendingGoalAction: GoalAction | undefined;
   private disposed = false;
-  private readonly queuedSends: Array<{
-    readonly text: string;
-    readonly attachments: readonly AttachmentReference[];
-    readonly execution: ExecutionOptions;
-    readonly resolve: () => void;
-    readonly onStarted?: () => void;
-  }> = [];
+  private readonly queuedSends: PendingSend[] = [];
 
   public constructor(
     private readonly runtime: AgentRuntimeClient,
@@ -72,7 +75,7 @@ export class ChatSessionController {
 
   public dispose(): void {
     this.disposed = true;
-    for (const queued of this.queuedSends.splice(0)) queued.resolve();
+    for (const queued of this.queuedSends.splice(0)) queued.resolve?.();
     this.events.onQueueChanged?.(0);
   }
 
@@ -125,14 +128,15 @@ export class ChatSessionController {
     this.currentRunAgentId = undefined;
     this.cancelRequested = false;
     this.busy = false;
-    const queued = this.pendingDecisionRunId ? undefined : this.queuedSends.shift();
-    if (queued) this.events.onQueueChanged?.(this.queuedSends.length);
-    if (queued && !this.disposed) {
-      void this.sendAndDrainQueue(queued.text, queued.attachments, queued.execution, false, queued.onStarted).finally(queued.resolve);
+    const batch = this.pendingDecisionRunId ? [] : this.queuedSends.splice(0);
+    if (batch.length) this.events.onQueueChanged?.(this.queuedSends.length);
+    const first = batch[0];
+    if (first && !this.disposed) {
+      void this.sendAndDrainQueue(first.text, first.attachments, first.execution, false, undefined, batch);
     } else if (!this.disposed) {
       this.events.onRunningChanged(false);
     } else {
-      queued?.resolve();
+      for (const item of batch) item.resolve?.();
     }
   }
 
@@ -172,40 +176,77 @@ export class ChatSessionController {
     attachments: readonly AttachmentReference[],
     execution: ExecutionOptions,
     checkActiveRun = true,
-    onStarted?: () => void
+    onStarted?: () => void,
+    initialBatch?: PendingSend[]
   ): Promise<void> {
+    // A decision answer must complete before unrelated pending input is drained.
+    let priorityAnswer = Boolean(this.pendingDecisionRunId);
     this.busy = true;
     this.events.onRunningChanged(true);
-    let next: { readonly text: string; readonly attachments: readonly AttachmentReference[]; readonly execution: ExecutionOptions; readonly resolve?: () => void; readonly onStarted?: () => void } | undefined = {
-      text, attachments, execution, onStarted
-    };
-    let retainedCompletion: Promise<void> | undefined;
+    let next: PendingSend[] = initialBatch ?? [{ text, attachments, execution, onStarted }];
+    const retainedCompletions: Promise<void>[] = [];
     let interrupted = false;
-    while (next && !this.disposed) {
+    while (next.length && !this.disposed) {
       let started = false;
-      let dispatched = false;
+      let attempted = false;
+      this.clearDecision();
+      this.cancelRequested = false;
       try {
-        await this.sendOne(next.text, next.attachments, next.execution, checkActiveRun, () => {
+        if (this.agentId && checkActiveRun) {
+          const active = await this.runtime.activeRun?.(this.agentId);
+          if (active) {
+            this.currentRunId = active.runId;
+            this.currentRunAgentId = active.agentId;
+            this.events.onProgress("진행 중인 작업이 끝난 뒤 대기 메시지를 모아 실행합니다.");
+            await this.flushCancellation();
+            await this.pollUntilTerminal(active.agentId, active.runId);
+            this.currentRunId = undefined;
+            this.currentRunAgentId = undefined;
+            this.cancelRequested = false;
+            if (this.pendingDecisionRunId) throw new Error("사용자 결정 후 대기 메시지를 모아 처리합니다.");
+          }
+        }
+        if (this.events.onBeforeQueueDrain) await this.events.onBeforeQueueDrain();
+        if (this.disposed) { for (const item of next) item.resolve?.(); break; }
+        // Freeze the original messages immediately before dispatch, after discovery.
+        // Arrivals during acceptance/polling belong to the next batch.
+        if (!priorityAnswer && this.queuedSends.length) {
+          next.push(...this.queuedSends.splice(0));
+          this.events.onQueueChanged?.(0);
+        }
+        attempted = true;
+        const merged = mergePendingSends(next);
+        if (next.length > 1) this.events.onProgress(`대기 메시지 ${next.length}개를 한 요청으로 접수합니다. 작업 모드·모델·추론은 첫 메시지 기준이며 권한은 공통 허용 범위로 적용합니다.`);
+        await this.sendOne(merged.text, merged.attachments, merged.execution, () => {
           started = true;
-          next?.onStarted?.();
-        }, () => { dispatched = true; });
+          for (const item of next) item.onStarted?.();
+        });
+        if (!this.pendingDecisionRunId && this.events.onBeforeQueueDrain) await this.events.onBeforeQueueDrain();
       } catch (error) {
-        // Discovery/transport errors cannot establish that the active execution ended.
         interrupted = true;
-        if (!started && !dispatched) {
-          let resolve = next.resolve;
-          if (!resolve) retainedCompletion = new Promise<void>(done => { resolve = done; });
-          this.queuedSends.unshift({ ...next, resolve: resolve! });
+        if (!started && !attempted) {
+          // Discovery failure retains each original identity and completion promise.
+          const retained = next.map(item => {
+            if (item.resolve) return item;
+            let resolve!: () => void;
+            retainedCompletions.push(new Promise<void>(done => { resolve = done; }));
+            return { ...item, resolve };
+          });
+          this.queuedSends.unshift(...retained);
           this.events.onQueueChanged?.(this.queuedSends.length);
-        } else next.resolve?.();
+        } else {
+          // Never replay an unacknowledged submission. The host restores originals.
+          for (const item of next) item.resolve?.();
+        }
         this.events.onError(errorMessage(error));
         break;
       }
-      checkActiveRun = false;
-      next.resolve?.();
+      for (const item of next) item.resolve?.();
       if (this.pendingDecisionRunId) break;
-      next = this.queuedSends.shift();
-      if (next) this.events.onQueueChanged?.(this.queuedSends.length);
+      priorityAnswer = false;
+      checkActiveRun = false;
+      next = this.queuedSends.splice(0);
+      if (next.length) this.events.onQueueChanged?.(0);
     }
     if (!interrupted) {
       this.currentRunId = undefined;
@@ -214,58 +255,33 @@ export class ChatSessionController {
     }
     this.busy = false;
     if (!this.disposed) this.events.onRunningChanged(false);
-    await retainedCompletion;
+    await Promise.all(retainedCompletions);
   }
 
   private async sendOne(
     text: string,
     attachments: readonly AttachmentReference[],
     execution: ExecutionOptions,
-    checkActiveRun = true,
-    onStarted?: () => void,
-    onDispatch?: () => void
+    onStarted: () => void
   ): Promise<void> {
-    this.clearDecision();
-    this.cancelRequested = false;
-    {
-      if (this.agentId && checkActiveRun) {
-        const active = await this.runtime.activeRun?.(this.agentId);
-        if (active) {
-          this.currentRunId = active.runId;
-          this.currentRunAgentId = active.agentId;
-          this.events.onProgress("진행 중인 작업이 끝난 뒤 입력한 요청을 이어서 실행합니다.");
-          await this.flushCancellation();
-          await this.pollUntilTerminal(active.agentId, active.runId);
-          this.currentRunId = undefined;
-          this.currentRunAgentId = undefined;
-          this.cancelRequested = false;
-          if (this.pendingDecisionRunId) throw new Error("사용자 결정 후 대기 메시지를 이어서 처리합니다.");
-        }
-      }
-      if (this.disposed) return;
-      this.submittedTaskMode = execution.taskMode;
-      onDispatch?.();
-      const request = withAttachmentReferences(text, attachments);
-      const images = runtimeImages(attachments);
-      if (!this.agentId) {
-        const candidateAgentId = `main-${randomUUID()}`;
-        const accepted = await this.runtime.submit(candidateAgentId, request, execution, images);
-        this.agentId = accepted.agentId;
-        this.events.onBound(this.agentId);
-        onStarted?.();
-        this.currentRunId = accepted.runId;
-        this.currentRunAgentId = accepted.agentId;
-        await this.flushCancellation();
-        await this.pollUntilTerminal(accepted.agentId, accepted.runId);
-      } else {
-        const accepted = await this.runtime.send(this.agentId, request, execution, images);
-        onStarted?.();
-        this.currentRunId = accepted.runId;
-        this.currentRunAgentId = accepted.agentId;
-        await this.flushCancellation();
-        await this.pollUntilTerminal(accepted.agentId, accepted.runId);
-      }
+    this.submittedTaskMode = execution.taskMode;
+    const request = withAttachmentReferences(text, attachments);
+    const images = runtimeImages(attachments);
+    if (!this.agentId) {
+      const candidateAgentId = `main-${randomUUID()}`;
+      const accepted = await this.runtime.submit(candidateAgentId, request, execution, images);
+      this.agentId = accepted.agentId;
+      this.events.onBound(this.agentId);
+      this.currentRunId = accepted.runId;
+      this.currentRunAgentId = accepted.agentId;
+    } else {
+      const accepted = await this.runtime.send(this.agentId, request, execution, images);
+      this.currentRunId = accepted.runId;
+      this.currentRunAgentId = accepted.agentId;
     }
+    onStarted();
+    await this.flushCancellation();
+    await this.pollUntilTerminal(this.currentRunAgentId, this.currentRunId);
     this.currentRunId = undefined;
     this.currentRunAgentId = undefined;
     this.cancelRequested = false;
@@ -437,6 +453,36 @@ export class ChatSessionController {
     }
     throw new Error("Agent Factory 실행 상태 확인 시간이 초과되었습니다. 런타임 기록에서 실행을 확인하세요.");
   }
+}
+
+function mergePendingSends(items: readonly PendingSend[]): Pick<PendingSend, "text" | "attachments" | "execution"> {
+  const first = items[0]!;
+  if (items.length === 1) return first;
+  const execution = { ...first.execution };
+  // cli-default/omitted can inherit read-only or another unknown session policy.
+  // Never infer its permissions from an explicit mode on a different message.
+  const inherited = (value: ExecutionOptions["executionMode"]) => value === undefined || value === "cli-default";
+  const modes = items.map(item => item.execution.executionMode);
+  if (modes.some(inherited) && !modes.every(inherited)) {
+    throw new Error("대기 메시지의 상속 권한과 명시 권한을 안전하게 병합할 수 없습니다. 입력창으로 복원한 뒤 같은 실행 권한으로 다시 보내세요.");
+  }
+  if (items.some(item => item.execution.actor !== execution.actor || item.execution.verifiedWorkRunId !== execution.verifiedWorkRunId)) {
+    throw new Error("대기 메시지의 실행 주체 또는 검증 대상이 달라 병합하지 않았습니다. 원래 대상별로 입력을 복원해 주세요.");
+  }
+  if (!modes.some(inherited)) {
+    execution.executionMode = modes.includes("workspace-write") ? "workspace-write"
+      : modes.includes("danger-full-access") ? "danger-full-access" : "bypass";
+  }
+  // Goal continuation needs agreement from every original request.
+  if (!items.every(item => item.execution.goalMode === true && item.execution.goalObjective === execution.goalObjective)) {
+    execution.goalMode = false;
+    delete execution.goalObjective;
+  }
+  return {
+    text: items.map((item, index) => `--- 대기 메시지 ${index + 1} 시작 ---\n${withAttachmentReferences(item.text, item.attachments)}\n--- 대기 메시지 ${index + 1} 끝 ---`).join("\n\n"),
+    attachments: items.flatMap(item => [...item.attachments]),
+    execution
+  };
 }
 
 export function withAttachmentReferences(

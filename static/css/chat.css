@@ -492,8 +492,9 @@ button {
 
 .run-status {
   display: block;
-  width: calc(100% - 12px);
-  margin: 0 auto 8px;
+  flex: 1 1 0;
+  min-width: 0;
+  margin: 0 0 8px;
   color: var(--vscode-descriptionForeground);
   font-size: 12px;
   line-height: 1.4;
@@ -1412,8 +1413,17 @@ button {
   display: block;
   height: 100%;
   border-radius: inherit;
-  background: hsl(120 72% 45%);
+  /* Remaining capacity is a health signal, not generic task progress. */
+  background: var(--vscode-testing-iconPassed, hsl(120 72% 45%));
   transition: width 180ms ease-out;
+}
+
+.context-token-meter-fill[data-level="warning"] {
+  background: var(--vscode-editorWarning-foreground, #cca700);
+}
+
+.context-token-meter-fill[data-level="critical"] {
+  background: var(--vscode-editorError-foreground, #f14c4c);
 }
 
 .drop-overlay {
@@ -1654,13 +1664,21 @@ button:focus-visible,
 }
 .status-footer .status-bar { flex: 1; min-width: 0; width: auto; margin-top: 0; }
 .status-settings-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  min-width: 24px;
+  height: 22px;
+  color: inherit;
   flex: 0 0 auto;
   border: 1px solid var(--vscode-statusBar-border, transparent);
   background: transparent;
-  padding: 0 6px;
-  font-size: 11px;
+  padding: 3px;
   cursor: pointer;
 }
+.status-settings-button svg { width: 16px; height: 16px; }
+.status-settings-button:hover { background: var(--vscode-toolbar-hoverBackground); }
 .status-settings {
   /* Stay outside the shell's three grid tracks and above its 22px footer. */
   position: absolute;
@@ -1714,9 +1732,51 @@ button:focus-visible,
 .status-catalog-row.status-drop-after { border-bottom-color: var(--vscode-focusBorder); }
 .status-catalog-row.dragging { opacity: 0.5; }
 
+/* Keep the queue trigger on the progress line; expanded contents stay in flow. */
+.composer-status-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin: 0 6px;
+}
+
+.pending-queue-toggle {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 4px;
+  max-width: 45%;
+  min-width: 0;
+  min-height: 24px;
+  margin: 0 0 8px auto;
+  padding: 3px 4px;
+  border: 0;
+  color: var(--vscode-descriptionForeground);
+  background: transparent;
+  font-size: 12px;
+  line-height: 1.4;
+  cursor: pointer;
+}
+.pending-queue-toggle[hidden] { display: none; }
+#pending-queue-label { min-width: 0; overflow-wrap: anywhere; }
+.pending-queue-toggle svg {
+  width: 14px;
+  height: 14px;
+  flex: 0 0 auto;
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 1.5;
+}
+.pending-queue-toggle[aria-expanded="true"] svg { transform: rotate(180deg); }
+.pending-queue-toggle:hover { color: var(--af-color-accent); }
+
 #pending-message-queue {
   max-height: 180px;
   overflow: auto;
+  margin: 0 6px 8px;
   padding: 8px 12px;
   border: 1px solid var(--vscode-widget-border);
   border-radius: 6px;
@@ -1725,9 +1785,12 @@ button:focus-visible,
   font-size: 12px;
 }
 
-#pending-message-queue summary { cursor: pointer; }
 #pending-message-queue p { white-space: pre-wrap; overflow-wrap: anywhere; }
+#pending-message-queue .pending-queue-description { margin-top: 0; }
 #pending-message-queue button {
+  max-width: 100%;
+  white-space: normal;
+  overflow-wrap: anywhere;
   margin: 4px 8px 4px 0;
   padding: 4px 8px;
   color: var(--vscode-button-secondaryForeground);
@@ -1736,5 +1799,5 @@ button:focus-visible,
   border-radius: 4px;
 }
 #pending-message-queue button:focus-visible,
-#pending-message-queue summary:focus-visible { outline: 1px solid var(--vscode-focusBorder); }
+.pending-queue-toggle:focus-visible { outline: 1px solid var(--vscode-focusBorder); }
 #pending-message-queue button:disabled { opacity: 0.5; }

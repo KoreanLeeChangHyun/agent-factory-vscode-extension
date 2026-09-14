@@ -184,6 +184,8 @@
               "task",
               "execution",
               "contextUsed",
+              "contextRemainingTokens",
+              "contextUsedPercent",
               "contextWindow",
               "weekly",
               "weeklyRemaining",
@@ -195,6 +197,12 @@
           },
           "description": "채팅 하단의 상태 표시줄 설정에서 표시할 정보와 순서를 선택합니다. 드래그 또는 이동 버튼으로 정렬하며 빈 배열은 모든 정보를 숨깁니다.",
           "uniqueItems": true
+        },
+        "agentFactory.mainChat.pythonPath": {
+          "type": "string",
+          "scope": "machine",
+          "default": "",
+          "description": "Python 3.10+ executable path on the extension host (without shell arguments). Empty uses python3 from PATH. On macOS, select your installed Python if the system Python is older."
         },
         "agentFactory.mainChat.runtimeExecPath": {
           "type": "string",
