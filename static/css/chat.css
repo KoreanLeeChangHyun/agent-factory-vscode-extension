@@ -1117,6 +1117,10 @@ button {
   flex-wrap: wrap;
 }
 
+.timeline.auto-scroll-disabled {
+  overflow-anchor: none;
+}
+
 .icon-button,
 .send-button {
   display: grid;

@@ -16,6 +16,7 @@
   const sendIcon = document.getElementById("send-icon");
   const stopIcon = document.getElementById("stop-icon");
   const attachButton = document.getElementById("attach-button");
+  const autoScrollButton = document.getElementById("auto-scroll-button");
   const modelButton = document.getElementById("model-button");
   const modelLabel = document.getElementById("model-label");
   const modelMenu = document.getElementById("model-menu");
@@ -111,6 +112,7 @@
     role: ["main", "work", "verification"].includes(saved?.role) ? saved.role : "main",
     verifiedWorkRunId: typeof saved?.verifiedWorkRunId === "string" ? saved.verifiedWorkRunId : undefined,
     draft: typeof saved?.draft === "string" ? saved.draft : "",
+    autoScroll: saved?.autoScroll !== false,
     attachments: Array.isArray(saved?.attachments) ? saved.attachments.filter(function (item) {
       return item && !item.pending && !item.previewUri?.startsWith("blob:") && item.data === undefined;
     }) : [],
@@ -155,6 +157,7 @@
   let themeUpdate = 0;
   let elapsedTimerId;
   let followLatest = true;
+  let autoScrollFrame;
 
   prompt.value = state.draft;
   renderAll();
@@ -255,6 +258,17 @@
 
   timeline.addEventListener("scroll", function () {
     followLatest = timeline.scrollHeight - timeline.scrollTop - timeline.clientHeight < 24;
+  });
+
+  autoScrollButton.addEventListener("click", function () {
+    state.autoScroll = !state.autoScroll;
+    cancelAnimationFrame(autoScrollFrame);
+    updateAutoScrollControl();
+    if (state.autoScroll) {
+      followLatest = true;
+      timeline.scrollTop = timeline.scrollHeight;
+    }
+    persist();
   });
 
   document.addEventListener("keydown", function (event) {
@@ -896,6 +910,7 @@
   }
 
   function renderAll() {
+    updateAutoScrollControl();
     renderPendingQueue();
     renderTimeline();
     renderAttachments();
@@ -1026,7 +1041,8 @@
   }
 
   function renderTimeline() {
-    const shouldFollowLatest = followLatest;
+    cancelAnimationFrame(autoScrollFrame);
+    const shouldFollowLatest = state.autoScroll && followLatest;
     const previousScroll = timeline.scrollTop;
     const displayStates = new Map();
     let focusedControl;
@@ -1149,10 +1165,21 @@
     updateQuestionControl();
     timeline.setAttribute("aria-busy", String(state.running));
     if (shouldFollowLatest) {
-      requestAnimationFrame(function () {
-        timeline.scrollTop = timeline.scrollHeight;
+      autoScrollFrame = requestAnimationFrame(function () {
+        // The user may disable following or scroll away before this frame runs.
+        if (state.autoScroll && followLatest) timeline.scrollTop = timeline.scrollHeight;
       });
     }
+  }
+
+  function updateAutoScrollControl() {
+    const label = state.autoScroll
+      ? "자동 스크롤 ON · 클릭하여 끄기"
+      : "자동 스크롤 OFF · 클릭하여 최신 내용으로 이동하고 켜기";
+    autoScrollButton.title = label;
+    autoScrollButton.setAttribute("aria-label", label);
+    autoScrollButton.setAttribute("aria-pressed", String(state.autoScroll));
+    timeline.classList.toggle("auto-scroll-disabled", !state.autoScroll);
   }
 
   function activityKindLabel(category) {
@@ -2646,6 +2673,7 @@
       role: state.role,
       verifiedWorkRunId: state.verifiedWorkRunId,
       draft: state.draft,
+      autoScroll: state.autoScroll,
       attachments: state.attachments.filter(function (attachment) {
         return !attachment.pending && !attachment.previewUri?.startsWith("blob:");
       }).map(function (attachment) {

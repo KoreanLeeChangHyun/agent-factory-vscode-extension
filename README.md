@@ -86,6 +86,18 @@ Drag one or more selected agents onto a group to move them. Dropping onto anothe
 
 Opening a bound chat reconnects to its existing accepted or active run and follows progress and completion without submitting another request. The stop button cancels that run. Closing a chat detaches the display without cancelling the background runtime.
 
+## Automatic transcript scrolling
+
+The compact down-arrow toggle beside Send controls automatic scrolling. Its tooltip
+shows **자동 스크롤 ON/OFF**, and its pressed state indicates ON. It defaults to ON.
+Turning it OFF preserves the transcript scroll position during new messages,
+streaming updates, rerenders, and queued-message acceptance. Turning it ON jumps
+to the latest content and resumes following. With ON selected, scrolling upward
+still pauses following until you return near the bottom, as before; submitting or
+accepting a message can resume following. With OFF selected, these events never
+re-enable automatic scrolling. Manual scrolling and question-list navigation remain
+available. The preference is saved per webview panel and restored on reload.
+
 ## Syntax highlighting
 
 - **Theme selection:** read `tui.theme` from `$CODEX_HOME/config.toml` (default: `~/.codex/config.toml`) on the workspace extension host, including SSH/container hosts.

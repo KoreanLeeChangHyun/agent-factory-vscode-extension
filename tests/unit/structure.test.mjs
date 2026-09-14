@@ -187,7 +187,7 @@ test("status bar includes active Work and Verification counts", function () {
   assert.match(template, /id="status-catalog"/);
   assert.match(chatScript, /meter\.setAttribute\("role", "progressbar"\)/);
   assert.match(chatScript, /fill\.style\.width = remainingRatio \* 100 \+ "%"/);
-  assert.match(chatScript, /var\(--vscode-progressBar-background\)/);
+  assert.match(chatScript, /fill\.dataset\.level = remainingRatio < 0\.1 \? "critical" : remainingRatio < 0\.3 \? "warning" : "healthy"/);
   assert.match(chatStyles, /\.context-token-meter/);
   assert.match(agentClient, /last_token_usage/);
   assert.match(agentClient, /model_context_window/);
