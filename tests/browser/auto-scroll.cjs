@@ -37,6 +37,27 @@ async function checkAutoScroll(page) {
   await emit({ type: 'agents.list', agents: [] });
   assert.equal(await page.locator('#timeline').evaluate(element => element.scrollTop), 150);
   assert.equal(await page.evaluate(() => window.scrollWrites), 0);
+  await emit({ type: 'host.initialize', runtimeAvailable: true, capabilities: { submit: {}, send: {} } });
+  for (const method of ['Enter', 'button']) {
+    await page.locator('#prompt').fill('Send while automatic scrolling is OFF: ' + method);
+    await page.locator('#timeline').evaluate(element => { element.scrollTop = 150; window.scrollWrites = 0; });
+    await settle();
+    const sendsBefore = await page.evaluate(() => window.sentMessages.filter(message => message.type === 'chat.send').length);
+    if (method === 'Enter') await page.locator('#prompt').press('Enter');
+    else await page.locator('#send-button').click();
+    await settle();
+    assert.equal(await page.evaluate(() => window.sentMessages.filter(message => message.type === 'chat.send').length), sendsBefore + 1);
+    assert.ok(await page.locator('#timeline').evaluate(element => Math.abs(element.scrollHeight - element.clientHeight - element.scrollTop) <= 1), 'Sending while OFF must reveal the bottom');
+    assert.equal(await page.evaluate(() => window.scrollWrites), 1, 'Sending while OFF must scroll once');
+    assert.equal(await toggle.getAttribute('aria-pressed'), 'false');
+    assert.equal(await page.evaluate(() => window.saved.autoScroll), false);
+    await page.evaluate(() => { window.scrollWrites = 0; });
+    const sent = await page.evaluate(() => window.sentMessages.filter(message => message.type === 'chat.send').at(-1));
+    await emit({ type: 'chat.started', id: sent.id, text: sent.text, attachments: [] });
+    await emit({ type: 'chat.assistant', text: 'Streaming after send\n\nMore content' });
+    await emit({ type: 'run.activity', id: 'after-send-' + method, category: 'command', phase: 'started', text: 'echo progress', output: 'first' });
+    assert.equal(await page.evaluate(() => window.scrollWrites), 0, 'Acceptance and streaming after send must keep automatic scrolling OFF');
+  }
   await toggle.click();
   await settle();
   assert.ok(await page.locator('#timeline').evaluate(element => Math.abs(element.scrollHeight - element.clientHeight - element.scrollTop) <= 1));

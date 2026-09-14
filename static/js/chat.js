@@ -722,6 +722,8 @@
     prompt.value = "";
     renderAll();
     resizePrompt();
+    // Sending reveals the latest content once without enabling automatic following.
+    if (!state.autoScroll) timeline.scrollTop = timeline.scrollHeight;
     persist();
     vscode.postMessage({ type: "chat.send", ...message });
   }
