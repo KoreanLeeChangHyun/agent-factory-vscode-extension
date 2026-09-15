@@ -1963,13 +1963,14 @@
       item.type = "button";
       item.className = "question-item";
       item.setAttribute("role", "option");
-      const number = document.createElement("span");
-      number.className = "question-item-index";
-      number.textContent = "질문 " + (index + 1);
+      item.setAttribute("aria-posinset", String(index + 1));
+      item.setAttribute("aria-setsize", String(questions.length));
       const text = document.createElement("span");
       text.className = "question-item-text";
-      text.textContent = question.text;
-      item.append(number, text);
+      const attachmentNames = (Array.isArray(question.attachments) ? question.attachments : [])
+        .map(function (attachment) { return attachment.name; }).filter(Boolean);
+      text.textContent = question.text?.trim() || (attachmentNames.length ? "첨부: " + attachmentNames.join(", ") : "첨부 메시지");
+      item.append(text);
       item.addEventListener("click", function () {
         closeQuestionMenu(false);
         jumpToQuestion(question.id);

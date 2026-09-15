@@ -1026,8 +1026,7 @@ button {
   opacity: 0.85;
 }
 
-.session-item-name,
-.question-item-index {
+.session-item-name {
   overflow: hidden;
   font-size: 12px;
   font-weight: 600;
@@ -1037,16 +1036,10 @@ button {
 
 .question-item-text {
   overflow: hidden;
-  color: var(--vscode-descriptionForeground);
-  font-size: 11px;
+  color: inherit;
+  font-size: 12px;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-.question-item:hover .question-item-text,
-.question-item:focus-visible .question-item-text {
-  color: inherit;
-  opacity: 0.85;
 }
 
 .message-user:focus-visible,
