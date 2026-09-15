@@ -61,11 +61,11 @@ export class AgentSidebar implements vscode.TreeDataProvider<Node>, vscode.TreeD
       const agents = await this.panels.sidebarAgents();
       if (this.disposed || revision !== this.revision) return;
       this.agents = agents;
-      this.view.message = agents.length ? undefined : "＋ 버튼으로 새 에이전트 채팅을 시작하세요.";
+      this.view.message = agents.length ? undefined : "Use the ＋ button to start a new agent chat.";
       this.changed.fire(undefined);
     } catch (error) {
       if (this.disposed || revision !== this.revision) return;
-      this.view.message = `목록을 불러오지 못했습니다. 새로고침으로 다시 시도하세요. ${error instanceof Error ? error.message : String(error)}`;
+      this.view.message = `Unable to load the list. Refresh to try again. ${error instanceof Error ? error.message : String(error)}`;
     }
   }
 
@@ -91,10 +91,10 @@ export class AgentSidebar implements vscode.TreeDataProvider<Node>, vscode.TreeD
     const item = new vscode.TreeItem(state.title, vscode.TreeItemCollapsibleState.None);
     item.id = `agent:${state.panelId}`;
     item.contextValue = "agentFactoryAgent";
-    item.description = running ? "실행 중" : state.agentId ? undefined : "새 채팅";
+    item.description = running ? "Running" : state.agentId ? undefined : "New chat";
     item.tooltip = [state.title, state.agentId, state.model].filter(Boolean).join("\n");
     item.iconPath = new vscode.ThemeIcon(running ? "loading~spin" : "comment-discussion");
-    item.command = { command: "agentFactory.sidebar.open", title: "에이전트 열기", arguments: [node] };
+    item.command = { command: "agentFactory.sidebar.open", title: "Open Agent", arguments: [node] };
     return item;
   }
 
@@ -126,7 +126,7 @@ export class AgentSidebar implements vscode.TreeDataProvider<Node>, vscode.TreeD
 
   private async name(title: string, value = ""): Promise<string | undefined> {
     const name = await vscode.window.showInputBox({ title, value, ignoreFocusOut: true,
-      validateInput: value => !value.trim() ? "이름을 입력하세요." : value.trim().length > 80 ? "80자 이내로 입력하세요." : undefined });
+      validateInput: value => !value.trim() ? "Enter a name." : value.trim().length > 80 ? "Enter no more than 80 characters." : undefined });
     return name?.trim() || undefined;
   }
 
@@ -137,14 +137,14 @@ export class AgentSidebar implements vscode.TreeDataProvider<Node>, vscode.TreeD
 
   private async rename(node?: Node): Promise<void> {
     if (node?.kind !== "agent") return;
-    const title = await this.name("에이전트 이름 변경", node.agent.state.title);
+    const title = await this.name("Rename Agent", node.agent.state.title);
     if (!title) return;
     await this.panels.renameSidebarAgent(node.agent.state, title);
     await this.refresh();
   }
 
   private async newGroup(): Promise<void> {
-    const name = await this.name("새 에이전트 그룹");
+    const name = await this.name("New Agent Group");
     if (!name) return;
     this.layout.groups.push({ id: randomUUID(), name });
     await this.save();
@@ -154,7 +154,7 @@ export class AgentSidebar implements vscode.TreeDataProvider<Node>, vscode.TreeD
     if (node?.kind !== "group") return;
     const group = this.layout.groups.find(group => group.id === node.group.id);
     if (!group) return;
-    const name = await this.name("그룹 이름 변경", group.name);
+    const name = await this.name("Rename Group", group.name);
     if (!name) return;
     group.name = name;
     await this.save();
@@ -163,9 +163,9 @@ export class AgentSidebar implements vscode.TreeDataProvider<Node>, vscode.TreeD
   private async move(node?: Node): Promise<void> {
     if (node?.kind !== "agent") return;
     const selected = await vscode.window.showQuickPick([
-      { label: "그룹 없음", id: "" },
+      { label: "No group", id: "" },
       ...this.layout.groups.map(group => ({ label: group.name, id: group.id }))
-    ], { title: "에이전트 그룹 선택", placeHolder: node.agent.state.title });
+    ], { title: "Select Agent Group", placeHolder: node.agent.state.title });
     if (!selected) return;
     if (selected.id) this.layout.assignments[node.agent.state.panelId] = selected.id;
     else delete this.layout.assignments[node.agent.state.panelId];

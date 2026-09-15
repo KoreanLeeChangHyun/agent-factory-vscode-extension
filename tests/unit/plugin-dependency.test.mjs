@@ -155,14 +155,14 @@ test("no compatible available plugin fails without add", async () => {
     json(currentList([record({ version: "1.0.1", installed: true, enabled: true })])),
     json(currentList())
   ]);
-  await assert.rejects(dependency.ensureAgentFactoryPlugin("1.0.2", process.runner), /공식 marketplace/);
+  await assert.rejects(dependency.ensureAgentFactoryPlugin("1.0.2", process.runner), /official marketplace/);
   assert.equal(process.calls.length, 2);
 });
 
 test("add or recheck failure blocks activation", async (t) => {
   await t.test("malformed add output", async () => {
     const process = queuedRunner([json(currentList()), json(currentList([], [record()])), { stdout: "[]" }]);
-    await assert.rejects(dependency.ensureAgentFactoryPlugin("1.0.2", process.runner), /JSON 객체/);
+    await assert.rejects(dependency.ensureAgentFactoryPlugin("1.0.2", process.runner), /JSON object/);
     assert.equal(process.calls.length, 3);
   });
   await t.test("plugin remains disabled after add", async () => {
@@ -172,43 +172,43 @@ test("add or recheck failure blocks activation", async (t) => {
       json({ installed: true }),
       json(currentList([record({ installed: true, enabled: false })]))
     ]);
-    await assert.rejects(dependency.ensureAgentFactoryPlugin("1.0.2", process.runner), /활성 상태/);
+    await assert.rejects(dependency.ensureAgentFactoryPlugin("1.0.2", process.runner), /is active/);
   });
 });
 
 test("malformed, oversized, and failed command output blocks", async (t) => {
   await t.test("malformed JSON", async () => {
     const process = queuedRunner([{ stdout: "{" }]);
-    await assert.rejects(dependency.ensureAgentFactoryPlugin("1.0.2", process.runner), /올바른 JSON/);
+    await assert.rejects(dependency.ensureAgentFactoryPlugin("1.0.2", process.runner), /valid JSON/);
   });
   await t.test("invalid record", async () => {
     const process = queuedRunner([json(currentList([{ name: "agent-factory" }]))]);
-    await assert.rejects(dependency.ensureAgentFactoryPlugin("1.0.2", process.runner), /레코드 형식/);
+    await assert.rejects(dependency.ensureAgentFactoryPlugin("1.0.2", process.runner), /record .*invalid format/);
   });
   await t.test("oversized output", async () => {
     const process = queuedRunner([{ stdout: " ".repeat(256 * 1024 + 1) }]);
-    await assert.rejects(dependency.ensureAgentFactoryPlugin("1.0.2", process.runner), /크기를 초과/);
+    await assert.rejects(dependency.ensureAgentFactoryPlugin("1.0.2", process.runner), /exceeded the size limit/);
   });
   await t.test("missing executable", async () => {
     const error = Object.assign(new Error("spawn codex ENOENT"), { code: "ENOENT" });
     const process = queuedRunner([error]);
-    await assert.rejects(dependency.ensureAgentFactoryPlugin("1.0.2", process.runner), /실행 파일을 찾을 수 없습니다/);
+    await assert.rejects(dependency.ensureAgentFactoryPlugin("1.0.2", process.runner), /executable was not found/);
   });
   await t.test("timeout", async () => {
     const error = Object.assign(new Error("timed out"), { killed: true });
     const process = queuedRunner([error]);
-    await assert.rejects(dependency.ensureAgentFactoryPlugin("1.0.2", process.runner), /시간이 초과/);
+    await assert.rejects(dependency.ensureAgentFactoryPlugin("1.0.2", process.runner), /timed out/);
   });
   await t.test("output limit", async () => {
     const error = Object.assign(new Error("stdout maxBuffer length exceeded"), {
       code: "ERR_CHILD_PROCESS_STDIO_MAXBUFFER"
     });
     const process = queuedRunner([error]);
-    await assert.rejects(dependency.ensureAgentFactoryPlugin("1.0.2", process.runner), /크기를 초과/);
+    await assert.rejects(dependency.ensureAgentFactoryPlugin("1.0.2", process.runner), /exceeded the size limit/);
   });
   await t.test("other command failure", async () => {
     const process = queuedRunner([new Error("spawn failed")]);
-    await assert.rejects(dependency.ensureAgentFactoryPlugin("1.0.2", process.runner), /실행 환경/);
+    await assert.rejects(dependency.ensureAgentFactoryPlugin("1.0.2", process.runner), /execution environment/);
   });
 });
 
@@ -240,6 +240,6 @@ test("activation bootstraps only after dependency success and reports one failur
   services.ensurePlugin = async () => { throw new Error("dependency unavailable"); };
   await activate(context, services);
   assert.equal(events.length, 2);
-  assert.match(events[1], /^error:Agent Factory를 시작하지 못했습니다\. dependency unavailable$/);
+  assert.match(events[1], /^error:Unable to start Agent Factory\. dependency unavailable$/);
   assert.ok(!events.includes("bootstrap"));
 });

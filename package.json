@@ -2,7 +2,7 @@
   "name": "agent-factory-main-chat",
   "displayName": "Agent Factory Main Chat",
   "description": "Main Agent chat sessions in VS Code editor tabs.",
-  "version": "1.0.7",
+  "version": "1.0.8",
   "publisher": "agent-factory",
   "icon": "static/images/agent-factory.png",
   "license": "UNLICENSED",
@@ -29,7 +29,7 @@
     "commands": [
       {
         "command": "agentFactory.mainChat.open",
-        "title": "Main Agent 채팅 추가",
+        "title": "Add Main Agent Chat",
         "category": "Agent Factory",
         "icon": "$(add)"
       },
@@ -40,53 +40,53 @@
       },
       {
         "command": "agentFactory.mainChat.rename",
-        "title": "Main Agent 이름 변경",
+        "title": "Rename Main Agent",
         "category": "Agent Factory"
       },
       {
         "command": "agentFactory.loadingAnimations.preview",
-        "title": "로딩 애니메이션 샘플 보기",
+        "title": "Preview Loading Animations",
         "category": "Agent Factory"
       },
       {
         "command": "agentFactory.sidebar.refresh",
-        "title": "에이전트 목록 새로고침",
+        "title": "Refresh Agents",
         "category": "Agent Factory",
         "icon": "$(refresh)"
       },
       {
         "command": "agentFactory.sidebar.open",
-        "title": "에이전트 열기",
+        "title": "Open Agent",
         "category": "Agent Factory",
         "icon": "$(comment-discussion)"
       },
       {
         "command": "agentFactory.sidebar.rename",
-        "title": "에이전트 이름 변경",
+        "title": "Rename Agent",
         "category": "Agent Factory",
         "icon": "$(edit)"
       },
       {
         "command": "agentFactory.sidebar.newGroup",
-        "title": "새 에이전트 그룹",
+        "title": "New Agent Group",
         "category": "Agent Factory",
         "icon": "$(new-folder)"
       },
       {
         "command": "agentFactory.sidebar.move",
-        "title": "에이전트 그룹 변경",
+        "title": "Move Agent to Group",
         "category": "Agent Factory",
         "icon": "$(folder)"
       },
       {
         "command": "agentFactory.sidebar.renameGroup",
-        "title": "그룹 이름 변경",
+        "title": "Rename Group",
         "category": "Agent Factory",
         "icon": "$(edit)"
       },
       {
         "command": "agentFactory.sidebar.deleteGroup",
-        "title": "그룹 해제",
+        "title": "Ungroup",
         "category": "Agent Factory",
         "icon": "$(ungroup-by-ref-type)"
       }
@@ -195,7 +195,7 @@
               "goalBudget"
             ]
           },
-          "description": "채팅 하단의 상태 표시줄 설정에서 표시할 정보와 순서를 선택합니다. 드래그 또는 이동 버튼으로 정렬하며 빈 배열은 모든 정보를 숨깁니다.",
+          "description": "Choose which information to display and its order in the status bar settings below the chat. Drag items or use the move buttons to reorder them. An empty array hides all items.",
           "uniqueItems": true
         },
         "agentFactory.mainChat.pythonPath": {
@@ -221,12 +221,12 @@
           ],
           "default": "danger-full-access",
           "enumDescriptions": [
-            "새 세션은 CLI 설정을 사용하며 기존 세션은 저장된 정책을 유지합니다.",
-            "작업 공간 쓰기를 허용하며 실행 중 추가 승인은 요청하지 않습니다.",
-            "전체 파일 시스템과 네트워크 접근을 허용하며 실행 중 추가 승인은 요청하지 않습니다.",
-            "전체 접근을 허용하며 실행 승인과 계획 재승인 없이 바로 진행합니다."
+            "New sessions use CLI settings; existing sessions keep their saved policy.",
+            "Allow workspace writes without requesting additional approval during execution.",
+            "Allow full file system and network access without requesting additional approval during execution.",
+            "Allow full access and proceed without execution approval or plan reapproval."
           ],
-          "description": "Main Agent의 다음 실행에 적용할 권한입니다. 기본값은 전체 파일 시스템과 네트워크 접근을 허용하고 추가 실행 승인을 요청하지 않습니다. 작업 공간 쓰기 또는 CLI 기본값으로 제한할 수 있습니다. 같은 세션에서도 실행 사이에 변경할 수 있으며 현재 실행 중인 작업은 변경하지 않습니다."
+          "description": "Permissions for the next Main Agent run. The default allows full file system and network access without additional execution approval. You can restrict access to workspace writes or CLI defaults. Permissions can change between runs in the same session; the current run is unaffected."
         }
       }
     },
@@ -243,13 +243,14 @@
       "agentFactory": [
         {
           "id": "agentFactory.agents",
-          "name": "에이전트"
+          "name": "Agents"
         }
       ]
     }
   },
   "scripts": {
     "build": "node scripts/build.mjs",
+    "release": "node scripts/release.mjs",
     "watch": "node scripts/build.mjs --watch",
     "check": "npm run typecheck && npm run check:static && npm run test && npm run build",
     "check:static": "node --check static/js/chat.js && node --check static/js/ansi-renderer.js && node --check static/js/execution-references.js && node --check static/js/loading-animation-gallery.js",

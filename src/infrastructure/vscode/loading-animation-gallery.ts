@@ -12,7 +12,7 @@ export class LoadingAnimationGallery {
 
     const panel = vscode.window.createWebviewPanel(
       "agentFactory.loadingAnimations",
-      "로딩 애니메이션 샘플",
+      "Loading Animation Samples",
       vscode.ViewColumn.Active,
       {
         enableScripts: true,

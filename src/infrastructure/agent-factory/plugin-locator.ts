@@ -23,7 +23,7 @@ export async function locateAgentFactoryExec(
       ? { available: true, execPath: configured }
       : {
           available: false,
-          diagnostic: `설정된 Agent Factory exec.py가 올바른 일반 파일이 아닙니다: ${configured}`
+          diagnostic: `The configured Agent Factory exec.py is not a valid regular file: ${configured}`
         };
   }
 
@@ -58,14 +58,14 @@ export async function locateAgentFactoryExec(
   } catch {
     return {
       available: false,
-      diagnostic: `Agent Factory 플러그인 캐시를 찾을 수 없습니다: ${cacheRoot}`
+      diagnostic: `Unable to find the Agent Factory plugin cache: ${cacheRoot}`
     };
   }
   candidates.sort((left, right) => right.modifiedAt - left.modifiedAt || right.path.localeCompare(left.path));
   if (candidates[0]) return { available: true, execPath: candidates[0].path };
   return {
     available: false,
-    diagnostic: `설치된 marketplace의 Agent Factory 플러그인에서 ${RELATIVE_EXEC_PATH}를 찾지 못했습니다.`
+    diagnostic: `Unable to find ${RELATIVE_EXEC_PATH} in the Agent Factory plugin installed from the marketplace.`
   };
 }
 

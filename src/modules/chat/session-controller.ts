@@ -96,7 +96,7 @@ export class ChatSessionController {
       if (active) {
         this.currentRunId = active.runId;
         this.currentRunAgentId = active.agentId;
-        this.events.onProgress("진행 중인 작업에 다시 연결했습니다.");
+        this.events.onProgress("Reconnected to the active run.");
         await this.flushCancellation();
         void this.followExistingRun(active.agentId, active.runId);
         return true;
@@ -156,7 +156,7 @@ export class ChatSessionController {
       });
     }
     if (this.goalControlPending) {
-      this.events.onError("이전 Goal 제어 요청이 처리 중입니다. 완료된 뒤 다시 보내세요.");
+      this.events.onError("The previous Goal control request is still processing. Send again after it finishes.");
       if (!this.running) this.events.onRunningChanged(false);
       return;
     }
@@ -197,13 +197,13 @@ export class ChatSessionController {
           if (active) {
             this.currentRunId = active.runId;
             this.currentRunAgentId = active.agentId;
-            this.events.onProgress("진행 중인 작업이 끝난 뒤 대기 메시지를 모아 실행합니다.");
+            this.events.onProgress("Queued messages will run together after the current run finishes.");
             await this.flushCancellation();
             await this.pollUntilTerminal(active.agentId, active.runId);
             this.currentRunId = undefined;
             this.currentRunAgentId = undefined;
             this.cancelRequested = false;
-            if (this.pendingDecisionRunId) throw new Error("사용자 결정 후 대기 메시지를 모아 처리합니다.");
+            if (this.pendingDecisionRunId) throw new Error("Queued messages will be processed together after your decision.");
           }
         }
         if (this.events.onBeforeQueueDrain) await this.events.onBeforeQueueDrain();
@@ -216,7 +216,7 @@ export class ChatSessionController {
         }
         attempted = true;
         const merged = mergePendingSends(next);
-        if (next.length > 1) this.events.onProgress(`대기 메시지 ${next.length}개를 한 요청으로 접수합니다. 작업 모드·모델·추론은 첫 메시지 기준이며 권한은 공통 허용 범위로 적용합니다.`);
+        if (next.length > 1) this.events.onProgress(`Submitting ${next.length} queued messages as one request. Task mode, model, and reasoning use the first message settings; permissions use their common allowed scope.`);
         await this.sendOne(merged.text, merged.attachments, merged.execution, () => {
           started = true;
           for (const item of next) item.onStarted?.();
@@ -304,11 +304,11 @@ export class ChatSessionController {
   public async controlGoal(action: GoalAction): Promise<void> {
     if (!this.agentId) return;
     if (this.goalControlPending) {
-      this.events.onError("이전 Goal 제어 요청이 처리 중입니다.");
+      this.events.onError("The previous Goal control request is still processing.");
       return;
     }
     if (action === "reopen" && this.busy) {
-      this.events.onError("현재 실행이 끝난 뒤 Goal을 다시 여세요.");
+      this.events.onError("Reopen Goal after the current run finishes.");
       return;
     }
     if (action === "reopen") this.cancelRequested = false;
@@ -332,7 +332,7 @@ export class ChatSessionController {
       if ("goal" in result) this.events.onGoal?.(result.goal ?? null, result.error);
       if (result.accepted) {
         if (this.busy) {
-          this.events.onError("다른 실행이 진행 중이어서 Goal 실행을 연결할 수 없습니다.");
+          this.events.onError("Unable to connect the Goal run while another run is active.");
           return;
         }
         this.currentRunId = result.accepted.runId;
@@ -364,7 +364,7 @@ export class ChatSessionController {
     if (!this.busy && !this.currentRunId) {
       if (this.goalControlPending && this.pendingGoalAction === "reopen") {
         this.cancelRequested = true;
-        this.events.onProgress("Goal 실행 접수 즉시 취소하도록 요청했습니다.");
+        this.events.onProgress("Requested cancellation as soon as the Goal run is accepted.");
         return;
       }
       if (!this.disposed) this.events.onRunningChanged(false);
@@ -372,7 +372,7 @@ export class ChatSessionController {
     }
     this.cancelRequested = true;
     if (!this.currentRunAgentId || !this.currentRunId) {
-      this.events.onProgress("실행 접수 즉시 취소하도록 요청했습니다.");
+      this.events.onProgress("Requested cancellation as soon as the run is accepted.");
       return;
     }
     await this.flushCancellation();
@@ -436,8 +436,8 @@ export class ChatSessionController {
           const summary = terminalSummary(result.status);
           this.events.onProgress(summary);
           if ((result.status !== "completed" && result.status !== "needs-human-decision") || diagnostic || goalError) {
-            this.events.onError([summary, diagnostic ? `${diagnostic.code}: ${diagnostic.message}` : "", diagnostic?.code === "execution_preflight_failed" ? "실행 환경 확인에 실패했습니다. 실행이 끝난 뒤 필요한 권한을 선택하고 다음 메시지로 다시 시도하세요." : "", goalError ?? ""].filter(Boolean).join("\n"));
-            this.events.onAssistantText(result.text.trim() ? `${summary}\n\n보존된 부분 결과 (완료 확인 아님):\n${result.text.trim()}` : summary, "final", runId);
+            this.events.onError([summary, diagnostic ? `${diagnostic.code}: ${diagnostic.message}` : "", diagnostic?.code === "execution_preflight_failed" ? "Execution environment check failed. After the run finishes, select the required permissions and retry with your next message." : "", goalError ?? ""].filter(Boolean).join("\n"));
+            this.events.onAssistantText(result.text.trim() ? `${summary}\n\nPreserved partial result (completion unconfirmed):\n${result.text.trim()}` : summary, "final", runId);
           } else {
             this.events.onAssistantText(result.text.trim() || summary, "final", runId);
           }
@@ -451,7 +451,7 @@ export class ChatSessionController {
       }
       await delay(interval);
     }
-    throw new Error("Agent Factory 실행 상태 확인 시간이 초과되었습니다. 런타임 기록에서 실행을 확인하세요.");
+    throw new Error("Timed out checking Agent Factory run status. Check the run in the runtime records.");
   }
 }
 
@@ -464,10 +464,10 @@ function mergePendingSends(items: readonly PendingSend[]): Pick<PendingSend, "te
   const inherited = (value: ExecutionOptions["executionMode"]) => value === undefined || value === "cli-default";
   const modes = items.map(item => item.execution.executionMode);
   if (modes.some(inherited) && !modes.every(inherited)) {
-    throw new Error("대기 메시지의 상속 권한과 명시 권한을 안전하게 병합할 수 없습니다. 입력창으로 복원한 뒤 같은 실행 권한으로 다시 보내세요.");
+    throw new Error("Cannot safely merge inherited and explicit permissions for queued messages. Restore them to the input and resend with matching execution permissions.");
   }
   if (items.some(item => item.execution.actor !== execution.actor || item.execution.verifiedWorkRunId !== execution.verifiedWorkRunId)) {
-    throw new Error("대기 메시지의 실행 주체 또는 검증 대상이 달라 병합하지 않았습니다. 원래 대상별로 입력을 복원해 주세요.");
+    throw new Error("Queued messages have different execution owners or verification targets and were not merged. Restore the input for each original target.");
   }
   if (!modes.some(inherited)) {
     execution.executionMode = modes.includes("workspace-write") ? "workspace-write"
@@ -503,7 +503,7 @@ export function withAttachmentReferences(
 export function runtimeImages(attachments: readonly AttachmentReference[]) {
   return attachments.filter((attachment) => attachment.kind === "image").map((attachment) => {
     if (!attachment.uri?.startsWith("file:") || !["image/png", "image/jpeg", "image/gif", "image/webp"].includes(attachment.mediaType ?? "")) {
-      throw new Error(`이미지 첨부를 안전한 로컬 파일로 준비하지 못했습니다: ${attachment.name}`);
+      throw new Error(`Unable to prepare the image attachment as a safe local file: ${attachment.name}`);
     }
     return {
       path: fileURLToPath(attachment.uri),
@@ -513,10 +513,10 @@ export function runtimeImages(attachments: readonly AttachmentReference[]) {
 }
 
 function terminalSummary(status: string): string {
-  if (status === "cancelled") return "실행이 취소되었습니다.";
-  if (status === "needs-human-decision") return "실행을 계속하려면 사용자 결정이 필요합니다.";
-  if (status === "failed") return "Agent Factory 실행이 실패했습니다.";
-  return "Agent Factory 실행이 완료되었습니다.";
+  if (status === "cancelled") return "The run was cancelled.";
+  if (status === "needs-human-decision") return "Your decision is required to continue the run.";
+  if (status === "failed") return "The Agent Factory run failed.";
+  return "The Agent Factory run completed.";
 }
 
 function delay(milliseconds: number): Promise<void> {

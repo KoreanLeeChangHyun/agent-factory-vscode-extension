@@ -16,16 +16,16 @@ export async function activate(
   const requiredVersion: unknown = context.extension.packageJSON.version;
   try {
     if (typeof requiredVersion !== "string" || !requiredVersion.trim()) {
-      throw new Error("확장 버전 정보를 읽을 수 없습니다.");
+      throw new Error("Unable to read the extension version.");
     }
     await services.withProgress({
       location: vscode.ProgressLocation.Notification,
-      title: "Agent Factory 플러그인 의존성을 확인하는 중입니다…",
+      title: "Checking Agent Factory plugin dependencies…",
       cancellable: false
     }, () => services.ensurePlugin(requiredVersion));
   } catch (error) {
-    const detail = error instanceof Error ? error.message : "알 수 없는 오류가 발생했습니다.";
-    await services.showErrorMessage(`Agent Factory를 시작하지 못했습니다. ${detail}`);
+    const detail = error instanceof Error ? error.message : "An unknown error occurred.";
+    await services.showErrorMessage(`Unable to start Agent Factory. ${detail}`);
     return;
   }
   services.bootstrap(context);

@@ -166,10 +166,10 @@ export class AgentFactoryClient implements AgentRuntimeClient {
         || value.projectRoot !== await realProjectRoot(this.projectRoot)
         || value.runtimeRoot !== join(value.home, "projects", value.projectId)
         || value.agentsRoot !== join(value.home, "projects", value.projectId, "agents")) {
-      throw new Error("Agent Factory 저장소 위치 응답이 올바르지 않습니다.");
+      throw new Error("Invalid Agent Factory storage location response.");
     }
     const expectedHome = resolve(process.env.AGENT_FACTORY_HOME ?? join(homedir(), ".agent-factory"));
-    if (value.home !== expectedHome) throw new Error("Agent Factory 저장소 홈 결속이 다릅니다.");
+    if (value.home !== expectedHome) throw new Error("Agent Factory storage home binding does not match.");
     await checkManagedComponents(value.agentsRoot as string);
     this.eventSnapshot = undefined;
     this.contextUsageSnapshots.clear();
@@ -178,7 +178,7 @@ export class AgentFactoryClient implements AgentRuntimeClient {
 
   private async managedPath(agentId: string, ...members: string[]): Promise<string> {
     if (!MANAGED_ID.test(agentId) || members.some((member) => !MANAGED_ID.test(member))) {
-      throw new Error("Agent Factory 관리 경로가 올바르지 않습니다.");
+      throw new Error("Invalid Agent Factory managed path.");
     }
     const location = await this.location();
     const path = join(location.agentsRoot, agentId, ...members);
@@ -195,12 +195,12 @@ export class AgentFactoryClient implements AgentRuntimeClient {
   private async readCapabilities(agentId?: string): ReturnType<AgentRuntimeClient["capabilities"]> {
     const document = await this.command(["capabilities", "--project-root", this.projectRoot, ...(agentId ? ["--agent", agentId] : [])]);
     if (document.kind !== "execution-capabilities" || document.schemaVersion !== "0.1.0") {
-      throw new Error("네이티브 기능 정보를 제공하는 Agent Factory 런타임으로 업데이트하세요.");
+      throw new Error("Update to an Agent Factory runtime that provides native capability information.");
     }
     const readCapabilities = (value: unknown): ExecutionCapabilities => {
       const record = readRecord(value, "execution capabilities");
       for (const key of ["model", "reasoning", "fast", "goal"]) {
-        if (typeof record[key] !== "boolean") throw new Error("Codex 기능 응답 형식이 올바르지 않습니다.");
+        if (typeof record[key] !== "boolean") throw new Error("Invalid Codex capability response format.");
       }
       return {
         ...record,
@@ -219,7 +219,7 @@ export class AgentFactoryClient implements AgentRuntimeClient {
   public async goal(agentId: string, action: GoalAction): Promise<{ goal?: NativeGoal | null; accepted?: RunAcceptance; error?: string }> {
     const document = await this.command(["goal", "--project-root", this.projectRoot, "--agent", agentId, action]);
     if (document.kind === "ack") {
-      if (action !== "reopen") throw new Error("Agent Factory Goal 제어가 예상하지 않은 실행을 접수했습니다.");
+      if (action !== "reopen") throw new Error("Agent Factory Goal control accepted an unexpected run.");
       return { accepted: readAcceptance(document, agentId) };
     }
     if (document.kind === "goal-control") return {};
@@ -229,22 +229,22 @@ export class AgentFactoryClient implements AgentRuntimeClient {
   private async checkedExecution(command: "submit" | "send", execution: ExecutionOptions, agentId?: string, hasImages = false): Promise<string[]> {
     const supported = (await this.capabilities(agentId))[command];
     if (execution.taskMode && !supported.taskModes?.includes(execution.taskMode)) {
-      throw new Error("선택한 작업 모드를 지원하는 Agent Factory 플러그인과 Codex로 업데이트해 주세요.");
+      throw new Error("Update the Agent Factory plugin and Codex to versions that support the selected task mode.");
     }
     if (hasImages && supported.images !== true) {
       throw new Error(
-        `현재 Agent Factory 런타임의 ${command} 이미지 전송 계약이 호환되지 않습니다. ` +
-        "Agent Factory 플러그인을 현재 익스텐션과 호환되는 버전으로 설치하거나 업데이트한 뒤, " +
-        "VS Code 익스텐션 호스트를 다시 로드하고 이미지 첨부를 다시 시도하세요."
+        `The current Agent Factory runtime has an incompatible ${command} image transfer contract. ` +
+        "Install or update the Agent Factory plugin to a version compatible with this extension, then " +
+        "reload the VS Code extension host and try attaching the images again."
       );
     }
     const unsupported = [
-      execution.model && !supported.model ? "모델 변경" : "",
-      execution.reasoningEffort && !supported.reasoning ? "추론 수준" : "",
+      execution.model && !supported.model ? "model changes" : "",
+      execution.reasoningEffort && !supported.reasoning ? "reasoning effort" : "",
       execution.fast && !supported.fast ? "Fast" : "",
       execution.goalMode && !supported.goal ? "Goal" : ""
     ].filter(Boolean);
-    if (unsupported.length) throw new Error(`현재 런타임의 ${command} 명령은 ${unsupported.join(", ")} 설정을 지원하지 않습니다.`);
+    if (unsupported.length) throw new Error(`The current runtime ${command} command does not support these settings: ${unsupported.join(", ")}.`);
     return executionArguments(execution);
   }
   public constructor(
@@ -265,7 +265,7 @@ export class AgentFactoryClient implements AgentRuntimeClient {
       }
       return {
         available: false,
-        diagnostic: output.stderr.trim() || "Agent Factory exec.py를 실행할 수 없습니다."
+        diagnostic: output.stderr.trim() || "Unable to run Agent Factory exec.py."
       };
     } catch (error) {
       return {
@@ -305,7 +305,7 @@ export class AgentFactoryClient implements AgentRuntimeClient {
 
   private async inputCommand(arguments_: string[], message: string, images: readonly RuntimeImageInput[]): Promise<Record<string, unknown>> {
     if (images.length === 0) return this.command([...arguments_, "--message", message]);
-    if (images.length > 8) throw new Error("이미지는 최대 8개까지 첨부할 수 있습니다.");
+    if (images.length > 8) throw new Error("You can attach up to 8 images.");
     const directory = await mkdtemp(join(tmpdir(), "agent-factory-input-"));
     try {
       const contractImages: { path: string; mediaType: string }[] = [];
@@ -316,13 +316,13 @@ export class AgentFactoryClient implements AgentRuntimeClient {
         let content: Buffer;
         try {
           const before = await source.stat();
-          if (!before.isFile() || before.size < 1 || before.size > 10 * 1024 * 1024) throw new Error("이미지 파일 크기가 허용 범위를 벗어났습니다.");
+          if (!before.isFile() || before.size < 1 || before.size > 10 * 1024 * 1024) throw new Error("Image file size is outside the allowed range.");
           content = await source.readFile();
           const after = await source.stat();
-          if (before.dev !== after.dev || before.ino !== after.ino || before.size !== after.size || before.mtimeMs !== after.mtimeMs) throw new Error("이미지 파일이 읽는 동안 변경되었습니다.");
+          if (before.dev !== after.dev || before.ino !== after.ino || before.size !== after.size || before.mtimeMs !== after.mtimeMs) throw new Error("The image file changed while being read.");
         } finally { await source.close(); }
         total += content.byteLength;
-        if (total > 20 * 1024 * 1024) throw new Error("이미지 전체 크기는 20 MiB를 넘을 수 없습니다.");
+        if (total > 20 * 1024 * 1024) throw new Error("Total image size must not exceed 20 MiB.");
         const name = `${String(index).padStart(2, "0")}${suffix}`;
         await writeFile(join(directory, name), content, { mode: 0o600, flag: "wx" });
         contractImages.push({ path: name, mediaType: image.mediaType });
@@ -371,21 +371,21 @@ export class AgentFactoryClient implements AgentRuntimeClient {
 
   public async updates(agentId: string, runId: string, cursor: number): Promise<RunUpdates> {
     if (!MANAGED_ID.test(agentId) || !MANAGED_ID.test(runId) || !Number.isInteger(cursor) || cursor < 0) {
-      throw new Error("Agent Factory 진행 이벤트 요청이 올바르지 않습니다.");
+      throw new Error("Invalid Agent Factory progress event request.");
     }
     const path = await this.managedPath(agentId, "runs", runId, "events.jsonl");
     let lines: readonly string[];
     try {
       const info = await lstat(path);
       if (!info.isFile() || info.size > MAX_EVENTS_BYTES) {
-        throw new Error("Agent Factory 이벤트 파일이 없거나 허용 크기를 초과했습니다.");
+        throw new Error("The Agent Factory event file is missing or exceeds the size limit.");
       }
       const signature = `${info.dev}:${info.ino}:${info.size}:${info.mtimeMs}:${info.ctimeMs}`;
       if (this.eventSnapshot?.path === path && this.eventSnapshot.signature === signature) {
         lines = this.eventSnapshot.lines;
       } else {
         const bytes = await readManagedBytes(path, MAX_EVENTS_BYTES);
-        if (bytes.length > MAX_EVENTS_BYTES) throw new Error("Agent Factory 이벤트 파일이 허용 크기를 초과했습니다.");
+        if (bytes.length > MAX_EVENTS_BYTES) throw new Error("The Agent Factory event file exceeds the size limit.");
         const content = bytes.toString("utf8");
         const splitLines = content.split("\n");
         if (!content.endsWith("\n")) splitLines.pop();
@@ -523,7 +523,7 @@ export class AgentFactoryClient implements AgentRuntimeClient {
   public async listSessions(): Promise<readonly MainAgentSession[]> {
     const document = await this.command(["list", "--project-root", this.projectRoot]);
     if (!Array.isArray(document.agents) || document.agents.length > 1_000) {
-      throw new Error("Agent Factory 세션 목록 응답이 올바르지 않습니다.");
+      throw new Error("Invalid Agent Factory session list response.");
     }
     return document.agents.flatMap((value) => {
       const agent = readRecordOrUndefined(value);
@@ -548,14 +548,14 @@ export class AgentFactoryClient implements AgentRuntimeClient {
 
   public async listChildSessions(mainAgentId: string, runId?: string): Promise<readonly ChildAgentSession[]> {
     if (!MANAGED_ID.test(mainAgentId)) {
-      throw new Error("Main Agent 식별자가 올바르지 않습니다.");
+      throw new Error("Invalid Main Agent identifier.");
     }
-    if (runId !== undefined && !MANAGED_ID.test(runId)) throw new Error("Main Agent 실행 식별자가 올바르지 않습니다.");
+    if (runId !== undefined && !MANAGED_ID.test(runId)) throw new Error("Invalid Main Agent run identifier.");
     const referenced = await this.discoverChildAgents(mainAgentId, runId);
     if (referenced.size === 0) return [];
     const document = await this.command(["list", "--project-root", this.projectRoot]);
     if (!Array.isArray(document.agents) || document.agents.length > 1_000) {
-      throw new Error("Agent Factory 세션 목록 응답이 올바르지 않습니다.");
+      throw new Error("Invalid Agent Factory session list response.");
     }
     const agents: ChildAgentSession[] = [];
     for (const value of document.agents) {
@@ -681,19 +681,19 @@ export class AgentFactoryClient implements AgentRuntimeClient {
     );
     if (output.exitCode !== 0 && ["submit", "send"].includes(arguments_[0] ?? "") && arguments_.includes("--approval-policy") &&
       /unrecognized arguments|unknown option|no such option/i.test(output.stderr)) {
-      throw new Error("현재 Agent Factory 런타임은 실행 권한 선택을 지원하지 않습니다. 플러그인을 업데이트한 뒤 다시 시도하세요.");
+      throw new Error("The current Agent Factory runtime does not support execution permission selection. Update the plugin and try again.");
     }
     let document: unknown;
     try {
       document = JSON.parse(output.stdout);
     } catch {
-      throw new Error(output.stderr.trim() || "Agent Factory 런타임이 올바른 JSON 응답을 반환하지 않았습니다.");
+      throw new Error(output.stderr.trim() || "The Agent Factory runtime did not return a valid JSON response.");
     }
     const record = readRecord(document, "runtime response");
     if (output.exitCode !== 0 || record.kind === "error") {
       const nested = readRecordOrUndefined(record.error);
       const message = typeof nested?.message === "string" ? nested.message : typeof record.message === "string" ? record.message : output.stderr.trim();
-      throw new Error(message || `Agent Factory 런타임 명령이 종료 코드 ${output.exitCode}로 실패했습니다.`);
+      throw new Error(message || `The Agent Factory runtime command failed with exit code ${output.exitCode}.`);
     }
     return record;
   }
@@ -705,7 +705,7 @@ export class AgentFactoryClient implements AgentRuntimeClient {
   ): Promise<ProcessOutput> {
     try {
       const info = await lstat(this.execPath);
-      if (!info.isFile()) throw new Error("Agent Factory exec.py가 일반 파일이 아닙니다.");
+      if (!info.isFile()) throw new Error("Agent Factory exec.py is not a regular file.");
     } catch (error) {
       if (!isMissingFile(error)) throw error;
       await this.refreshExecPath(error);
@@ -734,11 +734,11 @@ export class AgentFactoryClient implements AgentRuntimeClient {
     const expectedPath = await this.managedPath(agentId, "runs", runId, "result.md");
     const resolvedPath = resolve(path);
     if (resolvedPath !== expectedPath) {
-      throw new Error("Agent Factory 런타임이 예상 범위 밖의 결과 경로를 반환했습니다.");
+      throw new Error("The Agent Factory runtime returned a result path outside the expected scope.");
     }
     const info = await lstat(resolvedPath);
     if (!info.isFile() || info.size > MAX_RESULT_BYTES) {
-      throw new Error("Agent Factory 결과 파일이 없거나 허용 크기를 초과했습니다.");
+      throw new Error("The Agent Factory result file is missing or exceeds the size limit.");
     }
     return (await readManagedBytes(resolvedPath, MAX_RESULT_BYTES)).toString("utf8");
   }
@@ -748,7 +748,7 @@ export function executionPolicyArguments(mode: ExecutionMode = "cli-default"): s
   if (mode === "cli-default") return [];
   const humanApprovalPolicy = mode === "bypass" ? "bypass" : "required";
   if (mode === "bypass") mode = "danger-full-access";
-  if (mode !== "workspace-write" && mode !== "danger-full-access") throw new Error("올바르지 않은 실행 권한입니다.");
+  if (mode !== "workspace-write" && mode !== "danger-full-access") throw new Error("Invalid execution permissions.");
   return ["--sandbox", mode, "--approval-policy", "never", "--human-approval-policy", humanApprovalPolicy];
 }
 
@@ -871,17 +871,17 @@ async function progressUpdates(line: string, projectRoot: string, ownResultPath:
   const event = readRecordOrUndefined(value);
   if (!event) return [];
   if (event.type === "goal.updated") return [{ kind: "goal", goal: readNativeGoal(event.goal) }];
-  if (event.type === "goal.error") return [{ kind: "goal", goal: null, error: typeof event.message === "string" ? event.message : "Goal 상태 확인 필요" }];
-  if (event.type === "goal.continuing") return [statusUpdate("목표가 활성 상태입니다. Codex가 다음 turn을 이어갑니다.")];
+  if (event.type === "goal.error") return [{ kind: "goal", goal: null, error: typeof event.message === "string" ? event.message : "Goal status needs attention" }];
+  if (event.type === "goal.continuing") return [statusUpdate("The goal is active. Codex will continue with the next turn.")];
   if (event.type === "native.commentary") {
     return typeof event.text === "string" && event.text.trim()
-      ? [{ kind: "commentary", text: event.text }, statusUpdate("작업 중")]
+      ? [{ kind: "commentary", text: event.text }, statusUpdate("Working")]
       : [];
   }
-  if (event.type === "thread.started") return [statusUpdate("Main Agent 연결됨")];
-  if (event.type === "turn.started") return [statusUpdate("Main Agent가 요청을 분석 중")];
+  if (event.type === "thread.started") return [statusUpdate("Main Agent connected")];
+  if (event.type === "turn.started") return [statusUpdate("Main Agent is analyzing the request")];
   if (event.type === "turn.completed") {
-    return [statusUpdate("응답 정리 중")];
+    return [statusUpdate("Finalizing response")];
   }
   const item = readRecordOrUndefined(event.item);
   if (!item || (event.type !== "item.started" && event.type !== "item.completed")) return [];
@@ -894,41 +894,41 @@ async function progressUpdates(line: string, projectRoot: string, ownResultPath:
         /^(?:.*\/)?(?:cat|head|tail|sed)$/.test(words[0] ?? "") &&
         words.includes(ownResultPath) && words.slice(1).every(word =>
           word === ownResultPath || /^(?:-n|-q|--|-?\d+|\d+(?:,\d+)?p)$/.test(word)));
-      if (ownResultRead) return [statusUpdate("응답 정리 중")];
+      if (ownResultRead) return [statusUpdate("Finalizing response")];
     }
-    const detail = summarizeCommand(item.command) ?? "명령 내용 없음";
+    const detail = summarizeCommand(item.command) ?? "No command details";
     const title = summarizeReadActivity(item.command);
     const output = typeof item.aggregatedOutput === "string" ? item.aggregatedOutput : item.aggregated_output;
     const failed = completed && typeof item.exit_code === "number" && item.exit_code !== 0;
-    if (title === "실행 요청 읽기") {
-      return [statusUpdate("Main Agent가 요청을 분석 중")];
+    if (title === "Read run request") {
+      return [statusUpdate("Main Agent is analyzing the request")];
     }
     return compactUpdates(
       itemId ? activityUpdate(itemId, "command", failed ? "failed" : completed ? "completed" : "started", detail, undefined, title, typeof output === "string" ? truncate(output, 32768) : undefined) : undefined,
-      statusUpdate(failed ? "명령 실패 확인 중" : completed ? "결과 분석 중" : "명령 실행 중")
+      statusUpdate(failed ? "Checking command failure" : completed ? "Analyzing results" : "Running command")
     );
   }
   if (item.type === "file_change") {
     if (changesOnlyManagedRunFiles(item.changes, projectRoot)) {
-      return [statusUpdate(completed ? "응답 기록 확인 중" : "응답 기록 중")];
+      return [statusUpdate(completed ? "Checking response record" : "Recording response")];
     }
-    const detail = summarizeChanges(item.changes, projectRoot) ?? "변경 파일 정보 없음";
+    const detail = summarizeChanges(item.changes, projectRoot) ?? "No changed file details";
     const diff = completed ? await readGitDiff(item.changes, projectRoot) : undefined;
     return compactUpdates(
       itemId ? activityUpdate(itemId, "file", completed ? "completed" : "started", detail, diff) : undefined,
-      statusUpdate(completed ? "Git 변경 확인 중" : "Git 변경 중")
+      statusUpdate(completed ? "Checking Git changes" : "Applying Git changes")
     );
   }
   if (item.type === "mcp_tool_call") {
-    const detail = [item.server, item.tool].filter((value) => typeof value === "string").join("/") || "도구 정보 없음";
+    const detail = [item.server, item.tool].filter((value) => typeof value === "string").join("/") || "No tool details";
     const failed = completed && item.error !== null && item.error !== undefined;
     return compactUpdates(
       itemId ? activityUpdate(itemId, "tool", failed ? "failed" : completed ? "completed" : "started", detail) : undefined,
-      statusUpdate(failed ? "연결 도구 실패 확인 중" : completed ? "결과 분석 중" : "연결 도구 실행 중")
+      statusUpdate(failed ? "Checking connected tool failure" : completed ? "Analyzing results" : "Running connected tool")
     );
   }
-  if (item.type === "reasoning") return [statusUpdate("추론 중")];
-  if (item.type === "agent_message") return [statusUpdate("응답 정리 중")];
+  if (item.type === "reasoning") return [statusUpdate("Reasoning")];
+  if (item.type === "agent_message") return [statusUpdate("Finalizing response")];
   return [];
 }
 
@@ -938,7 +938,7 @@ function readNativeGoal(value: unknown): NativeGoal | null {
   if (typeof goal.threadId !== "string" || typeof goal.objective !== "string" || goal.objective.length > 4000 ||
       !["active", "paused", "blocked", "usageLimited", "budgetLimited", "complete"].includes(String(goal.status)) ||
       readTokenCount(goal.tokensUsed) === undefined || readTokenCount(goal.timeUsedSeconds) === undefined) {
-    throw new Error("네이티브 Goal 상태가 올바르지 않습니다.");
+    throw new Error("Invalid native Goal state.");
   }
   return { threadId: goal.threadId, objective: goal.objective, status: goal.status as NativeGoal["status"],
     tokensUsed: Number(goal.tokensUsed), timeUsedSeconds: Number(goal.timeUsedSeconds),
@@ -1090,10 +1090,10 @@ function summarizeReadActivity(value: unknown): string | undefined {
       skills.add(name);
     }
   }
-  if (skills.size > 0) return `Skill 읽기 · ${[...skills].join(", ")}`;
+  if (skills.size > 0) return `Read Skill · ${[...skills].join(", ")}`;
   const runDocument = value.match(/(?:\.agent-factory\/agent|projects\/project-[a-f0-9]{32}\/agents)\/[^/\s'\"]+\/runs\/[^/\s'\"]+\/(request|result)\.md\b/);
-  if (runDocument?.[1] === "request") return "실행 요청 읽기";
-  if (runDocument?.[1] === "result") return "실행 결과 읽기";
+  if (runDocument?.[1] === "request") return "Read run request";
+  if (runDocument?.[1] === "result") return "Read run result";
   return undefined;
 }
 
@@ -1107,7 +1107,7 @@ function summarizeChanges(value: unknown, projectRoot: string): string | undefin
   });
   if (paths.length === 0) return undefined;
   const visible = paths.slice(0, 2).join(", ");
-  return truncate(paths.length > 2 ? `${visible} 외 ${paths.length - 2}개` : visible, 140);
+  return truncate(paths.length > 2 ? `${visible} and ${paths.length - 2} more` : visible, 140);
 }
 
 function changesOnlyManagedRunFiles(value: unknown, projectRoot: string): boolean {
@@ -1230,7 +1230,7 @@ export function runBoundedProcess(
     const collect = (target: Buffer[], chunk: Buffer) => {
       outputBytes += chunk.length;
       if (outputBytes > maxOutputBytes) {
-        finishWithError(new Error("Agent Factory 런타임 출력이 허용 크기를 초과했습니다."));
+        finishWithError(new Error("Agent Factory runtime output exceeded the size limit."));
         return;
       }
       target.push(chunk);
@@ -1238,7 +1238,7 @@ export function runBoundedProcess(
     child.stdout.on("data", (chunk: Buffer) => collect(stdout, chunk));
     child.stderr.on("data", (chunk: Buffer) => collect(stderr, chunk));
     child.on("error", (error) => {
-      const wrapped = new Error(`Agent Factory 런타임 프로세스를 시작하지 못했습니다: ${error.message}`) as NodeJS.ErrnoException;
+      const wrapped = new Error(`Unable to start the Agent Factory runtime process: ${error.message}`) as NodeJS.ErrnoException;
       wrapped.code = (error as NodeJS.ErrnoException).code;
       finishWithError(wrapped);
     });
@@ -1253,7 +1253,7 @@ export function runBoundedProcess(
       });
     });
     timer = setTimeout(
-      () => finishWithError(new Error("Agent Factory 런타임 명령 시간이 초과되었습니다.")),
+      () => finishWithError(new Error("The Agent Factory runtime command timed out.")),
       timeoutMs
     );
   });
@@ -1268,14 +1268,14 @@ function readAcceptance(document: Record<string, unknown>, expectedAgentId: stri
     typeof document.runId !== "string" ||
     !MANAGED_ID.test(document.runId)
   ) {
-    throw new Error("Agent Factory 런타임이 올바른 실행 접수 응답을 반환하지 않았습니다.");
+    throw new Error("The Agent Factory runtime did not return a valid run acceptance response.");
   }
   return { agentId: document.agentId, runId: document.runId };
 }
 
 function imageSuffix(mediaType: RuntimeImageInput["mediaType"]): string {
   const suffix = { "image/png": ".png", "image/jpeg": ".jpg", "image/gif": ".gif", "image/webp": ".webp" }[mediaType];
-  if (!suffix) throw new Error("지원하지 않는 이미지 형식입니다.");
+  if (!suffix) throw new Error("Unsupported image format.");
   return suffix;
 }
 
@@ -1290,14 +1290,14 @@ function runDiagnostics(run: Record<string, unknown>): Pick<RunStatus, "error" |
 function readRunStatus(document: Record<string, unknown>): string {
   const run = readRecord(document.run, "run status");
   if (typeof run.status !== "string") {
-    throw new Error("Agent Factory 런타임 실행 상태가 올바르지 않습니다.");
+    throw new Error("Invalid Agent Factory runtime execution status.");
   }
   return run.status;
 }
 
 function readRecord(value: unknown, label: string): Record<string, unknown> {
   if (typeof value !== "object" || value === null || Array.isArray(value)) {
-    throw new Error(`Agent Factory ${label} 형식이 올바르지 않습니다.`);
+    throw new Error(`Invalid Agent Factory ${label} format.`);
   }
   return value as Record<string, unknown>;
 }
@@ -1315,7 +1315,7 @@ async function checkManagedComponents(path: string): Promise<void> {
     try {
       const info = await lstat(cursor);
       if (info.isSymbolicLink() || (cursor !== absolute && !info.isDirectory())) {
-        throw new Error("Agent Factory 관리 경로의 링크 또는 파일 유형이 안전하지 않습니다.");
+        throw new Error("Unsafe link or file type in an Agent Factory managed path.");
       }
     } catch (error) {
       if (isMissingFile(error)) return;
@@ -1330,7 +1330,7 @@ async function readManagedBytes(path: string, limit: number): Promise<Buffer> {
   try {
     const before = await file.stat();
     if (!before.isFile() || before.size > limit || await realpath(path) !== resolve(path)) {
-      throw new Error("Agent Factory 파일 경로 또는 크기가 안전하지 않습니다.");
+      throw new Error("Unsafe Agent Factory file path or size.");
     }
     const bytes = Buffer.alloc(limit + 1);
     let offset = 0;
@@ -1342,7 +1342,7 @@ async function readManagedBytes(path: string, limit: number): Promise<Buffer> {
     const after = await lstat(path);
     if (offset > limit || after.isSymbolicLink() || before.dev !== after.dev || before.ino !== after.ino
         || await realpath(path) !== resolve(path)) {
-      throw new Error("Agent Factory 파일이 읽는 동안 교체되었습니다.");
+      throw new Error("The Agent Factory file was replaced while being read.");
     }
     return bytes.subarray(0, offset);
   } finally {

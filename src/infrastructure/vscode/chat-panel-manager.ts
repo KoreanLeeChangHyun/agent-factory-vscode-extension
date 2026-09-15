@@ -186,22 +186,22 @@ export class ChatPanelManager implements vscode.Disposable {
   public async renameActive(): Promise<void> {
     const managed = this.findActivePanel();
     if (!managed) {
-      await vscode.window.showInformationMessage("이름을 변경할 Main Agent 채팅 탭을 먼저 선택하세요.");
+      await vscode.window.showInformationMessage("Select the Main Agent chat tab to rename first.");
       return;
     }
 
     const title = await vscode.window.showInputBox({
-      title: "Main Agent 이름 변경",
-      prompt: "이 채팅 탭에 표시할 이름을 입력하세요.",
+      title: "Rename Main Agent",
+      prompt: "Enter the name to display on this chat tab.",
       value: managed.state.title,
       valueSelection: [0, managed.state.title.length],
       validateInput(value) {
         const length = value.trim().length;
         if (length === 0) {
-          return "이름을 입력하세요.";
+          return "Enter a name.";
         }
         if (length > 80) {
-          return "이름은 80자 이하여야 합니다.";
+          return "The name must be no more than 80 characters.";
         }
         return undefined;
       }
@@ -332,7 +332,7 @@ export class ChatPanelManager implements vscode.Disposable {
       await this.post(managed.panel, {
         type: "host.notice",
         level: "error",
-        text: "채팅 화면에서 올바르지 않은 메시지를 받았습니다."
+        text: "Received an invalid message from the chat view."
       });
       return;
     }
@@ -386,7 +386,7 @@ export class ChatPanelManager implements vscode.Disposable {
           await this.ensureController(managed);
           try { await managed.controller?.reconnect(); }
           catch (error) {
-            await this.post(managed.panel, { type: "host.notice", level: "error", text: `진행 중인 작업 확인 실패: ${error instanceof Error ? error.message : String(error)}` });
+            await this.post(managed.panel, { type: "host.notice", level: "error", text: `Unable to check the active run: ${error instanceof Error ? error.message : String(error)}` });
           }
         }
         this.scheduleAgentList(managed, true);
@@ -432,7 +432,7 @@ export class ChatPanelManager implements vscode.Disposable {
           ...(managed.state.verifiedWorkRunId ? { verifiedWorkRunId: managed.state.verifiedWorkRunId } : {})
         })) {
           await this.post(managed.panel, { type: "decision.pending", runId: null });
-          await this.post(managed.panel, { type: "host.notice", level: "warning", text: "이미 답변했거나 만료된 요청입니다. 현재 대화에 직접 답변하세요." });
+          await this.post(managed.panel, { type: "host.notice", level: "warning", text: "This request has already been answered or has expired. Reply directly in the current conversation." });
         }
         return;
       case "composer.settings":
@@ -477,7 +477,7 @@ export class ChatPanelManager implements vscode.Disposable {
         return;
       case "session.select":
         if (managed.sessionTransition) {
-          await this.post(managed.panel, { type: "host.notice", level: "warning", text: "다른 세션을 불러오고 있습니다." });
+          await this.post(managed.panel, { type: "host.notice", level: "warning", text: "Another session is loading." });
           return;
         }
         const transition = this.selectSession(managed, message.agentId);
@@ -535,7 +535,7 @@ export class ChatPanelManager implements vscode.Disposable {
       await this.post(managed.panel, {
         type: "host.notice",
         level: "error",
-        text: `링크를 열 수 없습니다: ${error instanceof Error ? error.message : String(error)}`
+        text: `Unable to open the link: ${error instanceof Error ? error.message : String(error)}`
       });
     }
   }
@@ -641,7 +641,7 @@ export class ChatPanelManager implements vscode.Disposable {
         await this.post(managed.panel, {
           type: "host.notice",
           level: "warning",
-          text: "Main Agent가 호출한 작업자 또는 검증자 세션을 찾을 수 없습니다."
+          text: "Unable to find the work or verification session called by Main Agent."
         });
         return;
       }
@@ -651,7 +651,7 @@ export class ChatPanelManager implements vscode.Disposable {
         existing.panel.reveal(undefined, true);
         return;
       }
-      const label = child.role === "work" ? "작업자" : "검증자";
+      const label = child.role === "work" ? "Work agent" : "Verification agent";
       const state: ChatPanelState = {
         ...createDraftChatState(this.composerPreferences()),
         title: `${label} · ${child.agentId}`,
@@ -698,7 +698,7 @@ export class ChatPanelManager implements vscode.Disposable {
       await this.post(managed.panel, {
         type: "host.notice",
         level: "warning",
-        text: "Main Agent 패널에서만 다른 Main Agent 세션을 불러올 수 있습니다."
+        text: "Other Main Agent sessions can only be loaded from a Main Agent panel."
       });
       return;
     }
@@ -708,7 +708,7 @@ export class ChatPanelManager implements vscode.Disposable {
       await this.post(managed.panel, {
         type: "host.notice",
         level: "warning",
-        text: "현재 실행이 끝난 뒤 다른 세션을 불러오세요."
+        text: "Load another session after the current run finishes."
       });
       return;
     }
@@ -731,7 +731,7 @@ export class ChatPanelManager implements vscode.Disposable {
         await this.post(managed.panel, {
           type: "host.notice",
           level: "warning",
-          text: "선택한 Main Agent 세션을 현재 프로젝트에서 찾을 수 없습니다."
+          text: "The selected Main Agent session was not found in the current project."
         });
         await this.post(managed.panel, { type: "sessions.list", sessions });
         return;
@@ -740,7 +740,7 @@ export class ChatPanelManager implements vscode.Disposable {
         await this.post(managed.panel, {
           type: "host.notice",
           level: "warning",
-          text: "현재 실행이 끝난 뒤 다른 세션을 불러오세요."
+          text: "Load another session after the current run finishes."
         });
         return;
       }
@@ -878,13 +878,13 @@ export class ChatPanelManager implements vscode.Disposable {
       if (managed.disposed) return;
     }
     await this.ensureController(managed);
-    if (!managed.controller) throw new Error("런타임에 연결하지 못했습니다. 대기 메시지를 보존합니다.");
+    if (!managed.controller) throw new Error("Unable to connect to the runtime. Queued messages have been preserved.");
     const preparedAttachments = await Promise.all(attachments.map(async (attachment) => {
       if (attachment.kind !== "image") return attachment;
       const uri = await this.imageAttachmentPath(managed.state.panelId, attachment.id);
-      if (!uri) throw new Error(`이미지 첨부 원본을 확인할 수 없습니다: ${attachment.name}`);
+      if (!uri) throw new Error(`Unable to locate the original image attachment: ${attachment.name}`);
       const mediaType = imageMediaType(uri.fsPath);
-      if (!mediaType) throw new Error(`지원하지 않는 이미지 첨부입니다: ${attachment.name}`);
+      if (!mediaType) throw new Error(`Unsupported image attachment: ${attachment.name}`);
       const info = await vscode.workspace.fs.stat(uri);
       return { ...attachment, uri: uri.toString(), mediaType, size: info.size, previewUri: undefined };
     }));
@@ -932,7 +932,7 @@ export class ChatPanelManager implements vscode.Disposable {
       canSelectFiles: true,
       canSelectFolders: true,
       canSelectMany: true,
-      openLabel: "채팅에 첨부"
+      openLabel: "Attach to chat"
     });
     if (!uris?.length) {
       return;
@@ -982,11 +982,11 @@ export class ChatPanelManager implements vscode.Disposable {
       }
     } catch (error) {
       await Promise.all(createdImageIds.map(id => this.removeImageAttachment(managed, id, false)));
-      await this.post(panel, { type: "host.notice", level: "error", text: `첨부 파일을 준비하지 못했습니다: ${error instanceof Error ? error.message : String(error)}` });
+      await this.post(panel, { type: "host.notice", level: "error", text: `Unable to prepare attachments: ${error instanceof Error ? error.message : String(error)}` });
       return;
     }
     if (attachments.length) await this.post(panel, { type: "attachments.add", attachments });
-    if (rejectedImages) await this.post(panel, { type: "host.notice", level: "warning", text: `이미지 ${rejectedImages}개를 첨부 한도(최대 8개, 개별 10 MiB, 전체 20 MiB) 때문에 제외했습니다.` });
+    if (rejectedImages) await this.post(panel, { type: "host.notice", level: "warning", text: `Excluded ${rejectedImages} images due to attachment limits (up to 8 images, 10 MiB each, 20 MiB total).` });
   }
 
   private async createTextAttachment(managed: ManagedPanel, text: string): Promise<void> {
@@ -1004,7 +1004,7 @@ export class ChatPanelManager implements vscode.Disposable {
         type: "attachments.add",
         attachments: [{
           id: randomUUID(),
-          name: "붙여넣은 텍스트.txt",
+          name: "Pasted text.txt",
           kind: "file",
           uri: uri.toString(),
           mediaType: "text/plain",
@@ -1015,7 +1015,7 @@ export class ChatPanelManager implements vscode.Disposable {
       await this.post(managed.panel, {
         type: "host.notice",
         level: "error",
-        text: `붙여넣은 텍스트를 파일로 만들지 못했습니다: ${error instanceof Error ? error.message : String(error)}`
+        text: `Unable to create a file from pasted text: ${error instanceof Error ? error.message : String(error)}`
       });
     }
   }
@@ -1027,13 +1027,13 @@ export class ChatPanelManager implements vscode.Disposable {
     try {
       const content = decodeBrowserImage(message.data, message.size, message.mediaType);
       const stagedBytes = [...managed.imageAttachments.values()].reduce((total, size) => total + size, 0);
-      if (!canStageImage(managed.imageAttachments.size, stagedBytes, content.byteLength)) throw new Error("이미지 첨부 한도를 초과했습니다.");
+      if (!canStageImage(managed.imageAttachments.size, stagedBytes, content.byteLength)) throw new Error("Image attachment limit exceeded.");
       const attachment = await this.persistImage(managed.panel, managed.state.panelId, message.id, message.name, message.mediaType, content);
       managed.imageAttachments.set(message.id, content.byteLength);
       await this.post(managed.panel, { type: "attachments.add", attachments: [attachment] });
     } catch (error) {
       await this.post(managed.panel, { type: "attachment.rejected", id: message.id });
-      await this.post(managed.panel, { type: "host.notice", level: "error", text: `이미지 첨부를 저장하지 못했습니다: ${error instanceof Error ? error.message : String(error)}` });
+      await this.post(managed.panel, { type: "host.notice", level: "error", text: `Unable to save the image attachment: ${error instanceof Error ? error.message : String(error)}` });
     }
   }
 
@@ -1060,7 +1060,7 @@ export class ChatPanelManager implements vscode.Disposable {
   private async persistImage(panel: vscode.WebviewPanel, panelId: string, id: string, name: string, mediaType: string, content: Buffer): Promise<AttachmentReference> {
     assertAttachmentScopeId(panelId, "panel");
     assertAttachmentScopeId(id, "attachment");
-    if (content.byteLength < 1 || content.byteLength > 10 * 1024 * 1024 || !hasImageSignature(content, mediaType)) throw new Error("지원하지 않거나 너무 큰 이미지입니다.");
+    if (content.byteLength < 1 || content.byteLength > 10 * 1024 * 1024 || !hasImageSignature(content, mediaType)) throw new Error("The image is unsupported or too large.");
     const suffix = imageSuffix(mediaType);
     const directory = vscode.Uri.joinPath(this.context.globalStorageUri, "chat-images", panelId, id.slice(0, 2));
     await vscode.workspace.fs.createDirectory(directory);
@@ -1088,7 +1088,7 @@ export class ChatPanelManager implements vscode.Disposable {
   private async openImageAttachment(managed: ManagedPanel, id: string): Promise<void> {
     const uri = await this.imageAttachmentPath(managed.state.panelId, id);
     if (!uri) {
-      await this.post(managed.panel, { type: "host.notice", level: "warning", text: "이미지 원본이 더 이상 존재하지 않습니다." });
+      await this.post(managed.panel, { type: "host.notice", level: "warning", text: "The original image no longer exists." });
       return;
     }
     await vscode.commands.executeCommand("vscode.open", uri);
@@ -1100,7 +1100,7 @@ export class ChatPanelManager implements vscode.Disposable {
       if (uri) await unlink(uri.fsPath);
       managed.imageAttachments.delete(id);
     } catch (error) {
-      if (report) await this.post(managed.panel, { type: "host.notice", level: "warning", text: `이미지 임시 파일을 정리하지 못했습니다: ${error instanceof Error ? error.message : String(error)}` });
+      if (report) await this.post(managed.panel, { type: "host.notice", level: "warning", text: `Unable to clean up temporary image files: ${error instanceof Error ? error.message : String(error)}` });
     }
   }
 
@@ -1127,7 +1127,7 @@ export class ChatPanelManager implements vscode.Disposable {
       try {
         await vscode.workspace.getConfiguration("agentFactory.mainChat").update("statusItems", items, target);
       } catch {
-        await this.post(panel, { type: "host.notice", level: "warning", text: "상태 표시줄 설정을 저장하지 못했습니다. 저장된 설정을 다시 불러옵니다." });
+        await this.post(panel, { type: "host.notice", level: "warning", text: "Unable to save status bar settings. Reloading the saved settings." });
       } finally {
         this.pendingStatusWrites -= 1;
         await this.refreshStatusItems();
@@ -1208,19 +1208,19 @@ function imageMediaType(path: string): string | undefined {
 
 function imageSuffix(mediaType: string): string {
   const suffix = ({ "image/png": ".png", "image/jpeg": ".jpg", "image/gif": ".gif", "image/webp": ".webp" } as Record<string, string>)[mediaType];
-  if (!suffix) throw new Error("지원하지 않는 이미지 형식입니다.");
+  if (!suffix) throw new Error("Unsupported image format.");
   return suffix;
 }
 
 async function readSafeImage(path: string): Promise<Buffer> {
-  if (await realpath(path) !== resolve(path)) throw new Error("심볼릭 링크 이미지는 첨부할 수 없습니다.");
+  if (await realpath(path) !== resolve(path)) throw new Error("Symbolic link images cannot be attached.");
   const file = await openFile(path, fsConstants.O_RDONLY | fsConstants.O_NOFOLLOW);
   try {
     const before = await file.stat();
-    if (!before.isFile() || before.size < 1 || before.size > 10 * 1024 * 1024) throw new Error("이미지 크기가 허용 범위를 벗어났습니다.");
+    if (!before.isFile() || before.size < 1 || before.size > 10 * 1024 * 1024) throw new Error("Image size is outside the allowed range.");
     const content = await file.readFile();
     const after = await file.stat();
-    if (before.dev !== after.dev || before.ino !== after.ino || before.size !== after.size || before.mtimeMs !== after.mtimeMs) throw new Error("이미지가 읽는 동안 변경되었습니다.");
+    if (before.dev !== after.dev || before.ino !== after.ino || before.size !== after.size || before.mtimeMs !== after.mtimeMs) throw new Error("The image changed while being read.");
     return content;
   } finally { await file.close(); }
 }
@@ -1239,5 +1239,5 @@ function fallbackHtml(error: unknown): string {
     .replaceAll("&", "&amp;")
     .replaceAll("<", "&lt;")
     .replaceAll(">", "&gt;");
-  return `<!doctype html><html><body><p>채팅 화면을 불러오지 못했습니다.</p><pre>${escaped}</pre></body></html>`;
+  return `<!doctype html><html><body><p>Unable to load the chat view.</p><pre>${escaped}</pre></body></html>`;
 }

@@ -22,7 +22,7 @@ test("loading animation gallery previews themed candidates from the command pale
   const command = packageJson.contributes.commands.find(function (item) {
     return item.command === "agentFactory.loadingAnimations.preview";
   });
-  assert.equal(command.title, "로딩 애니메이션 샘플 보기");
+  assert.equal(command.title, "Preview Loading Animations");
   assert.match(bootstrap, /registerCommand\("agentFactory\.loadingAnimations\.preview"/);
   assert.match(loadingGallery, /class="sample-card/g);
   assert.match(loadingGallery, /id="motion-toggle"/);
@@ -83,7 +83,7 @@ test("session picker appears in the composer action row and renders a list", fun
   assert.match(template, /id="session-menu"[^>]*role="listbox"/);
   assert.match(template, /id="session-list"/);
   assert.match(template, /id="session-button"[^>]*class="utility-button"[\s\S]*?<svg/);
-  assert.doesNotMatch(template, /id="session-button"[^>]*>[\s\S]*?세션 불러오기[\s\S]*?<\/button>/);
+  assert.doesNotMatch(template, /id="session-button"[^>]*>[\s\S]*?Load session[\s\S]*?<\/button>/);
   assert.doesNotMatch(template, /id="resume-button"/);
   assert.match(chatScript, /type: "sessions\.request"/);
   assert.match(chatScript, /type: "session\.select"/);
@@ -142,9 +142,9 @@ test("composer uses one SVG send button that becomes the stop control", function
 test("composer submits active-run input to the host queue and retains the empty-composer stop control", function () {
   assert.doesNotMatch(chatScript, /state\.running \|\| !state\.capabilities/);
   assert.match(chatScript, /state\.running && !hasComposerContent\(\)/);
-  assert.match(chatScript, /"메시지를 대기열에 추가"/);
+  assert.match(chatScript, /"Add message to queue"/);
   assert.match(chatScript, /case "queue\.updated"/);
-  assert.match(chatScript, /queue: "대기 메시지 " \+ Math\.max/);
+  assert.match(chatScript, /queue: "Queued messages " \+ Math\.max/);
   assert.match(panelManager, /onQueueChanged: \(count\)/);
   assert.match(panelManager, /managed\.chatSendPreparation = sendPreparation\.then/);
 });
@@ -168,7 +168,7 @@ test("long pasted text becomes a real text-file attachment", function () {
   assert.match(chatScript, /type: "attachments\.createText", text/);
   assert.match(panelManager, /"pasted-text"/);
   assert.match(panelManager, /vscode\.workspace\.fs\.writeFile\(uri, contents\)/);
-  assert.match(panelManager, /name: "붙여넣은 텍스트\.txt"/);
+  assert.match(panelManager, /name: "Pasted text\.txt"/);
   assert.match(chatScript, /function hasComposerContent\(\)[\s\S]*?return prompt\.value\.trim\(\)\.length > 0 \|\| state\.attachments\.length > 0;/);
   assert.match(chatScript, /!state\.running && !hasComposerContent\(\)/);
 });
@@ -192,8 +192,8 @@ test("status bar includes active Work and Verification counts", function () {
   assert.match(agentClient, /last_token_usage/);
   assert.match(agentClient, /model_context_window/);
   assert.match(agentClient, /window_minutes !== 7 \* 24 \* 60/);
-  assert.match(chatScript, /agents: main \? state\.workUnitsKnown \? "작업 " \+ state\.workUnits\.workActive \+ " · 검증 " \+ state\.workUnits\.verificationActive/);
-  assert.match(template, /id="agents-menu"[^>]*aria-label="호출된 작업자와 검증자"/);
+  assert.match(chatScript, /agents: main \? state\.workUnitsKnown \? "Work " \+ state\.workUnits\.workActive \+ " · Verification " \+ state\.workUnits\.verificationActive/);
+  assert.match(template, /id="agents-menu"[^>]*aria-label="Called work and verification agents"/);
   assert.match(chatScript, /type: "agents\.request"/);
   assert.match(chatScript, /type: "agent\.open", agentId: agent\.agentId/);
   assert.match(panelManager, /listChildSessions\(managed\.state\.agentId\)/);
@@ -224,7 +224,7 @@ test("running state appears above the composer as an expandable work loop panel"
   assert.match(template, /role="status"/);
   assert.match(template, /id="run-elapsed"/);
   assert.match(template, /id="run-status-toggle"[^>]*aria-controls="run-details"/);
-  assert.match(template, /id="run-details"[^>]*aria-label="작업 및 검증 상세"/);
+  assert.match(template, /id="run-details"[^>]*aria-label="Work and verification details"/);
   assert.match(template, /id="run-stage-list"/);
   assert.match(template, /id="run-stop-button"/);
   assert.match(chatScript, /aria-busy/);
@@ -255,20 +255,20 @@ test("runtime status stays in the loader while concrete activity updates the tim
   assert.match(chatScript, /case "run\.activity":[\s\S]*upsertActivity\(message\.id, message\.category, message\.phase, message\.text, message\.diff, message\.title, message\.output\)/);
   assert.match(chatScript, /event\.type === "activity" && event\.id === id/);
   assert.match(chatStyles, /\.message-activity/);
-  assert.match(chatScript, /runStatusLabel\.textContent = state\.runProgress \|\| "작업 중"/);
+  assert.match(chatScript, /runStatusLabel\.textContent = state\.runProgress \|\| "Working"/);
 });
 
 test("commands, file changes, tools, and assistant responses have distinct presentation", function () {
   assert.match(chatScript, /activityKindLabel\(event\.category\)/);
-  assert.doesNotMatch(chatScript, /event\.type === "assistant" \? "응답"/);
+  assert.doesNotMatch(chatScript, /event\.type === "assistant" \? "Response"/);
   assert.doesNotMatch(chatScript, /return "Bash"/);
   assert.match(chatScript, /renderTerminalCommand\(content, event\.text, event\.phase, event\.title\)/);
-  assert.match(chatScript, /if \(category === "file"\) return "Git 변경"/);
+  assert.match(chatScript, /if \(category === "file"\) return "Git changes"/);
   assert.match(chatStyles, /\.message-activity-command \.message-content[\s\S]*font-family/);
   assert.doesNotMatch(chatStyles, /\.message-activity-command\s*\{[^}]*(?:border|background):/);
   assert.match(chatStyles, /\.git-diff-overview/);
   assert.doesNotMatch(chatStyles, /\.message-activity-file\s*\{[^}]*(?:border|background):/);
-  assert.doesNotMatch(chatScript, /return "런타임 기록"/);
+  assert.doesNotMatch(chatScript, /return "Runtime records"/);
   assert.match(chatStyles, /\.message-activity-tool/);
   assert.doesNotMatch(chatStyles, /\.message-activity-tool\s*\{[^}]*(?:border|background):/);
   assert.match(chatStyles, /\.message-activity \.message-kind/);
@@ -282,9 +282,9 @@ test("recognized read commands use concise activity labels instead of Bash text"
   assert.match(chatScript, /message\.title\.length <= 200/);
   assert.doesNotMatch(agentClient, /return truncate\(summary, 140\)/);
   assert.match(agentClient, /return summary\.trim\(\) \|\| undefined/);
-  assert.match(agentClient, /title === "실행 요청 읽기"/);
-  assert.match(agentClient, /return \[statusUpdate\("Main Agent가 요청을 분석 중"\)\]/);
-  assert.match(agentClient, /return "실행 결과 읽기"/);
+  assert.match(agentClient, /title === "Read run request"/);
+  assert.match(agentClient, /return \[statusUpdate\("Main Agent is analyzing the request"\)\]/);
+  assert.match(agentClient, /return "Read run result"/);
   assert.match(chatScript, /context\.title = command/);
   assert.match(chatScript, /text\.append\(context\);[\s\S]*container\.append\(row\);[\s\S]*return;/);
 });
@@ -292,8 +292,8 @@ test("recognized read commands use concise activity labels instead of Bash text"
 test("adjacent reads of the same skill or run document collapse into one activity", function () {
   assert.match(chatScript, /timeline: collapseAdjacentReads\(Array\.isArray\(saved\?\.timeline\)/);
   assert.match(chatScript, /normalizeSavedReadActivity\(savedEvent\)/);
-  assert.match(chatScript, /event\?\.title === "실행 요청 읽기"/);
-  assert.match(chatScript, /return \{ \.\.\.event, title: "실행 결과 읽기" \}/);
+  assert.match(chatScript, /event\?\.title === "Read run request"/);
+  assert.match(chatScript, /return \{ \.\.\.event, title: "Read run result" \}/);
   assert.match(chatScript, /sameReadActivity\(previous, incoming\)/);
   assert.match(chatScript, /isReadActivityTitle\(left\.title\)/);
   assert.match(chatScript, /left\.title === right\.title/);
@@ -301,16 +301,16 @@ test("adjacent reads of the same skill or run document collapse into one activit
 
 test("read activities visibly distinguish in-progress and completed phases", function () {
   assert.match(chatScript, /readActivityDisplayTitle\(title, phaseValue\)/);
-  assert.match(chatScript, /return title\.replace\("Skill 읽기 · ", "Skill 읽는 중 · "\)/);
-  assert.doesNotMatch(chatScript, /return "실행 요청 읽는 중"/);
-  assert.match(chatScript, /return "실행 결과 읽는 중"/);
+  assert.match(chatScript, /return title\.replace\("Read Skill · ", "Reading Skill · "\)/);
+  assert.doesNotMatch(chatScript, /return "Reading run request"/);
+  assert.match(chatScript, /return "Reading run result"/);
 });
 
 test("activity completion uses accessible success and failure dots instead of text labels", function () {
   assert.match(chatScript, /message-phase-" \+ \(phaseValue \|\| "started"\)/);
   assert.match(chatScript, /heading\.append\(createActivityPhase\(event\.phase\), kind\)/);
   assert.match(chatScript, /phase\.setAttribute\("aria-label", activityPhaseAccessibleLabel\(phaseValue\)\)/);
-  assert.doesNotMatch(chatScript, /return "완료"/);
+  assert.doesNotMatch(chatScript, /return "Completed"/);
   assert.match(chatStyles, /\.message-phase\s*\{[^}]*width: 2ch[^}]*height: 1\.5em/);
   assert.match(chatScript, /createElementNS\("http:\/\/www\.w3\.org\/2000\/svg", "circle"\)/);
   assert.match(chatStyles, /\.message-phase-failed\s*\{[^}]*af-cli-failure/);
@@ -322,7 +322,7 @@ test("terminal commands show three lines before offering an accessible command e
   assert.match(chatScript, /row\.append\(createActivityPhase\(phaseValue\), text\)/);
   assert.match(chatScript, /toggle\.hidden = text\.scrollHeight <= text\.clientHeight \+ 1/);
   assert.match(chatScript, /new ResizeObserver\(scheduleCommandDisclosureMeasurement\)/);
-  assert.match(chatScript, /toggle\.setAttribute\("aria-label", "전체 명령 펼치기"\)/);
+  assert.match(chatScript, /toggle\.setAttribute\("aria-label", "Expand full command"\)/);
   assert.match(chatScript, /toggle\.setAttribute\("aria-expanded", String\(expanded\)\)/);
   assert.match(chatScript, /togglePath\.setAttribute\("d", "m4 6 4 4 4-4"\)/);
   assert.match(chatStyles, /\.bash-command-text\s*\{[^}]*max-height: calc\(1\.5em \* 3\)/);
@@ -350,7 +350,7 @@ test("terminal commands and extension-aware diffs use VS Code TextMate highlight
 test("Git changes render a bounded unified diff preview with file statistics", function () {
   assert.match(chatScript, /renderGitDiff\(content, event\.diff, event\.text, event\.phase\)/);
   assert.match(chatScript, /Edited " \+ \(files\.length === 1 \? files\[0\]\.path/);
-  assert.match(chatScript, /summary\.textContent = "Git diff 보기"/);
+  assert.match(chatScript, /summary\.textContent = "View Git diff"/);
   assert.match(chatScript, /line\.startsWith\("@@"\)/);
   assert.match(chatStyles, /\.git-diff-preview pre/);
   assert.match(chatStyles, /\.git-diff-addition/);
@@ -379,8 +379,8 @@ test("reasoning options match the installed runtime capability", function () {
 test("status settings uses an accessible SVG-only button", function () {
   const button = template.match(/<button\b[^>]*id="status-settings-button"[^>]*>([\s\S]*?)<\/button>/);
   assert.ok(button);
-  assert.match(button[0], /aria-label="상태 표시줄 설정"/);
-  assert.match(button[0], /title="상태 표시줄 설정"/);
+  assert.match(button[0], /aria-label="Status bar settings"/);
+  assert.match(button[0], /title="Status bar settings"/);
   assert.match(button[0], /aria-controls="status-settings"/);
   assert.match(button[1], /<svg[^>]*aria-hidden="true"[^>]*focusable="false"/);
   assert.equal(button[1].replace(/<[^>]*>/g, '').trim(), '');

@@ -1203,14 +1203,16 @@ button {
   padding: 0 7px;
 }
 
-.task-mode-button {
+.task-mode-button,
+.execution-mode-button {
   width: 28px;
   min-width: 28px;
   justify-content: center;
   padding: 0;
 }
 
-.task-mode-icon {
+.task-mode-icon,
+.execution-mode-icon {
   width: 18px;
   height: 18px;
   flex: 0 0 auto;
@@ -1221,7 +1223,8 @@ button {
   stroke-width: 1.8;
 }
 
-.task-mode-button[aria-expanded="true"] {
+.task-mode-button[aria-expanded="true"],
+.execution-mode-button[aria-expanded="true"] {
   color: var(--vscode-foreground);
   background: var(--vscode-toolbar-activeBackground, var(--vscode-toolbar-hoverBackground));
 }

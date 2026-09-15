@@ -24,7 +24,7 @@ test("webview image messages validate exact bounded content", async function () 
 
 test("runtime image construction rejects blob URLs and emits local paths", async function () {
   const { runtimeImages } = await importTypeScript("src/modules/chat/session-controller.ts");
-  assert.throws(() => runtimeImages([{ id: "one", name: "one.png", kind: "image", uri: "blob:test", mediaType: "image/png" }]), /안전한 로컬 파일/);
+  assert.throws(() => runtimeImages([{ id: "one", name: "one.png", kind: "image", uri: "blob:test", mediaType: "image/png" }]), /safe local file/);
   assert.deepEqual(runtimeImages([{ id: "one", name: "one.png", kind: "image", uri: "file:///tmp/one.png", mediaType: "image/png" }]), [{ path: "/tmp/one.png", mediaType: "image/png" }]);
 });
 
@@ -79,6 +79,6 @@ test("runtime adapter refuses image metadata downgrade when plugin lacks image t
   client.capabilities = async () => ({ submit: flags, send: flags });
   client.command = async () => { throw new Error("image request must not reach an incompatible runtime"); };
   const image = [{ path: "/tmp/one.png", mediaType: "image/png" }];
-  await assert.rejects(client.submit("main-test", "inspect", {}, image), /플러그인을.*업데이트.*익스텐션 호스트를 다시 로드/s);
-  await assert.rejects(client.send("main-test", "inspect", {}, image), /플러그인을.*업데이트.*익스텐션 호스트를 다시 로드/s);
+  await assert.rejects(client.submit("main-test", "inspect", {}, image), /update.*plugin.*reload.*extension host/s);
+  await assert.rejects(client.send("main-test", "inspect", {}, image), /update.*plugin.*reload.*extension host/s);
 });

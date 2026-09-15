@@ -10,10 +10,10 @@ export function canStageImage(currentCount: number, currentBytes: number, nextBy
 export function decodeBrowserImage(data: string, declaredSize: number, mediaType: string): Buffer {
   const content = Buffer.from(data, "base64");
   if (content.byteLength !== declaredSize || content.toString("base64") !== data) {
-    throw new Error("이미지 첨부 데이터 크기가 일치하지 않습니다.");
+    throw new Error("Image attachment data size does not match.");
   }
   if (!hasImageSignature(content, mediaType)) {
-    throw new Error("이미지 내용과 미디어 형식이 일치하지 않습니다.");
+    throw new Error("Image content does not match its media type.");
   }
   return content;
 }

@@ -22,7 +22,7 @@ export function createContainer(context: vscode.ExtensionContext): Container {
     async () => {
       const projectRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
       if (!projectRoot) {
-        return { available: false, diagnostic: "Main Agent를 실행할 VS Code 작업 영역을 먼저 여세요." };
+        return { available: false, diagnostic: "Open a VS Code workspace to run Main Agent." };
       }
       const configuredPath = vscode.workspace
         .getConfiguration("agentFactory.mainChat")

@@ -208,7 +208,7 @@ test('batch permissions intersect explicit policies and never combine unknown in
     if (expected === 'rejected') {
       assert.equal(calls.length, 1);
       assert.deepEqual(promoted, []);
-      assert.match(errors[0], /상속 권한과 명시 권한/);
+      assert.match(errors[0], /inherited and explicit permissions/);
     } else {
       assert.equal(calls.length, 2);
       assert.equal(calls[1].options.executionMode, expected);
@@ -232,7 +232,7 @@ test('batching cannot transfer a human actor or verification target between orig
     terminal.resolve(); await Promise.all([active, first, second]);
     assert.deepEqual(calls, ['active']);
     assert.deepEqual(promoted, []);
-    assert.match(errors[0], /실행 주체 또는 검증 대상/);
+    assert.match(errors[0], /execution owners or verification targets/);
   }
 });
 

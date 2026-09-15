@@ -5,8 +5,8 @@ Agent Factory Main Agent sessions in VS Code editor tabs.
 ## Required companion plugin
 
 This extension requires an installed and enabled Agent Factory Codex plugin with
-the identical semantic base version. Extension `1.0.6` accepts plugin
-`1.0.6+codex.<token>`, for example, but not another semantic base version.
+the identical semantic base version. Extension `1.0.8` accepts plugin
+`1.0.8+codex.<token>`, for example, but not another semantic base version.
 
 During activation, the extension first checks the small installed-plugin list. Only
 when the plugin is missing or mismatched does it request the bounded available catalog,
@@ -126,9 +126,9 @@ npm run check
 
 ## Installation requirement
 
-Extension version 1.0.6 requires an installed and enabled Agent Factory plugin with the
-same semantic base version, 1.0.6. A plugin cachebuster suffix such as
-`1.0.6+codex.<token>` is accepted. During activation the extension checks configured
+Extension version 1.0.8 requires an installed and enabled Agent Factory plugin with the
+same semantic base version, 1.0.8. A plugin cachebuster suffix such as
+`1.0.8+codex.<token>` is accepted. During activation the extension checks configured
 Codex marketplaces and, when necessary, installs one compatible available plugin before
 registering its commands and views. The official `agent-factory` marketplace is preferred.
 
@@ -146,7 +146,7 @@ this plugin requirement.
 
 ## F5 manual test
 
-1. Configure a marketplace that provides Agent Factory plugin semantic version 1.0.6.
+1. Configure a marketplace that provides Agent Factory plugin semantic version 1.0.8.
    Activation installs the compatible plugin when needed. Confirm
    `skills/agent/scripts/exec.py` is present in the Codex plugin cache; if it is elsewhere,
    set `agentFactory.mainChat.runtimeExecPath` to its absolute path after satisfying the
@@ -194,3 +194,136 @@ Plan/default collaboration turns in one Work session before Verification, with
 automatic transition. Human approval and execution permissions remain separate.
 Unsupported modes are disabled and dispatch fails with an update diagnostic;
 older plugins are never silently treated as supporting these routes.
+
+## Marketplace release with Playwright
+
+- Run from this repository with dependencies already installed and Git push access
+  configured. Use `main` tracking `origin/main`; a new release requires HEAD to
+  equal `origin/main`. Live execution fetches remote `main` and rejects divergence.
+- The default publication transport is `playwright`. The command prepares and pushes
+  an exact release, then prints a handoff for the connected Playwright browser tools.
+  It does not launch a second browser or require `VSCE_PAT`. This is an agent-assisted
+  browser workflow, not unattended browser automation inside the Node script.
+- `--publish-via vsce` retains token-based CLI publication. Only this transport needs
+  `VSCE_PAT`, supplied through the environment and checked before version changes.
+  Never extract browser cookies into a PAT or save login data in the repository.
+- Ensure the companion plugin with the target semantic version is available first.
+  This command releases only the VS Code extension.
+
+```sh
+# Read-only plan: no token, build, writes, fetch, commit, push or publication.
+npm run release -- --dry-run --message 'Release chat improvements' --files src/extension.ts README.md
+
+# Prepare, commit and push; then use the printed Playwright handoff.
+npm run release -- --message 'Release chat improvements' --files src/extension.ts README.md
+
+# Select a higher stable version and optionally install on this extension host.
+npm run release -- --version 1.0.8 --message 'Release 1.0.8' --files README.md --install
+```
+
+- The default is the next patch version. `--version` accepts a strictly higher
+  `X.Y.Z` version. Both `package.json` and `package-lock.json` are updated and always
+  included; list every other changed file after one `--files` option. Omit
+  `--files` for a manifest-only release. Paths are exact repository-relative files,
+  including deleted tracked files; directories, globs, symlinks, ignored files,
+  traversal, duplicate paths and unknown options are rejected. Quote spaces.
+- Resolve all staged changes, conflicts and active Git operations first. Other
+  tracked changes and unlisted untracked files block release. The unrelated
+  untracked `.vscode/settings.json` is tolerated and never staged. Build-generated
+  tracked changes must also be included explicitly; inspect them before retrying.
+- Execution updates versions, runs `typecheck`, `check:static` and `build`, packages
+  a versioned VSIX using the existing Node File polyfill and GitHub README links,
+  stages only the literal file list, commits, pushes that commit to `origin/main`,
+  and hands off that same VSIX for Playwright upload (or submits it using VSCE). Packaging also invokes VSCE's existing
+  prepublish build hook. Changed `tests/**/*.test.mjs` files in the release scope
+  are run before packaging and committing. The full test suite is not invoked. Accepted submission can be
+  followed by `code --install-extension <saved-vsix> --force` with `--install`.
+  Local installation targets the host running this command; reload VS Code as needed.
+- A successful VSCE submission does not mean Marketplace automatic validation has
+  completed or the version is publicly available. Check validation status in the
+  publisher management page and confirm public availability separately. The saved
+  `published` stage means submission accepted; `completed` means this script finished
+  its selected steps. Neither state records validation or availability checks.
+- Use an exclusive checkout while releasing; do not edit files, run builds or Git
+  operations concurrently. Commands use argument arrays without a shell. Existing
+  Git hooks and npm build scripts still execute normally.
+
+### Playwright browser upload
+
+1. Run the release command with the exact authorized file list. A read-only
+   `--dry-run` previews it. The default `playwright` transport stops at
+   `awaiting-browser`, printing the publisher URL, extension ID, version, commit,
+   absolute VSIX path and SHA-256. This is not publication success.
+2. Use the connected Playwright browser tools to open `publisherUrl`. Complete
+   account sign-in or MFA in the browser if requested. Verify the publisher and
+   extension identity. Select the existing extension's update action, or the VS Code
+   new-extension action for its first release, using the current page snapshot.
+   Do not rely on unverified hard-coded selectors or upload to a different publisher.
+3. Before selecting any file (which may begin transmission immediately), run:
+
+   ```sh
+   npm run release -- --resume --browser-start
+   ```
+
+   This rechecks the saved commit, remote and VSIX hash and records `publishing`.
+   Use Playwright's file upload tool to select that exact VSIX and complete the
+   submission shown in the current page. If the browser runs on another host,
+   transfer only the VSIX to that host through an available authorized file-transfer
+   route and verify its SHA-256 before selecting it. A Linux path is not directly
+   usable by a browser server running on Windows. Do not rebuild the package there.
+4. Observe the publisher page's acceptance of the exact extension/version. Record
+   the URL, version and observed status, then complete the saved release:
+
+   ```sh
+   npm run release -- --resume --published --publication-evidence 'Publisher page URL; extension ID; exact version; observed acceptance/status'
+   ```
+
+   The evidence is an operator/agent attestation from the observed browser page,
+   not an automated server receipt check. The script stores it with a timestamp.
+   Pending Marketplace validation is not public availability; report it separately.
+5. If login or upload is interrupted, preserve the release state. `awaiting-browser`
+   can be resumed without uploading anything. Once `publishing` is recorded, inspect
+   the publisher dashboard for the exact version, including pending submissions,
+   before confirming acceptance or using `--resume --retry-publish`. A retry returns
+   to `awaiting-browser`; it never silently uploads again. Resume cannot change the
+   publication transport. Historical releases without a transport retain VSCE.
+
+Microsoft documents browser VSIX uploads on its
+[publishing extensions page](https://code.visualstudio.com/api/working-with-extensions/publishing-extension).
+This workflow does not publish the companion Codex plugin, whose compatible release
+must already be available. It does not broaden the authorized release file list.
+
+### Failed release and recovery
+
+- Progress is stored in `.git/agent-factory-release.json` (the resolved Git directory
+  for linked checkouts), with the original version, file list, commit and VSIX hash.
+  The VSIX is stored in `releases/`. Keep both until the release is resolved.
+  A new command refuses an unfinished release, preventing an automatic second
+  version bump or duplicate commit. No automatic rollback, reset or deletion occurs.
+- After a recorded `committed`, `pushing` or `pushed` stage, run
+  `npm run release -- --resume` (with `VSCE_PAT` only for a saved VSCE release). This reuses the saved
+  commit and VSIX, checks their identity and requires a clean tracked checkout.
+  An interrupted push may safely retry the same commit. Remote `main` must equal
+  the release commit before publication. `--resume --dry-run` only displays state.
+- A `publishing` stage means the server outcome may be unknown, including a network
+  error after acceptance. Check the publisher management page for this exact version
+  and artifact, including submissions pending validation. If that exact submission
+  was accepted, use `npm run release -- --resume --published`. Only after confirming
+  no submission exists, including pending validation, use
+  `npm run release -- --resume --retry-publish`. Public absence alone is insufficient
+  reason to retry. Neither path
+  creates a new commit or changes the version; duplicate publication is not silently
+  accepted. A saved `published` or `installing` stage resumes only remaining work.
+- A failure at `preparing` or `committing` requires manual inspection, not automatic
+  resume: checks may have changed generated assets, staging may remain, or a commit
+  may have succeeded just before interruption. Inspect `git status`, the index,
+  `git log -1`, both manifest versions and the saved state. Preserve desired edits.
+  If no commit occurred, manually undo only this attempt's version bump and staging,
+  then archive the state and incomplete VSIX outside their original paths before
+  starting a new release. Do not clear other work. If a commit occurred, finish
+  pushing/publishing the recorded VSIX manually after confirming the commit content
+  and VSIX match; do not launch a fresh version bump to recover that release.
+- After a hard interruption, `.git/agent-factory-release.lock` may remain. Check the
+  recorded PID and ensure no release process is running before manually removing
+  only that lock. Archive an unfinished state only after resolving its release.
+  A failed optional installation does not undo an accepted Marketplace submission.

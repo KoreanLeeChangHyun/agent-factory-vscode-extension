@@ -11,6 +11,7 @@ function harness(overrides = {}, text = "오류 수정") {
   const sent = [];
   const context = {
     state: { role: "main", taskMode: "work", attachments: [], timeline: [], capabilities: {}, runtimeAvailable: true, ...overrides },
+    timeline: { scrollTop: 0, scrollHeight: 500 },
     prompt: { value: text }, goalObjective: { value: "" }, nativeGoal: null,
     currentCapabilities: () => ({ model: true, reasoning: true, fast: true, goal: true }),
     createId: () => "message-id", renderAll() {}, resizePrompt() {}, persist() {},
@@ -35,6 +36,8 @@ test("mode submission preserves the draft, actual image reference and selected m
   assert.equal(context.state.pendingRequests[0].attachments[0].previewUri, "vscode-resource://input.png");
   assert.doesNotMatch(context.state.pendingRequests[0].text, /Work → Verification/);
   assert.equal(context.prompt.value, "");
+  assert.equal(context.timeline.scrollTop, 500);
+  assert.notEqual(context.state.autoScroll, true);
   run("submit()");
   assert.equal(sent.length, 1);
 });
@@ -113,7 +116,7 @@ test("mode menu displays four choices and persists a supported next-task selecti
       addEventListener(name, handler) { this.handlers[name] = handler; },
       replaceChildren() { this.children = []; } };
   }
-  const names = { direct: "직접 수정", work: "작업", "work-verification": "작업 · 검증", "plan-work-verification": "계획 · 작업 · 검증" };
+  const names = { direct: "Direct", work: "Work", "work-verification": "Work · Verification", "plan-work-verification": "Plan · Work · Verification" };
   const menu = element();
   const calls = [];
   const context = {

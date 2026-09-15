@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="ko">
+<html lang="en">
   <head>
     <meta charset="UTF-8" />
     <meta
@@ -11,8 +11,8 @@
     <title>Main Agent</title>
   </head>
   <body>
-    <main class="chat-shell" aria-label="Main Agent 채팅">
-      <section id="timeline" class="timeline" aria-live="polite" aria-label="대화 내용">
+    <main class="chat-shell" aria-label="Main Agent chat">
+      <section id="timeline" class="timeline" aria-live="polite" aria-label="Conversation">
         <div id="empty-state" class="empty-state">
           <img class="brand-mark" src="{{iconUri}}" alt="" aria-hidden="true" />
           <h1>Agent Factory</h1>
@@ -20,10 +20,10 @@
       </section>
 
       <div id="drop-overlay" class="drop-overlay" hidden>
-        <strong>파일 또는 폴더를 놓아 첨부</strong>
+        <strong>Drop files or folders to attach</strong>
       </div>
 
-      <section class="composer-region" aria-label="메시지 작성">
+      <section class="composer-region" aria-label="Compose message">
         <div class="composer-status-row">
           <div id="run-status" class="run-status" role="status" aria-live="polite" hidden>
             <button id="run-status-toggle" class="run-status-toggle" type="button" aria-expanded="false" aria-controls="run-details">
@@ -35,61 +35,60 @@
               <span id="run-status-agents" class="run-status-agents" aria-hidden="true"></span>
               <svg class="run-status-chevron" viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="m4 10 4-4 4 4"></path></svg>
             </button>
-            <section id="run-details" class="run-details" aria-label="작업 및 검증 상세" hidden>
+            <section id="run-details" class="run-details" aria-label="Work and verification details" hidden>
               <div class="run-details-heading">
-                <strong>작업 · 검증</strong>
+                <strong>Work · Verification</strong>
                 <span id="run-details-summary"></span>
               </div>
               <div id="run-stage-list" class="run-stage-list"></div>
-              <button id="run-stop-button" class="run-stop-button" type="button">현재 실행 중지</button>
+              <button id="run-stop-button" class="run-stop-button" type="button">Stop current run</button>
             </section>
           </div>
           <button id="pending-queue-toggle" class="pending-queue-toggle" type="button" aria-expanded="false" aria-controls="pending-message-queue" hidden>
-            <span id="pending-queue-label">대기 0</span>
+            <span id="pending-queue-label">Queued 0</span>
             <svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="m4 6 4 4 4-4"></path></svg>
           </button>
         </div>
-        <section id="pending-message-queue" aria-label="대기 메시지" hidden></section>
+        <section id="pending-message-queue" aria-label="Queued messages" hidden></section>
         <div class="composer">
-          <div id="attachment-list" class="attachment-list" aria-label="첨부 항목"></div>
+          <div id="attachment-list" class="attachment-list" aria-label="Attachments"></div>
           <textarea
             id="prompt"
             rows="1"
             maxlength="100000"
-            placeholder="Agent Factory에 요청하세요"
-            aria-label="Main Agent에게 보낼 메시지"
+            placeholder="Ask Agent Factory"
+            aria-label="Message to Main Agent"
           ></textarea>
           <div class="composer-actions">
             <div class="composer-actions-start">
-              <button id="attach-button" class="icon-button" type="button" title="파일 또는 폴더 첨부" aria-label="파일 또는 폴더 첨부">
+              <button id="attach-button" class="icon-button" type="button" title="Attach files or folders" aria-label="Attach files or folders">
                 <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M12 5v14M5 12h14"></path></svg>
               </button>
               <div class="setting-control">
-                <button id="model-button" class="setting-button" type="button" title="모델 선택" aria-label="모델 선택" aria-haspopup="menu" aria-expanded="false" aria-controls="model-menu">
+                <button id="model-button" class="setting-button" type="button" title="Select model" aria-label="Select model" aria-haspopup="menu" aria-expanded="false" aria-controls="model-menu">
                   <span id="model-label">Default</span>
                   <svg class="chevron-icon" viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="m4 6 4 4 4-4"></path></svg>
                 </button>
-                <div id="model-menu" class="setting-menu" role="menu" aria-label="모델 선택" hidden></div>
+                <div id="model-menu" class="setting-menu" role="menu" aria-label="Select model" hidden></div>
               </div>
               <div class="setting-control">
-                <button id="reasoning-button" class="setting-button" type="button" title="추론 수준 선택" aria-label="추론 수준 선택" aria-haspopup="menu" aria-expanded="false" aria-controls="reasoning-menu">
+                <button id="reasoning-button" class="setting-button" type="button" title="Select reasoning effort" aria-label="Select reasoning effort" aria-haspopup="menu" aria-expanded="false" aria-controls="reasoning-menu">
                   <span id="reasoning-label">Default</span>
                   <svg class="chevron-icon" viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="m4 6 4 4 4-4"></path></svg>
                 </button>
-                <div id="reasoning-menu" class="setting-menu" role="menu" aria-label="추론 수준 선택" hidden></div>
+                <div id="reasoning-menu" class="setting-menu" role="menu" aria-label="Select reasoning effort" hidden></div>
               </div>
               <div class="setting-control">
-                <button id="execution-mode-button" class="setting-button" type="button" title="다음 메시지에 적용할 실행 권한 선택" aria-label="실행 권한 선택" aria-haspopup="menu" aria-expanded="false" aria-controls="execution-mode-menu">
-                  <span id="execution-mode-label">권한: 전체 접근</span>
-                  <svg class="chevron-icon" viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="m4 6 4 4 4-4"></path></svg>
+                <button id="execution-mode-button" class="setting-button execution-mode-button" type="button" title="Permissions: Current session · Select execution permissions for the next message" aria-label="Permissions: Current session · Select execution permissions for the next message" aria-haspopup="menu" aria-expanded="false" aria-controls="execution-mode-menu">
+                  <svg class="execution-mode-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M12 3 4 6v6c0 4 4 7 8 9 4-2 8-5 8-9V6l-8-3Z"></path></svg>
                 </button>
-                <div id="execution-mode-menu" class="setting-menu" role="menu" aria-label="실행 권한 선택" hidden></div>
+                <div id="execution-mode-menu" class="setting-menu" role="menu" aria-label="Select execution permissions" hidden></div>
               </div>
               <div class="setting-control">
-                <button id="work-loop-button" class="setting-button task-mode-button" type="button" title="작업 모드: 작업 · 다음 전송에 적용할 모드 선택" aria-label="작업 모드: 작업 · 다음 전송에 적용할 모드 선택" aria-haspopup="menu" aria-expanded="false" aria-controls="task-mode-menu">
+                <button id="work-loop-button" class="setting-button task-mode-button" type="button" title="Task mode: Work · Select the mode for the next message" aria-label="Task mode: Work · Select the mode for the next message" aria-haspopup="menu" aria-expanded="false" aria-controls="task-mode-menu">
                   <svg class="task-mode-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M14 6a5 5 0 0 0-6 6L3 17a2.8 2.8 0 0 0 4 4l5-5a5 5 0 0 0 6-6l-3 3-4-4 3-3Z"></path></svg>
                 </button>
-                <div id="task-mode-menu" class="setting-menu" role="menu" aria-label="작업 모드 선택" hidden></div>
+                <div id="task-mode-menu" class="setting-menu" role="menu" aria-label="Select task mode" hidden></div>
               </div>
               <button id="fast-mode-button" class="mode-button" type="button" title="Fast mode off" aria-label="Fast mode off" aria-pressed="false">
                 <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M13 2 4 14h7l-1 8 10-13h-7l1-7Z"></path></svg>
@@ -98,27 +97,27 @@
                 <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8"></circle><circle cx="12" cy="12" r="3"></circle><path d="M12 2v3M12 19v3M2 12h3M19 12h3"></path></svg>
               </button>
               <div class="utility-picker session-picker">
-                <button id="session-button" class="utility-button" type="button" title="기존 Main Agent 세션 불러오기" aria-label="기존 Main Agent 세션 불러오기" aria-haspopup="listbox" aria-expanded="false" aria-controls="session-menu">
+                <button id="session-button" class="utility-button" type="button" title="Load an existing Main Agent session" aria-label="Load an existing Main Agent session" aria-haspopup="listbox" aria-expanded="false" aria-controls="session-menu">
                   <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M3 12a9 9 0 1 0 3-6.7"></path><path d="M3 4v5h5"></path><path d="M12 7v5l3 2"></path></svg>
                 </button>
-                <div id="session-menu" class="utility-list-menu session-menu" role="listbox" aria-label="Main Agent 세션" hidden>
+                <div id="session-menu" class="utility-list-menu session-menu" role="listbox" aria-label="Main Agent sessions" hidden>
                   <div id="session-list" class="session-list"></div>
                 </div>
               </div>
               <div class="utility-picker question-picker">
-                <button id="question-button" class="utility-button" type="button" title="사용자 질문 목록" aria-label="사용자 질문 목록" aria-haspopup="listbox" aria-expanded="false" aria-controls="question-menu">
+                <button id="question-button" class="utility-button" type="button" title="User questions" aria-label="User questions" aria-haspopup="listbox" aria-expanded="false" aria-controls="question-menu">
                   <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><circle cx="5" cy="7" r="1"></circle><circle cx="5" cy="12" r="1"></circle><circle cx="5" cy="17" r="1"></circle><path d="M9 7h10M9 12h10M9 17h10"></path></svg>
                 </button>
-                <div id="question-menu" class="utility-list-menu question-menu" role="listbox" aria-label="사용자 질문" hidden>
+                <div id="question-menu" class="utility-list-menu question-menu" role="listbox" aria-label="User questions" hidden>
                   <div id="question-list" class="question-list"></div>
                 </div>
               </div>
             </div>
             <div class="composer-actions-end">
-              <button id="auto-scroll-button" class="mode-button" type="button" title="자동 스크롤 ON · 클릭하여 끄기" aria-label="자동 스크롤 ON · 클릭하여 끄기" aria-pressed="true" aria-controls="timeline">
+              <button id="auto-scroll-button" class="mode-button" type="button" title="Auto-scroll ON · Click to turn off" aria-label="Auto-scroll ON · Click to turn off" aria-pressed="true" aria-controls="timeline">
                 <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M12 3v12m-5-5 5 5 5-5M5 20h14"></path></svg>
               </button>
-              <button id="send-button" class="send-button" type="button" title="전송 (Enter)" aria-label="메시지 전송">
+              <button id="send-button" class="send-button" type="button" title="Send (Enter)" aria-label="Send message">
                 <svg id="send-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M12 19V5M6.5 10.5 12 5l5.5 5.5"></path></svg>
                 <svg id="stop-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false" hidden><rect x="7" y="7" width="10" height="10" rx="1"></rect></svg>
               </button>
@@ -126,31 +125,31 @@
           </div>
         </div>
       </section>
-      <section id="goal-panel" class="goal-panel" aria-label="지속 목표" hidden>
-        <label for="goal-objective">목표 <span>(새 목표를 지정할 때만 입력, 최대 4,000자)</span></label>
-        <textarea id="goal-objective" rows="2" maxlength="4000" placeholder="비워 두면 기존 목표를 유지합니다. 첫 실행에서는 메시지가 목표가 됩니다."></textarea>
-        <p id="goal-status" role="status" aria-live="polite">목표를 켜고 메시지를 보내세요.</p>
+      <section id="goal-panel" class="goal-panel" aria-label="Ongoing goal" hidden>
+        <label for="goal-objective">Goal <span>(Only enter a new goal, up to 4,000 characters)</span></label>
+        <textarea id="goal-objective" rows="2" maxlength="4000" placeholder="Leave blank to keep the existing goal. On the first run, your message becomes the goal."></textarea>
+        <p id="goal-status" role="status" aria-live="polite">Enable Goal and send a message.</p>
         <div class="goal-actions">
-          <button type="button" data-goal-action="refresh">상태 새로고침</button>
-          <button type="button" data-goal-action="pause">일시 정지</button>
-          <button type="button" data-goal-action="reopen">다시 시작</button>
-          <button type="button" data-goal-action="cancel">목표 취소</button>
-          <button type="button" data-goal-action="disable">Goal 끄기</button>
+          <button type="button" data-goal-action="refresh">Refresh status</button>
+          <button type="button" data-goal-action="pause">Pause</button>
+          <button type="button" data-goal-action="reopen">Resume</button>
+          <button type="button" data-goal-action="cancel">Cancel goal</button>
+          <button type="button" data-goal-action="disable">Turn off Goal</button>
         </div>
       </section>
-      <div id="agents-menu" class="utility-list-menu agents-menu" role="listbox" aria-label="호출된 작업자와 검증자" hidden>
+      <div id="agents-menu" class="utility-list-menu agents-menu" role="listbox" aria-label="Called work and verification agents" hidden>
         <div id="agents-list" class="agents-list"></div>
       </div>
-      <section id="status-settings" class="status-settings" aria-label="상태 표시줄 설정" hidden>
-        <div class="status-settings-heading"><strong>상태 표시줄</strong><button id="status-settings-close" type="button" aria-label="상태 표시줄 설정 닫기" title="닫기"><svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="m4 4 8 8M12 4l-8 8"></path></svg></button></div>
-        <p class="status-settings-hint">선택하여 표시 · 드래그나 화살표로 순서 변경</p>
+      <section id="status-settings" class="status-settings" aria-label="Status bar settings" hidden>
+        <div class="status-settings-heading"><strong>Status bar</strong><button id="status-settings-close" type="button" aria-label="Close status bar settings" title="Close"><svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="m4 4 8 8M12 4l-8 8"></path></svg></button></div>
+        <p class="status-settings-hint">Select items to display · Drag or use arrows to reorder</p>
         <div id="status-catalog" class="status-catalog"></div>
-        <div class="status-settings-footer"><span tabindex="0" title="현재 연결은 비용·잔여 크레딧, 한도 초기화·단기 한도, 계정 전체 토큰, 입력·출력·캐시 세부 통계 및 처리 속도를 제공하지 않습니다.">일부 지표 미지원</span><button id="status-reset" type="button">기본값 복원</button></div>
+        <div class="status-settings-footer"><span tabindex="0" title="The current connection does not provide costs, remaining credits, limit resets, short-term limits, account-wide tokens, input/output/cache breakdowns, or processing speed.">Some metrics are unavailable</span><button id="status-reset" type="button">Restore defaults</button></div>
         <span id="status-announcement" role="status" aria-live="polite"></span>
       </section>
       <div class="status-footer">
-        <div id="status-bar" class="status-bar" aria-label="Agent 상태"></div>
-        <button id="status-settings-button" class="status-settings-button" type="button" aria-controls="status-settings" aria-expanded="false" aria-label="상태 표시줄 설정" title="상태 표시줄 설정">
+        <div id="status-bar" class="status-bar" aria-label="Agent status"></div>
+        <button id="status-settings-button" class="status-settings-button" type="button" aria-controls="status-settings" aria-expanded="false" aria-label="Status bar settings" title="Status bar settings">
           <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round">
             <path d="m9 3-.5 3-2 1.2L3.7 6l-3 5 2.3 2v2l-2.3 2 3 5 2.8-1.2 2 1.2.5 3h6l.5-3 2-1.2 2.8 1.2 3-5-2.3-2v-2l2.3-2-3-5-2.8 1.2-2-1.2L15 3Z" transform="translate(2 0) scale(.83)" />
             <circle cx="12" cy="12" r="3" />

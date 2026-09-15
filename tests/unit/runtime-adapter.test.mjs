@@ -187,8 +187,8 @@ raise SystemExit(2)
   });
   assert.equal((await compatible.capabilities()).submit.images, true);
   assert.equal((await compatible.capabilities()).send.images, true);
-  await assert.rejects(client.submit('test', 'test', { reasoningEffort: 'medium', fast: false, goalMode: false }), /추론 수준/);
-  await assert.rejects(client.send('test', 'test', { model: 'gpt-6-astra', fast: false, goalMode: false }), /모델 변경/);
+  await assert.rejects(client.submit('test', 'test', { reasoningEffort: 'medium', fast: false, goalMode: false }), /reasoning effort/);
+  await assert.rejects(client.send('test', 'test', { model: 'gpt-6-astra', fast: false, goalMode: false }), /model changes/);
   await assert.rejects(client.listSessions(), /specific runtime failure/);
 });
 
@@ -210,7 +210,7 @@ test("composer shows only supported controls across draft and bound sessions", a
     renderStatusBar() { statusRenders++; },
     state: { capabilities: { submit: { model: true }, send: {} }, model: 'gpt-6-astra', reasoning: 'medium', fastMode: true, goalMode: true },
     modelButton: button(), reasoningButton: button(), fastModeButton: button(), goalModeButton: button(), workLoopButton: button(),
-    taskModeNames: { work: "작업" },
+    taskModeNames: { work: "Work" },
     executionModeButton: button(), executionModeLabel: {}, modelLabel: {}, reasoningLabel: {}, openSettingId: undefined,
     goalPanel: { querySelectorAll() { return []; } }, goalStatus: {}, nativeGoal: null, goalError: undefined
   };
@@ -314,12 +314,12 @@ test("Content remaining is independent of Weekly availability", async function (
   };
   assert.equal(
     runInNewContext(functions + "\ncontextStatusLabel();", context),
-    "Content 잔량 79%"
+    "Content remaining 79%"
   );
   context.state.weeklyUsedPercent = undefined;
   assert.equal(
     runInNewContext("contextStatusLabel();", context),
-    "Content 잔량 79%"
+    "Content remaining 79%"
   );
 });
 
@@ -483,21 +483,21 @@ test("runtime client invokes official commands and reads the bounded managed res
   assert.deepEqual(await client.updates("main-test", "run-fake", 0), {
     cursor: 10,
     updates: [
-      { kind: "status", text: "Main Agent가 요청을 분석 중" },
+      { kind: "status", text: "Main Agent is analyzing the request" },
       { kind: "activity", id: "command-1", category: "command", phase: "started", text: "npm run check" },
-      { kind: "status", text: "명령 실행 중" },
+      { kind: "status", text: "Running command" },
       { kind: "activity", id: "command-1", category: "command", phase: "completed", text: "npm run check" },
-      { kind: "status", text: "결과 분석 중" },
-      { kind: "activity", id: "change-1", category: "file", phase: "started", text: "static/js/chat.js, static/css/chat.css 외 1개" },
-      { kind: "status", text: "Git 변경 중" },
-      { kind: "status", text: "응답 기록 중" },
-      { kind: "activity", id: "skill-1", category: "command", phase: "started", text: "sed -n '1,240p' /home/test/.codex/plugins/cache/personal/agent-factory/0.1.0/skills/agent/SKILL.md", title: "Skill 읽기 · agent-factory:agent" },
-      { kind: "status", text: "명령 실행 중" },
-      { kind: "status", text: "Main Agent가 요청을 분석 중" },
-      { kind: "status", text: "응답 정리 중" },
+      { kind: "status", text: "Analyzing results" },
+      { kind: "activity", id: "change-1", category: "file", phase: "started", text: "static/js/chat.js, static/css/chat.css and 1 more" },
+      { kind: "status", text: "Applying Git changes" },
+      { kind: "status", text: "Recording response" },
+      { kind: "activity", id: "skill-1", category: "command", phase: "started", text: "sed -n '1,240p' /home/test/.codex/plugins/cache/personal/agent-factory/0.1.0/skills/agent/SKILL.md", title: "Read Skill · agent-factory:agent" },
+      { kind: "status", text: "Running command" },
+      { kind: "status", text: "Main Agent is analyzing the request" },
+      { kind: "status", text: "Finalizing response" },
       { kind: "activity", id: "mcp-1", category: "tool", phase: "started", text: "codex/list_mcp_resources" },
-      { kind: "status", text: "연결 도구 실행 중" },
-      { kind: "status", text: "응답 정리 중" },
+      { kind: "status", text: "Running connected tool" },
+      { kind: "status", text: "Finalizing response" },
       { kind: "usage", usedTokens: 39300, contextWindowTokens: 258400, weeklyUsedPercent: 3 }
     ]
   });
@@ -527,7 +527,7 @@ test("runtime client invokes official commands and reads the bounded managed res
   ].map(JSON.stringify).join("\n") + "\n");
   const commentaryUpdates = (await client.updates("main-test", "run-fake", 0)).updates;
   assert.deepEqual(commentaryUpdates.filter((update) => update.kind === "commentary"), [{ kind: "commentary", text: commentary }]);
-  assert.equal(commentaryUpdates[1].text, "작업 중");
+  assert.equal(commentaryUpdates[1].text, "Working");
 
   assert.deepEqual(await client.result("main-test", "run-fake"), {
     status: "completed",
@@ -606,7 +606,7 @@ test("runtime client refreshes changed context usage during a turn and forces th
   assert.deepEqual(await client.updates("main-test", "run-live", 0), {
     cursor: 1,
     updates: [
-      { kind: "status", text: "Main Agent가 요청을 분석 중" },
+      { kind: "status", text: "Main Agent is analyzing the request" },
       { kind: "usage", usedTokens: 10_000, contextWindowTokens: 258_400, weeklyUsedPercent: 12.5 }
     ]
   });
@@ -628,7 +628,7 @@ test("runtime client refreshes changed context usage during a turn and forces th
   assert.deepEqual(await client.updates("main-test", "run-live", 1), {
     cursor: 2,
     updates: [
-      { kind: "status", text: "응답 정리 중" },
+      { kind: "status", text: "Finalizing response" },
       { kind: "usage", usedTokens: 30_000, contextWindowTokens: 258_400 }
     ]
   });
@@ -753,7 +753,7 @@ test("cancellation requested during submission is delivered once to the accepted
   await new Promise(resolve => setImmediate(resolve));
   await controller.cancel();
   await controller.cancel();
-  assert.match(progress.at(-1), /접수 즉시 취소/);
+  assert.match(progress.at(-1), /cancellation as soon as the run is accepted/);
   acceptSubmit({ agentId: "main-accepted", runId: "run-accepted" });
   await new Promise(resolve => setImmediate(resolve));
   assert.deepEqual(cancellations, [["main-accepted", "run-accepted"]]);
@@ -781,7 +781,7 @@ test("Goal control serializes reopen requests before runtime acceptance", async 
   assert.equal(controller.queueLength, 1);
   assert.deepEqual(calls, [["main-exact", "reopen"]]);
   assert.deepEqual(errors, [
-    "이전 Goal 제어 요청이 처리 중입니다."
+    "The previous Goal control request is still processing."
   ]);
   releaseGoal({ goal: null });
   await first;
@@ -808,7 +808,7 @@ test("cancellation during Goal reopen acceptance targets the accepted run once",
   await new Promise(resolve => setImmediate(resolve));
   await controller.cancel();
   await controller.cancel();
-  assert.match(progress.at(-1), /Goal 실행 접수 즉시 취소/);
+  assert.match(progress.at(-1), /cancellation as soon as the Goal run is accepted/);
   acceptGoal({ accepted: { agentId: "main-exact", runId: "run-reopened" } });
   await reopening;
   assert.deepEqual(cancellations, [["main-exact", "run-reopened"]]);
@@ -847,7 +847,7 @@ test("native Goal events expose status and usage without turning a turn end into
   assert.deepEqual(updates.updates.filter(update => update.kind === "goal"), [
     { kind: "goal", goal }, { kind: "goal", goal: { ...goal, status: "paused" } }
   ]);
-  assert.ok(updates.updates.some(update => update.kind === "status" && update.text.includes("다음 turn")));
+  assert.ok(updates.updates.some(update => update.kind === "status" && update.text.includes("next turn")));
 });
 
 test("Goal control and objective protocol rejects unsupported actions and overlong objectives", async () => {
@@ -870,9 +870,9 @@ test("runtime acceptance rejects malformed run identities and Goal acknowledgeme
     send: { model: true, reasoning: true, fast: true, goal: true }
   });
   client.command = async () => ({ kind: "ack", status: "accepted", agentId: "main-exact", runId: "../outside" });
-  await assert.rejects(client.submit("main-exact", "task", {}), /접수 응답/);
+  await assert.rejects(client.submit("main-exact", "task", {}), /acceptance response/);
   client.command = async () => ({ kind: "ack", status: "accepted", agentId: "main-exact", runId: "run-exact" });
-  await assert.rejects(client.goal("main-exact", "refresh"), /예상하지 않은 실행/);
+  await assert.rejects(client.goal("main-exact", "refresh"), /unexpected run/);
 });
 
 test("Goal controls use the bound session and report backend errors", async () => {
@@ -905,12 +905,12 @@ test("Goal UI shows native completion separately and keeps reopen unavailable du
     nativeGoal: { objective: "finish", status: "active", tokensUsed: 20, timeUsedSeconds: 3 }
   };
   runInNewContext(render + "\nrenderGoal();", context);
-  assert.match(context.goalStatus.textContent, /진행 중/);
+  assert.match(context.goalStatus.textContent, /In progress/);
   assert.equal(buttons[2].disabled, true);
   context.nativeGoal.status = "complete";
   context.state.running = false;
   runInNewContext("renderGoal();", context);
-  assert.match(context.goalStatus.textContent, /목표 완료/);
+  assert.match(context.goalStatus.textContent, /Goal completed/);
   assert.equal(buttons[2].disabled, false);
   context.state.role = "work";
   runInNewContext("renderGoal();", context);
@@ -932,7 +932,7 @@ test("authoritative terminal failures cannot be hidden by nonempty completion te
       onGoal(goal, error) { goals.push(error); }, onAssistantText(value) { text.push(value); }, onError(value) { errors.push(value); }
     }, undefined, { pollIntervalMs: 0, maxPolls: 1 });
     await controller.send("task", [], {});
-    assert.match(text[0], /보존된 부분 결과/);
+    assert.match(text[0], /Preserved partial result/);
     assert.notEqual(text[0], "Implementation complete.");
     assert.match(errors[0], /native_backend_error/);
     assert.deepEqual(goals, ["pause unconfirmed"]);
@@ -953,7 +953,7 @@ test("framed repeated pause warnings retain the following normal progress event"
   const result = await client.updates("main-exact", "run-one", 0);
   assert.equal(result.cursor, 3);
   assert.deepEqual(result.updates.filter(value => value.kind === "goal").map(value => value.error), ["warning one", "warning two"]);
-  assert.ok(result.updates.some(value => value.kind === "status" && value.text.includes("응답 정리")));
+  assert.ok(result.updates.some(value => value.kind === "status" && value.text.includes("Finalizing response")));
 });
 
 
@@ -967,9 +967,9 @@ test("runtime reads reject symlink ancestors and arbitrary result paths", async 
   const external = join(root, "external");
   await mkdir(external);
   await writeFile(join(external, "result.md"), "outside");
-  await assert.rejects(client.readManagedResult(join(external, "result.md"), "main-test", "run-fake"), /범위 밖/);
+  await assert.rejects(client.readManagedResult(join(external, "result.md"), "main-test", "run-fake"), /outside the expected scope/);
   await symlink(external, join(agentsRoot(root), "main-test"), "dir");
-  await assert.rejects(client.updates("main-test", "run-fake", 0), /안전하지/);
+  await assert.rejects(client.updates("main-test", "run-fake", 0), /Unsafe/);
   await assert.rejects(readFile(join(root, ".agent-factory")), { code: "ENOENT" });
 });
 
@@ -983,7 +983,7 @@ test("session controller emits complete commentary once and marks final output",
     async updates() { return { cursor: 3, updates: [
       { kind: "commentary", text: " " },
       { kind: "commentary", text: commentary },
-      { kind: "status", text: "작업 중" },
+      { kind: "status", text: "Working" },
       { kind: "commentary", text: commentary }
     ] }; },
     async status() { return { status: "completed" }; },
@@ -1087,7 +1087,7 @@ test("execution selection protocol accepts only listed modes", async () => {
 test("explicit execution mode applies sandbox and never approval to submit and send", async () => {
   const { AgentFactoryClient, executionPolicyArguments } = await importTypeScript("src/infrastructure/agent-factory/agent-client.ts");
   assert.deepEqual(executionPolicyArguments(), []);
-  assert.throws(() => executionPolicyArguments("unsafe-unknown"), /실행 권한/);
+  assert.throws(() => executionPolicyArguments("unsafe-unknown"), /execution permissions/);
   const root = await mkdtemp(join(tmpdir(), "af-execution-mode-"));
   try {
     const client = new AgentFactoryClient(new URL("../fixtures/fake-exec.py", import.meta.url).pathname, root);
@@ -1451,7 +1451,7 @@ test("mode capability negotiation rejects old runtimes and forwards supported fl
   const { AgentFactoryClient } = await importTypeScript("src/infrastructure/agent-factory/agent-client.ts");
   const client = new AgentFactoryClient("unused", "/project");
   client.capabilities = async () => ({ submit: {}, send: { taskModes: ["direct", "work"] } });
-  await assert.rejects(client.checkedExecution("submit", { taskMode: "work" }), /업데이트/);
-  await assert.rejects(client.checkedExecution("send", { taskMode: "plan-work-verification" }), /업데이트/);
+  await assert.rejects(client.checkedExecution("submit", { taskMode: "work" }), /Update/);
+  await assert.rejects(client.checkedExecution("send", { taskMode: "plan-work-verification" }), /Update/);
   assert.deepEqual(await client.checkedExecution("send", { taskMode: "direct" }), ["--task-mode", "direct"]);
 });
