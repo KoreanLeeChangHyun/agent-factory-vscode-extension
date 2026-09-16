@@ -109,7 +109,7 @@ test("attachment-only loop requests show attachment names without injected instr
   assert.equal(sent[0].execution.taskMode, "work");
 });
 
-test("mode menu explains standalone Verification and displays supported choices and persists a supported next-task selection during execution", () => {
+test("mode menu displays only choices and persists a supported next-task selection during execution", () => {
   function element() {
     return { children: [], dataset: {}, handlers: {}, classList: { add() {} },
       setAttribute() {}, append(...children) { this.children.push(...children); },
@@ -129,8 +129,8 @@ test("mode menu explains standalone Verification and displays supported choices 
   };
   const renderer = script.slice(script.indexOf("  function renderSettingMenu("), script.indexOf("  function handleSettingMenuKeydown("));
   runInNewContext(renderer + '\nrenderSettingMenu("task", menu);', context);
-  assert.equal(menu.children[0].textContent, "Verification checks existing work and reports findings without making changes.");
   const options = menu.children.filter(item => item.dataset.value);
+  assert.equal(menu.children.length, options.length);
   assert.equal(options.length, 6);
   assert.equal(options[0].disabled, false);
   assert.equal(options.find(item => item.dataset.value === "plan-work").disabled, true);

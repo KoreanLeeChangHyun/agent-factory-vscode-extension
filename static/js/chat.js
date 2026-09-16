@@ -2584,14 +2584,6 @@
   function renderSettingMenu(setting, menu) {
     const current = setting === "business" ? state.businessMode : setting === "task" ? state.taskMode : setting === "model" ? state.model : setting === "reasoning" ? state.reasoning : state.executionMode ?? "cli-default";
     menu.replaceChildren();
-    if (setting === "task" || setting === "business") {
-      const explanation = document.createElement("p");
-      explanation.className = "setting-explanation";
-      explanation.textContent = setting === "task"
-        ? "Verification checks existing work and reports findings without making changes."
-        : "Use Interview, Planning, or Design to develop Processed drafts. On completion, promote the agreed content to a Specification. Choose Normal for ordinary work.";
-      menu.append(explanation);
-    }
     const values = setting === "model" ? [...new Set([...settingOptions.model, state.model])] : settingOptions[setting];
     for (const value of values) {
       const option = document.createElement("button");
