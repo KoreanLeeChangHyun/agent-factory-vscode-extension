@@ -78,6 +78,15 @@ function currentList(installed = [], available = []) {
   return { installed, available };
 }
 
+const officialMarketplace = {
+  name: "agent-factory",
+  marketplaceSource: {
+    sourceType: "git",
+    source: "https://github.com/KoreanLeeChangHyun/agent-factory-codex-plugin.git"
+  }
+};
+const marketplaceList = (...marketplaces) => json({ marketplaces });
+
 function queuedRunner(results) {
   const calls = [];
   const runner = async (command, args, options) => {
@@ -114,6 +123,7 @@ test("installation-needed path reads a large current-schema available catalog an
   });
   const process = queuedRunner([
     json(currentList([record({ version: "1.0.1", installed: true, enabled: true })])),
+    marketplaceList(officialMarketplace),
     json(currentList([], [candidate])),
     json({ installed: true }),
     json(currentList([installedCandidate]))
@@ -121,54 +131,59 @@ test("installation-needed path reads a large current-schema available catalog an
   await dependency.ensureAgentFactoryPlugin("1.0.2+extension.build", process.runner);
   assert.deepEqual(process.calls.map((call) => call.args), [
     ["plugin", "list", "--json"],
+    ["plugin", "marketplace", "list", "--json"],
     ["plugin", "list", "--available", "--json"],
     ["plugin", "add", "team@agent-factory", "--json"],
     ["plugin", "list", "--json"]
   ]);
-  assert.ok(process.calls[1].options.maxBuffer > 300 * 1024);
-  assert.ok(process.calls[1].options.maxBuffer > process.calls[0].options.maxBuffer);
+  assert.ok(process.calls[2].options.maxBuffer > 300 * 1024);
+  assert.ok(process.calls[2].options.maxBuffer > process.calls[0].options.maxBuffer);
 });
 
 test("candidate selection prefers marketplace agent-factory and is otherwise deterministic", async () => {
   const official = record({ pluginId: "official@agent-factory", marketplaceName: "agent-factory" });
   const process = queuedRunner([
     json(currentList()),
+    marketplaceList(officialMarketplace),
     json(currentList([], [record({ pluginId: "z@agent-factory", marketplaceName: "zeta" }), official, record({ pluginId: "a@agent-factory", marketplaceName: "alpha" })])),
     json({ installed: true }),
     json(currentList([{ ...official, installed: true, enabled: true }]))
   ]);
   await dependency.ensureAgentFactoryPlugin("1.0.2", process.runner);
-  assert.deepEqual(process.calls[2].args, ["plugin", "add", "official@agent-factory", "--json"]);
+  assert.deepEqual(process.calls[3].args, ["plugin", "add", "official@agent-factory", "--json"]);
 
   const alphabetical = queuedRunner([
     json(currentList()),
+    marketplaceList(officialMarketplace),
     json(currentList([], [record({ pluginId: "z@agent-factory", marketplaceName: "zeta" }), record({ pluginId: "a@agent-factory", marketplaceName: "alpha" })])),
     json({ installed: true }),
     json(currentList([record({ pluginId: "a@agent-factory", marketplaceName: "alpha", installed: true, enabled: true })]))
   ]);
   await dependency.ensureAgentFactoryPlugin("1.0.2", alphabetical.runner);
-  assert.deepEqual(alphabetical.calls[2].args, ["plugin", "add", "a@agent-factory", "--json"]);
+  assert.deepEqual(alphabetical.calls[3].args, ["plugin", "add", "a@agent-factory", "--json"]);
 });
 
 test("no compatible available plugin fails without add", async () => {
   const process = queuedRunner([
     json(currentList([record({ version: "1.0.1", installed: true, enabled: true })])),
+    marketplaceList(officialMarketplace),
     json(currentList())
   ]);
-  await assert.rejects(dependency.ensureAgentFactoryPlugin("1.0.2", process.runner), /official marketplace/);
-  assert.equal(process.calls.length, 2);
+  await assert.rejects(dependency.ensureAgentFactoryPlugin("1.0.2", process.runner), /exact version/);
+  assert.equal(process.calls.length, 3);
 });
 
 test("add or recheck failure blocks activation", async (t) => {
   await t.test("malformed add output", async () => {
-    const process = queuedRunner([json(currentList()), json(currentList([], [record()])), { stdout: "[]" }]);
+    const process = queuedRunner([json(currentList()), marketplaceList(officialMarketplace), json(currentList([], [record()])), { stdout: "[]" }]);
     await assert.rejects(dependency.ensureAgentFactoryPlugin("1.0.2", process.runner), /JSON object/);
-    assert.equal(process.calls.length, 3);
+    assert.equal(process.calls.length, 4);
   });
   await t.test("plugin remains disabled after add", async () => {
     const process = queuedRunner([
       json(currentList()),
-      json(currentList([], [record()])),
+      marketplaceList(officialMarketplace),
+    json(currentList([], [record()])),
       json({ installed: true }),
       json(currentList([record({ installed: true, enabled: false })]))
     ]);
@@ -238,8 +253,144 @@ test("activation bootstraps only after dependency success and reports one failur
 
   events.length = 0;
   services.ensurePlugin = async () => { throw new Error("dependency unavailable"); };
-  await activate(context, services);
+  await activate({ extension: context.extension }, services);
   assert.equal(events.length, 2);
-  assert.match(events[1], /^error:Unable to start Agent Factory\. dependency unavailable$/);
+  assert.match(events[1], /^error:Unable to start Agent Factory\. dependency unavailable/);
   assert.ok(!events.includes("bootstrap"));
+});
+
+test("first activation registers missing official source, installs exact version, then confirms it", async () => {
+  const candidate = record({ pluginId: "agent-factory@agent-factory", marketplaceName: "agent-factory" });
+  const process = queuedRunner([
+    json(currentList()), marketplaceList(), json({ added: true }), marketplaceList(officialMarketplace),
+    json(currentList([], [candidate])), json({ installed: true }),
+    json(currentList([{ ...candidate, installed: true, enabled: true }]))
+  ]);
+  await dependency.ensureAgentFactoryPlugin("1.0.2", process.runner);
+  assert.deepEqual(process.calls.map(({ args }) => args), [
+    ["plugin", "list", "--json"],
+    ["plugin", "marketplace", "list", "--json"],
+    ["plugin", "marketplace", "add", "KoreanLeeChangHyun/agent-factory-codex-plugin", "--ref", "main", "--json"],
+    ["plugin", "marketplace", "list", "--json"],
+    ["plugin", "list", "--available", "--json"],
+    ["plugin", "add", "agent-factory@agent-factory", "--json"],
+    ["plugin", "list", "--json"]
+  ]);
+});
+
+test("conflicting or unconfirmed official marketplace is never overwritten", async () => {
+  for (const source of [undefined, { sourceType: "local", source: "/workspace/marketplace" },
+    { sourceType: "git", source: "https://github.com/other/repo.git" }]) {
+    const process = queuedRunner([json(currentList()), marketplaceList({ name: "agent-factory", marketplaceSource: source })]);
+    await assert.rejects(dependency.ensureAgentFactoryPlugin("1.0.2", process.runner), /name conflict/);
+    assert.equal(process.calls.length, 2);
+  }
+});
+
+test("registration failure can be retried and successful registration is not repeated", async () => {
+  const process = queuedRunner([
+    json(currentList()), marketplaceList(), new Error("offline"),
+    json(currentList()), marketplaceList(officialMarketplace), json(currentList([], [record()])),
+    json({ installed: true }), json(currentList([record({ installed: true, enabled: true })]))
+  ]);
+  await assert.rejects(dependency.ensureAgentFactoryPlugin("1.0.2", process.runner), /Register official/);
+  await dependency.ensureAgentFactoryPlugin("1.0.2", process.runner);
+  assert.equal(process.calls.filter(({ args }) => args[1] === "marketplace" && args[2] === "add").length, 1);
+});
+
+test("missing registration confirmation and wrong post-install version block success", async () => {
+  const missing = queuedRunner([json(currentList()), marketplaceList(), json({ added: true }), marketplaceList()]);
+  await assert.rejects(dependency.ensureAgentFactoryPlugin("1.0.2", missing.runner), /confirm.*registration/);
+  const wrong = queuedRunner([
+    json(currentList()), marketplaceList(officialMarketplace), json(currentList([], [record()])),
+    json({ installed: true }), json(currentList([record({ version: "1.0.3", installed: true, enabled: true })]))
+  ]);
+  await assert.rejects(dependency.ensureAgentFactoryPlugin("1.0.2", wrong.runner), /active after installation/);
+});
+
+test("concurrent dependency checks share one installation and later calls recheck", async () => {
+  let release;
+  const gate = new Promise((resolve) => { release = resolve; });
+  const process = queuedRunner([
+    json(currentList()), marketplaceList(officialMarketplace), json(currentList([], [record()])),
+    json({ installed: true }), json(currentList([record({ installed: true, enabled: true })])),
+    json(currentList([record({ installed: true, enabled: true })]))
+  ]);
+  const runner = async (...args) => { await gate; return process.runner(...args); };
+  const first = dependency.ensureAgentFactoryPlugin("1.0.2", runner);
+  const second = dependency.ensureAgentFactoryPlugin("1.0.2", runner);
+  release();
+  await Promise.all([first, second]);
+  assert.equal(process.calls.length, 5);
+  await dependency.ensureAgentFactoryPlugin("1.0.2", runner);
+  assert.equal(process.calls.length, 6);
+});
+
+test("activation Retry reruns dependencies and concurrent activation bootstraps once", async () => {
+  const { activate } = await importTypeScript("src/extension.ts", true);
+  const context = { extension: { packageJSON: { version: "1.0.2" } } };
+  let attempts = 0;
+  let bootstraps = 0;
+  let notifications = 0;
+  const services = {
+    ensurePlugin: async () => { if (++attempts === 1) throw new Error("Codex CLI executable was not found"); },
+    bootstrap: () => { bootstraps++; },
+    withProgress: async (_, task) => task(),
+    showErrorMessage: async (message, action) => {
+      notifications++;
+      assert.match(message, /workspace extension host/);
+      assert.equal(action, "Retry");
+      return "Retry";
+    }
+  };
+  await Promise.all([activate(context, services), activate(context, services)]);
+  await activate(context, services);
+  assert.equal(attempts, 2);
+  assert.equal(notifications, 1);
+  assert.equal(bootstraps, 1);
+});
+
+test("dismissing dependency error leaves activation retryable without bootstrap", async () => {
+  const { activate } = await importTypeScript("src/extension.ts", true);
+  const context = { extension: { packageJSON: { version: "1.0.2" } } };
+  let bootstraps = 0;
+  const services = {
+    ensurePlugin: async () => { throw new Error("installation failed"); },
+    bootstrap: () => { bootstraps++; },
+    withProgress: async (_, task) => task(),
+    showErrorMessage: async () => undefined
+  };
+  await activate(context, services);
+  assert.equal(bootstraps, 0);
+  services.ensurePlugin = async () => {};
+  await activate(context, services);
+  assert.equal(bootstraps, 1);
+});
+
+test("a newer catalog version is never installed as an exact-version fallback", async () => {
+  const process = queuedRunner([
+    json(currentList()), marketplaceList(officialMarketplace),
+    json(currentList([], [record({ version: "1.0.3+codex.new" })]))
+  ]);
+  await assert.rejects(dependency.ensureAgentFactoryPlugin("1.0.2", process.runner), /exact version/);
+  assert.equal(process.calls.length, 3);
+});
+
+test("installation command failure is surfaced and a later retry reruns installation", async () => {
+  const process = queuedRunner([
+    json(currentList()), marketplaceList(officialMarketplace), json(currentList([], [record()])), new Error("network unavailable"),
+    json(currentList()), marketplaceList(officialMarketplace), json(currentList([], [record()])),
+    json({ installed: true }), json(currentList([record({ installed: true, enabled: true })]))
+  ]);
+  await assert.rejects(dependency.ensureAgentFactoryPlugin("1.0.2", process.runner), /plugin installation failed/);
+  await dependency.ensureAgentFactoryPlugin("1.0.2", process.runner);
+  assert.equal(process.calls.filter(({ args }) => args[1] === "add").length, 2);
+});
+
+test("malformed marketplace list blocks registration", async () => {
+  for (const output of [json({}), json({ marketplaces: [null] }), { stdout: "{" }]) {
+    const process = queuedRunner([json(currentList()), output]);
+    await assert.rejects(dependency.ensureAgentFactoryPlugin("1.0.2", process.runner), /marketplace list/);
+    assert.equal(process.calls.length, 2);
+  }
 });

@@ -85,6 +85,12 @@
                 <div id="execution-mode-menu" class="setting-menu" role="menu" aria-label="Select execution permissions" hidden></div>
               </div>
               <div class="setting-control">
+                <button id="business-mode-button" class="setting-button task-mode-button" type="button" title="Workflow: Normal" aria-label="Workflow: Normal" aria-haspopup="menu" aria-expanded="false" aria-controls="business-mode-menu">
+                  <svg class="task-mode-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M4 4h6v6H4Zm10 0h6v6h-6ZM4 14h6v6H4Zm10 0h6v6h-6Z"></path></svg>
+                </button>
+                <div id="business-mode-menu" class="setting-menu" role="menu" aria-label="Select workflow" hidden></div>
+              </div>
+              <div class="setting-control">
                 <button id="work-loop-button" class="setting-button task-mode-button" type="button" title="Task mode: Work · Select the mode for the next message" aria-label="Task mode: Work · Select the mode for the next message" aria-haspopup="menu" aria-expanded="false" aria-controls="task-mode-menu">
                   <svg class="task-mode-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M14 6a5 5 0 0 0-6 6L3 17a2.8 2.8 0 0 0 4 4l5-5a5 5 0 0 0 6-6l-3 3-4-4 3-3Z"></path></svg>
                 </button>
@@ -97,9 +103,6 @@
                 <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8"></circle><circle cx="12" cy="12" r="3"></circle><path d="M12 2v3M12 19v3M2 12h3M19 12h3"></path></svg>
               </button>
               <div class="utility-picker session-picker">
-                <button id="session-button" class="utility-button" type="button" title="Load an existing Main Agent session" aria-label="Load an existing Main Agent session" aria-haspopup="listbox" aria-expanded="false" aria-controls="session-menu">
-                  <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M3 12a9 9 0 1 0 3-6.7"></path><path d="M3 4v5h5"></path><path d="M12 7v5l3 2"></path></svg>
-                </button>
                 <div id="session-menu" class="utility-list-menu session-menu" role="listbox" aria-label="Main Agent sessions" hidden>
                   <div id="session-list" class="session-list"></div>
                 </div>
@@ -112,11 +115,11 @@
                   <div id="question-list" class="question-list"></div>
                 </div>
               </div>
+              <button id="auto-scroll-button" class="mode-button" type="button" title="Auto-scroll ON · Click to turn off" aria-label="Auto-scroll ON · Click to turn off" aria-pressed="true" aria-controls="timeline">
+                <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M4 5h8M4 10h6M4 15h8M17 3v17m-4-4 4 4 4-4"></path></svg>
+              </button>
             </div>
             <div class="composer-actions-end">
-              <button id="auto-scroll-button" class="mode-button" type="button" title="Auto-scroll ON · Click to turn off" aria-label="Auto-scroll ON · Click to turn off" aria-pressed="true" aria-controls="timeline">
-                <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M12 3v12m-5-5 5 5 5-5M5 20h14"></path></svg>
-              </button>
               <button id="send-button" class="send-button" type="button" title="Send (Enter)" aria-label="Send message">
                 <svg id="send-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M12 19V5M6.5 10.5 12 5l5.5 5.5"></path></svg>
                 <svg id="stop-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false" hidden><rect x="7" y="7" width="10" height="10" rx="1"></rect></svg>

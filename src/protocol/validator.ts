@@ -1,4 +1,5 @@
-import { TASK_MODES, type TaskMode } from "../infrastructure/agent-factory/agent-client";
+import { BUSINESS_MODES, type BusinessMode } from "../common/types/business-mode";
+import { TASK_SELECTIONS, type TaskSelection } from "../modules/chat/task-selection";
 import { STATUS_ITEM_IDS, type StatusItemId } from "../core/config/types";
 import type { AttachmentKind, AttachmentReference } from "../common/types/attachment";
 import type { ClientMessage } from "./messages";
@@ -96,7 +97,8 @@ export function parseClientMessage(value: unknown): ClientMessage | undefined {
       return { type: value.type, agentId: value.agentId };
     case "composer.settings":
       if (
-        (value.taskMode !== undefined && !TASK_MODES.includes(value.taskMode as TaskMode)) ||
+        (value.businessMode !== undefined && !BUSINESS_MODES.includes(value.businessMode as BusinessMode)) ||
+        (value.taskMode !== undefined && !TASK_SELECTIONS.includes(value.taskMode as TaskSelection)) ||
         (value.model !== undefined && (typeof value.model !== "string" || value.model.length > 100)) ||
         (value.reasoning !== undefined && (typeof value.reasoning !== "string" || !reasoningEfforts.has(value.reasoning))) ||
         typeof value.fastMode !== "boolean" ||
@@ -111,7 +113,8 @@ export function parseClientMessage(value: unknown): ClientMessage | undefined {
         ...(typeof value.reasoning === "string"
           ? { reasoning: value.reasoning as "none" | "low" | "medium" | "high" | "xhigh" | "max" }
           : {}),
-        ...(value.taskMode !== undefined ? { taskMode: value.taskMode as TaskMode } : {}),
+        ...(value.businessMode !== undefined ? { businessMode: value.businessMode as BusinessMode } : {}),
+        ...(value.taskMode !== undefined ? { taskMode: value.taskMode as TaskSelection } : {}),
         fastMode: value.fastMode,
         goalMode: value.goalMode,
         ...(typeof value.workLoopMode === "boolean" ? { workLoopMode: value.workLoopMode } : {})
@@ -124,7 +127,8 @@ export function parseClientMessage(value: unknown): ClientMessage | undefined {
         value.text.length > 100_000 ||
         !Array.isArray(value.attachments) ||
         !isRecord(value.execution) ||
-        (value.execution.taskMode !== undefined && !TASK_MODES.includes(value.execution.taskMode as TaskMode)) ||
+        (value.execution.businessMode !== undefined && !BUSINESS_MODES.includes(value.execution.businessMode as BusinessMode)) ||
+        (value.execution.taskMode !== undefined && !TASK_SELECTIONS.includes(value.execution.taskMode as TaskSelection)) ||
         (value.execution.model !== undefined && (
           typeof value.execution.model !== "string" || value.execution.model.length > 100
         )) ||
@@ -153,7 +157,8 @@ export function parseClientMessage(value: unknown): ClientMessage | undefined {
         text: value.text,
         attachments,
         execution: {
-          ...(value.execution.taskMode !== undefined ? { taskMode: value.execution.taskMode as TaskMode } : {}),
+          ...(value.execution.businessMode !== undefined ? { businessMode: value.execution.businessMode as BusinessMode } : {}),
+          ...(value.execution.taskMode !== undefined ? { taskMode: value.execution.taskMode as TaskSelection } : {}),
           ...(typeof value.execution.model === "string" && value.execution.model
             ? { model: value.execution.model }
             : {}),

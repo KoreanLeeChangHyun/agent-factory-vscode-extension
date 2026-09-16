@@ -195,7 +195,7 @@ raise SystemExit(2)
 test("composer shows only supported controls across draft and bound sessions", async function () {
   const script = await readFile(new URL('../../static/js/chat.js', import.meta.url), 'utf8');
   const functions = script.slice(script.indexOf('  function currentCapabilities()'), script.indexOf('  function openSetting(setting)'));
-  const iconFunction = script.slice(script.indexOf('  function createTaskModeIcon(mode)'), script.indexOf('  function handleSettingMenuKeydown(event)'));
+  const iconFunction = script.slice(script.indexOf('  function createBusinessModeIcon(mode)'), script.indexOf('  function handleSettingMenuKeydown(event)'));
   const element = (namespaceURI, localName) => ({
     namespaceURI, localName, children: [], attributes: {},
     classList: { add() {} },
@@ -210,7 +210,7 @@ test("composer shows only supported controls across draft and bound sessions", a
     renderStatusBar() { statusRenders++; },
     state: { capabilities: { submit: { model: true }, send: {} }, model: 'gpt-6-astra', reasoning: 'medium', fastMode: true, goalMode: true },
     modelButton: button(), reasoningButton: button(), fastModeButton: button(), goalModeButton: button(), workLoopButton: button(),
-    taskModeNames: { work: "Work" },
+    taskModeNames: { work: "Work" }, businessModeNames: { normal: "Normal" }, businessModeButton: button(),
     executionModeButton: button(), executionModeLabel: {}, modelLabel: {}, reasoningLabel: {}, openSettingId: undefined,
     goalPanel: { querySelectorAll() { return []; } }, goalStatus: {}, nativeGoal: null, goalError: undefined
   };
@@ -258,6 +258,7 @@ test("chat panel restoration preserves composer settings and context usage", asy
     goalMode: true,
     workLoopMode: true,
     taskMode: "work-verification",
+    businessMode: "normal",
     contextUsedTokens: 39_300,
     contextWindowTokens: 1_050_000,
     weeklyUsedPercent: 12.5
@@ -724,7 +725,7 @@ test("session controller batches concurrent sends in order without dropping atta
   assert.match(calls[1][1], /대기 메시지 1 시작 ---\nsecond\n\n첨부 참조:/);
   assert.match(calls[1][1], /queued\.md: file:\/\/\/tmp\/queued\.md/);
   assert.match(calls[1][1], /대기 메시지 2 시작 ---\nthird/);
-  assert.deepEqual(calls[1][2], secondExecution);
+  assert.deepEqual(calls[1][2], { ...secondExecution, businessMode: "normal" });
   assert.deepEqual(queueCounts, [1, 2, 0]);
   assert.deepEqual(running, [true, false]);
   assert.deepEqual(errors, []);
@@ -1454,4 +1455,40 @@ test("mode capability negotiation rejects old runtimes and forwards supported fl
   await assert.rejects(client.checkedExecution("submit", { taskMode: "work" }), /Update/);
   await assert.rejects(client.checkedExecution("send", { taskMode: "plan-work-verification" }), /Update/);
   assert.deepEqual(await client.checkedExecution("send", { taskMode: "direct" }), ["--task-mode", "direct"]);
+});
+
+
+test("workflow protocol and preferences preserve valid independent selections", async () => {
+  const { parseClientMessage } = await importTypeScript("src/protocol/validator.ts");
+  const { restoreChatState } = await importTypeScript("src/modules/chat/chat-state.ts");
+  for (const businessMode of ["normal", "interview", "planning", "design"]) {
+    const execution = { taskMode: "work", businessMode, fast: false, goal: false };
+    const sent = parseClientMessage({ type: "chat.send", id: "message", text: "original", attachments: [], execution });
+    assert.equal(sent.execution.businessMode, businessMode);
+    assert.equal(sent.execution.taskMode, "work");
+    assert.equal(sent.text, "original");
+    const settings = parseClientMessage({ type: "composer.settings", businessMode, fastMode: false, goalMode: false });
+    assert.equal(restoreChatState(settings).businessMode, businessMode);
+  }
+  assert.equal(restoreChatState({}).businessMode, "normal");
+  assert.equal(restoreChatState({}, { businessMode: "planning" }).businessMode, "planning");
+  assert.equal(restoreChatState({ businessMode: "invalid" }).businessMode, "normal");
+  assert.equal(parseClientMessage({ type: "composer.settings", businessMode: "invalid", fastMode: false, goalMode: false }), undefined);
+  assert.equal(parseClientMessage({ type: "chat.send", id: "x", text: "", attachments: [], execution: { businessMode: "invalid", fast: false, goal: false } }), undefined);
+  assert.equal(parseClientMessage({ type: "chat.send", id: "x", text: "", attachments: [], execution: { taskMode: "verification", fast: false, goal: false } }).execution.taskMode, "verification");
+});
+
+
+test("Verification selection persists while the runtime wire remains direct", async () => {
+  const { taskExecution } = await importTypeScript("src/modules/chat/task-selection.ts");
+  const { restoreChatState } = await importTypeScript("src/modules/chat/chat-state.ts");
+  const { TASK_MODES, AgentFactoryClient } = await importTypeScript("src/infrastructure/agent-factory/agent-client.ts");
+  assert.equal(restoreChatState({ taskMode: "verification" }).taskMode, "verification");
+  assert.equal(TASK_MODES.includes("verification"), false);
+  assert.deepEqual(taskExecution("verification"), { taskMode: "direct", inspectionOnly: true });
+  assert.deepEqual(taskExecution("work"), { taskMode: "work", inspectionOnly: false });
+  const client = new AgentFactoryClient("unused", "/project");
+  client.capabilities = async () => ({ submit: { taskModes: ["direct"] }, send: { taskModes: ["work"] } });
+  assert.deepEqual(await client.checkedExecution("submit", taskExecution("verification")), ["--task-mode", "direct"]);
+  await assert.rejects(client.checkedExecution("send", taskExecution("verification")), /Update/);
 });

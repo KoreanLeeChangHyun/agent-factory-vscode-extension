@@ -12,7 +12,8 @@ export type ClientMessage =
       readonly text: string;
       readonly attachments: readonly AttachmentReference[];
       readonly execution: {
-        readonly taskMode?: import("../infrastructure/agent-factory/agent-client").TaskMode;
+        readonly businessMode?: import("../common/types/business-mode").BusinessMode;
+      readonly taskMode?: import("../modules/chat/task-selection").TaskSelection;
         readonly model?: string;
         readonly reasoningEffort?: "none" | "low" | "medium" | "high" | "xhigh" | "max";
         readonly fast: boolean;
@@ -42,7 +43,8 @@ export type ClientMessage =
       readonly fastMode: boolean;
       readonly goalMode: boolean;
       readonly workLoopMode?: boolean;
-      readonly taskMode?: import("../infrastructure/agent-factory/agent-client").TaskMode;
+      readonly businessMode?: import("../common/types/business-mode").BusinessMode;
+      readonly taskMode?: import("../modules/chat/task-selection").TaskSelection;
     }
   | {
       readonly type: "status.reorder";
@@ -74,7 +76,8 @@ export type HostMessage =
       readonly fastMode: boolean;
       readonly goalMode: boolean;
       readonly workLoopMode?: boolean;
-      readonly taskMode?: import("../infrastructure/agent-factory/agent-client").TaskMode;
+      readonly businessMode?: import("../common/types/business-mode").BusinessMode;
+      readonly taskMode?: import("../modules/chat/task-selection").TaskSelection;
       readonly contextUsedTokens?: number;
       readonly contextWindowTokens?: number;
       readonly weeklyUsedPercent?: number;

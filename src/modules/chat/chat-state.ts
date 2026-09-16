@@ -1,4 +1,5 @@
-import { TASK_MODES, type TaskMode } from "../../infrastructure/agent-factory/agent-client";
+import { BUSINESS_MODES, type BusinessMode } from "../../common/types/business-mode";
+import { TASK_SELECTIONS, type TaskSelection } from "./task-selection";
 import { randomUUID } from "node:crypto";
 
 export interface ChatPanelState {
@@ -12,7 +13,8 @@ export interface ChatPanelState {
   readonly fastMode?: boolean;
   readonly goalMode?: boolean;
   readonly workLoopMode?: boolean;
-  readonly taskMode?: TaskMode;
+  readonly taskMode?: TaskSelection;
+  readonly businessMode?: BusinessMode;
   readonly contextUsedTokens?: number;
   readonly contextWindowTokens?: number;
   readonly weeklyUsedPercent?: number;
@@ -20,7 +22,7 @@ export interface ChatPanelState {
 
 export type ComposerPreferences = Pick<
   ChatPanelState,
-  "model" | "reasoning" | "fastMode" | "goalMode" | "workLoopMode" | "taskMode"
+  "model" | "reasoning" | "fastMode" | "goalMode" | "workLoopMode" | "taskMode" | "businessMode"
 >;
 
 export function createDraftChatState(preferences: ComposerPreferences = {}): ChatPanelState {
@@ -52,7 +54,8 @@ export function restoreChatState(
       : preferences.reasoning ? { reasoning: preferences.reasoning } : {}),
     fastMode: typeof value.fastMode === "boolean" ? value.fastMode : preferences.fastMode === true,
     goalMode: typeof value.goalMode === "boolean" ? value.goalMode : preferences.goalMode === true,
-    taskMode: TASK_MODES.includes(value.taskMode as TaskMode) ? value.taskMode as TaskMode : value.workLoopMode === true ? "work-verification" : preferences.taskMode ?? "work",
+    businessMode: BUSINESS_MODES.includes(value.businessMode as BusinessMode) ? value.businessMode as BusinessMode : preferences.businessMode ?? "normal",
+    taskMode: TASK_SELECTIONS.includes(value.taskMode as TaskSelection) ? value.taskMode as TaskSelection : value.workLoopMode === true ? "work-verification" : preferences.taskMode ?? "work",
     workLoopMode: typeof value.workLoopMode === "boolean" ? value.workLoopMode : preferences.workLoopMode === true,
     ...(readCount(value.contextUsedTokens) !== undefined
       ? { contextUsedTokens: readCount(value.contextUsedTokens) }

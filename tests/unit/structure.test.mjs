@@ -73,17 +73,18 @@ test("chat template uses external static assets and a nonce CSP with WebAssembly
   assert.doesNotMatch(template, /<style[ >]/);
 });
 
-test("session picker appears in the composer action row and renders a list", function () {
+test("session menu remains available without a composer session-load button", function () {
   const actionsStartIndex = template.indexOf('class="composer-actions-start"');
-  const sessionIndex = template.indexOf('id="session-button"');
+  const sessionIndex = template.indexOf('id="session-menu"');
   const actionsEndIndex = template.indexOf('class="composer-actions-end"');
   assert.ok(actionsStartIndex > 0);
   assert.ok(sessionIndex > actionsStartIndex);
   assert.ok(sessionIndex < actionsEndIndex);
   assert.match(template, /id="session-menu"[^>]*role="listbox"/);
   assert.match(template, /id="session-list"/);
-  assert.match(template, /id="session-button"[^>]*class="utility-button"[\s\S]*?<svg/);
-  assert.doesNotMatch(template, /id="session-button"[^>]*>[\s\S]*?Load session[\s\S]*?<\/button>/);
+  assert.doesNotMatch(template, /id="session-button"/);
+  assert.doesNotMatch(chatScript, /sessionButton|updateSessionControl/);
+  assert.match(chatScript, /case "sessions\.open":[\s\S]*?openSessionMenu\(\)/);
   assert.doesNotMatch(template, /id="resume-button"/);
   assert.match(chatScript, /type: "sessions\.request"/);
   assert.match(chatScript, /type: "session\.select"/);

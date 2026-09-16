@@ -29,7 +29,10 @@
   const goalModeButton = document.getElementById("goal-mode-button");
   const workLoopButton = document.getElementById("work-loop-button");
   const taskModeMenu = document.getElementById("task-mode-menu");
-  const taskModeNames = { direct: "Direct", work: "Work", "work-verification": "Work · Verification", "plan-work-verification": "Plan · Work · Verification" };
+  const businessModeButton = document.getElementById("business-mode-button");
+  const businessModeMenu = document.getElementById("business-mode-menu");
+  const businessModeNames = { normal: "Normal", interview: "Interview", planning: "Planning", design: "Design" };
+  const taskModeNames = { verification: "Verification", direct: "Direct", work: "Work", "work-verification": "Work · Verification", "plan-work-verification": "Plan · Work · Verification" };
   const goalPanel = document.getElementById("goal-panel");
   const goalObjective = document.getElementById("goal-objective");
   const goalStatus = document.getElementById("goal-status");
@@ -39,7 +42,6 @@
     const action = event.target.closest("[data-goal-action]")?.dataset.goalAction;
     if (action && state.agentId) vscode.postMessage({ type: "goal.control", action });
   });
-  const sessionButton = document.getElementById("session-button");
   const sessionMenu = document.getElementById("session-menu");
   const sessionList = document.getElementById("session-list");
   const questionButton = document.getElementById("question-button");
@@ -61,6 +63,7 @@
   const dropOverlay = document.getElementById("drop-overlay");
   const settingOptions = {
     task: Object.keys(taskModeNames),
+    business: Object.keys(businessModeNames),
     model: [""],
     reasoning: ["", "none", "low", "medium", "high", "xhigh", "max"],
     execution: ["cli-default", "workspace-write", "danger-full-access", "bypass"]
@@ -131,6 +134,7 @@
     reasoning: normalizeSettingValue(saved?.reasoning, settingOptions.reasoning),
     fastMode: saved?.fastMode === true,
     goalMode: saved?.goalMode === true,
+    businessMode: Object.hasOwn(businessModeNames, saved?.businessMode) ? saved.businessMode : "normal",
     taskMode: Object.hasOwn(taskModeNames, saved?.taskMode) ? saved.taskMode : saved?.workLoopMode === true ? "work-verification" : "work",
     workLoopMode: saved?.workLoopMode === true,
     queueCount: 0,
@@ -226,6 +230,7 @@
   reasoningButton.addEventListener("click", function () {
     openSetting("reasoning");
   });
+  businessModeButton.addEventListener("click", function () { openSetting("business"); });
   executionModeButton?.addEventListener("click", function () {
     openSetting("execution");
   });
@@ -239,13 +244,6 @@
     toggleMode("goalMode");
     if (!state.goalMode && nativeGoal && state.agentId) {
       vscode.postMessage({ type: "goal.control", action: "disable" });
-    }
-  });
-  sessionButton.addEventListener("click", function () {
-    if (sessionMenu.hidden) {
-      openSessionMenu();
-    } else {
-      closeSessionMenu(true);
     }
   });
   questionButton.addEventListener("click", function () {
@@ -402,6 +400,7 @@
         state.running = message.running === true;
         state.model = normalizeModel(message.model);
         state.reasoning = normalizeSettingValue(message.reasoning, settingOptions.reasoning);
+        state.businessMode = Object.hasOwn(businessModeNames, message.businessMode) ? message.businessMode : state.businessMode;
         state.taskMode = Object.hasOwn(taskModeNames, message.taskMode) ? message.taskMode : state.taskMode;
         state.fastMode = message.fastMode === true;
         state.goalMode = message.goalMode === true;
@@ -530,7 +529,6 @@
             followLatest = true;
             renderTimeline();
           }
-          updateSessionControl();
           updateModeControls();
           closeSessionMenu(false);
           persist();
@@ -697,12 +695,12 @@
         return reference;
       }),
       execution: {
-        ...(state.role === "main" ? { taskMode: state.taskMode } : {}),
+        ...(state.role === "main" ? { taskMode: state.taskMode, businessMode: state.businessMode || "normal" } : {}),
         model: currentCapabilities().model ? state.model || undefined : undefined,
         reasoningEffort: currentCapabilities().reasoning ? state.reasoning || undefined : undefined,
         fast: currentCapabilities().fast === true && state.fastMode,
-        goal: state.role === "main" && currentCapabilities().goal === true && state.goalMode,
-        ...(state.role === "main" && state.goalMode && goalObjective.value.trim() ? { goalObjective: goalObjective.value.trim() } : {})
+        goal: state.role === "main" && state.taskMode !== "verification" && currentCapabilities().goal === true && state.goalMode,
+        ...(state.role === "main" && state.taskMode !== "verification" && state.goalMode && goalObjective.value.trim() ? { goalObjective: goalObjective.value.trim() } : {})
       }
     };
     if (message.execution.goal && !nativeGoal && !message.execution.goalObjective && text.length > 4000) {
@@ -925,7 +923,6 @@
     updateSendButton();
     updateRunControls();
     updateModeControls();
-    updateSessionControl();
     updateQuestionControl();
   }
 
@@ -1923,7 +1920,6 @@
     closeSettingMenu(false);
     closeQuestionMenu(false);
     sessionMenu.hidden = false;
-    sessionButton.setAttribute("aria-expanded", "true");
     state.sessionsLoading = true;
     renderSessionList();
     vscode.postMessage({ type: "sessions.request" });
@@ -1931,9 +1927,8 @@
 
   function closeSessionMenu(restoreFocus) {
     sessionMenu.hidden = true;
-    sessionButton.setAttribute("aria-expanded", "false");
     if (restoreFocus) {
-      sessionButton.focus();
+      prompt.focus();
     }
   }
 
@@ -2056,13 +2051,6 @@
     const offset = event.key === "ArrowDown" ? 1 : -1;
     event.preventDefault();
     items[(index + offset + items.length) % items.length]?.focus();
-  }
-
-  function updateSessionControl() {
-    sessionButton.hidden = state.role !== "main";
-    sessionButton.title = state.agentId ? "Current session: " + state.agentId : "Load an existing Main Agent session";
-    sessionButton.setAttribute("aria-label", sessionButton.title);
-    sessionButton.disabled = state.running;
   }
 
   function updateQuestionControl() {
@@ -2473,6 +2461,7 @@
           prompt.value = item.text;
           state.attachments = item.attachments;
           state.taskMode = item.execution.taskMode || state.taskMode;
+          state.businessMode = item.execution.businessMode || "normal";
           state.model = item.execution.model;
           state.reasoning = item.execution.reasoningEffort;
           state.fastMode = item.execution.fast;
@@ -2500,7 +2489,6 @@
     sendButton.title = queuesMessage ? "Add to queue (Enter)" : state.running ? "Stop current run (Esc)" : "Send (Enter)";
     sendIcon.hidden = state.running && !queuesMessage;
     stopIcon.hidden = !state.running || queuesMessage;
-    updateSessionControl();
     renderRunStatus();
     updateSendButton();
     renderGoal();
@@ -2536,6 +2524,10 @@
 
   function updateModeControls() {
     updateExecutionControl();
+    businessModeButton.parentElement.hidden = state.role !== "main";
+    businessModeButton.replaceChildren(createBusinessModeIcon(state.businessMode));
+    businessModeButton.title = "Workflow: " + businessModeNames[state.businessMode] + " · Select the workflow for the next message";
+    businessModeButton.setAttribute("aria-label", businessModeButton.title);
     workLoopButton.parentElement.hidden = state.role !== "main";
     workLoopButton.replaceChildren(createTaskModeIcon(state.taskMode));
     workLoopButton.title = "Task mode: " + taskModeNames[state.taskMode] + " · Select the mode for the next message";
@@ -2545,7 +2537,7 @@
     reasoningButton.parentElement.hidden = supported.reasoning !== true;
     fastModeButton.hidden = supported.fast !== true;
     goalModeButton.hidden = supported.goal !== true || (state.role && state.role !== "main");
-    if (openSettingId && openSettingId !== "execution" && openSettingId !== "task" && supported[openSettingId] !== true) closeSettingMenu(false);
+    if (openSettingId && openSettingId !== "execution" && openSettingId !== "task" && openSettingId !== "business" && supported[openSettingId] !== true) closeSettingMenu(false);
     fastModeButton.setAttribute("aria-pressed", String(state.fastMode));
     fastModeButton.setAttribute("aria-label", state.fastMode ? "Fast mode on" : "Fast mode off");
     fastModeButton.title = state.fastMode ? "Fast mode on" : "Fast mode off";
@@ -2590,13 +2582,21 @@
   }
 
   function renderSettingMenu(setting, menu) {
-    const current = setting === "task" ? state.taskMode : setting === "model" ? state.model : setting === "reasoning" ? state.reasoning : state.executionMode ?? "cli-default";
+    const current = setting === "business" ? state.businessMode : setting === "task" ? state.taskMode : setting === "model" ? state.model : setting === "reasoning" ? state.reasoning : state.executionMode ?? "cli-default";
     menu.replaceChildren();
+    if (setting === "task" || setting === "business") {
+      const explanation = document.createElement("p");
+      explanation.className = "setting-explanation";
+      explanation.textContent = setting === "task"
+        ? "Verification checks existing work and reports findings without making changes."
+        : "Use Interview, Planning, or Design to develop Processed drafts. On completion, promote the agreed content to a Specification. Choose Normal for ordinary work.";
+      menu.append(explanation);
+    }
     const values = setting === "model" ? [...new Set([...settingOptions.model, state.model])] : settingOptions[setting];
     for (const value of values) {
       const option = document.createElement("button");
       option.type = "button";
-      option.disabled = setting === "task" && !currentCapabilities().taskModes?.includes(value);
+      option.disabled = setting === "task" && !currentCapabilities().taskModes?.includes(value === "verification" ? "direct" : value);
       if (option.disabled) option.title = "This mode requires a compatible plugin and Codex version.";
       option.className = "setting-option";
       option.setAttribute("role", "menuitemradio");
@@ -2611,14 +2611,18 @@
       checkPath.setAttribute("d", "m3 8 3 3 7-7");
       check.append(checkPath);
       const label = document.createElement("span");
-      label.textContent = setting === "task" ? taskModeNames[value] : setting === "execution" ? executionModeName(value) : value || "Default";
-      if (setting === "task") {
+      label.textContent = setting === "business" ? businessModeNames[value] : setting === "task" ? taskModeNames[value] : setting === "execution" ? executionModeName(value) + " — " + executionModeExplanation(value) : value || "Default";
+      if (setting === "business") {
+        option.append(createBusinessModeIcon(value), label, check);
+      } else if (setting === "task") {
         option.append(createTaskModeIcon(value), label, check);
       } else {
         option.append(check, label);
       }
       option.addEventListener("click", function () {
-        if (setting === "task") {
+        if (setting === "business") {
+          state.businessMode = value;
+        } else if (setting === "task") {
           state.taskMode = value;
         } else if (setting === "model") {
           state.model = value;
@@ -2639,8 +2643,28 @@
     }
   }
 
+  function createBusinessModeIcon(mode) {
+    const paths = {
+      normal: "M4 4h6v6H4Zm10 0h6v6h-6ZM4 14h6v6H4Zm10 0h6v6h-6Z",
+      interview: "M4 4h16v12H9l-5 4V4Zm4 4h8M8 12h5",
+      planning: "M5 3h14v18H5ZM8 7h2m3 0h3M8 12h2m3 0h3M8 17h2m3 0h3",
+      design: "M3 3h6v6H3Zm12 12h6v6h-6ZM9 6h9v9M6 9v9h9"
+    };
+    return createModeIcon(paths[mode] || paths.normal, "task-mode-icon");
+  }
+
+  function executionModeExplanation(mode) {
+    return ({
+      "cli-default": "Inherit the current session or CLI permission policy.",
+      "workspace-write": "Allow writes within the workspace; other actions follow the host approval policy.",
+      "danger-full-access": "Allow filesystem access outside the workspace; approvals still follow the host policy.",
+      bypass: "Disable sandbox restrictions and approval prompts."
+    })[mode] || "Use the host permission policy.";
+  }
+
   function createTaskModeIcon(mode) {
     const paths = {
+      verification: "M10 3a7 7 0 1 0 0 14 7 7 0 0 0 0-14Zm5 12 6 6M6 10l3 3 5-6",
       direct: "m15 5 4 4M4 20l5-1L20 8a2.8 2.8 0 0 0-4-4L5 15l-1 5Z",
       work: "M14 6a5 5 0 0 0-6 6L3 17a2.8 2.8 0 0 0 4 4l5-5a5 5 0 0 0 6-6l-3 3-4-4 3-3Z",
       "work-verification": "M12 3 4 6v6c0 4 4 7 8 9 4-2 8-5 8-9V6l-8-3Zm-4 9 3 3 5-6",
@@ -2695,11 +2719,11 @@
   }
 
   function settingButton(setting) {
-    return setting === "task" ? workLoopButton : setting === "model" ? modelButton : setting === "reasoning" ? reasoningButton : executionModeButton;
+    return setting === "business" ? businessModeButton : setting === "task" ? workLoopButton : setting === "model" ? modelButton : setting === "reasoning" ? reasoningButton : executionModeButton;
   }
 
   function settingMenu(setting) {
-    return setting === "task" ? taskModeMenu : setting === "model" ? modelMenu : setting === "reasoning" ? reasoningMenu : executionModeMenu;
+    return setting === "business" ? businessModeMenu : setting === "task" ? taskModeMenu : setting === "model" ? modelMenu : setting === "reasoning" ? reasoningMenu : executionModeMenu;
   }
 
   function executionModeName(mode) {
@@ -2754,6 +2778,7 @@
       reasoning: state.reasoning,
       fastMode: state.fastMode,
       goalMode: state.goalMode,
+      businessMode: state.businessMode,
       taskMode: state.taskMode,
       workLoopMode: state.workLoopMode,
       contextUsedTokens: state.contextUsedTokens,
@@ -2788,6 +2813,7 @@
       reasoning: state.reasoning || undefined,
       fastMode: state.fastMode,
       goalMode: state.goalMode,
+      businessMode: state.businessMode,
       taskMode: state.taskMode,
       workLoopMode: state.workLoopMode
     });

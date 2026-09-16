@@ -1811,3 +1811,16 @@ button:focus-visible,
 #pending-message-queue button:focus-visible,
 .pending-queue-toggle:focus-visible { outline: 1px solid var(--vscode-focusBorder); }
 #pending-message-queue button:disabled { opacity: 0.5; }
+
+.setting-explanation {
+  max-width: 300px;
+  margin: 6px 10px;
+  color: var(--vscode-descriptionForeground);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+#execution-mode-menu .setting-option span {
+  white-space: normal;
+  max-width: 280px;
+}

@@ -1,3 +1,4 @@
+import { taskExecution } from "../../modules/chat/task-selection";
 import { homedir } from "node:os";
 import { extname, isAbsolute, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -362,6 +363,7 @@ export class ChatPanelManager implements vscode.Disposable {
           statusItems: this.statusItems(),
           model: managed.state.model,
           reasoning: managed.state.reasoning,
+          businessMode: managed.state.businessMode ?? "normal",
           taskMode: managed.state.taskMode ?? "work",
           fastMode: managed.state.fastMode === true,
           goalMode: managed.state.goalMode === true,
@@ -438,6 +440,7 @@ export class ChatPanelManager implements vscode.Disposable {
       case "composer.settings":
         managed.state = {
           ...managed.state,
+          businessMode: message.businessMode ?? managed.state.businessMode,
           taskMode: message.taskMode ?? managed.state.taskMode,
           model: message.model,
           reasoning: message.reasoning,
@@ -686,6 +689,7 @@ export class ChatPanelManager implements vscode.Disposable {
     await this.context.globalState.update(COMPOSER_PREFERENCES_KEY, {
       model: state.model,
       reasoning: state.reasoning,
+      businessMode: state.businessMode ?? "normal",
       taskMode: state.taskMode ?? "work",
       fastMode: state.fastMode === true,
       goalMode: state.goalMode === true,
@@ -891,12 +895,12 @@ export class ChatPanelManager implements vscode.Disposable {
     let started = false;
     void managed.controller.send(text, preparedAttachments, {
       ...((managed.state.role ?? "main") === "main" && (!managed.state.agentId || executionModeExplicit) ? { executionMode } : {}),
-      ...((managed.state.role ?? "main") === "main" ? { taskMode: execution.taskMode ?? "work" } : {}),
+      ...((managed.state.role ?? "main") === "main" ? { ...taskExecution(execution.taskMode), businessMode: execution.businessMode ?? "normal" } : {}),
       model: execution.model,
       reasoningEffort: execution.reasoningEffort,
       fast: execution.fast,
-      goalMode: execution.goal,
-      goalObjective: execution.goalObjective,
+      goalMode: execution.taskMode !== "verification" && execution.goal,
+      goalObjective: execution.taskMode === "verification" ? undefined : execution.goalObjective,
       ...((managed.state.role ?? "main") !== "main" ? { actor: "human" as const } : {}),
       ...(managed.state.verifiedWorkRunId ? { verifiedWorkRunId: managed.state.verifiedWorkRunId } : {})
     }, () => {

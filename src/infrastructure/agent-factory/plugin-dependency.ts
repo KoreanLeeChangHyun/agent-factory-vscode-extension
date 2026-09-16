@@ -1,4 +1,5 @@
 import { execFile } from "node:child_process";
+import { homedir } from "node:os";
 import { runtimeEnvironment } from "./process-environment";
 
 const CODEX_COMMAND = "codex";
@@ -9,6 +10,8 @@ const MAX_OUTPUT_BYTES = 256 * 1024;
 const MAX_AVAILABLE_OUTPUT_BYTES = 4 * 1024 * 1024;
 const LIST_TIMEOUT_MS = 15_000;
 const ADD_TIMEOUT_MS = 30_000;
+const OFFICIAL_SOURCE = "KoreanLeeChangHyun/agent-factory-codex-plugin";
+const pendingRepairs = new WeakMap<ProcessRunner, { version: string; promise: Promise<void> }>();
 
 export interface ProcessRunOptions {
   readonly timeout: number;
@@ -47,16 +50,33 @@ export async function ensureAgentFactoryPlugin(
   runner: ProcessRunner = runProcess
 ): Promise<void> {
   const requiredBase = semanticBase(requiredExtensionVersion);
+  const pending = pendingRepairs.get(runner);
+  if (pending) {
+    if (pending.version === requiredBase) return pending.promise;
+    await pending.promise.catch(() => undefined);
+    return ensureAgentFactoryPlugin(requiredExtensionVersion, runner);
+  }
+  const promise = ensurePlugin(requiredBase, runner);
+  pendingRepairs.set(runner, { version: requiredBase, promise });
+  try {
+    await promise;
+  } finally {
+    pendingRepairs.delete(runner);
+  }
+}
+
+async function ensurePlugin(requiredBase: string, runner: ProcessRunner): Promise<void> {
   let records = await listPlugins(runner, "installed");
   if (hasCompatibleInstalledPlugin(records, requiredBase)) return;
 
+  await ensureOfficialMarketplace(runner);
   const availableRecords = await listPlugins(runner, "available");
   const candidate = availableRecords
     .filter((record) => record.name === "agent-factory" && semanticBase(record.version) === requiredBase)
     .sort(compareCandidates)[0];
   if (!candidate) {
     throw new PluginDependencyError(
-      `Unable to install Agent Factory plugin version ${requiredBase}. Ensure the official marketplace is configured and offers this version.`
+      `Unable to install Agent Factory plugin version ${requiredBase}. The configured catalogs do not offer this exact version. Refresh the official marketplace or install the matching extension version, then Retry.`
     );
   }
 
@@ -69,11 +89,49 @@ export async function ensureAgentFactoryPlugin(
   parseJsonObject(addResult.stdout, "Agent Factory plugin installation result");
 
   records = await listPlugins(runner, "installed");
-  if (!hasCompatibleInstalledPlugin(records, requiredBase)) {
+  if (!hasCompatibleInstalledPlugin(records.filter((record) => record.pluginId === candidate.pluginId), requiredBase)) {
     throw new PluginDependencyError(
       `Unable to confirm that Agent Factory plugin ${requiredBase} is active after installation. Check the Codex plugin settings.`
     );
   }
+}
+
+async function ensureOfficialMarketplace(runner: ProcessRunner): Promise<void> {
+  if (await hasOfficialMarketplace(runner)) return;
+  const result = await invoke(runner,
+    ["plugin", "marketplace", "add", OFFICIAL_SOURCE, "--ref", "main", "--json"],
+    ADD_TIMEOUT_MS, "Register official Agent Factory marketplace");
+  parseJsonObject(result.stdout, "Marketplace registration result");
+  if (!await hasOfficialMarketplace(runner)) {
+    throw new PluginDependencyError("Unable to confirm official Agent Factory marketplace registration. Retry after checking Codex marketplace settings.");
+  }
+}
+
+async function hasOfficialMarketplace(runner: ProcessRunner): Promise<boolean> {
+  const result = await invoke(runner, ["plugin", "marketplace", "list", "--json"],
+    LIST_TIMEOUT_MS, "List Codex marketplaces");
+  const value = parseJsonObject(result.stdout, "Codex marketplace list");
+  if (!Array.isArray(value.marketplaces)
+    || value.marketplaces.some((entry) => !isObject(entry) || !isNonEmptyString(entry.name))) {
+    throw new PluginDependencyError("The Codex marketplace list has an invalid format.");
+  }
+  const matches = value.marketplaces.filter((entry) => entry.name === "agent-factory");
+  if (!matches.length) return false;
+  // CLI list exposes repository identity but may omit the configured ref. Never rewrite it.
+  const sources = new Set([
+    OFFICIAL_SOURCE,
+    `https://github.com/${OFFICIAL_SOURCE}`,
+    `https://github.com/${OFFICIAL_SOURCE}.git`,
+    `git@github.com:${OFFICIAL_SOURCE}.git`,
+    `ssh://git@github.com/${OFFICIAL_SOURCE}.git`
+  ]);
+  if (matches.length !== 1 || !isObject(matches[0].marketplaceSource)
+    || matches[0].marketplaceSource.sourceType !== "git"
+    || typeof matches[0].marketplaceSource.source !== "string"
+    || !sources.has(matches[0].marketplaceSource.source)) {
+    throw new PluginDependencyError("Marketplace name conflict: agent-factory is configured with a different or unconfirmed source. Resolve it in Codex marketplace settings, then Retry. No source was overwritten.");
+  }
+  return true;
 }
 
 export function semanticBase(version: string): string {
@@ -221,6 +279,8 @@ function isTimedOutProcess(error: unknown): boolean {
 export const runProcess: ProcessRunner = (executable, arguments_, options) => new Promise((resolve, reject) => {
   execFile(executable, [...arguments_], {
     env: runtimeEnvironment(),
+    // Do not load project-local Codex configuration during dependency installation.
+    cwd: homedir(),
     encoding: "utf8",
     timeout: options.timeout,
     maxBuffer: options.maxBuffer,

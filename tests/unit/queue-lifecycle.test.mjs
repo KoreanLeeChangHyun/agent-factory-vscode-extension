@@ -293,3 +293,122 @@ test('batch drain waits for already received attachment preparation before takin
   assert.equal(calls.length, 2);
   assert.match(calls[1], /ready[\s\S]*prepared image/);
 });
+
+
+test('workflow guidance follows each queued snapshot and Normal preserves ordinary requests', async () => {
+  const terminal = deferred(), calls = [];
+  const controller = new ChatSessionController(runtime({
+    async send(agentId, text, execution) {
+      calls.push({ text, execution });
+      return { agentId, runId: calls.length === 1 ? 'first' : 'batch' };
+    },
+    async status(_agentId, runId) {
+      if (runId === 'first') await terminal.promise;
+      return { status: 'completed' };
+    }
+  }), events(), 'main-existing', { pollIntervalMs: 0 });
+  const first = controller.send('ordinary', [], { taskMode: 'work', businessMode: 'normal' });
+  await tick();
+  const options = { taskMode: 'work', businessMode: 'interview' };
+  const interview = controller.send('Interview text', [], options);
+  const design = controller.send('Design text', [], { taskMode: 'work', businessMode: 'design' });
+  options.businessMode = 'planning';
+  terminal.resolve();
+  await Promise.all([first, interview, design]);
+  assert.equal(calls[0].text, 'ordinary');
+  assert.equal(calls[1].execution.taskMode, 'work');
+  assert.equal(calls[1].execution.businessMode, 'normal');
+  assert.equal((calls[1].text.match(/Workflow guidance for this message only:/g) || []).length, 2);
+  assert.match(calls[1].text, /Interview text[\s\S]*message only: interview[\s\S]*Design text[\s\S]*message only: design/);
+  assert.doesNotMatch(calls[1].text, /message only: planning/);
+  assert.match(calls[1].text, /docs\/processed\//);
+  assert.match(calls[1].text, /index\.html/);
+  assert.match(calls[1].text, /SKILL\.md/);
+});
+
+test('new sessions receive Planning guidance while retaining original promotion callbacks', async () => {
+  const calls = [], promoted = [];
+  const controller = new ChatSessionController(runtime({
+    async submit(agentId, text, execution) {
+      calls.push({ text, execution });
+      return { agentId, runId: 'new-run' };
+    }
+  }), events(), undefined, { pollIntervalMs: 0 });
+  await controller.send('Plan this feature', [], { taskMode: 'work', businessMode: 'planning' }, () => promoted.push('Plan this feature'));
+  assert.match(calls[0].text, /^Plan this feature\n\n\[Workflow guidance for this message only: planning\]/);
+  assert.equal(calls[0].execution.taskMode, 'work');
+  assert.deepEqual(promoted, ['Plan this feature']);
+});
+
+
+test('inspection snapshots are dispatched separately from queued implementation', async () => {
+  const terminal = deferred(), calls = [];
+  const controller = new ChatSessionController(runtime({
+    async send(agentId, text, execution) {
+      calls.push({ text, execution });
+      return { agentId, runId: calls.length === 1 ? 'first' : `run-${calls.length}` };
+    },
+    async status(_agentId, runId) {
+      if (runId === 'first') await terminal.promise;
+      return { status: 'completed' };
+    }
+  }), events(), 'main-existing', { pollIntervalMs: 0 });
+  const first = controller.send('first', [], { taskMode: 'work' });
+  await tick();
+  const inspection = { taskMode: 'direct', inspectionOnly: true, businessMode: 'design' };
+  const second = controller.send('Inspect existing changes', [], inspection);
+  const third = controller.send('Implement later', [], { taskMode: 'work' });
+  inspection.inspectionOnly = false;
+  terminal.resolve();
+  await Promise.all([first, second, third]);
+  assert.equal(calls.length, 3);
+  assert.equal(calls[1].execution.taskMode, 'direct');
+  assert.match(calls[1].text, /^Inspect existing changes/);
+  assert.match(calls[1].text, /standalone inspection by Main/);
+  assert.match(calls[1].text, /Do not implement repairs/);
+  assert.doesNotMatch(calls[1].text, /Workflow guidance|Implement later/);
+  assert.equal(calls[2].execution.taskMode, 'work');
+  assert.equal(calls[2].text, 'Implement later');
+});
+
+test('inspection decision continuation retains its original constraints', async () => {
+  const calls = [], resumed = deferred();
+  const controller = new ChatSessionController(runtime({
+    async send(agentId, text, execution) {
+      calls.push({ text, execution });
+      if (calls.length === 2) resumed.resolve();
+      return { agentId, runId: calls.length === 1 ? 'inspection' : 'answer' };
+    },
+    async result(_agentId, runId) {
+      return { status: runId === 'inspection' ? 'needs-human-decision' : 'completed', text: 'Select target' };
+    }
+  }), events(), 'main-existing', { pollIntervalMs: 0 });
+  await controller.send('Inspect', [], { taskMode: 'direct', inspectionOnly: true });
+  assert.equal(controller.approveDecision('inspection', { taskMode: 'work', inspectionOnly: false, goalMode: true, goalObjective: 'Implement from UI' }), true);
+  await resumed.promise;
+  assert.equal(calls[1].execution.taskMode, 'direct');
+  assert.equal(calls[1].execution.inspectionOnly, true);
+  assert.equal(calls[1].execution.goalMode, false);
+  assert.equal(Object.hasOwn(calls[1].execution, 'goalObjective'), false);
+  assert.match(calls[1].text, /Do not implement repairs/);
+});
+
+
+test('inspection dispatch suppresses Goal for both new and existing sessions without mutating input', async () => {
+  for (const agentId of [undefined, 'main-existing']) {
+    const calls = [];
+    const accept = async (id, text, execution) => {
+      calls.push({ text, execution });
+      return { agentId: id, runId: 'inspection' };
+    };
+    const controller = new ChatSessionController(runtime({ submit: accept, send: accept }), events(), agentId, { pollIntervalMs: 0 });
+    const execution = { taskMode: 'direct', inspectionOnly: true, goalMode: true, goalObjective: 'Old implementation objective' };
+    await controller.send('Inspect existing changes', [], execution);
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].execution.goalMode, false);
+    assert.equal(Object.hasOwn(calls[0].execution, 'goalObjective'), false);
+    assert.equal(calls[0].execution.taskMode, 'direct');
+    assert.equal(execution.goalMode, true);
+    assert.equal(execution.goalObjective, 'Old implementation objective');
+  }
+});

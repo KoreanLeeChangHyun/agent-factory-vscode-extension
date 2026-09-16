@@ -41,6 +41,8 @@ export type TaskMode = typeof TASK_MODES[number];
 export type ExecutionMode = "cli-default" | "workspace-write" | "danger-full-access" | "bypass";
 
 export interface ExecutionOptions {
+  readonly inspectionOnly?: boolean;
+  readonly businessMode?: import("../../common/types/business-mode").BusinessMode;
   readonly taskMode?: TaskMode;
   readonly executionMode?: ExecutionMode;
   readonly model?: string;

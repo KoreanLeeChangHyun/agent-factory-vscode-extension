@@ -1,4 +1,6 @@
 /.agent-factory/
+/.codex/
+/docs/
 node_modules/
 out/
 dist/

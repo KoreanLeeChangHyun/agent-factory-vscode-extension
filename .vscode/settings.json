@@ -1,0 +1,10 @@
+{
+    "agentFactory.mainChat.statusItems": [
+        "agents",
+        "branch",
+        "context",
+        "contextRemainingTokens",
+        "weeklyRemaining",
+        "status"
+    ]
+}

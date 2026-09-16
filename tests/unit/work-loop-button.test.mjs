@@ -109,14 +109,14 @@ test("attachment-only loop requests show attachment names without injected instr
   assert.equal(sent[0].execution.taskMode, "work");
 });
 
-test("mode menu displays four choices and persists a supported next-task selection during execution", () => {
+test("mode menu explains standalone Verification and displays supported choices and persists a supported next-task selection during execution", () => {
   function element() {
     return { children: [], dataset: {}, handlers: {}, classList: { add() {} },
       setAttribute() {}, append(...children) { this.children.push(...children); },
       addEventListener(name, handler) { this.handlers[name] = handler; },
       replaceChildren() { this.children = []; } };
   }
-  const names = { direct: "Direct", work: "Work", "work-verification": "Work · Verification", "plan-work-verification": "Plan · Work · Verification" };
+  const names = { verification: "Verification", direct: "Direct", work: "Work", "work-verification": "Work · Verification", "plan-work-verification": "Plan · Work · Verification" };
   const menu = element();
   const calls = [];
   const context = {
@@ -129,11 +129,41 @@ test("mode menu displays four choices and persists a supported next-task selecti
   };
   const renderer = script.slice(script.indexOf("  function renderSettingMenu("), script.indexOf("  function handleSettingMenuKeydown("));
   runInNewContext(renderer + '\nrenderSettingMenu("task", menu);', context);
-  assert.equal(menu.children.length, 4);
-  assert.equal(menu.children[3].disabled, true);
-  assert.equal(menu.children[0].disabled, false);
-  menu.children[0].handlers.click();
-  assert.equal(context.state.taskMode, "direct");
+  assert.equal(menu.children[0].textContent, "Verification checks existing work and reports findings without making changes.");
+  const options = menu.children.filter(item => item.dataset.value);
+  assert.equal(options.length, 5);
+  assert.equal(options[0].disabled, false);
+  assert.equal(options[4].disabled, true);
+  assert.equal(options[1].disabled, false);
+  options[0].handlers.click();
+  assert.equal(context.state.taskMode, "verification");
   assert.equal(context.state.running, true);
   assert.deepEqual(calls, ["persist", "save"]);
+  context.currentCapabilities = () => ({ taskModes: ["work"] });
+  runInNewContext('renderSettingMenu("task", menu);', context);
+  assert.equal(menu.children.find(item => item.dataset.value === "verification").disabled, true);
+});
+
+
+test("workflow selections snapshot queued user text independently of task route", () => {
+  const { context, sent, run } = harness({ running: true });
+  for (const businessMode of ["interview", "planning", "design", "normal"]) {
+    context.state.businessMode = businessMode;
+    context.prompt.value = "Original request";
+    run("submit()");
+  }
+  context.state.businessMode = "design";
+  assert.deepEqual(sent.map(message => message.execution.businessMode), ["interview", "planning", "design", "normal"]);
+  assert.ok(sent.every(message => message.text === "Original request" && message.execution.taskMode === "work"));
+});
+
+
+test("Verification snapshots inspection selection and suppresses Goal continuation", () => {
+  const { context, sent, run } = harness({ taskMode: "verification", goalMode: true });
+  context.goalObjective.value = "Old implementation goal";
+  run("submit()");
+  context.state.taskMode = "work";
+  assert.equal(sent[0].execution.taskMode, "verification");
+  assert.equal(sent[0].execution.goal, false);
+  assert.equal(sent[0].execution.goalObjective, undefined);
 });

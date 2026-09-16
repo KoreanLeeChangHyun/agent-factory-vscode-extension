@@ -1,3 +1,5 @@
+import { withInspectionGuidance } from "./task-selection";
+import { withBusinessMode } from "../../common/types/business-mode";
 import { randomUUID } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import type { AttachmentReference } from "../../common/types/attachment";
@@ -49,6 +51,10 @@ export class ChatSessionController {
   private busy = false;
   private pendingDecisionRunId: string | undefined;
   private pendingDecisionTaskMode: ExecutionOptions["taskMode"];
+  private pendingDecisionBusinessMode: ExecutionOptions["businessMode"];
+  private pendingDecisionInspectionOnly: boolean | undefined;
+  private submittedInspectionOnly: boolean | undefined;
+  private submittedBusinessMode: ExecutionOptions["businessMode"];
   private submittedTaskMode: ExecutionOptions["taskMode"];
   private cancelRequested = false;
   private cancellationInFlight: Promise<void> | undefined;
@@ -214,6 +220,12 @@ export class ChatSessionController {
           next.push(...this.queuedSends.splice(0));
           this.events.onQueueChanged?.(0);
         }
+        // Inspection must never inherit an implementation route from a different message.
+        const boundary = next.findIndex(item => Boolean(item.execution.inspectionOnly) !== Boolean(next[0]!.execution.inspectionOnly));
+        if (boundary > 0) {
+          this.queuedSends.unshift(...next.splice(boundary));
+          this.events.onQueueChanged?.(this.queuedSends.length);
+        }
         attempted = true;
         const merged = mergePendingSends(next);
         if (next.length > 1) this.events.onProgress(`Submitting ${next.length} queued messages as one request. Task mode, model, and reasoning use the first message settings; permissions use their common allowed scope.`);
@@ -264,8 +276,17 @@ export class ChatSessionController {
     execution: ExecutionOptions,
     onStarted: () => void
   ): Promise<void> {
+    // Apply at dispatch so initial sends and decision continuations share the boundary.
+    if (execution.inspectionOnly) {
+      const inspectionExecution = { ...execution, goalMode: false };
+      delete inspectionExecution.goalObjective;
+      execution = inspectionExecution;
+    }
+    this.submittedInspectionOnly = execution.inspectionOnly;
+    this.submittedBusinessMode = execution.businessMode;
     this.submittedTaskMode = execution.taskMode;
-    const request = withAttachmentReferences(text, attachments);
+    const content = withAttachmentReferences(text, attachments);
+    const request = execution.inspectionOnly ? withInspectionGuidance(content) : withBusinessMode(content, execution.businessMode);
     const images = runtimeImages(attachments);
     if (!this.agentId) {
       const candidateAgentId = `main-${randomUUID()}`;
@@ -291,13 +312,17 @@ export class ChatSessionController {
     if (this.busy || this.goalControlPending || this.pendingDecisionRunId !== runId) return false;
     const text = "바로 위 응답에서 제안한 범위와 조건대로 진행하세요.";
     const taskMode = this.pendingDecisionTaskMode;
-    void this.sendAndDrainQueue(text, [], { ...execution, ...(taskMode ? { taskMode } : {}), actor: "human" }, true, () => this.events.onHumanDecision?.(text));
+    const businessMode = this.pendingDecisionBusinessMode;
+    const inspectionOnly = this.pendingDecisionInspectionOnly;
+    void this.sendAndDrainQueue(text, [], { ...execution, inspectionOnly, ...(taskMode ? { taskMode } : {}), ...(businessMode ? { businessMode } : {}), actor: "human" }, true, () => this.events.onHumanDecision?.(text));
     return true;
   }
 
   private clearDecision(): void {
     this.pendingDecisionRunId = undefined;
     this.pendingDecisionTaskMode = undefined;
+    this.pendingDecisionBusinessMode = undefined;
+    this.pendingDecisionInspectionOnly = undefined;
     this.events.onDecision?.(null);
   }
 
@@ -437,12 +462,22 @@ export class ChatSessionController {
           this.events.onProgress(summary);
           if ((result.status !== "completed" && result.status !== "needs-human-decision") || diagnostic || goalError) {
             this.events.onError([summary, diagnostic ? `${diagnostic.code}: ${diagnostic.message}` : "", diagnostic?.code === "execution_preflight_failed" ? "Execution environment check failed. After the run finishes, select the required permissions and retry with your next message." : "", goalError ?? ""].filter(Boolean).join("\n"));
-            this.events.onAssistantText(result.text.trim() ? `${summary}\n\nPreserved partial result (completion unconfirmed):\n${result.text.trim()}` : summary, "final", runId);
+            if (result.status === "cancelled") {
+              // The error notice already carries the cancellation summary.
+              const partialResult = result.text.trim();
+              if (partialResult && partialResult !== summary) {
+                this.events.onAssistantText(`Preserved partial result (completion unconfirmed):\n${partialResult}`, "final", runId);
+              }
+            } else {
+              this.events.onAssistantText(result.text.trim() ? `${summary}\n\nPreserved partial result (completion unconfirmed):\n${result.text.trim()}` : summary, "final", runId);
+            }
           } else {
             this.events.onAssistantText(result.text.trim() || summary, "final", runId);
           }
           if (result.status === "needs-human-decision" && result.text.trim() && !diagnostic && !goalError) {
             this.pendingDecisionRunId = runId;
+            this.pendingDecisionInspectionOnly = this.submittedInspectionOnly;
+            this.pendingDecisionBusinessMode = this.submittedBusinessMode;
             this.pendingDecisionTaskMode = status.taskMode ?? this.submittedTaskMode;
             this.events.onDecision?.(runId);
           }
@@ -478,8 +513,10 @@ function mergePendingSends(items: readonly PendingSend[]): Pick<PendingSend, "te
     execution.goalMode = false;
     delete execution.goalObjective;
   }
+  // Each original retains its workflow; do not apply the first workflow to the batch.
+  execution.businessMode = "normal";
   return {
-    text: items.map((item, index) => `--- 대기 메시지 ${index + 1} 시작 ---\n${withAttachmentReferences(item.text, item.attachments)}\n--- 대기 메시지 ${index + 1} 끝 ---`).join("\n\n"),
+    text: items.map((item, index) => `--- 대기 메시지 ${index + 1} 시작 ---\n${withBusinessMode(withAttachmentReferences(item.text, item.attachments), item.execution.inspectionOnly ? "normal" : item.execution.businessMode)}\n--- 대기 메시지 ${index + 1} 끝 ---`).join("\n\n"),
     attachments: items.flatMap(item => [...item.attachments]),
     execution
   };
