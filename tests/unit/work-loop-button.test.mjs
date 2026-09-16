@@ -88,15 +88,15 @@ test("mode click opens choices without submitting or granting approval", () => {
   assert.deepEqual(calls, ["task"]);
 });
 
-test("four modes snapshot each queued submission independently", () => {
+test("five modes snapshot each queued submission independently", () => {
   const { context, sent, run } = harness({ running: true });
-  for (const taskMode of ["direct", "work", "work-verification", "plan-work-verification"]) {
+  for (const taskMode of ["direct", "work", "plan-work", "work-verification", "plan-work-verification"]) {
     context.state.taskMode = taskMode;
     context.prompt.value = "동일 요청";
     run("submit()");
   }
   context.state.taskMode = "direct";
-  assert.deepEqual(sent.map(message => message.execution.taskMode), ["direct", "work", "work-verification", "plan-work-verification"]);
+  assert.deepEqual(sent.map(message => message.execution.taskMode), ["direct", "work", "plan-work", "work-verification", "plan-work-verification"]);
   assert.ok(sent.every(message => message.text === "동일 요청"));
 });
 
@@ -116,7 +116,7 @@ test("mode menu explains standalone Verification and displays supported choices 
       addEventListener(name, handler) { this.handlers[name] = handler; },
       replaceChildren() { this.children = []; } };
   }
-  const names = { verification: "Verification", direct: "Direct", work: "Work", "work-verification": "Work · Verification", "plan-work-verification": "Plan · Work · Verification" };
+  const names = { verification: "Verification", direct: "Direct", work: "Work", "plan-work": "Plan · Work", "work-verification": "Work · Verification", "plan-work-verification": "Plan · Work · Verification" };
   const menu = element();
   const calls = [];
   const context = {
@@ -131,14 +131,22 @@ test("mode menu explains standalone Verification and displays supported choices 
   runInNewContext(renderer + '\nrenderSettingMenu("task", menu);', context);
   assert.equal(menu.children[0].textContent, "Verification checks existing work and reports findings without making changes.");
   const options = menu.children.filter(item => item.dataset.value);
-  assert.equal(options.length, 5);
+  assert.equal(options.length, 6);
   assert.equal(options[0].disabled, false);
-  assert.equal(options[4].disabled, true);
+  assert.equal(options.find(item => item.dataset.value === "plan-work").disabled, true);
+  assert.equal(options.find(item => item.dataset.value === "plan-work-verification").disabled, true);
   assert.equal(options[1].disabled, false);
   options[0].handlers.click();
   assert.equal(context.state.taskMode, "verification");
   assert.equal(context.state.running, true);
   assert.deepEqual(calls, ["persist", "save"]);
+  context.currentCapabilities = () => ({ taskModes: ["direct", "work", "plan-work"] });
+  runInNewContext('renderSettingMenu("task", menu);', context);
+  const planWork = menu.children.find(item => item.dataset.value === "plan-work");
+  assert.equal(planWork.disabled, false);
+  planWork.handlers.click();
+  assert.equal(context.state.taskMode, "plan-work");
+  assert.equal(context.state.running, true);
   context.currentCapabilities = () => ({ taskModes: ["work"] });
   runInNewContext('renderSettingMenu("task", menu);', context);
   assert.equal(menu.children.find(item => item.dataset.value === "verification").disabled, true);

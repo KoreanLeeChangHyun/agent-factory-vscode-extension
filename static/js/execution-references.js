@@ -103,7 +103,7 @@
           taskMode = run.taskMode || taskMode;
         }
       } catch { /* Command output remains available as raw evidence. */ }
-      candidates.push({ ...(["direct", "work", "work-verification", "plan-work-verification"].includes(taskMode) ? { taskMode } : {}), agentId, role: ["work", "verification"].includes(role) ? role : undefined, runId, observedStatus, action, kind: script[1] });
+      candidates.push({ ...(["direct", "work", "plan-work", "work-verification", "plan-work-verification"].includes(taskMode) ? { taskMode } : {}), agentId, role: ["work", "verification"].includes(role) ? role : undefined, runId, observedStatus, action, kind: script[1] });
     }
     return candidates.length === 1 ? candidates[0] : undefined;
   }

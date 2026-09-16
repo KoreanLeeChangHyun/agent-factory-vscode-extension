@@ -35,7 +35,7 @@ export interface ExecutionCapabilities {
   readonly diagnostic?: string;
 }
 
-export const TASK_MODES = ["direct", "work", "work-verification", "plan-work-verification"] as const;
+export const TASK_MODES = ["direct", "work", "plan-work", "work-verification", "plan-work-verification"] as const;
 export type TaskMode = typeof TASK_MODES[number];
 
 export type ExecutionMode = "cli-default" | "workspace-write" | "danger-full-access" | "bypass";

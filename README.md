@@ -8,6 +8,9 @@ Use Agent Factory Main Agent sessions in VS Code editor tabs.
 - Organize chats into workspace-local groups.
 - Attach files and images; view Markdown, command output, and diffs.
 - Select task modes, permissions, Fast/Goal controls, and status bar information.
+- **Plan · Work** runs actual Codex Plan then implementation in the same Work
+  session, followed by Main checks without separate Verification. It requires
+  runtime support; queued requests keep their selected mode.
 
 ## Setup
 

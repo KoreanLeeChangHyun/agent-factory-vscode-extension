@@ -1002,7 +1002,8 @@ test("session controller emits complete commentary once and marks final output",
 });
 
 
-test("human decision approvals are explicit, once-only and bound to the pending run", async () => {
+for (const taskMode of ["plan-work", "plan-work-verification"]) {
+test(`human decision approvals preserve ${taskMode}, are explicit, once-only and bound to the pending run`, async () => {
   const { ChatSessionController } = await importTypeScript("src/modules/chat/session-controller.ts");
   const decisions = [], texts = [], sent = [], errors = [], human = [];
   let nextStatus = "needs-human-decision";
@@ -1020,7 +1021,7 @@ test("human decision approvals are explicit, once-only and bound to the pending 
     onError(error) { errors.push(error); }
   };
   const controller = new ChatSessionController(runtime, events, undefined, { pollIntervalMs: 0, maxPolls: 1 });
-  await controller.send("task", [], { taskMode: "plan-work-verification" });
+  await controller.send("task", [], { taskMode });
   assert.deepEqual(errors, []);
   assert.equal(decisions.at(-1), "proposal-run");
   assert.deepEqual(texts.at(-1), { text: "제안한 범위로 진행할까요?", phase: "final", runId: "proposal-run" });
@@ -1034,7 +1035,7 @@ test("human decision approvals are explicit, once-only and bound to the pending 
   await new Promise(resolve => setImmediate(resolve));
   assert.equal(sent.length, 1);
   assert.equal(sent[0].execution.actor, "human");
-  assert.equal(sent[0].execution.taskMode, "plan-work-verification");
+  assert.equal(sent[0].execution.taskMode, taskMode);
   assert.equal(sent[0].text, human[0]);
   assert.equal(controller.approveDecision("proposal-run", {}), false);
   nextStatus = "needs-human-decision";
@@ -1044,6 +1045,7 @@ test("human decision approvals are explicit, once-only and bound to the pending 
   await controller.send("직접 답변", [], {});
   assert.equal(controller.approveDecision("reply-run", {}), false);
 });
+}
 
 test("decision buttons are not inferred from completed prose or diagnostic partial results", async () => {
   const { ChatSessionController } = await importTypeScript("src/modules/chat/session-controller.ts");
@@ -1434,16 +1436,16 @@ test("internal result reads stay hidden while child, mixed and failed reads rema
   assert.deepEqual(updates.filter(update => update.kind === 'activity').map(update => update.id), ['child', 'mixed', 'failed']);
 });
 
-
 test("task mode protocol rejects unknown routes and preserves valid snapshots", async () => {
   const { parseClientMessage } = await importTypeScript("src/protocol/validator.ts");
-  for (const taskMode of ["direct", "work", "work-verification", "plan-work-verification"]) {
+  for (const taskMode of ["direct", "work", "plan-work", "work-verification", "plan-work-verification"]) {
     const message = { type: "chat.send", id: "message", text: "request", attachments: [], execution: { taskMode, fast: false, goal: false } };
     assert.equal(parseClientMessage(message).execution.taskMode, taskMode);
     assert.equal(parseClientMessage({ ...message, execution: { ...message.execution, taskMode: "plan-agent" } }), undefined);
   }
   const { restoreChatState } = await importTypeScript("src/modules/chat/chat-state.ts");
   assert.equal(restoreChatState({}).taskMode, "work");
+  assert.equal(restoreChatState({ taskMode: "plan-work" }).taskMode, "plan-work");
   assert.equal(restoreChatState({ taskMode: "direct", workLoopMode: true }).taskMode, "direct");
   assert.equal(restoreChatState({ taskMode: "invalid" }).taskMode, "work");
 });
@@ -1454,7 +1456,12 @@ test("mode capability negotiation rejects old runtimes and forwards supported fl
   client.capabilities = async () => ({ submit: {}, send: { taskModes: ["direct", "work"] } });
   await assert.rejects(client.checkedExecution("submit", { taskMode: "work" }), /Update/);
   await assert.rejects(client.checkedExecution("send", { taskMode: "plan-work-verification" }), /Update/);
+  await assert.rejects(client.checkedExecution("send", { taskMode: "plan-work" }), /Update/);
   assert.deepEqual(await client.checkedExecution("send", { taskMode: "direct" }), ["--task-mode", "direct"]);
+  client.capabilities = async () => ({ submit: { taskModes: ["plan-work"] }, send: { taskModes: ["plan-work"] } });
+  for (const operation of ["submit", "send"]) {
+    assert.deepEqual(await client.checkedExecution(operation, { taskMode: "plan-work" }), ["--task-mode", "plan-work"]);
+  }
 });
 
 

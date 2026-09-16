@@ -32,7 +32,7 @@
   const businessModeButton = document.getElementById("business-mode-button");
   const businessModeMenu = document.getElementById("business-mode-menu");
   const businessModeNames = { normal: "Normal", interview: "Interview", planning: "Planning", design: "Design" };
-  const taskModeNames = { verification: "Verification", direct: "Direct", work: "Work", "work-verification": "Work · Verification", "plan-work-verification": "Plan · Work · Verification" };
+  const taskModeNames = { verification: "Verification", direct: "Direct", work: "Work", "plan-work": "Plan · Work", "work-verification": "Work · Verification", "plan-work-verification": "Plan · Work · Verification" };
   const goalPanel = document.getElementById("goal-panel");
   const goalObjective = document.getElementById("goal-objective");
   const goalStatus = document.getElementById("goal-status");
@@ -987,7 +987,7 @@
     const badge = document.createElement("span");
     badge.className = "managed-agent-status";
     badge.textContent = status === "active" ? "In progress" : status === "runtime-error" ? "Runtime error" : childAgentStatusLabel(status);
-    if (managed.taskMode === "work" && status === "completed") badge.textContent += " · No separate verification requested";
+    if (["work", "plan-work"].includes(managed.taskMode) && status === "completed") badge.textContent += " · No separate verification requested";
     heading.append(label, badge);
     const identity = document.createElement("div");
     identity.className = "managed-agent-identity";
@@ -2667,6 +2667,7 @@
       verification: "M10 3a7 7 0 1 0 0 14 7 7 0 0 0 0-14Zm5 12 6 6M6 10l3 3 5-6",
       direct: "m15 5 4 4M4 20l5-1L20 8a2.8 2.8 0 0 0-4-4L5 15l-1 5Z",
       work: "M14 6a5 5 0 0 0-6 6L3 17a2.8 2.8 0 0 0 4 4l5-5a5 5 0 0 0 6-6l-3 3-4-4 3-3Z",
+      "plan-work": "M14 21H6a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2v6M8 7h6M8 11h4M8 15h2m5 0 5 3-5 3v-6",
       "work-verification": "M12 3 4 6v6c0 4 4 7 8 9 4-2 8-5 8-9V6l-8-3Zm-4 9 3 3 5-6",
       "plan-work-verification": "M14 21H6a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2v6M8 7h6M8 11h4M8 15h2m4 2 3 3 5-6"
     };
