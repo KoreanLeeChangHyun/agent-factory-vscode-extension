@@ -32,7 +32,7 @@ codex plugin add agent-factory@agent-factory
 ### Companion plugin requirement
 
 - The plugin must be installed and enabled with the identical semantic base version.
-  Extension `1.0.8` accepts plugin `1.0.8+codex.<token>`.
+  Extension `1.0.9` accepts plugin `1.0.9+codex.<token>`.
 - An already compatible installed plugin requires only a local installed-list check.
 - If the plugin is missing, disabled or mismatched, activation registers the
   official `agent-factory` marketplace from the source above when absent, then

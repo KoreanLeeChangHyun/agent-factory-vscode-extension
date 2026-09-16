@@ -83,7 +83,9 @@ function cleanIndex() {
 }
 function scope(files) {
   const unexpected = [...names("diff", "--name-only", "-z"), ...names("ls-files", "--others", "--exclude-standard", "-z")]
-    .filter((file) => file !== ".vscode/settings.json" || names("ls-files", "-z", "--", file).length)
+    // Local display settings are excluded from the VSIX and forbidden in --files.
+    // Leave their unstaged changes alone, whether tracked or untracked.
+    .filter((file) => file !== ".vscode/settings.json")
     .filter((file) => !files.includes(file));
   if (unexpected.length) fail(`Changes outside --files: ${unexpected.join(", ")}`);
 }
