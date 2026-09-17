@@ -412,3 +412,23 @@ test('inspection dispatch suppresses Goal for both new and existing sessions wit
     assert.equal(execution.goalObjective, 'Old implementation objective');
   }
 });
+
+
+test('controller forwards the composer objective independently of workflow and attachments', async () => {
+  for (const agentId of [undefined, 'main-existing']) {
+    const calls = [];
+    const accept = async (id, text, execution) => {
+      calls.push({ text, execution });
+      return { agentId: id, runId: 'composer-goal' };
+    };
+    const controller = new ChatSessionController(runtime({ send: accept, submit: accept }), events(), agentId, { pollIntervalMs: 0 });
+    await controller.send('Current composer goal', [{ kind: 'file', name: 'notes.txt', uri: 'file:///tmp/notes.txt' }], {
+      goalMode: true, goalObjective: 'Current composer goal', businessMode: 'design'
+    });
+    assert.equal(calls[0].execution.goalObjective, 'Current composer goal');
+    assert.equal(calls[0].execution.goalMode, true);
+    assert.ok(calls[0].text.includes('Current composer goal'));
+    assert.notEqual(calls[0].text, calls[0].execution.goalObjective);
+    controller.dispose();
+  }
+});

@@ -1491,9 +1491,6 @@ button:focus-visible,
 
 .goal-panel { padding: 8px 12px; border-top: 1px solid var(--vscode-panel-border); font-size: 12px; }
 .goal-panel[hidden] { display: none; }
-.goal-panel label { display: block; margin-bottom: 4px; }
-.goal-panel label span { opacity: .75; }
-.goal-panel textarea { box-sizing: border-box; width: 100%; resize: vertical; color: var(--vscode-input-foreground); background: var(--vscode-input-background); border: 1px solid var(--vscode-input-border, transparent); }
 .goal-panel p { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 130px; overflow: auto; }
 .goal-actions { display: flex; flex-wrap: wrap; gap: 6px; }
 .goal-actions button { color: var(--vscode-button-secondaryForeground); background: var(--vscode-button-secondaryBackground); border: 0; padding: 4px 8px; cursor: pointer; }
@@ -1716,7 +1713,59 @@ button:focus-visible,
 .status-catalog-row label span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .status-catalog-row[data-selected="true"] { background: var(--vscode-list-inactiveSelectionBackground, var(--vscode-input-background)); }
 .status-catalog-row:hover { background: var(--vscode-list-hoverBackground); }
-.status-catalog-row input { accent-color: var(--vscode-focusBorder); }
+.status-catalog-row label .status-checkbox { display: grid; flex: 0 0 14px; overflow: visible; }
+.status-checkbox input[type="checkbox"] {
+  appearance: none;
+  grid-area: 1 / 1;
+  width: 14px;
+  height: 14px;
+  margin: 0;
+  border: 1px solid var(--vscode-descriptionForeground, #808080);
+  border-radius: 2px;
+  background: var(--vscode-input-background, var(--af-chat-background));
+  box-shadow: none;
+  cursor: pointer;
+}
+.status-checkbox input[type="checkbox"]:checked {
+  border-color: var(--af-color-accent);
+  background: var(--af-color-accent);
+}
+.status-checkbox svg {
+  grid-area: 1 / 1;
+  width: 14px;
+  height: 14px;
+  fill: none;
+  stroke: #fff;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  pointer-events: none;
+  visibility: hidden;
+}
+.status-checkbox input:checked + svg { visibility: visible; }
+.status-checkbox input[type="checkbox"]:focus-visible {
+  border-color: var(--af-color-accent);
+  outline: 2px solid var(--af-color-accent);
+  outline-offset: 2px;
+}
+.status-checkbox input:disabled { opacity: 0.5; cursor: default; }
+.status-checkbox input:disabled + svg { opacity: 0.5; }
+/* Let the OS supply accessible checkbox colors and marks in forced-colors mode. */
+@media (forced-colors: active) {
+  .status-checkbox input[type="checkbox"] {
+    appearance: auto;
+    border-color: ButtonText;
+    background: Canvas;
+    accent-color: auto;
+    opacity: 1;
+  }
+  .status-checkbox input[type="checkbox"]:disabled { border-color: GrayText; }
+  .status-checkbox input[type="checkbox"]:focus-visible {
+    border-color: Highlight;
+    outline-color: Highlight;
+  }
+  .status-checkbox svg { display: none; }
+}
 .status-preview { grid-column: 1; padding-left: 25px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--vscode-descriptionForeground); font-size: 11px; line-height: 1.4; }
 .status-order-actions { display: flex; align-self: center; grid-column: 2; grid-row: 1 / 3; gap: 2px; }
 .status-order-actions[hidden] { display: none; }

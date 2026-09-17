@@ -197,7 +197,7 @@ test("composer shows only supported controls across draft and bound sessions", a
   const functions = script.slice(script.indexOf('  function currentCapabilities()'), script.indexOf('  function openSetting(setting)'));
   const iconFunction = script.slice(script.indexOf('  function createBusinessModeIcon(mode)'), script.indexOf('  function handleSettingMenuKeydown(event)'));
   const element = (namespaceURI, localName) => ({
-    namespaceURI, localName, children: [], attributes: {},
+    namespaceURI, localName, children: [], attributes: {}, dataset: {},
     classList: { add() {} },
     setAttribute(name, value) { this.attributes[name] = value; },
     append(...children) { this.children.push(...children); },
@@ -208,7 +208,7 @@ test("composer shows only supported controls across draft and bound sessions", a
   const context = {
     document: { createElementNS: element },
     renderStatusBar() { statusRenders++; },
-    state: { capabilities: { submit: { model: true }, send: {} }, model: 'gpt-6-astra', reasoning: 'medium', fastMode: true, goalMode: true },
+    state: { businessMode: 'normal', taskMode: 'work', capabilities: { submit: { model: true }, send: {} }, model: 'gpt-6-astra', reasoning: 'medium', fastMode: true, goalMode: true },
     modelButton: button(), reasoningButton: button(), fastModeButton: button(), goalModeButton: button(), workLoopButton: button(),
     taskModeNames: { work: "Work" }, businessModeNames: { normal: "Normal" }, businessModeButton: button(),
     executionModeButton: button(), executionModeLabel: {}, modelLabel: {}, reasoningLabel: {}, openSettingId: undefined,
@@ -230,10 +230,14 @@ test("composer shows only supported controls across draft and bound sessions", a
   runInNewContext('updateModeControls();', context);
   assert.equal(context.modelButton.parentElement.hidden, true);
   assert.equal(context.workLoopButton.children.length, 1);
-  assert.notEqual(context.workLoopButton.children[0], icon);
+  assert.equal(context.workLoopButton.children[0], icon);
   assert.equal(statusRenders, 2);
   assert.equal(context.state.model, 'gpt-6-astra');
   assert.equal(context.state.reasoning, 'medium');
+  context.state.taskMode = 'direct';
+  runInNewContext('updateModeControls();', context);
+  assert.notEqual(context.workLoopButton.children[0], icon);
+  assert.notEqual(context.workLoopButton.children[0].children[0].attributes.d, icon.children[0].attributes.d);
 });
 
 test("chat panel restoration preserves composer settings and context usage", async function () {
@@ -304,7 +308,7 @@ test("webview persistence carries weekly usage through chat state restoration", 
   assert.equal(restoreChatState(serialized).weeklyUsedPercent, 12.5);
 });
 
-test("Content remaining is independent of Weekly availability", async function () {
+test("Ctx left is independent of Weekly availability", async function () {
   const script = await readFile(new URL("../../static/js/chat.js", import.meta.url), "utf8");
   const functions = script.slice(
     script.indexOf("  function contextStatusLabel()"),
@@ -315,12 +319,12 @@ test("Content remaining is independent of Weekly availability", async function (
   };
   assert.equal(
     runInNewContext(functions + "\ncontextStatusLabel();", context),
-    "Content remaining 79%"
+    "Ctx left 79%"
   );
   context.state.weeklyUsedPercent = undefined;
   assert.equal(
     runInNewContext("contextStatusLabel();", context),
-    "Content remaining 79%"
+    "Ctx left 79%"
   );
 });
 
@@ -913,6 +917,13 @@ test("Goal UI shows native completion separately and keeps reopen unavailable du
   runInNewContext("renderGoal();", context);
   assert.match(context.goalStatus.textContent, /Goal completed/);
   assert.equal(buttons[2].disabled, false);
+  context.nativeGoal = null;
+  runInNewContext("renderGoal();", context);
+  assert.equal(context.goalPanel.hidden, true);
+  context.goalError = "Unable to fetch Goal status";
+  runInNewContext("renderGoal();", context);
+  assert.equal(context.goalPanel.hidden, false);
+  assert.equal(context.goalStatus.textContent, context.goalError);
   context.state.role = "work";
   runInNewContext("renderGoal();", context);
   assert.equal(context.goalPanel.hidden, true);
@@ -1498,4 +1509,59 @@ test("Verification selection persists while the runtime wire remains direct", as
   client.capabilities = async () => ({ submit: { taskModes: ["direct"] }, send: { taskModes: ["work"] } });
   assert.deepEqual(await client.checkedExecution("submit", taskExecution("verification")), ["--task-mode", "direct"]);
   await assert.rejects(client.checkedExecution("send", taskExecution("verification")), /Update/);
+});
+
+test("cancellation summaries are shown once on restore and live delivery without hiding partial results", async () => {
+  const script = await readFile(new URL("../../static/js/chat.js", import.meta.url), "utf8");
+  const helpers = script.slice(script.indexOf("  function isDuplicateCancellation("), script.indexOf("  function appendNotice("));
+  const summary = "The run was cancelled.";
+  const notice = { type: "notice", level: "error", text: summary };
+  const final = { type: "assistant", phase: "final", text: summary, runId: "cancelled-one" };
+  const partial = { ...final, text: "Preserved partial result (completion unconfirmed):\nChanges made." };
+  const context = { events: [notice, final, partial] };
+  runInNewContext(helpers + "\nresult = collapseCancellationNotices(events);", context);
+  assert.deepEqual(Array.from(context.result), [notice, partial]);
+  for (const events of [
+    [notice, { ...final, phase: "commentary" }],
+    [notice, { type: "user", text: "next request" }, final],
+    [{ ...notice, runId: "other-run" }, final],
+    [{ ...notice, text: "Different error" }, final]
+  ]) {
+    context.events = events;
+    runInNewContext("result = collapseCancellationNotices(events);", context);
+    assert.deepEqual(Array.from(context.result), events);
+  }
+  const handler = script.slice(script.indexOf('      case "chat.assistant":'), script.indexOf('      case "run.state":'));
+  Object.assign(context, {
+    state: { timeline: [{ ...notice, text: summary + "\nprovider: diagnostic" }] },
+    message: { ...final, type: "chat.assistant" },
+    createId: () => "new", renderTimeline() {}, persist() {}
+  });
+  runInNewContext('switch (message.type) {\n' + handler + '\n}', context);
+  assert.equal(context.state.timeline.length, 1);
+  context.message = { ...partial, type: "chat.assistant" };
+  runInNewContext('switch (message.type) {\n' + handler + '\n}', context);
+  assert.equal(context.state.timeline.length, 2);
+  assert.equal(context.state.timeline[1].text, partial.text);
+});
+
+test("cancelled controller results emit one notice and preserve only meaningful partial text", async () => {
+  const { ChatSessionController } = await importTypeScript("src/modules/chat/session-controller.ts");
+  for (const resultText of ["", "The run was cancelled.", "Saved partial work"]) {
+    const texts = [], errors = [];
+    const runtime = {
+      async submit(agentId) { return { agentId, runId: "cancelled-run" }; },
+      async updates() { return { cursor: 0, updates: [] }; },
+      async status() { return { status: "cancelled" }; },
+      async result() { return { status: "cancelled", text: resultText }; }
+    };
+    const controller = new ChatSessionController(runtime, {
+      onBound() {}, onRunningChanged() {}, onProgress() {}, onActivity() {}, onUsage() {},
+      onAssistantText(text) { texts.push(text); }, onError(text) { errors.push(text); }
+    }, undefined, { pollIntervalMs: 0, maxPolls: 1 });
+    await controller.send("task", [], {});
+    assert.deepEqual(errors, ["The run was cancelled."]);
+    assert.equal(texts.length, resultText === "Saved partial work" ? 1 : 0);
+    if (texts.length) assert.match(texts[0], /Saved partial work/);
+  }
 });

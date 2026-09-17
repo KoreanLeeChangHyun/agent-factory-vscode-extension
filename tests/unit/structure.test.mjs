@@ -145,7 +145,7 @@ test("composer submits active-run input to the host queue and retains the empty-
   assert.match(chatScript, /state\.running && !hasComposerContent\(\)/);
   assert.match(chatScript, /"Add message to queue"/);
   assert.match(chatScript, /case "queue\.updated"/);
-  assert.match(chatScript, /queue: "Queued messages " \+ Math\.max/);
+  assert.match(chatScript, /queue: "Queue " \+ Math\.max/);
   assert.match(panelManager, /onQueueChanged: \(count\)/);
   assert.match(panelManager, /managed\.chatSendPreparation = sendPreparation\.then/);
 });
@@ -193,7 +193,7 @@ test("status bar includes active Work and Verification counts", function () {
   assert.match(agentClient, /last_token_usage/);
   assert.match(agentClient, /model_context_window/);
   assert.match(agentClient, /window_minutes !== 7 \* 24 \* 60/);
-  assert.match(chatScript, /agents: main \? state\.workUnitsKnown \? "Work " \+ state\.workUnits\.workActive \+ " · Verification " \+ state\.workUnits\.verificationActive/);
+  assert.match(chatScript, /agents: main \? state\.workUnitsKnown \? "Work " \+ state\.workUnits\.workActive \+ " · Verify " \+ state\.workUnits\.verificationActive/);
   assert.match(template, /id="agents-menu"[^>]*aria-label="Called work and verification agents"/);
   assert.match(chatScript, /type: "agents\.request"/);
   assert.match(chatScript, /type: "agent\.open", agentId: agent\.agentId/);
@@ -207,13 +207,15 @@ test("status bar includes active Work and Verification counts", function () {
   assert.match(agentClient, /"--verified-work-run-id"/);
 });
 
-test("composer selections remain sticky across turns and panel restoration", function () {
+test("composer settings persist and Goal is scoped to one submission", function () {
   assert.match(chatScript, /type: "composer\.settings"/);
   assert.match(chatScript, /saveComposerSettings\(\)/);
   assert.match(panelManager, /context\.globalState\.get\(COMPOSER_PREFERENCES_KEY\)/);
   assert.match(panelManager, /context\.globalState\.update\(COMPOSER_PREFERENCES_KEY/);
   assert.match(chatScript, /case "host\.initialize":[\s\S]*updateModeControls\(\);[\s\S]*renderTimeline\(\);/);
-  assert.doesNotMatch(chatScript, /if \(state\.goalMode\) \{[\s\S]*state\.goalMode = false/);
+  assert.doesNotMatch(template, /id="goal-objective"/);
+  assert.match(panelManager, /const goalObjective = goalMode \? text\.trim\(\) : undefined/);
+  assert.doesNotMatch(panelManager, /goalObjective: execution\.taskMode/);
   assert.match(chatScript, /model: state\.model,[\s\S]*reasoning: state\.reasoning,[\s\S]*fastMode: state\.fastMode,[\s\S]*goalMode: state\.goalMode/);
 });
 
@@ -291,7 +293,7 @@ test("recognized read commands use concise activity labels instead of Bash text"
 });
 
 test("adjacent reads of the same skill or run document collapse into one activity", function () {
-  assert.match(chatScript, /timeline: collapseAdjacentReads\(Array\.isArray\(saved\?\.timeline\)/);
+  assert.match(chatScript, /timeline: collapseAdjacentReads\(collapseCancellationNotices\(Array\.isArray\(saved\?\.timeline\)/);
   assert.match(chatScript, /normalizeSavedReadActivity\(savedEvent\)/);
   assert.match(chatScript, /event\?\.title === "Read run request"/);
   assert.match(chatScript, /return \{ \.\.\.event, title: "Read run result" \}/);

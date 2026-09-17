@@ -34,7 +34,6 @@
   const businessModeNames = { normal: "Normal", interview: "Interview", planning: "Planning", design: "Design" };
   const taskModeNames = { verification: "Verification", direct: "Direct", work: "Work", "plan-work": "Plan · Work", "work-verification": "Work · Verification", "plan-work-verification": "Plan · Work · Verification" };
   const goalPanel = document.getElementById("goal-panel");
-  const goalObjective = document.getElementById("goal-objective");
   const goalStatus = document.getElementById("goal-status");
   let nativeGoal = null;
   let goalError;
@@ -120,7 +119,7 @@
     }) : [],
     startedMessageIds: Array.isArray(saved?.startedMessageIds) ? saved.startedMessageIds : [],
     pendingRequests: Array.isArray(saved?.pendingRequests) ? saved.pendingRequests : [],
-    timeline: collapseAdjacentReads(Array.isArray(saved?.timeline) ? saved.timeline : []),
+    timeline: collapseAdjacentReads(collapseCancellationNotices(Array.isArray(saved?.timeline) ? saved.timeline : [])),
     statusItems: normalizeStatusItems(saved?.statusItems),
     projectName: typeof saved?.projectName === "string" ? saved.projectName : "",
     pendingDecisionRunId: undefined,
@@ -222,6 +221,8 @@
     }
   });
   attachButton.addEventListener("click", function () {
+    // Let the native picker return to the existing draft and selection.
+    prompt.focus({ preventScroll: true });
     vscode.postMessage({ type: "attachments.pick" });
   });
   modelButton.addEventListener("click", function () {
@@ -378,6 +379,9 @@
     event.preventDefault();
     dragDepth = 0;
     dropOverlay.hidden = true;
+    if (document.activeElement === document.body || document.activeElement === attachButton) {
+      prompt.focus({ preventScroll: true });
+    }
     addDroppedData(event.dataTransfer);
   });
 
@@ -439,8 +443,6 @@
       case "goal.updated":
         nativeGoal = message.goal || null;
         goalError = message.error;
-        if (nativeGoal) state.goalMode = true;
-        else if (!goalError) state.goalMode = false;
         renderGoal();
         updateModeControls();
         persist();
@@ -582,6 +584,7 @@
             return entry.type === "assistant" && entry.runId === message.runId && entry.text === message.text &&
               entry.phase === (message.phase === "commentary" ? "commentary" : "final");
           })) break;
+          if (isDuplicateCancellation(state.timeline.at(-1), { ...message, type: "assistant" })) break;
           state.timeline.push({ type: "assistant", id: createId(), text: message.text, runId: message.runId, phase: message.phase === "commentary" ? "commentary" : "final" });
           renderTimeline();
           persist();
@@ -679,7 +682,11 @@
   function submit() {
     const userText = prompt.value.trim();
     let text = userText;
-    if (!text && state.attachments.length === 0) return;
+    const goal = state.role === "main" && state.taskMode !== "verification" && currentCapabilities().goal === true && state.goalMode;
+    if (goal && (!text || text.length > 4000)) {
+      appendNotice("error", text ? "Shorten the chat message to 4,000 characters or turn off Goal." : "Enter a goal in the chat message or turn off Goal.");
+      return;
+    }
     if ((!text && state.attachments.length === 0) || !state.capabilities || !state.runtimeAvailable) {
       return;
     }
@@ -699,20 +706,17 @@
         model: currentCapabilities().model ? state.model || undefined : undefined,
         reasoningEffort: currentCapabilities().reasoning ? state.reasoning || undefined : undefined,
         fast: currentCapabilities().fast === true && state.fastMode,
-        goal: state.role === "main" && state.taskMode !== "verification" && currentCapabilities().goal === true && state.goalMode,
-        ...(state.role === "main" && state.taskMode !== "verification" && state.goalMode && goalObjective.value.trim() ? { goalObjective: goalObjective.value.trim() } : {})
+        goal,
+        ...(goal ? { goalObjective: text } : {})
       }
     };
-    if (message.execution.goal && !nativeGoal && !message.execution.goalObjective && text.length > 4000) {
-      appendNotice("error", "For long requests, enter a goal of up to 4,000 characters.");
-      return;
-    }
-    goalObjective.value = "";
     const submittedAttachments = state.attachments.map(function (attachment) {
       const { pending, ...submitted } = attachment;
       return submitted;
     });
     (state.pendingRequests ??= []).push({ ...message, attachments: submittedAttachments });
+    state.goalMode = false;
+    saveComposerSettings();
     state.draft = "";
     state.attachments = [];
     followLatest = true;
@@ -730,6 +734,23 @@
       return;
     }
     vscode.postMessage({ type: "run.cancel" });
+  }
+
+  function isDuplicateCancellation(previous, current) {
+    // Older hosts emitted both an error notice and a final cancellation summary.
+    return previous?.type === "notice" && previous.level === "error" &&
+      current?.type === "assistant" && current.phase !== "commentary" &&
+      current.text?.trim() === "The run was cancelled." &&
+      previous.text?.split("\n")[0].trim() === "The run was cancelled." &&
+      (!previous.runId || !current.runId || previous.runId === current.runId);
+  }
+
+  function collapseCancellationNotices(events) {
+    const retained = [];
+    for (const event of events) {
+      if (!isDuplicateCancellation(retained.at(-1), event)) retained.push(event);
+    }
+    return retained;
   }
 
   function appendNotice(level, text) {
@@ -2076,6 +2097,7 @@
       item.dataset.itemId = itemId;
       item.textContent = statusLabel(itemId);
       item.title = statusCatalog[itemId][1];
+      item.setAttribute("aria-description", statusCatalog[itemId][1]);
       item.setAttribute("aria-label", statusCatalog[itemId][0] + ": " + item.textContent + " · Move with Alt+Left/Right");
       if (itemId === "agents" && state.role === "main") {
         item.classList.add("work-unit-activity");
@@ -2313,7 +2335,17 @@
       });
       const name = document.createElement("span");
       name.textContent = statusCatalog[id][0];
-      label.append(checkbox, name);
+      const checkboxControl = document.createElement("span");
+      checkboxControl.className = "status-checkbox";
+      const check = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+      check.setAttribute("viewBox", "0 0 16 16");
+      check.setAttribute("aria-hidden", "true");
+      check.setAttribute("focusable", "false");
+      const checkPath = document.createElementNS("http://www.w3.org/2000/svg", "path");
+      checkPath.setAttribute("d", "m3 8 3 3 7-7");
+      check.append(checkPath);
+      checkboxControl.append(checkbox, check);
+      label.append(checkboxControl, name);
       label.title = statusCatalog[id][1];
       checkbox.setAttribute("aria-description", statusCatalog[id][1]);
       const preview = document.createElement("span");
@@ -2381,37 +2413,37 @@
 
   function statusLabel(itemId) {
     const main = state.role === "main";
-    const count = value => safeCountOrUndefined(value) === undefined ? "Unavailable" : value.toLocaleString("en-US");
-    const goalLabels = { active: "In progress", paused: "Paused", blocked: "Input required", usageLimited: "Usage limit", budgetLimited: "Goal budget limit", complete: "Completed" };
-    const executionLabels = { "cli-default": "CLI default", "workspace-write": "Workspace write", "danger-full-access": "Full access", bypass: "Full access · Bypass approvals", "read-only": "Read-only" };
+    const count = value => safeCountOrUndefined(value) === undefined ? "—" : value.toLocaleString("en-US");
+    const goalLabels = { active: "Active", paused: "Paused", blocked: "Awaiting input", usageLimited: "Usage limit", budgetLimited: "Budget limit", complete: "Done" };
+    const executionLabels = { "cli-default": "CLI default", "workspace-write": "Workspace", "danger-full-access": "Full access", bypass: "Full · Bypass", "read-only": "Read-only" };
     const supported = currentCapabilities();
     const labels = {
       agent: state.title,
-      status: state.pendingDecisionRunId ? "User decision required" : state.running ? "Running" : state.runtimeAvailable ? "Idle" : "Connection unavailable",
-      role: { main: "Main", work: "Work Agent", verification: "Verification Agent" }[state.role],
-      agents: main ? state.workUnitsKnown ? "Work " + state.workUnits.workActive + " · Verification " + state.workUnits.verificationActive : "Agent status unavailable" : "Agent status: Main only",
-      agentsTotal: main ? "Total agents " + (state.workUnitsKnown ? count(state.workUnits.totalCalled) : "Unavailable") : "Total agents: Main only",
+      status: state.pendingDecisionRunId ? "Awaiting input" : state.running ? "Running" : state.runtimeAvailable ? "Idle" : "Offline",
+      role: { main: "Main", work: "Work", verification: "Verify" }[state.role],
+      agents: main ? state.workUnitsKnown ? "Work " + state.workUnits.workActive + " · Verify " + state.workUnits.verificationActive : "Agents —" : "Agents: Main only",
+      agentsTotal: main ? "Calls " + (state.workUnitsKnown ? count(state.workUnits.totalCalled) : "—") : "Calls: Main only",
       project: state.projectName || "Project —",
       branch: state.branch || "—",
       context: contextStatusLabel(),
       contextUsed: contextUsedStatusLabel(),
       contextRemainingTokens: contextRemainingTokensLabel(),
       contextUsedPercent: contextUsedPercentLabel(),
-      contextWindow: "Content window " + (state.contextWindowTokens > 0 ? count(state.contextWindowTokens) : "Unavailable") + " tokens",
-      weekly: "Weekly usage " + (state.weeklyUsedPercent === undefined ? "Unavailable" : formatPercent(state.weeklyUsedPercent)),
-      weeklyRemaining: "Weekly remaining " + (state.weeklyUsedPercent === undefined ? "Unavailable" : formatPercent(100 - state.weeklyUsedPercent)),
+      contextWindow: "Ctx window " + (state.contextWindowTokens > 0 ? count(state.contextWindowTokens) : "—") + " tokens",
+      weekly: "Wk used " + (state.weeklyUsedPercent === undefined ? "—" : formatPercent(state.weeklyUsedPercent)),
+      weeklyRemaining: "Wk left " + (state.weeklyUsedPercent === undefined ? "—" : formatPercent(100 - state.weeklyUsedPercent)),
       elapsed: state.running && state.runStartedAt ? "Elapsed " + formatElapsed(Math.max(0, Date.now() - state.runStartedAt)) : "Elapsed —",
-      queue: "Queued messages " + Math.max(state.queueCount, (state.pendingRequests || []).length),
-      runtime: state.runtimeAvailable ? "Runtime connected" : "Runtime disconnected",
-      model: "Selected model " + (supported.model ? state.model || "Default" : "Support unknown"),
-      reasoning: "Selected reasoning " + (supported.reasoning ? state.reasoning || "Default" : "Support unknown"),
-      fast: "Fast " + (supported.fast ? state.fastMode ? "On" : "Off" : "Support unknown"),
-      task: main ? "Next task " + taskModeNames[state.taskMode] : "Task mode: Main only",
-      execution: "Permissions " + (executionLabels[state.executionMode] || "Unavailable"),
-      goal: !main ? "Goal: Main only" : goalError ? "Goal unavailable" : nativeGoal ? "Goal " + (goalLabels[nativeGoal.status] || "Unavailable") : "Goal " + (state.goalMode ? "On · Goal unknown" : "Off"),
-      goalTokens: "Goal " + (main && !goalError ? count(nativeGoal?.tokensUsed) : "Unavailable") + " tokens",
-      goalBudget: "Goal budget " + (main && !goalError ? count(nativeGoal?.tokenBudget) : "Unavailable") + " tokens",
-      goalTime: "Goal time " + (main && !goalError && safeCountOrUndefined(nativeGoal?.timeUsedSeconds) !== undefined ? formatElapsed(nativeGoal.timeUsedSeconds * 1000) : "Unavailable")
+      queue: "Queue " + Math.max(state.queueCount, (state.pendingRequests || []).length),
+      runtime: state.runtimeAvailable ? "Runtime online" : "Runtime offline",
+      model: "Model " + (supported.model ? state.model || "Default" : "Unknown"),
+      reasoning: "Reasoning " + (supported.reasoning ? state.reasoning || "Default" : "Unknown"),
+      fast: "Fast " + (supported.fast ? state.fastMode ? "On" : "Off" : "Unknown"),
+      task: main ? "Task " + taskModeNames[state.taskMode]?.replaceAll("Verification", "Verify") : "Task: Main only",
+      execution: "Perms " + (executionLabels[state.executionMode] || "—"),
+      goal: !main ? "Goal: Main only" : goalError ? "Goal —" : nativeGoal ? "Goal " + (goalLabels[nativeGoal.status] || "—") : "Goal " + (state.goalMode ? "On · Unknown" : "Off"),
+      goalTokens: "Goal used " + (main && !goalError ? count(nativeGoal?.tokensUsed) : "—") + " tokens",
+      goalBudget: "Goal budget " + (main && !goalError ? count(nativeGoal?.tokenBudget) : "—") + " tokens",
+      goalTime: "Goal time " + (main && !goalError && safeCountOrUndefined(nativeGoal?.timeUsedSeconds) !== undefined ? formatElapsed(nativeGoal.timeUsedSeconds * 1000) : "—")
     };
     return labels[itemId] || itemId;
   }
@@ -2466,7 +2498,6 @@
           state.reasoning = item.execution.reasoningEffort;
           state.fastMode = item.execution.fast;
           state.goalMode = item.execution.goal;
-          goalObjective.value = item.execution.goalObjective || "";
           renderAll();
           resizePrompt();
           persist();
@@ -2525,11 +2556,17 @@
   function updateModeControls() {
     updateExecutionControl();
     businessModeButton.parentElement.hidden = state.role !== "main";
-    businessModeButton.replaceChildren(createBusinessModeIcon(state.businessMode));
+    if (businessModeButton.dataset.mode !== state.businessMode) {
+      businessModeButton.replaceChildren(createBusinessModeIcon(state.businessMode));
+      businessModeButton.dataset.mode = state.businessMode;
+    }
     businessModeButton.title = "Workflow: " + businessModeNames[state.businessMode] + " · Select the workflow for the next message";
     businessModeButton.setAttribute("aria-label", businessModeButton.title);
     workLoopButton.parentElement.hidden = state.role !== "main";
-    workLoopButton.replaceChildren(createTaskModeIcon(state.taskMode));
+    if (workLoopButton.dataset.mode !== state.taskMode) {
+      workLoopButton.replaceChildren(createTaskModeIcon(state.taskMode));
+      workLoopButton.dataset.mode = state.taskMode;
+    }
     workLoopButton.title = "Task mode: " + taskModeNames[state.taskMode] + " · Select the mode for the next message";
     workLoopButton.setAttribute("aria-label", workLoopButton.title);
     const supported = currentCapabilities();
@@ -2551,11 +2588,11 @@
   }
 
   function renderGoal() {
-    goalPanel.hidden = state.role !== "main" || (!state.goalMode && !nativeGoal && !goalError);
+    goalPanel.hidden = state.role !== "main" || (!nativeGoal && !goalError);
     const labels = { active: "In progress", paused: "Paused", blocked: "Input required", usageLimited: "Usage limit", budgetLimited: "Goal budget limit", complete: "Goal completed" };
     goalStatus.textContent = goalError || (nativeGoal
       ? `${labels[nativeGoal.status] || nativeGoal.status} · ${nativeGoal.tokensUsed.toLocaleString("en-US")} tokens · ${nativeGoal.timeUsedSeconds}s\n${nativeGoal.objective}`
-      : "Enable Goal and send a message.");
+      : "");
     for (const button of goalPanel.querySelectorAll("[data-goal-action]")) {
       const action = button.dataset.goalAction;
       button.disabled = !state.agentId || (action !== "refresh" && !nativeGoal) || (["reopen"].includes(action) && state.running);
@@ -2603,7 +2640,11 @@
       checkPath.setAttribute("d", "m3 8 3 3 7-7");
       check.append(checkPath);
       const label = document.createElement("span");
-      label.textContent = setting === "business" ? businessModeNames[value] : setting === "task" ? taskModeNames[value] : setting === "execution" ? executionModeName(value) + " — " + executionModeExplanation(value) : value || "Default";
+      label.textContent = setting === "business" ? businessModeNames[value] : setting === "task" ? taskModeNames[value] : setting === "execution" ? executionModeName(value) : value || "Default";
+      if (setting === "execution") {
+        option.title = executionModeExplanation(value);
+        option.setAttribute("aria-description", option.title);
+      }
       if (setting === "business") {
         option.append(createBusinessModeIcon(value), label, check);
       } else if (setting === "task") {
@@ -2813,24 +2854,24 @@
   }
 
   function contextStatusLabel() {
-    if (state.contextUsedTokens === undefined || !(state.contextWindowTokens > 0)) return "Content remaining unavailable";
+    if (state.contextUsedTokens === undefined || !(state.contextWindowTokens > 0)) return "Ctx left —";
     const remaining = Math.max(0, state.contextWindowTokens - state.contextUsedTokens);
-    return "Content remaining " + formatPercent(remaining / state.contextWindowTokens * 100);
+    return "Ctx left " + formatPercent(remaining / state.contextWindowTokens * 100);
   }
 
   function contextUsedStatusLabel() {
-    return "Content tokens used " + (state.contextUsedTokens === undefined
-      ? "Unavailable" : state.contextUsedTokens.toLocaleString("en-US") + " tokens");
+    return "Ctx used " + (state.contextUsedTokens === undefined
+      ? "—" : state.contextUsedTokens.toLocaleString("en-US")) + " tokens";
   }
 
   function contextRemainingTokensLabel() {
-    if (state.contextUsedTokens === undefined || !(state.contextWindowTokens > 0)) return "Content tokens remaining unavailable";
-    return "Content tokens remaining " + Math.max(0, state.contextWindowTokens - state.contextUsedTokens).toLocaleString("en-US") + " tokens";
+    if (state.contextUsedTokens === undefined || !(state.contextWindowTokens > 0)) return "Ctx left — tokens";
+    return "Ctx left " + Math.max(0, state.contextWindowTokens - state.contextUsedTokens).toLocaleString("en-US") + " tokens";
   }
 
   function contextUsedPercentLabel() {
-    return "Content used " + (state.contextUsedTokens === undefined || !(state.contextWindowTokens > 0)
-      ? "Unavailable" : formatPercent(state.contextUsedTokens / state.contextWindowTokens * 100));
+    return "Ctx used " + (state.contextUsedTokens === undefined || !(state.contextWindowTokens > 0)
+      ? "—" : formatPercent(state.contextUsedTokens / state.contextWindowTokens * 100));
   }
 
   function formatPercent(value) {

@@ -9,18 +9,19 @@ const controls = script.slice(script.indexOf("  function updateSendButton()"), s
 
 function harness(overrides = {}, text = "오류 수정") {
   const sent = [];
+  const notices = [];
   const context = {
     state: { role: "main", taskMode: "work", attachments: [], timeline: [], capabilities: {}, runtimeAvailable: true, ...overrides },
     timeline: { scrollTop: 0, scrollHeight: 500 },
-    prompt: { value: text }, goalObjective: { value: "" }, nativeGoal: null,
+    prompt: { value: text }, nativeGoal: null,
     currentCapabilities: () => ({ model: true, reasoning: true, fast: true, goal: true }),
-    createId: () => "message-id", renderAll() {}, resizePrompt() {}, persist() {},
+    createId: () => "message-id", renderAll() {}, resizePrompt() {}, persist() {}, saveComposerSettings() {},
     summarizeChildAgents: () => ({ activeUnits: 0, workActive: 0, verificationActive: 0, totalCalled: 0 }),
-    appendNotice() {}, vscode: { postMessage: message => sent.push(message) },
+    appendNotice: (level, text) => notices.push({ level, text }), vscode: { postMessage: message => sent.push(message) },
     workLoopButton: {}, sendButton: {}
   };
   runInNewContext(submit + controls, context);
-  return { context, sent, run: code => runInNewContext(code, context) };
+  return { context, sent, notices, run: code => runInNewContext(code, context) };
 }
 
 test("mode submission preserves the draft, actual image reference and selected model", () => {
@@ -168,10 +169,97 @@ test("workflow selections snapshot queued user text independently of task route"
 
 test("Verification snapshots inspection selection and suppresses Goal continuation", () => {
   const { context, sent, run } = harness({ taskMode: "verification", goalMode: true });
-  context.goalObjective.value = "Old implementation goal";
+  context.nativeGoal = { objective: "Old implementation goal" };
   run("submit()");
   context.state.taskMode = "work";
   assert.equal(sent[0].execution.taskMode, "verification");
   assert.equal(sent[0].execution.goal, false);
   assert.equal(sent[0].execution.goalObjective, undefined);
+});
+
+
+test("Goal snapshots the current composer, replaces an existing objective and resets for the next request", () => {
+  for (const text of ["New goal", "x".repeat(4000)]) {
+    const { context, sent, run } = harness({ goalMode: true }, text);
+    context.nativeGoal = { objective: "Stale goal" };
+    run("submit()");
+    assert.equal(sent[0].execution.goal, true);
+    assert.equal(sent[0].execution.goalObjective, text);
+    assert.equal(context.state.pendingRequests[0].execution.goalObjective, text);
+    assert.equal(context.state.goalMode, false);
+    context.prompt.value = "Follow-up";
+    run("submit()");
+    assert.equal(sent[1].execution.goal, false);
+    assert.equal(sent[1].execution.goalObjective, undefined);
+  }
+});
+
+test("invalid Goal drafts are preserved with an actionable error even with an existing goal", () => {
+  for (const text of ["", "   ", "x".repeat(4001)]) {
+    for (const attachments of [[], [{ id: "image", kind: "image", name: "image.png" }]]) {
+      const { context, sent, notices, run } = harness({ goalMode: true, attachments }, text);
+      context.nativeGoal = { objective: "Stale goal" };
+      run("submit()");
+      assert.equal(sent.length, 0);
+      assert.equal(context.prompt.value, text);
+      assert.equal(context.state.attachments, attachments);
+      assert.equal(context.state.goalMode, true);
+      assert.equal(notices[0].level, "error");
+      assert.match(notices[0].text, /chat message.*turn off Goal/);
+    }
+  }
+});
+
+test("Goal is excluded for child roles, Verification and unsupported runtimes", () => {
+  for (const state of [{ role: "work" }, { role: "verification" }, { taskMode: "verification" }, { unsupported: true }]) {
+    const { context, sent, run } = harness({ goalMode: true, ...state });
+    if (state.unsupported) context.currentCapabilities = () => ({ goal: false });
+    run("submit()");
+    assert.equal(sent[0].execution.goal, false);
+    assert.equal(sent[0].execution.goalObjective, undefined);
+  }
+});
+
+test("Goal click only toggles the next request and native updates do not re-enable it", () => {
+  const { context, sent, run } = harness();
+  const handler = script.match(/goalModeButton\.addEventListener\("click", function \(\) \{([\s\S]*?)\n  \}\);/)[1];
+  context.toggleMode = key => { context.state[key] = !context.state[key]; };
+  run(handler);
+  assert.equal(context.state.goalMode, true);
+  assert.equal(sent.length, 0);
+  assert.equal(context.prompt.value, "오류 수정");
+  run("submit()");
+  context.message = { goal: { objective: "Current goal" } };
+  context.renderGoal = () => {};
+  context.updateModeControls = () => {};
+  run(script.slice(script.indexOf('      case "goal.updated":') + '      case "goal.updated":'.length, script.indexOf('      case "capabilities.updated":')).replace(/break;\s*$/, ""));
+  assert.equal(context.state.goalMode, false);
+});
+
+test("host derives the objective from chat text and rejects invalid goals before dispatch", async () => {
+  const { transform } = await import("esbuild");
+  const hostSource = await readFile(new URL("../../src/infrastructure/vscode/chat-panel-manager.ts", import.meta.url), "utf8");
+  const method = hostSource.slice(hostSource.indexOf("  private async sendChat("), hostSource.indexOf("  private async mutateImages("));
+  const { code } = await transform(method.replace("private async sendChat(", "async function sendChat("), { loader: "ts" });
+  const sendChat = runInNewContext(code + "\nsendChat;", { taskExecution: () => ({}) });
+  const calls = [];
+  const host = { async ensureController() {}, async post() {} };
+  const managed = {
+    state: { role: "main", panelId: "panel" },
+    controller: { async send(text, attachments, execution, onStarted) { calls.push(execution); onStarted(); } }
+  };
+  const send = (text, execution) => sendChat.call(host, managed, text, [], execution, "id", "workspace-write", false);
+  await send(" Current composer goal ", { goal: true, goalObjective: "Stale hidden objective" });
+  assert.equal(calls[0].goalObjective, "Current composer goal");
+  for (const text of ["", "x".repeat(4001)]) {
+    await assert.rejects(send(text, { goal: true, goalObjective: "Stale hidden objective" }), /1–4,000/);
+  }
+  assert.equal(calls.length, 1);
+  await send("Inspect", { goal: true, taskMode: "verification", goalObjective: "Stale" });
+  assert.equal(calls[1].goalMode, false);
+  assert.equal(calls[1].goalObjective, undefined);
+  managed.state.role = "work";
+  await send("Child message", { goal: true, goalObjective: "Stale" });
+  assert.equal(calls[2].goalMode, false);
+  assert.equal(calls[2].goalObjective, undefined);
 });

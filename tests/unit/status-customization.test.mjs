@@ -68,11 +68,11 @@ test("catalog checkboxes toggle fields and keyboard buttons persist ordered choi
   const { run, nodes, context, sent } = harness();
   run('renderStatusCatalog()');
   const row = id => nodes.get('status-catalog').children.find(node => node.dataset.itemId === id);
-  const checkbox = row('branch').children[0].children[0];
+  const checkbox = row('branch').children[0].children[0].children[0];
   checkbox.checked = false;
   checkbox.handlers.change();
   assert.deepEqual(clean(context.state.statusItems), ['project', 'queue']);
-  const weekly = row('weekly').children[0].children[0];
+  const weekly = row('weekly').children[0].children[0].children[0];
   weekly.checked = true;
   weekly.handlers.change();
   row('weekly').children[1].children[0].handlers.click();
@@ -102,21 +102,37 @@ test("native drag inserts before/after target and ignores external drags", () =>
 
 test("live labels distinguish absent values, zero usage, selected model and elapsed time", () => {
   const { run, context } = harness();
-  assert.match(run('statusLabel("weekly")'), /Unavailable/);
+  assert.match(run('statusLabel("weekly")'), /—/);
   context.state.weeklyUsedPercent = 0;
   assert.match(run('statusLabel("weekly")'), /0%/);
   context.state.model = 'chosen-model';
-  assert.equal(run('statusLabel("model")'), 'Selected model chosen-model');
+  assert.equal(run('statusLabel("model")'), 'Model chosen-model');
   assert.equal(run('statusLabel("elapsed")'), 'Elapsed —');
   context.state.running = true; context.state.runStartedAt = Date.now() - 5000;
   assert.doesNotMatch(run('statusLabel("elapsed")'), /—/);
   context.state.contextWindowTokens = 0; context.state.contextUsedTokens = 0;
-  assert.match(run('statusLabel("context")'), /Content remaining unavailable/);
+  assert.match(run('statusLabel("context")'), /Ctx left —/);
   context.nativeGoal = { tokensUsed: 0, timeUsedSeconds: 0, status: 'active' };
-  assert.equal(run('statusLabel("goalTokens")'), 'Goal 0 tokens');
-  assert.match(run('statusLabel("goalBudget")'), /Unavailable/);
+  assert.equal(run('statusLabel("goalTokens")'), 'Goal used 0 tokens');
+  assert.match(run('statusLabel("goalBudget")'), /—/);
   context.state.workUnitsKnown = false;
-  assert.match(run('statusLabel("agents")'), /unavailable/);
+  assert.match(run('statusLabel("agents")'), /—/);
+  context.state.running = false;
+  assert.equal(run('statusLabel("status")'), 'Idle');
+  context.state.running = true;
+  assert.equal(run('statusLabel("status")'), 'Running');
+  context.state.pendingDecisionRunId = 'pending-run';
+  assert.equal(run('statusLabel("status")'), 'Awaiting input');
+  context.state.pendingDecisionRunId = undefined;
+  context.state.running = false;
+  context.state.runtimeAvailable = false;
+  assert.equal(run('statusLabel("status")'), 'Offline');
+  context.currentCapabilities = () => ({});
+  assert.equal(run('statusLabel("model")'), 'Model Unknown');
+  context.state.title = 'my-long-agent-name';
+  context.state.projectName = 'my-long-project-name';
+  assert.equal(run('statusLabel("agent")'), context.state.title);
+  assert.equal(run('statusLabel("project")'), context.state.projectName);
 });
 
 test("Content and Weekly used/remaining items are independently selectable and calculated", () => {
@@ -124,32 +140,32 @@ test("Content and Weekly used/remaining items are independently selectable and c
   run('setStatusItems(["contextUsed", "context", "weekly", "weeklyRemaining"])');
   assert.deepEqual(sent.at(-1).items, ['contextUsed', 'context', 'weekly', 'weeklyRemaining']);
   Object.assign(context.state, { contextUsedTokens: 54_264, contextWindowTokens: 258_400, weeklyUsedPercent: 12.5 });
-  assert.equal(run('statusLabel("contextUsed")'), 'Content tokens used 54,264 tokens');
-  assert.equal(run('statusLabel("context")'), 'Content remaining 79%');
-  assert.equal(run('statusLabel("weekly")'), 'Weekly usage 12.5%');
-  assert.equal(run('statusLabel("weeklyRemaining")'), 'Weekly remaining 87.5%');
+  assert.equal(run('statusLabel("contextUsed")'), 'Ctx used 54,264 tokens');
+  assert.equal(run('statusLabel("context")'), 'Ctx left 79%');
+  assert.equal(run('statusLabel("weekly")'), 'Wk used 12.5%');
+  assert.equal(run('statusLabel("weeklyRemaining")'), 'Wk left 87.5%');
   context.state.contextUsedTokens = undefined;
-  assert.equal(run('statusLabel("contextUsed")'), 'Content tokens used Unavailable');
-  assert.equal(run('statusLabel("context")'), 'Content remaining unavailable');
-  assert.equal(run('statusLabel("weeklyRemaining")'), 'Weekly remaining 87.5%');
+  assert.equal(run('statusLabel("contextUsed")'), 'Ctx used — tokens');
+  assert.equal(run('statusLabel("context")'), 'Ctx left —');
+  assert.equal(run('statusLabel("weeklyRemaining")'), 'Wk left 87.5%');
   context.state.weeklyUsedPercent = undefined;
-  assert.equal(run('statusLabel("weeklyRemaining")'), 'Weekly remaining Unavailable');
+  assert.equal(run('statusLabel("weeklyRemaining")'), 'Wk left —');
   context.state.contextUsedTokens = 0;
-  assert.equal(run('statusLabel("contextUsed")'), 'Content tokens used 0 tokens');
-  assert.equal(run('statusLabel("context")'), 'Content remaining 100%');
+  assert.equal(run('statusLabel("contextUsed")'), 'Ctx used 0 tokens');
+  assert.equal(run('statusLabel("context")'), 'Ctx left 100%');
   for (const used of [0, 100]) {
     context.state.weeklyUsedPercent = used;
-    assert.equal(run('statusLabel("weekly")'), `Weekly usage ${used}%`);
-    assert.equal(run('statusLabel("weeklyRemaining")'), `Weekly remaining ${100 - used}%`);
+    assert.equal(run('statusLabel("weekly")'), `Wk used ${used}%`);
+    assert.equal(run('statusLabel("weeklyRemaining")'), `Wk left ${100 - used}%`);
   }
   context.state.contextUsedTokens = 300_000;
-  assert.equal(run('statusLabel("context")'), 'Content remaining 0%');
-  assert.equal(run('statusLabel("contextUsed")'), 'Content tokens used 300,000 tokens');
+  assert.equal(run('statusLabel("context")'), 'Ctx left 0%');
+  assert.equal(run('statusLabel("contextUsed")'), 'Ctx used 300,000 tokens');
   for (const window of [0, undefined]) {
     context.state.contextWindowTokens = window;
-    assert.equal(run('statusLabel("context")'), 'Content remaining unavailable');
-    assert.equal(run('statusLabel("contextUsed")'), 'Content tokens used 300,000 tokens');
-    assert.equal(run('statusLabel("contextWindow")'), 'Content window Unavailable tokens');
+    assert.equal(run('statusLabel("context")'), 'Ctx left —');
+    assert.equal(run('statusLabel("contextUsed")'), 'Ctx used 300,000 tokens');
+    assert.equal(run('statusLabel("contextWindow")'), 'Ctx window — tokens');
   }
   context.state.branch = 'feature/status';
   assert.equal(run('statusLabel("branch")'), 'feature/status');
@@ -164,26 +180,26 @@ test("Content percentage and token counts remain separate through selection and 
   run('setStatusItems(items)');
   assert.deepEqual(sent.at(-1).items, items);
   Object.assign(context.state, { contextUsedTokens: 25, contextWindowTokens: 100 });
-  assert.equal(run('statusLabel("context")'), 'Content remaining 75%');
-  assert.equal(run('statusLabel("contextUsed")'), 'Content tokens used 25 tokens');
-  assert.equal(run('statusLabel("contextRemainingTokens")'), 'Content tokens remaining 75 tokens');
-  assert.equal(run('statusLabel("contextUsedPercent")'), 'Content used 25%');
+  assert.equal(run('statusLabel("context")'), 'Ctx left 75%');
+  assert.equal(run('statusLabel("contextUsed")'), 'Ctx used 25 tokens');
+  assert.equal(run('statusLabel("contextRemainingTokens")'), 'Ctx left 75 tokens');
+  assert.equal(run('statusLabel("contextUsedPercent")'), 'Ctx used 25%');
   context.state.contextUsedTokens = 150;
-  assert.equal(run('statusLabel("contextRemainingTokens")'), 'Content tokens remaining 0 tokens');
-  assert.equal(run('statusLabel("contextUsedPercent")'), 'Content used 150%');
+  assert.equal(run('statusLabel("contextRemainingTokens")'), 'Ctx left 0 tokens');
+  assert.equal(run('statusLabel("contextUsedPercent")'), 'Ctx used 150%');
   context.state.contextUsedTokens = 0;
-  assert.equal(run('statusLabel("contextRemainingTokens")'), 'Content tokens remaining 100 tokens');
-  assert.equal(run('statusLabel("contextUsedPercent")'), 'Content used 0%');
+  assert.equal(run('statusLabel("contextRemainingTokens")'), 'Ctx left 100 tokens');
+  assert.equal(run('statusLabel("contextUsedPercent")'), 'Ctx used 0%');
   for (const window of [undefined, 0]) {
     context.state.contextWindowTokens = window;
-    assert.equal(run('statusLabel("contextRemainingTokens")'), 'Content tokens remaining unavailable');
-    assert.equal(run('statusLabel("contextUsedPercent")'), 'Content used Unavailable');
-    assert.equal(run('statusLabel("contextUsed")'), 'Content tokens used 0 tokens');
+    assert.equal(run('statusLabel("contextRemainingTokens")'), 'Ctx left — tokens');
+    assert.equal(run('statusLabel("contextUsedPercent")'), 'Ctx used —');
+    assert.equal(run('statusLabel("contextUsed")'), 'Ctx used 0 tokens');
   }
   context.state.contextWindowTokens = 100;
   context.state.contextUsedTokens = undefined;
-  assert.equal(run('statusLabel("contextRemainingTokens")'), 'Content tokens remaining unavailable');
-  assert.equal(run('statusLabel("contextUsedPercent")'), 'Content used Unavailable');
+  assert.equal(run('statusLabel("contextRemainingTokens")'), 'Ctx left — tokens');
+  assert.equal(run('statusLabel("contextUsedPercent")'), 'Ctx used —');
 });
 
 test("usage updates preserve unknown Content values and independent Weekly data", () => {
@@ -192,14 +208,14 @@ test("usage updates preserve unknown Content values and independent Weekly data"
   const update = section('      case "context.usage":', '      case "run.activity":');
   context.message = { type: 'context.usage', usedTokens: -1, contextWindowTokens: 100, weeklyUsedPercent: 25 };
   run('switch (message.type) {\n' + update + '\n}');
-  assert.equal(run('statusLabel("context")'), 'Content remaining unavailable');
-  assert.equal(run('statusLabel("contextUsed")'), 'Content tokens used Unavailable');
-  assert.equal(run('statusLabel("weeklyRemaining")'), 'Weekly remaining 75%');
+  assert.equal(run('statusLabel("context")'), 'Ctx left —');
+  assert.equal(run('statusLabel("contextUsed")'), 'Ctx used — tokens');
+  assert.equal(run('statusLabel("weeklyRemaining")'), 'Wk left 75%');
   context.message = { type: 'context.usage', usedTokens: 0, contextWindowTokens: 100 };
   run('switch (message.type) {\n' + update + '\n}');
-  assert.equal(run('statusLabel("context")'), 'Content remaining 100%');
-  assert.equal(run('statusLabel("weekly")'), 'Weekly usage Unavailable');
-  assert.equal(run('statusLabel("weeklyRemaining")'), 'Weekly remaining Unavailable');
+  assert.equal(run('statusLabel("context")'), 'Ctx left 100%');
+  assert.equal(run('statusLabel("weekly")'), 'Wk used —');
+  assert.equal(run('statusLabel("weeklyRemaining")'), 'Wk left —');
 });
 
 async function load(relative) {
@@ -229,6 +245,7 @@ test("host initialization replaces stale restored selection, including an intent
   Object.assign(context, {
     message: { type: 'host.initialize', statusItems: [], runtimeAvailable: true, running: false, role: 'main', model: '', taskMode: 'work', queueCount: 0 },
     normalizeModel: value => value || '', normalizeSettingValue: value => value,
+    businessModeNames: { normal: "Normal" },
     settingOptions: { reasoning: [] }, safePercentOrUndefined: () => undefined,
     safeCount: value => Number.isInteger(value) ? value : 0,
     updateModeControls() {}, renderTimeline() {}, updateRunControls() {}

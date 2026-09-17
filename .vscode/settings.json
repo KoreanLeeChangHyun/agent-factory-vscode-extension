@@ -4,7 +4,6 @@
         "branch",
         "context",
         "contextRemainingTokens",
-        "weeklyRemaining",
-        "status"
+        "weeklyRemaining"
     ]
 }

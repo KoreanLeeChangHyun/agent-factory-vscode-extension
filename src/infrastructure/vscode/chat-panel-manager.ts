@@ -125,7 +125,7 @@ export class ChatPanelManager implements vscode.Disposable {
     const existing = [...this.panels.values()].find(panel => panel.state.panelId === state.panelId ||
       (state.agentId && panel.state.agentId === state.agentId));
     if (existing) { existing.panel.reveal(undefined, true); return; }
-    const panel = vscode.window.createWebviewPanel(this.viewType, state.title, vscode.ViewColumn.Active, this.webviewOptions());
+    const panel = vscode.window.createWebviewPanel(this.viewType, state.title, vscode.ViewColumn.Active, this.webviewOptions(state.panelId));
     await this.attach(panel, { ...this.composerPreferences(), ...state });
   }
 
@@ -154,7 +154,7 @@ export class ChatPanelManager implements vscode.Disposable {
       this.viewType,
       state.title,
       vscode.ViewColumn.Active,
-      this.webviewOptions()
+      this.webviewOptions(state.panelId)
     );
     await this.attach(panel, state);
   }
@@ -232,7 +232,7 @@ export class ChatPanelManager implements vscode.Disposable {
   private async attach(panel: vscode.WebviewPanel, state: ChatPanelState): Promise<void> {
     panel.title = state.title;
     panel.iconPath = vscode.Uri.joinPath(this.context.extensionUri, "static", "images", "agent-factory.png");
-    panel.webview.options = this.webviewOptions();
+    panel.webview.options = this.webviewOptions(state.panelId);
 
     const subscriptions: vscode.Disposable[] = [];
     const managed: ManagedPanel = {
@@ -666,7 +666,7 @@ export class ChatPanelManager implements vscode.Disposable {
         this.viewType,
         state.title,
         vscode.ViewColumn.Active,
-        this.webviewOptions()
+        this.webviewOptions(state.panelId)
       );
       await this.attach(panel, state);
     } catch (error) {
@@ -881,6 +881,11 @@ export class ChatPanelManager implements vscode.Disposable {
       await managed.sessionTransition;
       if (managed.disposed) return;
     }
+    const goalMode = (managed.state.role ?? "main") === "main" && execution.taskMode !== "verification" && execution.goal;
+    const goalObjective = goalMode ? text.trim() : undefined;
+    if (goalMode && (!goalObjective || goalObjective.length > 4000)) {
+      throw new Error("Enter a chat message of 1–4,000 characters or turn off Goal.");
+    }
     await this.ensureController(managed);
     if (!managed.controller) throw new Error("Unable to connect to the runtime. Queued messages have been preserved.");
     const preparedAttachments = await Promise.all(attachments.map(async (attachment) => {
@@ -899,8 +904,8 @@ export class ChatPanelManager implements vscode.Disposable {
       model: execution.model,
       reasoningEffort: execution.reasoningEffort,
       fast: execution.fast,
-      goalMode: execution.taskMode !== "verification" && execution.goal,
-      goalObjective: execution.taskMode === "verification" ? undefined : execution.goalObjective,
+      goalMode,
+      goalObjective,
       ...((managed.state.role ?? "main") !== "main" ? { actor: "human" as const } : {}),
       ...(managed.state.verifiedWorkRunId ? { verifiedWorkRunId: managed.state.verifiedWorkRunId } : {})
     }, () => {
@@ -1052,9 +1057,6 @@ export class ChatPanelManager implements vscode.Disposable {
       const mediaType = imageMediaType(uri.fsPath);
       if (!mediaType) continue;
       const info = await vscode.workspace.fs.stat(uri);
-      const directory = vscode.Uri.joinPath(uri, "..");
-      const roots = managed.panel.webview.options.localResourceRoots ?? this.templates.localResourceRoots;
-      managed.panel.webview.options = { ...managed.panel.webview.options, localResourceRoots: uniqueUris([...roots, directory]) };
       attachments.push({ id: reference.id, name: reference.name, kind: "image", uri: uri.toString(), previewUri: managed.panel.webview.asWebviewUri(uri).toString(), mediaType, size: info.size, target: reference.target });
       if (reference.target === "composer") managed.imageAttachments.set(reference.id, info.size);
     }
@@ -1070,8 +1072,6 @@ export class ChatPanelManager implements vscode.Disposable {
     await vscode.workspace.fs.createDirectory(directory);
     const uri = vscode.Uri.joinPath(directory, `${id}${suffix}`);
     await writeNewImageAttachment(uri.fsPath, content);
-    const roots = panel.webview.options.localResourceRoots ?? this.templates.localResourceRoots;
-    panel.webview.options = { ...panel.webview.options, localResourceRoots: uniqueUris([...roots, directory]) };
     return { id, name, kind: "image", uri: uri.toString(), previewUri: panel.webview.asWebviewUri(uri).toString(), mediaType, size: content.byteLength };
   }
 
@@ -1140,11 +1140,17 @@ export class ChatPanelManager implements vscode.Disposable {
     await this.statusItemsWrite;
   }
 
-  private webviewOptions(): vscode.WebviewPanelOptions & vscode.WebviewOptions {
+  private webviewOptions(panelId: string): vscode.WebviewPanelOptions & vscode.WebviewOptions {
+    assertAttachmentScopeId(panelId, "panel");
+    // Register the panel image tree before HTML loads. Changing Webview options
+    // during image preparation can reload the document and discard live input.
     return {
       enableScripts: true,
       retainContextWhenHidden: true,
-      localResourceRoots: [...this.templates.localResourceRoots]
+      localResourceRoots: uniqueUris([
+        ...this.templates.localResourceRoots,
+        vscode.Uri.joinPath(this.context.globalStorageUri, "chat-images", panelId)
+      ])
     };
   }
 
