@@ -322,7 +322,8 @@ test('workflow guidance follows each queued snapshot and Normal preserves ordina
   assert.match(calls[1].text, /Interview text[\s\S]*message only: interview[\s\S]*Design text[\s\S]*message only: design/);
   assert.doesNotMatch(calls[1].text, /message only: planning/);
   assert.match(calls[1].text, /docs\/processed\//);
-  assert.match(calls[1].text, /index\.html/);
+  assert.match(calls[1].text, /docs\/skills\//);
+  assert.doesNotMatch(calls[1].text, /docs\/specification\/|index\.html|Write BOTH/);
   assert.match(calls[1].text, /SKILL\.md/);
 });
 
