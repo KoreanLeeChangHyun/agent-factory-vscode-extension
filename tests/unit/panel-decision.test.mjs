@@ -98,6 +98,7 @@ test("host forwards chosen execution mode for new and existing Main sessions", a
   const manager = new module.exports.ChatPanelManager({}, {}, () => [], async () => { throw new Error("not used"); });
   const managed = {
     state: { role: "main" },
+    panel: { webview: { async postMessage() { return true; } } },
     controller: { async send(_text, _attachments, execution) { calls.push(execution); } }
   };
   const execution = { fast: false, goal: false };
