@@ -362,12 +362,13 @@ export class ChatPanelManager implements vscode.Disposable {
           running: managed.controller?.running ?? Boolean(managed.state.agentId && connection.available),
           statusItems: this.statusItems(),
           model: managed.state.model,
+          agentModels: managed.state.agentModels,
           reasoning: managed.state.reasoning,
-          businessMode: managed.state.businessMode ?? "normal",
-          taskMode: managed.state.taskMode ?? "work",
+          businessMode: "normal",
+          taskMode: "direct",
           fastMode: managed.state.fastMode === true,
-          goalMode: managed.state.goalMode === true,
-          workLoopMode: managed.state.workLoopMode === true,
+          goalMode: false,
+          workLoopMode: false,
           contextUsedTokens: managed.state.contextUsedTokens,
           contextWindowTokens: managed.state.contextWindowTokens,
           weeklyUsedPercent: managed.state.weeklyUsedPercent,
@@ -440,13 +441,14 @@ export class ChatPanelManager implements vscode.Disposable {
       case "composer.settings":
         managed.state = {
           ...managed.state,
-          businessMode: message.businessMode ?? managed.state.businessMode,
-          taskMode: message.taskMode ?? managed.state.taskMode,
+          businessMode: "normal",
+          taskMode: "direct",
           model: message.model,
+          agentModels: message.agentModels,
           reasoning: message.reasoning,
           fastMode: message.fastMode,
-          goalMode: message.goalMode,
-          workLoopMode: message.workLoopMode ?? managed.state.workLoopMode
+          goalMode: false,
+          workLoopMode: false
         };
         await this.saveComposerPreferences(managed.state);
         return;
@@ -686,14 +688,17 @@ export class ChatPanelManager implements vscode.Disposable {
   }
 
   private async saveComposerPreferences(state: ChatPanelState): Promise<void> {
+    // A child chat override must not replace the Main composer defaults.
+    if (state.role && state.role !== "main") return;
     await this.context.globalState.update(COMPOSER_PREFERENCES_KEY, {
       model: state.model,
+      agentModels: state.agentModels,
       reasoning: state.reasoning,
-      businessMode: state.businessMode ?? "normal",
-      taskMode: state.taskMode ?? "work",
+      businessMode: "normal",
+      taskMode: "direct",
       fastMode: state.fastMode === true,
-      goalMode: state.goalMode === true,
-      workLoopMode: state.workLoopMode === true
+      goalMode: false,
+      workLoopMode: false
     } satisfies ComposerPreferences);
   }
 
@@ -842,8 +847,8 @@ export class ChatPanelManager implements vscode.Disposable {
         onDecision: (runId) => {
           void this.post(managed.panel, { type: "decision.pending", runId });
         },
-        onHumanDecision: (text) => {
-          void this.post(managed.panel, { type: "chat.human-decision", text });
+        onHumanDecision: (text, submission) => {
+          void this.post(managed.panel, { type: "chat.human-decision", text, submission });
         },
         onProgress: (progressText) => {
           void this.post(managed.panel, { type: "run.progress", text: progressText });
@@ -902,16 +907,17 @@ export class ChatPanelManager implements vscode.Disposable {
       ...((managed.state.role ?? "main") === "main" && (!managed.state.agentId || executionModeExplicit) ? { executionMode } : {}),
       ...((managed.state.role ?? "main") === "main" ? { ...taskExecution(execution.taskMode), businessMode: execution.businessMode ?? "normal" } : {}),
       model: execution.model,
+      agentModels: execution.agentModels,
       reasoningEffort: execution.reasoningEffort,
       fast: execution.fast,
       goalMode,
       goalObjective,
       ...((managed.state.role ?? "main") !== "main" ? { actor: "human" as const } : {}),
       ...(managed.state.verifiedWorkRunId ? { verifiedWorkRunId: managed.state.verifiedWorkRunId } : {})
-    }, () => {
+    }, (submission) => {
       started = true;
       managed.pendingMessageIds?.delete(id);
-      const event: Extract<HostMessage, { type: "chat.started" }> = { type: "chat.started", id, text, attachments };
+      const event: Extract<HostMessage, { type: "chat.started" }> = { type: "chat.started", id, text, attachments, submission };
       (managed.startedMessages ??= []).push(event);
       managed.startedMessages = managed.startedMessages.slice(-200);
       void this.post(managed.panel, event);
@@ -939,8 +945,10 @@ export class ChatPanelManager implements vscode.Disposable {
     const panel = managed.panel;
     const uris = await vscode.window.showOpenDialog({
       canSelectFiles: true,
-      canSelectFolders: true,
+      // Windows/Linux cannot select files and folders together: that opens a folder picker.
+      canSelectFolders: false,
       canSelectMany: true,
+      title: "Attach files to chat",
       openLabel: "Attach to chat"
     });
     if (!uris?.length) {

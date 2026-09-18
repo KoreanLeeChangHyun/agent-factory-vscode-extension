@@ -12,8 +12,9 @@ function harness(overrides = {}, text = "오류 수정") {
   const notices = [];
   const context = {
     state: { role: "main", taskMode: "work", attachments: [], timeline: [], capabilities: {}, runtimeAvailable: true, ...overrides },
+    taskModeNames: Object.fromEntries(["direct", "work", "plan", "verification", "plan-work", "work-verification", "plan-work-verification"].map(value => [value, value])),
     timeline: { scrollTop: 0, scrollHeight: 500 },
-    prompt: { value: text }, nativeGoal: null,
+    inputFeedback: {}, prompt: { value: text, focus() {} }, nativeGoal: null,
     currentCapabilities: () => ({ model: true, reasoning: true, fast: true, goal: true }),
     createId: () => "message-id", renderAll() {}, resizePrompt() {}, persist() {}, saveComposerSettings() {},
     summarizeChildAgents: () => ({ activeUnits: 0, workActive: 0, verificationActive: 0, totalCalled: 0 }),
@@ -30,7 +31,7 @@ test("mode submission preserves the draft, actual image reference and selected m
   run("submit()");
   assert.equal(sent.length, 1);
   assert.equal(sent[0].text, "오류 수정");
-  assert.equal(sent[0].execution.taskMode, "work");
+  assert.equal(sent[0].execution.taskMode, "direct");
   assert.deepEqual(JSON.parse(JSON.stringify(sent[0].attachments[0])), { id: "image-one", name: "input.png", kind: "image", uri: "file:///host/input.png", mediaType: "image/png", size: 32 });
   assert.equal(sent[0].execution.model, "chosen-model");
   assert.equal(context.state.pendingRequests[0].text, "오류 수정");
@@ -54,7 +55,7 @@ test("running sessions retain active UI identity and keep submitted drafts outsi
   run("submit()");
   assert.equal(sent.length, 1);
   assert.equal(sent[0].text, "오류 수정");
-  assert.equal(sent[0].execution.taskMode, "work");
+  assert.equal(sent[0].execution.taskMode, "direct");
   assert.equal(context.state.timeline.length, 0);
   assert.equal(context.state.pendingRequests.length, 1);
   assert.equal(context.state.runStartedAt, 17);
@@ -83,21 +84,21 @@ test("disabled mode and child sessions preserve the original request", () => {
 });
 
 test("mode click opens choices without submitting or granting approval", () => {
-  const handler = script.match(/workLoopButton\.addEventListener\("click", function \(\) \{([\s\S]*?)\n  \}\);/)[1];
+  const handler = script.match(/submissionButton\.addEventListener\("click", function \(\) \{([^}]+)\}\);/)[1];
   const calls = [];
   runInNewContext(handler, { openSetting: setting => calls.push(setting) });
-  assert.deepEqual(calls, ["task"]);
+  assert.deepEqual(calls, ["submission"]);
 });
 
-test("five modes snapshot each queued submission independently", () => {
+test("six actions snapshot each queued submission independently", () => {
   const { context, sent, run } = harness({ running: true });
-  for (const taskMode of ["direct", "work", "plan-work", "work-verification", "plan-work-verification"]) {
+  for (const taskMode of ["work", "plan", "verification", "plan-work", "work-verification", "plan-work-verification"]) {
     context.state.taskMode = taskMode;
     context.prompt.value = "동일 요청";
-    run("submit()");
+    run(`submit(${JSON.stringify(taskMode)})`);
   }
   context.state.taskMode = "direct";
-  assert.deepEqual(sent.map(message => message.execution.taskMode), ["direct", "work", "plan-work", "work-verification", "plan-work-verification"]);
+  assert.deepEqual(sent.map(message => message.execution.taskMode), ["work", "plan", "verification", "plan-work", "work-verification", "plan-work-verification"]);
   assert.ok(sent.every(message => message.text === "동일 요청"));
 });
 
@@ -107,50 +108,51 @@ test("attachment-only loop requests show attachment names without injected instr
   assert.equal(context.state.timeline.length, 0);
   assert.equal(context.state.pendingRequests[0].attachments[0].name, "input.txt");
   assert.equal(sent[0].text, "");
-  assert.equal(sent[0].execution.taskMode, "work");
+  assert.equal(sent[0].execution.taskMode, "direct");
 });
 
-test("mode menu displays only choices and persists a supported next-task selection during execution", () => {
+test("action menu sends supported drafts without persisting a selection during execution", () => {
   function element() {
     return { children: [], dataset: {}, handlers: {}, classList: { add() {} },
       setAttribute() {}, append(...children) { this.children.push(...children); },
       addEventListener(name, handler) { this.handlers[name] = handler; },
       replaceChildren() { this.children = []; } };
   }
-  const names = { verification: "Verification", direct: "Direct", work: "Work", "plan-work": "Plan · Work", "work-verification": "Work · Verification", "plan-work-verification": "Plan · Work · Verification" };
+  const names = { verification: "Verification", plan: "Plan", work: "Work", "plan-work": "Plan · Work", "work-verification": "Work · Verification", "plan-work-verification": "Plan · Work · Verification" };
   const menu = element();
   const calls = [];
   const context = {
-    state: { taskMode: "work", running: true }, taskModeNames: names,
-    settingOptions: { task: Object.keys(names) }, menu,
+    state: { taskMode: "work", running: true, runtimeAvailable: true }, taskModeNames: names,
+    settingOptions: { task: Object.keys(names), business: [] }, menu,
     document: { createElement: element, createElementNS: element },
-    currentCapabilities: () => ({ taskModes: ["direct", "work", "work-verification"] }),
+    currentCapabilities: () => ({ taskModes: ["verification", "work", "work-verification"] }),
+    submit(action) { calls.push(action); },
     handleSettingMenuKeydown() {}, updateModeControls() {}, renderStatusBar() {},
     persist() { calls.push("persist"); }, saveComposerSettings() { calls.push("save"); }, closeSettingMenu() {}
   };
-  const renderer = script.slice(script.indexOf("  function renderSettingMenu("), script.indexOf("  function handleSettingMenuKeydown("));
+  const renderer = script.slice(script.indexOf("  function renderSubmissionMenu("), script.indexOf("  function handleSettingMenuKeydown("));
   runInNewContext(renderer + '\nrenderSettingMenu("task", menu);', context);
-  const options = menu.children.filter(item => item.dataset.value);
-  assert.equal(menu.children.length, options.length);
+  const options = menu.children[2].children.filter(item => item.dataset.action);
   assert.equal(options.length, 6);
   assert.equal(options[0].disabled, false);
-  assert.equal(options.find(item => item.dataset.value === "plan-work").disabled, true);
-  assert.equal(options.find(item => item.dataset.value === "plan-work-verification").disabled, true);
-  assert.equal(options[1].disabled, false);
+  assert.equal(options.find(item => item.dataset.action === "plan-work").disabled, true);
+  assert.equal(options.find(item => item.dataset.action === "plan-work-verification").disabled, true);
+  assert.equal(options[1].disabled, true);
   options[0].handlers.click();
-  assert.equal(context.state.taskMode, "verification");
+  assert.equal(context.state.taskMode, "work");
   assert.equal(context.state.running, true);
-  assert.deepEqual(calls, ["persist", "save"]);
+  assert.deepEqual(calls, ["verification"]);
   context.currentCapabilities = () => ({ taskModes: ["direct", "work", "plan-work"] });
   runInNewContext('renderSettingMenu("task", menu);', context);
-  const planWork = menu.children.find(item => item.dataset.value === "plan-work");
+  const planWork = menu.children[2].children.find(item => item.dataset.action === "plan-work");
   assert.equal(planWork.disabled, false);
   planWork.handlers.click();
-  assert.equal(context.state.taskMode, "plan-work");
+  assert.equal(context.state.taskMode, "work");
+  assert.deepEqual(calls, ["verification", "plan-work"]);
   assert.equal(context.state.running, true);
   context.currentCapabilities = () => ({ taskModes: ["work"] });
   runInNewContext('renderSettingMenu("task", menu);', context);
-  assert.equal(menu.children.find(item => item.dataset.value === "verification").disabled, true);
+  assert.equal(menu.children[2].children.find(item => item.dataset.action === "verification").disabled, true);
 });
 
 
@@ -159,18 +161,18 @@ test("workflow selections snapshot queued user text independently of task route"
   for (const businessMode of ["interview", "planning", "design", "normal"]) {
     context.state.businessMode = businessMode;
     context.prompt.value = "Original request";
-    run("submit()");
+    run(`submit("direct", "${businessMode}")`);
   }
   context.state.businessMode = "design";
   assert.deepEqual(sent.map(message => message.execution.businessMode), ["interview", "planning", "design", "normal"]);
-  assert.ok(sent.every(message => message.text === "Original request" && message.execution.taskMode === "work"));
+  assert.ok(sent.every(message => message.text === "Original request" && message.execution.taskMode === "direct"));
 });
 
 
 test("Verification snapshots inspection selection and suppresses Goal continuation", () => {
   const { context, sent, run } = harness({ taskMode: "verification", goalMode: true });
   context.nativeGoal = { objective: "Old implementation goal" };
-  run("submit()");
+  run('submit("verification")');
   context.state.taskMode = "work";
   assert.equal(sent[0].execution.taskMode, "verification");
   assert.equal(sent[0].execution.goal, false);
@@ -182,7 +184,7 @@ test("Goal snapshots the current composer, replaces an existing objective and re
   for (const text of ["New goal", "x".repeat(4000)]) {
     const { context, sent, run } = harness({ goalMode: true }, text);
     context.nativeGoal = { objective: "Stale goal" };
-    run("submit()");
+    run('submit("direct", "normal", true)');
     assert.equal(sent[0].execution.goal, true);
     assert.equal(sent[0].execution.goalObjective, text);
     assert.equal(context.state.pendingRequests[0].execution.goalObjective, text);
@@ -199,13 +201,13 @@ test("invalid Goal drafts are preserved with an actionable error even with an ex
     for (const attachments of [[], [{ id: "image", kind: "image", name: "image.png" }]]) {
       const { context, sent, notices, run } = harness({ goalMode: true, attachments }, text);
       context.nativeGoal = { objective: "Stale goal" };
-      run("submit()");
+      run('submit("direct", "normal", true)');
       assert.equal(sent.length, 0);
       assert.equal(context.prompt.value, text);
       assert.equal(context.state.attachments, attachments);
       assert.equal(context.state.goalMode, true);
-      assert.equal(notices[0].level, "error");
-      assert.match(notices[0].text, /chat message.*turn off Goal/);
+      assert.equal(context.inputFeedback.hidden, false);
+      assert.match(context.inputFeedback.textContent, /goal|4,000|target/);
     }
   }
 });
@@ -214,21 +216,21 @@ test("Goal is excluded for child roles, Verification and unsupported runtimes", 
   for (const state of [{ role: "work" }, { role: "verification" }, { taskMode: "verification" }, { unsupported: true }]) {
     const { context, sent, run } = harness({ goalMode: true, ...state });
     if (state.unsupported) context.currentCapabilities = () => ({ goal: false });
-    run("submit()");
+    run(state.taskMode === "verification" ? 'submit("verification")' : "submit()");
     assert.equal(sent[0].execution.goal, false);
     assert.equal(sent[0].execution.goalObjective, undefined);
   }
 });
 
-test("Goal click only toggles the next request and native updates do not re-enable it", () => {
+test("Goal click submits immediately and native updates do not re-enable it", () => {
   const { context, sent, run } = harness();
-  const handler = script.match(/goalModeButton\.addEventListener\("click", function \(\) \{([\s\S]*?)\n  \}\);/)[1];
+  const handler = 'submit("direct", "normal", true);';
   context.toggleMode = key => { context.state[key] = !context.state[key]; };
   run(handler);
-  assert.equal(context.state.goalMode, true);
-  assert.equal(sent.length, 0);
-  assert.equal(context.prompt.value, "오류 수정");
-  run("submit()");
+  assert.equal(context.state.goalMode, false);
+  assert.equal(sent.length, 1);
+  assert.equal(sent[0].execution.goal, true);
+  assert.equal(context.prompt.value, "");
   context.message = { goal: { objective: "Current goal" } };
   context.renderGoal = () => {};
   context.updateModeControls = () => {};

@@ -47,14 +47,15 @@ test('queue promotes only accepted requests and batches snapshots and active ide
   assert.deepEqual(cancelled, []);
   terminal.resolve(); await tick();
   assert.deepEqual(promoted, ['first']);
-  const fourth = controller.send('fourth', [], {}, () => promoted.push('fourth'));
-  assert.equal(controller.queueLength, 1);
+  const fourth = controller.send('fourth', [], { executionMode: 'bypass' }, () => promoted.push('fourth'));
+  assert.equal(controller.queueLength, 2);
   acceptance.resolve(); await Promise.all([first, second, third, fourth]);
   assert.deepEqual(promoted, ['first', 'second', 'third', 'fourth']);
   assert.equal(calls.length, 3);
-  assert.match(calls[1].text, /대기 메시지 2 시작 ---\nthird/);
-  assert.equal(calls[2].text, 'fourth');
-  assert.equal(calls[1].options.goalMode, false);
+  assert.match(calls[1].text, /^second\n/);
+  assert.match(calls[2].text, /third/);
+  assert.match(calls[2].text, /fourth/);
+  assert.equal(calls[1].options.goalMode, true);
   assert.equal(calls[1].options.model, 'original');
   assert.equal(calls[1].options.taskMode, 'work-verification');
   assert.equal(calls[1].options.executionMode, 'workspace-write');
@@ -133,12 +134,25 @@ test('explicit stop targets only the current run and preserves queued requests',
 test('webview acceptance replay promotes exactly once and preserves queued image previews', async () => {
   const script = await readFile(new URL('../../static/js/chat.js', import.meta.url), 'utf8');
   const handler = script.slice(script.indexOf('      case "chat.started":'), script.indexOf('      case "queue.updated":'));
+  const submissionHelper = script.slice(script.indexOf('  function submissionFromExecution('), script.indexOf('  function renderSubmission('));
   const context = {
-    state: { pendingRequests: [{ id: 'one', attachments: [{ name: 'input.png', previewUri: 'safe-preview' }] }], timeline: [] },
+    state: { pendingRequests: [{ id: 'one', execution: { taskMode: 'plan-work', businessMode: 'design', goal: false }, attachments: [{ name: 'input.png', previewUri: 'safe-preview' }] }], timeline: [] },
     message: { type: 'chat.started', id: 'one', text: 'request', attachments: [] },
     summarizeChildAgents: () => ({}), renderAll() {}, persist() {}
   };
-  for (let i = 0; i < 2; i++) runInNewContext(`switch (message.type) { ${handler} }`, context);
+  const replay = () => runInNewContext(`${submissionHelper}
+switch (message.type) { ${handler} }`, context);
+  replay();
+  assert.equal(context.state.timeline[0].submission.taskMode, 'plan-work');
+  assert.equal(context.state.timeline[0].submission.businessMode, 'design');
+  assert.equal(context.state.timeline[0].submission.goal, false);
+  assert.equal(context.state.timeline[0].submission.guidance, undefined);
+  const submission = { taskMode: 'plan-work', businessMode: 'design', goal: false, guidance: 'Actual dispatched guidance' };
+  context.message.submission = submission;
+  replay();
+  replay();
+  assert.deepEqual(context.state.timeline[0].submission, submission);
+  assert.equal(context.state.timeline[0].text, 'request');
   assert.equal(context.state.timeline.length, 1);
   assert.equal(context.state.timeline[0].attachments[0].previewUri, 'safe-preview');
   assert.equal(context.state.pendingRequests.length, 0);
@@ -432,4 +446,99 @@ test('controller forwards the composer objective independently of workflow and a
     assert.notEqual(calls[0].text, calls[0].execution.goalObjective);
     controller.dispose();
   }
+});
+
+
+test('all message actions retain queue identity and cannot merge across routes', async () => {
+  const terminal = deferred(), calls = [];
+  const controller = new ChatSessionController(runtime({
+    async send(agentId, text, execution) { calls.push({ text, execution }); return { agentId, runId: text }; },
+    async status(_agentId, runId) { if (runId === 'holding') await terminal.promise; return { status: 'completed' }; }
+  }), events(), 'main-existing', { pollIntervalMs: 0 });
+  const holding = controller.send('holding', [], {});
+  await tick();
+  const actions = ['work', 'plan', 'verification', 'plan-work', 'work-verification', 'plan-work-verification', 'direct'];
+  const pending = actions.map(taskMode => controller.send(taskMode, [], { taskMode }));
+  terminal.resolve();
+  await Promise.all([holding, ...pending]);
+  assert.deepEqual(calls.slice(1).map(call => call.execution.taskMode), actions);
+  assert.deepEqual(calls.slice(1).map(call => call.text), actions);
+});
+
+test('delegated role settings stay separate across queued dispatches and reach Main guidance', async () => {
+  const calls = [], terminal = deferred();
+  const controller = new ChatSessionController(runtime({
+    async send(agentId, text, options) { calls.push({ text, options }); return { agentId, runId: String(calls.length) }; },
+    async status(_agentId, runId) { if (runId === '1') await terminal.promise; return { status: 'completed' }; }
+  }), events(), 'main-existing', { pollIntervalMs: 0 });
+  const first = controller.send('active', [], {});
+  await tick();
+  const one = { work: { model: 'worker-one', reasoningEffort: 'high' } };
+  const two = { verification: { model: 'review-two', reasoningEffort: 'low' } };
+  const second = controller.send('second', [], { taskMode: 'work', agentModels: one });
+  const third = controller.send('third', [], { taskMode: 'work', agentModels: two });
+  terminal.resolve();
+  await Promise.all([first, second, third]);
+  assert.equal(calls.length, 3);
+  assert.match(calls[1].text, /worker-one/);
+  assert.doesNotMatch(calls[1].text, /review-two/);
+  assert.match(calls[2].text, /review-two/);
+  assert.match(calls[1].text, /--work-reasoning-effort/);
+});
+
+
+test('queued one-shot goals stay separate from ordinary sends and different goals', async () => {
+  const terminal = deferred(), calls = [];
+  const controller = new ChatSessionController(runtime({
+    async send(agentId, text, options) { calls.push({ text, options }); return { agentId, runId: calls.length === 1 ? 'active' : text }; },
+    async status(_agentId, runId) { if (runId === 'active') await terminal.promise; return { status: 'completed' }; }
+  }), events(), 'main-existing', { pollIntervalMs: 0 });
+  const active = controller.send('active', [], {}); await tick();
+  const first = controller.send('goal one', [], { goalMode: true, goalObjective: 'one' });
+  const second = controller.send('goal two', [], { goalMode: true, goalObjective: 'two' });
+  const normal = controller.send('ordinary', [], { goalMode: false });
+  terminal.resolve(); await Promise.all([active, first, second, normal]);
+  assert.deepEqual(calls.map(call => call.text), ['active', 'goal one', 'goal two', 'ordinary']);
+  assert.equal(calls[1].options.goalObjective, 'one');
+  assert.equal(calls[2].options.goalObjective, 'two');
+  assert.equal(calls[1].options.goalMode, true);
+  assert.equal(calls[2].options.goalMode, true);
+  assert.equal(calls[3].options.goalMode, false);
+  assert.equal(calls[3].options.goalObjective, undefined);
+});
+
+
+test('accepted submission captures exact guidance and original per-message intent across a queued batch', async () => {
+  const terminal = deferred(), calls = [], accepted = [];
+  const controller = new ChatSessionController(runtime({
+    async send(agentId, text) { calls.push(text); return { agentId, runId: calls.length === 1 ? 'first' : 'batch' }; },
+    async status(_agentId, runId) { if (runId === 'first') await terminal.promise; return { status: 'completed' }; }
+  }), events(), 'main-existing', { pollIntervalMs: 0 });
+  const first = controller.send('ordinary', [], {}, value => accepted.push(value));
+  await tick();
+  const options = { taskMode: 'plan-work', businessMode: 'interview' };
+  const second = controller.send('Original interview', [{ id: 'file', kind: 'file', name: 'notes.md', uri: 'file:///tmp/notes.md' }], options, value => accepted.push(value));
+  const third = controller.send('Original design', [], { taskMode: 'plan-work', businessMode: 'design' }, value => accepted.push(value));
+  options.businessMode = 'normal';
+  terminal.resolve();
+  await Promise.all([first, second, third]);
+  assert.deepEqual(accepted[0], { taskMode: 'direct', businessMode: 'normal', goal: false, guidance: '' });
+  assert.equal(accepted[1].businessMode, 'interview');
+  assert.equal(accepted[2].businessMode, 'design');
+  assert.equal(accepted[1].taskMode, 'plan-work');
+  for (const submission of accepted.slice(1)) assert.ok(calls[1].includes(submission.guidance));
+  assert.equal(calls[1].split('file:///tmp/notes.md').length - 1, 1);
+  assert.equal(calls[1].split('[Workflow guidance for this message only:').length - 1, 2);
+});
+
+test('single dispatch acknowledges exact application suffix and effective Goal/Verification metadata', async () => {
+  const calls = [], accepted = [];
+  const controller = new ChatSessionController(runtime({
+    async send(agentId, text) { calls.push(text); return { agentId, runId: 'run' }; }
+  }), events(), 'main-existing', { pollIntervalMs: 0 });
+  await controller.send('  Original goal  ', [], { goalMode: true, goalObjective: 'Original goal', businessMode: 'planning', agentModels: { work: { model: 'test-model' } } }, value => accepted.push(value));
+  assert.equal(calls[0], '  Original goal  ' + accepted[0].guidance);
+  assert.equal(accepted[0].goal, true);
+  await controller.send('Inspect', [], { taskMode: 'verification', businessMode: 'design', goalMode: true }, value => accepted.push(value));
+  assert.deepEqual(accepted[1], { taskMode: 'verification', businessMode: 'normal', goal: false, guidance: '' });
 });

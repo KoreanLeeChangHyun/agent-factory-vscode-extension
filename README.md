@@ -7,10 +7,18 @@ Use Agent Factory Main Agent sessions in VS Code editor tabs.
 - Stream conversations, resume sessions, and follow Work and Verification activity.
 - Organize chats into workspace-local groups.
 - Attach files and images; view Markdown, command output, and diffs.
-- Select task modes, permissions, Fast/Goal controls, and status bar information.
+- Enter/send always runs directly through Main, including after restoring old saved modes.
+- Send the current draft with one of six one-message actions: Work, Plan, Verification,
+  Plan · Work, Work · Verification, or Plan · Work · Verification. Actions do not persist.
+- Plan only returns a plan using actual Work Plan collaboration mode. Standalone
+  Verification dispatches a managed verifier for the explicit target, otherwise prior
+  completed work in this chat; Main asks if no target is available.
+- Workflow choices immediately submit the current draft once; ordinary sends use Normal.
+- Goal immediately submits the current draft as a goal and sits before Fast. Fast remains a persistent toggle.
+- Permissions and attachments remain available.
 - **Plan · Work** runs actual Codex Plan then implementation in the same Work
   session, followed by Main checks without separate Verification. It requires
-  runtime support; queued requests keep their selected mode.
+  runtime support; queued inputs retain their action and different actions never merge.
 
 ## Setup
 
@@ -35,7 +43,7 @@ codex plugin add agent-factory@agent-factory
 ### Companion plugin requirement
 
 - The plugin must be installed and enabled with the identical semantic base version.
-  Extension `1.0.10` accepts plugin `1.0.10+codex.<token>`.
+  Extension `1.0.11` accepts plugin `1.0.11+codex.<token>`.
 - An already compatible installed plugin requires only a local installed-list check.
 - If the plugin is missing, disabled or mismatched, activation registers the
   official `agent-factory` marketplace from the source above when absent, then

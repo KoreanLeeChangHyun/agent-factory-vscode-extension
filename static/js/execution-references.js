@@ -64,26 +64,58 @@
     return tokens;
   }
 
-  function managedCommand(command, output, children) {
-    if (typeof command !== "string" || /(^|[^<])<<[^<]/.test(command) || command.includes("`")) return undefined;
-    const tokens = shellTokens(command);
-    const candidates = [];
-    for (let index = 0; index < tokens.length - 2; index += 1) {
-      if (!/^(?:[^\s]*\/)?python(?:3(?:\.\d+)?)?$/.test(tokens[index])) continue;
-      if (index && !["\0;", "\0|", "\0&", "\0(", "do", "then"].includes(tokens[index - 1])) continue;
-      const script = /(?:^|\/)skills\/agent\/scripts\/(exec|loop)\.py$/.exec(tokens[index + 1]);
+  // Inspect executable positions only; never evaluate shell text or expand variables.
+  function shellCommands(source, depth = 0) {
+    if (typeof source !== "string" || depth > 3 || source.includes("<<") || source.includes("`")) return [];
+    const commands = [], segments = [[]];
+    for (const token of shellTokens(source)) {
+      if (token.startsWith("\0")) segments.push([]);
+      else segments[segments.length - 1].push(token);
+    }
+    for (let words of segments) {
+      while (words.length && (/^[A-Za-z_][A-Za-z0-9_]*=/.test(words[0]) || ["do", "then", "command", "exec"].includes(words[0]))) words = words.slice(1);
+      if (/^(?:.*\/)?env$/.test(words[0] || "")) {
+        words = words.slice(1);
+        while (words.length && (words[0] === "--" || words[0] === "-i" || /^[A-Za-z_][A-Za-z0-9_]*=/.test(words[0]))) words = words.slice(1);
+      }
+      if (/^(?:.*\/)?(?:bash|sh|zsh)$/.test(words[0] || "") && /^-[a-z]*c[a-z]*$/.test(words[1] || "")) {
+        commands.push(...shellCommands(words[2], depth + 1));
+      } else if (words.length) commands.push(words);
+    }
+    return commands;
+  }
+
+  function scriptInvocations(command) {
+    const invocations = [];
+    for (const words of shellCommands(command)) {
+      let index = 0;
+      if (/^(?:.*\/)?python(?:3(?:\.\d+)?)?$/.test(words[0])) {
+        index = 1;
+        while (["-u", "-B", "-I", "-E", "-s", "-S", "--"].includes(words[index])) index += 1;
+      }
+      const script = /(?:^|\/)skills\/(agent|convention|document)\/scripts\/([^/]+\.py)$/.exec(words[index] || "");
       if (!script) continue;
-      const action = tokens[index + 2];
+      invocations.push({ skill: script[1], script: script[2], path: words[index], action: words[index + 1] || "", args: words.slice(index + 2) });
+    }
+    return invocations;
+  }
+
+  function managedCommand(command, output, children) {
+    const candidates = [];
+    for (const invocation of scriptInvocations(command)) {
+      const script = /^(exec|loop)\.py$/.exec(invocation.script);
+      if (invocation.skill !== "agent" || !script) continue;
+      const action = invocation.action;
       if (!(script[1] === "exec" ? ["submit", "send", "status", "result", "updates", "cancel"] : ["start", "status", "reconcile", "recover-receipt", "skip"]).includes(action)) continue;
-      const args = [];
-      for (let cursor = index + 3; cursor < tokens.length && !["\0;", "\0|", "\0&", "\0(", "\0)"].includes(tokens[cursor]); cursor += 1) args.push(tokens[cursor]);
+      const args = invocation.args;
       const options = new Map();
       for (let cursor = 0; cursor < args.length; cursor += 1) {
         const arg = args[cursor];
         if (!arg.startsWith("--")) continue;
         const equal = arg.indexOf("=");
         if (equal >= 0) options.set(arg.slice(0, equal), arg.slice(equal + 1));
-        else options.set(arg, args[++cursor]);
+        else if (args[cursor + 1] !== undefined && !args[cursor + 1].startsWith("--")) options.set(arg, args[++cursor]);
+        else options.set(arg, undefined);
       }
       const option = name => options.get(name);
       const agentId = option(script[1] === "loop" ? "--work-agent" : "--agent");
@@ -103,30 +135,24 @@
           taskMode = run.taskMode || taskMode;
         }
       } catch { /* Command output remains available as raw evidence. */ }
-      candidates.push({ ...(["direct", "work", "plan-work", "work-verification", "plan-work-verification"].includes(taskMode) ? { taskMode } : {}), agentId, role: ["work", "verification"].includes(role) ? role : undefined, runId, observedStatus, action, kind: script[1] });
+      candidates.push({ ...(["direct", "work", "plan", "verification", "plan-work", "work-verification", "plan-work-verification"].includes(taskMode) ? { taskMode } : {}), agentId, role: ["work", "verification"].includes(role) ? role : undefined, runId, observedStatus, action, kind: script[1] });
     }
     return candidates.length === 1 ? candidates[0] : undefined;
   }
 
   function skillDocuments(command) {
-    if (typeof command !== "string" || command.includes("`") || command.includes("<<")) return [];
-    const tokens = shellTokens(command), documents = new Map();
-    let reading = false;
-    for (let index = 0; index < tokens.length; index += 1) {
-      const token = tokens[index];
-      if (token.startsWith("\0")) { reading = false; continue; }
-      if (index === 0 || tokens[index - 1].startsWith("\0")) {
-        reading = /^(?:.*\/)?(?:cat|head|tail|sed|awk)$/.test(token);
-        continue;
+    const documents = new Map();
+    for (const words of shellCommands(command)) {
+      if (!/^(?:.*\/)?(?:cat|head|tail|sed|awk|less|more)$/.test(words[0])) continue;
+      for (const token of words.slice(1)) {
+        const match = /(?:^|\/)skills\/(?:\.system\/)?([^/]+)\/(SKILL\.md|(?:references|assets|prompt)\/.+\.md)$/.exec(token);
+        if (!match || /[\n\r]/.test(token)) continue;
+        const plugin = /(?:^|\/)plugins\/cache\/[^/]+\/([^/]+)\/[^/]+\/skills\//.exec(token);
+        documents.set(token, { skill: plugin ? plugin[1] + ":" + match[1] : match[1], document: match[2], path: token });
       }
-      if (!reading) continue;
-      const match = /(?:^|\/)skills\/(?:\.system\/)?([^/]+)\/(SKILL\.md|references\/.+\.md)$/.exec(token);
-      if (!match) continue;
-      const plugin = /(?:^|\/)plugins\/cache\/[^/]+\/([^/]+)\/[^/]+\/skills\//.exec(token);
-      documents.set(token, { skill: plugin ? plugin[1] + ":" + match[1] : match[1], document: match[2], path: token });
     }
     return [...documents.values()];
   }
 
-  globalThis.agentFactoryExecutionReferences = Object.freeze({ extract, managedCommand, skillDocuments });
+  globalThis.agentFactoryExecutionReferences = Object.freeze({ extract, managedCommand, skillDocuments, scriptInvocations });
 })();

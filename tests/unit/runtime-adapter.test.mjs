@@ -208,36 +208,26 @@ test("composer shows only supported controls across draft and bound sessions", a
   const context = {
     document: { createElementNS: element },
     renderStatusBar() { statusRenders++; },
-    state: { businessMode: 'normal', taskMode: 'work', capabilities: { submit: { model: true }, send: {} }, model: 'gpt-6-astra', reasoning: 'medium', fastMode: true, goalMode: true },
+    modelMenu: { querySelector() { return null; } }, submissionButton: button(),
+    state: { role: 'main', businessMode: 'normal', taskMode: 'work', capabilities: { submit: { model: true }, send: {} }, model: 'gpt-6-astra', reasoning: 'medium', fastMode: true, goalMode: true },
     modelButton: button(), reasoningButton: button(), fastModeButton: button(), goalModeButton: button(), workLoopButton: button(),
     taskModeNames: { work: "Work" }, businessModeNames: { normal: "Normal" }, businessModeButton: button(),
     executionModeButton: button(), executionModeLabel: {}, modelLabel: {}, reasoningLabel: {}, openSettingId: undefined,
     goalPanel: { querySelectorAll() { return []; } }, goalStatus: {}, nativeGoal: null, goalError: undefined
   };
   runInNewContext(functions + iconFunction + '\nupdateModeControls();', context);
-  assert.equal(context.workLoopButton.children.length, 1);
-  const icon = context.workLoopButton.children[0];
-  assert.equal(icon.namespaceURI, 'http://www.w3.org/2000/svg');
-  assert.equal(icon.localName, 'svg');
-  assert.equal(icon.children[0].localName, 'path');
-  assert.ok(icon.children[0].attributes.d);
   assert.equal(statusRenders, 1);
   assert.equal(context.modelButton.parentElement.hidden, false);
-  assert.equal(context.reasoningButton.parentElement.hidden, true);
+  assert.equal(context.submissionButton.hidden, false);
   assert.equal(context.fastModeButton.hidden, true);
-  assert.equal(context.goalModeButton.hidden, true);
   context.state.agentId = 'bound-session';
   runInNewContext('updateModeControls();', context);
-  assert.equal(context.modelButton.parentElement.hidden, true);
-  assert.equal(context.workLoopButton.children.length, 1);
-  assert.equal(context.workLoopButton.children[0], icon);
+  assert.equal(context.modelButton.parentElement.hidden, false);
   assert.equal(statusRenders, 2);
   assert.equal(context.state.model, 'gpt-6-astra');
-  assert.equal(context.state.reasoning, 'medium');
-  context.state.taskMode = 'direct';
+  context.state.role = 'work';
   runInNewContext('updateModeControls();', context);
-  assert.notEqual(context.workLoopButton.children[0], icon);
-  assert.notEqual(context.workLoopButton.children[0].children[0].attributes.d, icon.children[0].attributes.d);
+  assert.equal(context.submissionButton.hidden, true);
 });
 
 test("chat panel restoration preserves composer settings and context usage", async function () {
@@ -259,9 +249,9 @@ test("chat panel restoration preserves composer settings and context usage", asy
     model: "gpt-5.6-terra",
     reasoning: "high",
     fastMode: true,
-    goalMode: true,
-    workLoopMode: true,
-    taskMode: "work-verification",
+    goalMode: false,
+    workLoopMode: false,
+    taskMode: "direct",
     businessMode: "normal",
     contextUsedTokens: 39_300,
     contextWindowTokens: 1_050_000,
@@ -1455,10 +1445,10 @@ test("task mode protocol rejects unknown routes and preserves valid snapshots", 
     assert.equal(parseClientMessage({ ...message, execution: { ...message.execution, taskMode: "plan-agent" } }), undefined);
   }
   const { restoreChatState } = await importTypeScript("src/modules/chat/chat-state.ts");
-  assert.equal(restoreChatState({}).taskMode, "work");
-  assert.equal(restoreChatState({ taskMode: "plan-work" }).taskMode, "plan-work");
+  assert.equal(restoreChatState({}).taskMode, "direct");
+  assert.equal(restoreChatState({ taskMode: "plan-work" }).taskMode, "direct");
   assert.equal(restoreChatState({ taskMode: "direct", workLoopMode: true }).taskMode, "direct");
-  assert.equal(restoreChatState({ taskMode: "invalid" }).taskMode, "work");
+  assert.equal(restoreChatState({ taskMode: "invalid" }).taskMode, "direct");
 });
 
 test("mode capability negotiation rejects old runtimes and forwards supported flags", async () => {
@@ -1486,10 +1476,10 @@ test("workflow protocol and preferences preserve valid independent selections", 
     assert.equal(sent.execution.taskMode, "work");
     assert.equal(sent.text, "original");
     const settings = parseClientMessage({ type: "composer.settings", businessMode, fastMode: false, goalMode: false });
-    assert.equal(restoreChatState(settings).businessMode, businessMode);
+    assert.equal(restoreChatState(settings).businessMode, "normal");
   }
   assert.equal(restoreChatState({}).businessMode, "normal");
-  assert.equal(restoreChatState({}, { businessMode: "planning" }).businessMode, "planning");
+  assert.equal(restoreChatState({}, { businessMode: "planning" }).businessMode, "normal");
   assert.equal(restoreChatState({ businessMode: "invalid" }).businessMode, "normal");
   assert.equal(parseClientMessage({ type: "composer.settings", businessMode: "invalid", fastMode: false, goalMode: false }), undefined);
   assert.equal(parseClientMessage({ type: "chat.send", id: "x", text: "", attachments: [], execution: { businessMode: "invalid", fast: false, goal: false } }), undefined);
@@ -1497,17 +1487,17 @@ test("workflow protocol and preferences preserve valid independent selections", 
 });
 
 
-test("Verification selection persists while the runtime wire remains direct", async () => {
+test("Verification action requires the managed runtime route and is not restored", async () => {
   const { taskExecution } = await importTypeScript("src/modules/chat/task-selection.ts");
   const { restoreChatState } = await importTypeScript("src/modules/chat/chat-state.ts");
   const { TASK_MODES, AgentFactoryClient } = await importTypeScript("src/infrastructure/agent-factory/agent-client.ts");
-  assert.equal(restoreChatState({ taskMode: "verification" }).taskMode, "verification");
-  assert.equal(TASK_MODES.includes("verification"), false);
-  assert.deepEqual(taskExecution("verification"), { taskMode: "direct", inspectionOnly: true });
+  assert.equal(restoreChatState({ taskMode: "verification" }).taskMode, "direct");
+  assert.equal(TASK_MODES.includes("verification"), true);
+  assert.deepEqual(taskExecution("verification"), { taskMode: "verification", inspectionOnly: false });
   assert.deepEqual(taskExecution("work"), { taskMode: "work", inspectionOnly: false });
   const client = new AgentFactoryClient("unused", "/project");
-  client.capabilities = async () => ({ submit: { taskModes: ["direct"] }, send: { taskModes: ["work"] } });
-  assert.deepEqual(await client.checkedExecution("submit", taskExecution("verification")), ["--task-mode", "direct"]);
+  client.capabilities = async () => ({ submit: { taskModes: ["verification"] }, send: { taskModes: ["work"] } });
+  assert.deepEqual(await client.checkedExecution("submit", taskExecution("verification")), ["--task-mode", "verification"]);
   await assert.rejects(client.checkedExecution("send", taskExecution("verification")), /Update/);
 });
 

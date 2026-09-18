@@ -1,3 +1,4 @@
+import type { AgentModels } from "../../common/types/agent-models";
 import { constants as fsConstants } from "node:fs";
 import { spawn } from "node:child_process";
 import { runtimeEnvironment } from "./process-environment";
@@ -35,7 +36,7 @@ export interface ExecutionCapabilities {
   readonly diagnostic?: string;
 }
 
-export const TASK_MODES = ["direct", "work", "plan-work", "work-verification", "plan-work-verification"] as const;
+export const TASK_MODES = ["direct", "work", "plan", "verification", "plan-work", "work-verification", "plan-work-verification"] as const;
 export type TaskMode = typeof TASK_MODES[number];
 
 export type ExecutionMode = "cli-default" | "workspace-write" | "danger-full-access" | "bypass";
@@ -46,6 +47,7 @@ export interface ExecutionOptions {
   readonly taskMode?: TaskMode;
   readonly executionMode?: ExecutionMode;
   readonly model?: string;
+  readonly agentModels?: AgentModels;
   readonly reasoningEffort?: "none" | "low" | "medium" | "high" | "xhigh" | "max";
   readonly fast?: boolean;
   readonly goalMode?: boolean;

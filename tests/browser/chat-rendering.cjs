@@ -6,6 +6,10 @@ const { chromium } = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
 const { checkStatusCustomizationLayout } = require('./status-customization.cjs');
 const { checkAutoScroll } = require('./auto-scroll.cjs');
 const { checkImageComposer } = require('./image-composer.cjs');
+const { checkFactoryRendering } = require('./factory-rendering.cjs');
+const { checkAgentModels } = require('./agent-models.cjs');
+const { checkOneShotComposer } = require('./one-shot-composer.cjs');
+const { checkMessageSubmission } = require('./message-submission.cjs');
 
 const root = path.resolve(__dirname, '../..');
 const longCommand = Array.from({ length: 8 }, (_, index) => 'echo ' + index).join('\n');
@@ -74,11 +78,51 @@ async function main() {
     page.on('pageerror', error => errors.push(error.message));
     page.on('console', message => { if (message.type() === 'error') errors.push(message.text()); });
     await page.addInitScript(events => {
-      window.saved = { timeline: events };
+      window.saved = JSON.parse(sessionStorage.getItem("submission-restoration-fixture") || "null") || { timeline: events };
       window.sentMessages = [];
       window.acquireVsCodeApi = () => ({ getState: () => window.saved, setState: value => { window.saved = value; }, postMessage(message) { window.sentMessages.push(message); } });
     }, fixture);
     await page.goto('http://127.0.0.1:' + server.address().port);
+    if (process.argv.includes('--document-attachments-only')) {
+      const attachments = [
+        { id: 'doc', kind: 'file', name: 'communication.md', uri: 'vscode-remote://ssh-remote+host/home/docs/communication.md' },
+        { id: 'folder', kind: 'folder', name: 'references', uri: 'file:///tmp/references' }
+      ];
+      await page.evaluate(attachments => window.postMessage({ type: 'attachments.add', attachments }, '*'), attachments);
+      await page.waitForFunction(() => document.querySelectorAll('#attachment-list .attachment-chip').length === 2);
+      assert.match(await page.locator('#attachment-list').innerText(), /communication\.md/);
+      await page.evaluate(attachments => window.postMessage({ type: 'chat.started', id: 'doc-message', text: 'Attached document', attachments }, '*'), attachments);
+      await page.waitForFunction(() => document.querySelectorAll('.history-reference').length === 2);
+      assert.deepEqual(await page.locator('.history-reference').allTextContents(), ['communication.md', 'references']);
+      assert.equal(await page.locator('.history-reference').first().getAttribute('title'), attachments[0].uri);
+      assert.equal(await page.locator('.history-reference button').count(), 0);
+      console.log('Document composer and sent-message attachment checks passed.');
+      return;
+    }
+    if (process.argv.includes('--message-submission-only')) {
+      await checkMessageSubmission(page);
+      assert.deepEqual(errors, []);
+      console.log('Submission metadata and guidance rendering checks passed.');
+      return;
+    }
+    if (process.argv.includes('--one-shot-composer-only')) {
+      await checkOneShotComposer(page);
+      assert.deepEqual(errors, []);
+      console.log('One-shot Goal and workflow composer checks passed.');
+      return;
+    }
+    if (process.argv.includes('--agent-models-only')) {
+      await checkAgentModels(page);
+      assert.deepEqual(errors, []);
+      console.log('Combined agent model settings checks passed.');
+      return;
+    }
+    if (process.argv.includes('--factory-rendering-only')) {
+      await checkFactoryRendering(page);
+      assert.deepEqual(errors, []);
+      console.log('Factory script and Skill rendering checks passed.');
+      return;
+    }
     if (process.argv.includes('--image-composer-only')) {
       await checkImageComposer(page);
       assert.deepEqual(errors, []);

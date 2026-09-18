@@ -76,7 +76,7 @@ test("chat template uses external static assets and a nonce CSP with WebAssembly
 test("session menu remains available without a composer session-load button", function () {
   const actionsStartIndex = template.indexOf('class="composer-actions-start"');
   const sessionIndex = template.indexOf('id="session-menu"');
-  const actionsEndIndex = template.indexOf('class="composer-actions-end"');
+  const actionsEndIndex = template.indexOf('class="composer-actions-end ');
   assert.ok(actionsStartIndex > 0);
   assert.ok(sessionIndex > actionsStartIndex);
   assert.ok(sessionIndex < actionsEndIndex);
@@ -111,26 +111,15 @@ test("history and user question lists share one popup width", function () {
   assert.match(chatStyles, /\.utility-list-menu \{[\s\S]*width: min\(440px, calc\(100vw - 36px\)\);/);
 });
 
-test("composer exposes separate model and reasoning controls", function () {
+test("composer groups model, reasoning and permissions beside submission actions", function () {
   assert.match(template, /id="model-button"/);
-  assert.match(template, /id="reasoning-button"/);
-  assert.doesNotMatch(template, /id="model-reasoning-button"/);
-  assert.match(template, /id="model-menu"/);
-  assert.match(template, /id="reasoning-menu"/);
-  assert.match(template, /id="execution-mode-button"[\s\S]*aria-controls="execution-mode-menu"/);
-  assert.match(template, /id="execution-mode-menu" class="setting-menu" role="menu"/);
-  assert.match(template, /aria-haspopup="menu"/);
-  assert.match(chatScript, /role", "menuitemradio"/);
-  assert.match(chatScript, /type: "execution\.select", mode: value/);
-  assert.doesNotMatch(chatScript, /type: "execution\.pick"/);
-  assert.match(chatScript, /createElementNS\("http:\/\/www\.w3\.org\/2000\/svg", "svg"\)/);
-  assert.doesNotMatch(chatScript, /settings\.open/);
-  assert.match(chatScript, /modelLabel\.textContent = state\.model \|\| "Default"/);
-  assert.match(chatScript, /reasoningLabel\.textContent = state\.reasoning \|\| "Default"/);
-  assert.doesNotMatch(chatScript, /modelLabel\.textContent = "Model "/);
-  assert.doesNotMatch(chatScript, /reasoningLabel\.textContent = "Reasoning "/);
+  assert.match(template, /id="model-menu"[^>]*role="dialog"/);
+  assert.match(template, /id="submission-menu"[^>]*role="menu"/);
+  assert.match(template, /id="submission-button"/);
+  assert.doesNotMatch(template, /id="(?:reasoning|execution-mode|goal-mode)-button"/);
+  assert.match(chatScript, /select.dataset.setting = "permissions"/);
+  assert.match(chatScript, /type: "execution\.select", mode: select.value/);
   assert.match(template, /id="fast-mode-button"/);
-  assert.match(template, /id="goal-mode-button"/);
 });
 
 test("composer uses one SVG send button that becomes the stop control", function () {
@@ -171,7 +160,7 @@ test("long pasted text becomes a real text-file attachment", function () {
   assert.match(panelManager, /vscode\.workspace\.fs\.writeFile\(uri, contents\)/);
   assert.match(panelManager, /name: "Pasted text\.txt"/);
   assert.match(chatScript, /function hasComposerContent\(\)[\s\S]*?return prompt\.value\.trim\(\)\.length > 0 \|\| state\.attachments\.length > 0;/);
-  assert.match(chatScript, /!state\.running && !hasComposerContent\(\)/);
+  assert.match(template, /id="input-feedback"[^>]*role="alert"/);
 });
 
 test("status bar includes active Work and Verification counts", function () {
@@ -216,7 +205,7 @@ test("composer settings persist and Goal is scoped to one submission", function 
   assert.doesNotMatch(template, /id="goal-objective"/);
   assert.match(panelManager, /const goalObjective = goalMode \? text\.trim\(\) : undefined/);
   assert.doesNotMatch(panelManager, /goalObjective: execution\.taskMode/);
-  assert.match(chatScript, /model: state\.model,[\s\S]*reasoning: state\.reasoning,[\s\S]*fastMode: state\.fastMode,[\s\S]*goalMode: state\.goalMode/);
+  assert.match(chatScript, /model: state\.model,[\s\S]*reasoning: state\.reasoning,[\s\S]*fastMode: state\.fastMode,[\s\S]*goalMode: false/);
 });
 
 test("running state appears above the composer as an expandable work loop panel", function () {

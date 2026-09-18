@@ -1,5 +1,14 @@
+import type { AgentModels } from "../common/types/agent-models";
 import type { StatusItemId } from "../core/config/types";
 import type { AttachmentReference } from "../common/types/attachment";
+
+/** Captured submission intent and app-added guidance, never the full provider prompt. */
+export interface MessageSubmission {
+  readonly taskMode: import("../modules/chat/task-selection").TaskSelection;
+  readonly businessMode: import("../common/types/business-mode").BusinessMode;
+  readonly goal: boolean;
+  readonly guidance?: string;
+}
 
 export type ClientMessage =
   | { readonly type: "client.ready" }
@@ -15,6 +24,7 @@ export type ClientMessage =
         readonly businessMode?: import("../common/types/business-mode").BusinessMode;
       readonly taskMode?: import("../modules/chat/task-selection").TaskSelection;
         readonly model?: string;
+        readonly agentModels?: AgentModels;
         readonly reasoningEffort?: "none" | "low" | "medium" | "high" | "xhigh" | "max";
         readonly fast: boolean;
         readonly goal: boolean;
@@ -39,6 +49,7 @@ export type ClientMessage =
   | {
       readonly type: "composer.settings";
       readonly model?: string;
+      readonly agentModels?: AgentModels;
       readonly reasoning?: "none" | "low" | "medium" | "high" | "xhigh" | "max";
       readonly fastMode: boolean;
       readonly goalMode: boolean;
@@ -53,7 +64,7 @@ export type ClientMessage =
 
 export type HostMessage =
   | { readonly type: "chat.rejected"; readonly id: string }
-  | { readonly type: "chat.started"; readonly id: string; readonly text: string; readonly attachments: readonly AttachmentReference[] }
+  | { readonly type: "chat.started"; readonly submission?: MessageSubmission; readonly id: string; readonly text: string; readonly attachments: readonly AttachmentReference[] }
   | { readonly type: "execution.updated"; readonly mode?: import("../infrastructure/agent-factory/agent-client").ExecutionMode | "read-only" }
   | { readonly type: "syntax.theme"; readonly selection: import("../infrastructure/agent-factory/cli-theme").CliTheme }
   | { readonly type: "branch.updated"; readonly branch?: string }
@@ -72,6 +83,7 @@ export type HostMessage =
       readonly running: boolean;
       readonly statusItems: readonly StatusItemId[];
       readonly model?: string;
+      readonly agentModels?: AgentModels;
       readonly reasoning?: "none" | "low" | "medium" | "high" | "xhigh" | "max";
       readonly fastMode: boolean;
       readonly goalMode: boolean;
@@ -126,7 +138,7 @@ export type HostMessage =
       }[];
     }
   | { readonly type: "decision.pending"; readonly runId: string | null }
-  | { readonly type: "chat.human-decision"; readonly text: string }
+  | { readonly type: "chat.human-decision"; readonly submission?: MessageSubmission; readonly text: string }
   | { readonly type: "chat.assistant"; readonly text: string; readonly phase?: "commentary" | "final"; readonly runId?: string }
   | { readonly type: "run.progress"; readonly text: string }
   | {

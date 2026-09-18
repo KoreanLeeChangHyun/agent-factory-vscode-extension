@@ -82,3 +82,32 @@ test("managed loop cards retain the captured route from matching command output"
   assert.equal(managed(status, JSON.stringify({ workAgentId: 'other', loopId: 'loop-1', taskMode: 'work' })).taskMode, undefined);
   assert.equal(managed(status, JSON.stringify({ workAgentId: 'work-1', loopId: 'other', taskMode: 'work' })).taskMode, undefined);
 });
+
+test('Factory calls recognize shell/env wrappers, Python flags and direct executable paths', () => {
+  for (const command of [
+    'env PYTHONUNBUFFERED=1 python3 -u -B skills/agent/scripts/exec.py submit --agent work-1 --role work --task-mode plan',
+    'bash -lc "python3 skills/agent/scripts/exec.py submit --agent work-1 --role work --task-mode plan"',
+    'X=1 command skills/agent/scripts/exec.py submit --agent work-1 --role work --task-mode plan'
+  ]) {
+    assert.equal(managed(command).agentId, 'work-1');
+    assert.equal(managed(command).taskMode, 'plan');
+  }
+});
+
+test('Factory utility calls and batched runs retain a dedicated classification without guessed identity', () => {
+  const scripts = command => JSON.parse(JSON.stringify(context.agentFactoryExecutionReferences.scriptInvocations(command)));
+  assert.equal(scripts(exec + ' capabilities --project-root /repo')[0].action, 'capabilities');
+  assert.equal(scripts('python3 skills/agent/scripts/loop.py status --loop-id loop-1')[0].script, 'loop.py');
+  assert.equal(scripts(exec + ' status --agent work-1; ' + exec + ' status --agent work-2').length, 2);
+  for (const command of ['echo "' + exec + ' status --agent work-1"', 'python3 -c "' + exec + '"', 'cat <<EOF\n' + exec + '\nEOF', 'python3 other/exec.py status']) {
+    assert.deepEqual(scripts(command), [], command);
+  }
+});
+
+test('wrapped Skill reads include local canonical docs and owned prompts', () => {
+  const docs = command => JSON.parse(JSON.stringify(context.agentFactoryExecutionReferences.skillDocuments(command)));
+  assert.equal(docs('bash -lc "cat docs/skills/design-main-chat/SKILL.md"')[0].skill, 'design-main-chat');
+  assert.equal(docs('env LANG=C cat skills/agent/prompt/work.md')[0].document, 'prompt/work.md');
+  assert.equal(docs('command cat skills/agent/SKILL.md skills/convention/references/testing.md').length, 2);
+  assert.deepEqual(docs('bash -lc "echo skills/agent/SKILL.md"'), []);
+});

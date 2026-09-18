@@ -10,7 +10,7 @@ async function checkImageComposer(page) {
   await page.locator('#prompt').fill('before after');
   await page.locator('#prompt').evaluate(element => element.setSelectionRange(7, 7));
   await page.evaluate(() => {
-    window.composerNodes = ['business-mode-button', 'work-loop-button', 'model-button', 'reasoning-button', 'fast-mode-button', 'goal-mode-button'].map(id => document.getElementById(id));
+    window.composerNodes = ['submission-button', 'model-button', 'fast-mode-button'].map(id => document.getElementById(id));
     window.composerIcons = window.composerNodes.map(node => node.querySelector('svg'));
     window.composerMutations = [];
     window.composerObserver = new MutationObserver(records => window.composerMutations.push(...records));
@@ -42,7 +42,7 @@ async function checkImageComposer(page) {
   await emit({ type: 'attachments.add', attachments: [attachment(first)] });
   assert.equal(await page.locator('#prompt').inputValue(), 'before typing after');
   assert.equal(await page.locator('#prompt').evaluate(element => document.activeElement === element && element.selectionStart === 14), true);
-  for (const id of ['model-button', 'reasoning-button', 'fast-mode-button', 'goal-mode-button']) assert.equal(await page.locator('#' + id).isVisible(), true);
+  for (const id of ['model-button', 'fast-mode-button', 'submission-button']) assert.equal(await page.locator('#' + id).isVisible(), true);
   assert.equal(await page.evaluate(() => window.composerMutations.length), 0);
   assert.equal(await page.evaluate(() => window.composerNodes.every((node, index) => node.isConnected && node.querySelector('svg') === window.composerIcons[index])), true);
   await page.evaluate(() => window.composerObserver.disconnect());

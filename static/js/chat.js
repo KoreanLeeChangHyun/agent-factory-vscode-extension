@@ -19,20 +19,13 @@
   const autoScrollButton = document.getElementById("auto-scroll-button");
   const modelButton = document.getElementById("model-button");
   const modelLabel = document.getElementById("model-label");
+  const submissionButton = document.getElementById("submission-button");
+  const submissionMenu = document.getElementById("submission-menu");
+  const inputFeedback = document.getElementById("input-feedback");
   const modelMenu = document.getElementById("model-menu");
-  const reasoningButton = document.getElementById("reasoning-button");
-  const reasoningLabel = document.getElementById("reasoning-label");
-  const reasoningMenu = document.getElementById("reasoning-menu");
-  const executionModeButton = document.getElementById("execution-mode-button");
-  const executionModeMenu = document.getElementById("execution-mode-menu");
   const fastModeButton = document.getElementById("fast-mode-button");
-  const goalModeButton = document.getElementById("goal-mode-button");
-  const workLoopButton = document.getElementById("work-loop-button");
-  const taskModeMenu = document.getElementById("task-mode-menu");
-  const businessModeButton = document.getElementById("business-mode-button");
-  const businessModeMenu = document.getElementById("business-mode-menu");
   const businessModeNames = { normal: "Normal", interview: "Interview", planning: "Planning", design: "Design" };
-  const taskModeNames = { verification: "Verification", direct: "Direct", work: "Work", "plan-work": "Plan · Work", "work-verification": "Work · Verification", "plan-work-verification": "Plan · Work · Verification" };
+  const taskModeNames = { plan: "Plan", verification: "Verification", direct: "Direct", work: "Work", "plan-work": "Plan · Work", "work-verification": "Work · Verification", "plan-work-verification": "Plan · Work · Verification" };
   const goalPanel = document.getElementById("goal-panel");
   const goalStatus = document.getElementById("goal-status");
   let nativeGoal = null;
@@ -61,8 +54,8 @@
   const agentsList = document.getElementById("agents-list");
   const dropOverlay = document.getElementById("drop-overlay");
   const settingOptions = {
-    task: Object.keys(taskModeNames),
-    business: Object.keys(businessModeNames),
+    task: ["work", "plan", "verification", "plan-work", "work-verification", "plan-work-verification"],
+    business: ["interview", "planning", "design"],
     model: [""],
     reasoning: ["", "none", "low", "medium", "high", "xhigh", "max"],
     execution: ["cli-default", "workspace-write", "danger-full-access", "bypass"]
@@ -129,13 +122,14 @@
     branch: undefined,
     capabilities: undefined,
     running: saved?.running === true,
+    agentModels: saved?.agentModels || {},
     model: normalizeModel(saved?.model),
     reasoning: normalizeSettingValue(saved?.reasoning, settingOptions.reasoning),
     fastMode: saved?.fastMode === true,
-    goalMode: saved?.goalMode === true,
-    businessMode: Object.hasOwn(businessModeNames, saved?.businessMode) ? saved.businessMode : "normal",
-    taskMode: Object.hasOwn(taskModeNames, saved?.taskMode) ? saved.taskMode : saved?.workLoopMode === true ? "work-verification" : "work",
-    workLoopMode: saved?.workLoopMode === true,
+    goalMode: false,
+    businessMode: "normal",
+    taskMode: "direct",
+    workLoopMode: false,
     queueCount: 0,
     contextUsedTokens: safeCountOrUndefined(saved?.contextUsedTokens),
     contextWindowTokens: safeCountOrUndefined(saved?.contextWindowTokens),
@@ -228,25 +222,9 @@
   modelButton.addEventListener("click", function () {
     openSetting("model");
   });
-  reasoningButton.addEventListener("click", function () {
-    openSetting("reasoning");
-  });
-  businessModeButton.addEventListener("click", function () { openSetting("business"); });
-  executionModeButton?.addEventListener("click", function () {
-    openSetting("execution");
-  });
-  fastModeButton.addEventListener("click", function () {
-    toggleMode("fastMode");
-  });
-  workLoopButton.addEventListener("click", function () {
-    openSetting("task");
-  });
-  goalModeButton.addEventListener("click", function () {
-    toggleMode("goalMode");
-    if (!state.goalMode && nativeGoal && state.agentId) {
-      vscode.postMessage({ type: "goal.control", action: "disable" });
-    }
-  });
+  submissionButton.addEventListener("click", function () { openSetting("submission"); });
+  fastModeButton.addEventListener("click", function () { toggleMode("fastMode"); });
+  prompt.addEventListener("input", function () { inputFeedback.hidden = true; });
   questionButton.addEventListener("click", function () {
     if (questionMenu.hidden) {
       openQuestionMenu();
@@ -403,12 +381,13 @@
         if (currentCapabilities().diagnostic) appendNotice("warning", currentCapabilities().diagnostic);
         state.running = message.running === true;
         state.model = normalizeModel(message.model);
+        state.agentModels = message.agentModels || state.agentModels || {};
         state.reasoning = normalizeSettingValue(message.reasoning, settingOptions.reasoning);
-        state.businessMode = Object.hasOwn(businessModeNames, message.businessMode) ? message.businessMode : state.businessMode;
-        state.taskMode = Object.hasOwn(taskModeNames, message.taskMode) ? message.taskMode : state.taskMode;
+        state.businessMode = "normal";
+        state.taskMode = "direct";
         state.fastMode = message.fastMode === true;
-        state.goalMode = message.goalMode === true;
-        state.workLoopMode = message.workLoopMode === true;
+        state.goalMode = false;
+        state.workLoopMode = false;
         state.contextUsedTokens = safeCountOrUndefined(message.contextUsedTokens);
         state.contextWindowTokens = safeCountOrUndefined(message.contextWindowTokens);
         state.weeklyUsedPercent = safePercentOrUndefined(message.weeklyUsedPercent);
@@ -455,12 +434,9 @@
         if (Array.isArray(message.models)) {
           settingOptions.model = ["", ...new Set(message.models.map(normalizeModel).filter(Boolean))];
           if (openSettingId === "model") {
-            const focused = modelMenu.contains(document.activeElement) ? document.activeElement.dataset.value : undefined;
+            const focused = modelMenu.contains(document.activeElement) ? { role: document.activeElement.dataset.role, field: document.activeElement.dataset.field } : undefined;
             renderSettingMenu("model", modelMenu);
-            if (focused !== undefined) {
-              const options = Array.from(modelMenu.querySelectorAll("button"));
-              (options.find((option) => option.dataset.value === focused) || options[0])?.focus();
-            }
+            if (focused?.role && focused?.field) modelMenu.querySelector('select[data-role="' + focused.role + '"][data-field="' + focused.field + '"]')?.focus();
           }
         }
         break;
@@ -567,7 +543,7 @@
         break;
       case "chat.human-decision":
         if (typeof message.text === "string" && message.text) {
-          state.timeline.push({ type: "user", id: createId(), text: message.text });
+          state.timeline.push({ type: "user", id: createId(), text: message.text, submission: message.submission });
           followLatest = true;
           renderTimeline();
           persist();
@@ -617,6 +593,7 @@
         if (!(state.startedMessageIds || []).includes(message.id) && !state.timeline.some(function (item) { return item.type === "user" && item.id === message.id; })) {
           state.timeline.push({ type: "user", id: message.id,
             text: message.text || message.attachments.map(function (item) { return "Attachments: " + item.name; }).join("\n"),
+            submission: message.submission || submissionFromExecution(pending?.execution),
             attachments: pending ? pending.attachments : message.attachments });
           state.pendingDecisionRunId = undefined;
           state.decisionSubmitting = false;
@@ -625,6 +602,8 @@
           state.runStartedAt = Date.now();
           state.runProgress = "Main Agent running";
         }
+        const acknowledged = state.timeline.find(function (item) { return item.type === "user" && item.id === message.id; });
+        if (acknowledged && message.submission) acknowledged.submission = message.submission;
         state.startedMessageIds = [...new Set([...(state.startedMessageIds || []), message.id])].slice(-400);
         renderAll();
         persist();
@@ -679,12 +658,22 @@
     }
   });
 
-  function submit() {
+  function submit(action = "direct", workflow = "normal", asGoal = false) {
+    if (!Object.hasOwn(taskModeNames, action)) action = "direct";
     const userText = prompt.value.trim();
+    if (!userText && state.attachments.length === 0) {
+      inputFeedback.textContent = "Enter what you want help with. Include the target and desired result, for example: ‘Fix the login error in this file.’";
+      inputFeedback.hidden = false;
+      prompt.focus();
+      return;
+    }
+    inputFeedback.hidden = true;
     let text = userText;
-    const goal = state.role === "main" && state.taskMode !== "verification" && currentCapabilities().goal === true && state.goalMode;
+    const goal = state.role === "main" && action !== "verification" && currentCapabilities().goal === true && asGoal === true;
     if (goal && (!text || text.length > 4000)) {
-      appendNotice("error", text ? "Shorten the chat message to 4,000 characters or turn off Goal." : "Enter a goal in the chat message or turn off Goal.");
+      inputFeedback.textContent = text ? "Shorten the goal to 4,000 characters." : "Describe the goal you want to achieve, for example: ‘Make the attached page usable on mobile.’";
+      inputFeedback.hidden = false;
+      prompt.focus();
       return;
     }
     if ((!text && state.attachments.length === 0) || !state.capabilities || !state.runtimeAvailable) {
@@ -702,7 +691,8 @@
         return reference;
       }),
       execution: {
-        ...(state.role === "main" ? { taskMode: state.taskMode, businessMode: state.businessMode || "normal" } : {}),
+        ...(state.role === "main" ? { taskMode: action, businessMode: workflow } : {}),
+        agentModels: state.role === "main" ? JSON.parse(JSON.stringify(state.agentModels || {})) : undefined,
         model: currentCapabilities().model ? state.model || undefined : undefined,
         reasoningEffort: currentCapabilities().reasoning ? state.reasoning || undefined : undefined,
         fast: currentCapabilities().fast === true && state.fastMode,
@@ -993,6 +983,19 @@
     container.append(details);
   }
 
+  function renderFactoryScripts(container, scripts, documents, event) {
+    container.classList.add("managed-agent-card");
+    const heading = document.createElement("strong");
+    heading.textContent = "Agent Factory · " + scripts.map(function (script) {
+      return script.script + (script.action ? " · " + script.action : "");
+    }).join(" / ");
+    container.append(heading);
+    // Keep mixed commands and failures intact, including their non-Factory output.
+    renderSkillDocuments(container, documents.length ? documents : scripts.map(function (script) {
+      return { skill: "agent-factory:" + script.skill, document: script.script, path: script.path };
+    }), event);
+  }
+
   function renderManagedAgent(container, managed, events) {
     container.classList.add("managed-agent-card");
     const child = state.childAgents.find(function (agent) { return agent.agentId === managed.agentId; });
@@ -1004,7 +1007,7 @@
     const heading = document.createElement("div");
     heading.className = "managed-agent-heading";
     const label = document.createElement("strong");
-    label.textContent = managed.kind === "loop" ? taskModeNames[managed.taskMode] || "Work · Verification" : role === "verification" ? "Verification agent" : role === "work" ? "Work agent" : "Agent";
+    label.textContent = managed.taskMode === "plan" ? "Plan · Work agent" : managed.kind === "loop" ? taskModeNames[managed.taskMode] || "Work · Verification" : role === "verification" ? "Verification agent" : role === "work" ? "Work agent" : "Agent";
     const badge = document.createElement("span");
     badge.className = "managed-agent-status";
     badge.textContent = status === "active" ? "In progress" : status === "runtime-error" ? "Runtime error" : childAgentStatusLabel(status);
@@ -1063,6 +1066,42 @@
     return byEvent;
   }
 
+  function submissionFromExecution(execution) {
+    if (!execution) return undefined;
+    return { taskMode: execution.taskMode, businessMode: execution.businessMode, goal: execution.goal === true };
+  }
+
+  function renderSubmission(content, submission) {
+    if (!submission || typeof submission !== "object") return;
+    const actions = { work: "Work", plan: "Plan", verification: "Verification", "plan-work": "Plan → Work", "work-verification": "Work → Verification", "plan-work-verification": "Plan → Work → Verification" };
+    const workflows = { interview: "Interview", planning: "Planning", design: "Design" };
+    const labels = [Object.hasOwn(workflows, submission.businessMode) ? workflows[submission.businessMode] : undefined, Object.hasOwn(actions, submission.taskMode) ? actions[submission.taskMode] : undefined, submission.goal === true ? "Goal" : undefined].filter(Boolean);
+    if (labels.length) {
+      const metadata = document.createElement("div");
+      metadata.className = "message-submission";
+      metadata.setAttribute("aria-label", "Submission method");
+      for (const label of labels) {
+        const badge = document.createElement("span");
+        badge.textContent = label;
+        metadata.append(badge);
+      }
+      content.prepend(metadata);
+    }
+    // Missing historical guidance is unknown; never reconstruct it from today's templates.
+    if (typeof submission.guidance === "string" && submission.guidance.trim()) {
+      const details = document.createElement("details");
+      details.className = "message-guidance";
+      const summary = document.createElement("summary");
+      summary.append(createModeIcon("m9 5 7 7-7 7", "submission-chevron"), document.createTextNode("View delivered guidance"));
+      const note = document.createElement("p");
+      note.textContent = "Application-added guidance for this request. This is not the full provider prompt.";
+      const guidance = document.createElement("pre");
+      guidance.textContent = submission.guidance;
+      details.append(summary, note, guidance);
+      content.append(details);
+    }
+  }
+
   function renderTimeline() {
     cancelAnimationFrame(autoScrollFrame);
     const shouldFollowLatest = state.autoScroll && followLatest;
@@ -1116,7 +1155,7 @@
         const marker = event.type === "user" ? document.createElement("span") : createTranscriptDot();
         marker.classList.add("transcript-marker");
         marker.setAttribute("aria-hidden", "true");
-        if (event.type === "user") marker.textContent = "›";
+        if (event.type === "user") marker.append(createModeIcon("m9 5 7 7-7 7", "submission-chevron"));
         message.append(marker);
       }
       if (event.type === "activity" && event.category !== "command" && !(event.category === "file" && event.diff)) {
@@ -1154,9 +1193,13 @@
         }
       } else if (event.type === "activity" && event.category === "command") {
         const skillDocuments = globalThis.agentFactoryExecutionReferences?.skillDocuments(event.text) || [];
+        const factoryScripts = globalThis.agentFactoryExecutionReferences?.scriptInvocations(event.text) || [];
         if (managedGroup) {
           message.classList.add("message-activity-agent");
           renderManagedAgent(content, managedGroup.managed, managedGroup.events);
+        } else if (factoryScripts.length) {
+          message.classList.add("message-activity-agent");
+          renderFactoryScripts(content, factoryScripts, skillDocuments, event);
         } else if (skillDocuments.length) {
           renderSkillDocuments(content, skillDocuments, event);
         } else {
@@ -1168,6 +1211,7 @@
       } else {
         content.textContent = event.text;
       }
+      if (event.type === "user") renderSubmission(content, event.submission);
       if (event.type === "user" && Array.isArray(event.attachments)) renderHistoryAttachments(content, event.attachments);
       message.append(content);
       const display = displayStates.get(event.id);
@@ -1916,7 +1960,17 @@
     const gallery = document.createElement("div");
     gallery.className = "history-attachments";
     for (const attachment of attachments) {
-      if (attachment.kind !== "image") continue;
+      if (attachment.kind !== "image") {
+        const reference = document.createElement("div");
+        reference.className = "attachment-chip history-reference";
+        reference.title = attachment.uri || attachment.name;
+        const name = document.createElement("span");
+        name.className = "attachment-chip-name";
+        name.textContent = attachment.name;
+        reference.append(name);
+        gallery.append(reference);
+        continue;
+      }
       const item = document.createElement(attachment.previewUri ? "button" : "div");
       item.className = "history-attachment";
       item.title = attachment.name;
@@ -2468,7 +2522,7 @@
     queue.replaceChildren();
     const description = document.createElement("p");
     description.className = "pending-queue-description";
-    description.textContent = state.pendingDecisionRunId ? "Queued messages will run together after your decision" : "Queued messages run together. Task mode, model, and reasoning use the first message settings.";
+    description.textContent = state.pendingDecisionRunId ? "Queued messages will run together after your decision" : "Queued messages retain their execution action. Only matching actions run together.";
     queue.append(description);
     if (pending.some(function (item) { return !item.rejected; }) && !state.running && !state.pendingDecisionRunId) {
       const resume = document.createElement("button");
@@ -2478,8 +2532,9 @@
       queue.append(resume);
     }
     pending.forEach(function (item) {
-      const entry = document.createElement("p");
+      const entry = document.createElement("div");
       entry.textContent = item.text + (item.attachments.length ? " · " + item.attachments.map(function (attachment) { return attachment.name; }).join(", ") : "");
+      renderSubmission(entry, submissionFromExecution(item.execution));
       queue.append(entry);
       if (item.rejected) {
         const recover = document.createElement("button");
@@ -2492,12 +2547,13 @@
           state.draft = item.text;
           prompt.value = item.text;
           state.attachments = item.attachments;
-          state.taskMode = item.execution.taskMode || state.taskMode;
-          state.businessMode = item.execution.businessMode || "normal";
+          state.taskMode = "direct";
+          state.businessMode = "normal";
           state.model = item.execution.model;
+          state.agentModels = item.execution.agentModels || {};
           state.reasoning = item.execution.reasoningEffort;
           state.fastMode = item.execution.fast;
-          state.goalMode = item.execution.goal;
+          state.goalMode = false;
           renderAll();
           resizePrompt();
           persist();
@@ -2508,7 +2564,7 @@
   }
 
   function updateSendButton() {
-    sendButton.disabled = !state.runtimeAvailable || !state.capabilities || (!state.running && !hasComposerContent());
+    sendButton.disabled = !state.runtimeAvailable || !state.capabilities;
   }
 
   function updateRunControls() {
@@ -2542,47 +2598,24 @@
   }
 
   function updateExecutionControl() {
-    if (!executionModeButton) return;
-    executionModeButton.parentElement.hidden = state.role !== "main";
-    executionModeButton.disabled = state.running;
-    const modeName = state.executionMode === undefined ? "Current session" : executionModeName(state.executionMode);
-    executionModeButton.title = "Permissions: " + modeName + (state.running
-      ? " · Permissions for the next message can be changed after execution finishes."
-      : " · Select execution permissions for the next message");
-    executionModeButton.setAttribute("aria-label", executionModeButton.title);
-    if (state.running && openSettingId === "execution") closeSettingMenu(false);
+    const select = modelMenu.querySelector('[data-setting="permissions"]');
+    if (select) select.disabled = state.running;
   }
 
   function updateModeControls() {
     updateExecutionControl();
-    businessModeButton.parentElement.hidden = state.role !== "main";
-    if (businessModeButton.dataset.mode !== state.businessMode) {
-      businessModeButton.replaceChildren(createBusinessModeIcon(state.businessMode));
-      businessModeButton.dataset.mode = state.businessMode;
-    }
-    businessModeButton.title = "Workflow: " + businessModeNames[state.businessMode] + " · Select the workflow for the next message";
-    businessModeButton.setAttribute("aria-label", businessModeButton.title);
-    workLoopButton.parentElement.hidden = state.role !== "main";
-    if (workLoopButton.dataset.mode !== state.taskMode) {
-      workLoopButton.replaceChildren(createTaskModeIcon(state.taskMode));
-      workLoopButton.dataset.mode = state.taskMode;
-    }
-    workLoopButton.title = "Task mode: " + taskModeNames[state.taskMode] + " · Select the mode for the next message";
-    workLoopButton.setAttribute("aria-label", workLoopButton.title);
     const supported = currentCapabilities();
-    modelButton.parentElement.hidden = supported.model !== true;
-    reasoningButton.parentElement.hidden = supported.reasoning !== true;
+    modelButton.parentElement.hidden = false;
+    submissionButton.hidden = state.role !== "main";
     fastModeButton.hidden = supported.fast !== true;
-    goalModeButton.hidden = supported.goal !== true || (state.role && state.role !== "main");
-    if (openSettingId && openSettingId !== "execution" && openSettingId !== "task" && openSettingId !== "business" && supported[openSettingId] !== true) closeSettingMenu(false);
     fastModeButton.setAttribute("aria-pressed", String(state.fastMode));
     fastModeButton.setAttribute("aria-label", state.fastMode ? "Fast mode on" : "Fast mode off");
     fastModeButton.title = state.fastMode ? "Fast mode on" : "Fast mode off";
-    goalModeButton.setAttribute("aria-pressed", String(state.goalMode));
-    goalModeButton.setAttribute("aria-label", state.goalMode ? "Goal mode on" : "Goal mode off");
-    goalModeButton.title = state.goalMode ? "Goal mode on" : "Goal mode off";
-    modelLabel.textContent = state.model || "Default";
-    reasoningLabel.textContent = state.reasoning || "Default";
+    const modelText = (state.model || "Default") + " · " + (state.reasoning || "Default");
+    if (modelLabel.textContent !== modelText) modelLabel.textContent = modelText;
+    modelButton.title = "Models, reasoning and permissions";
+    modelButton.setAttribute("aria-label", modelButton.title);
+    if (openSettingId === "submission") renderSubmissionMenu(submissionMenu);
     renderGoal();
     renderStatusBar();
   }
@@ -2615,65 +2648,117 @@
     menu.hidden = false;
     button.setAttribute("aria-expanded", "true");
     const selected = menu.querySelector('[aria-checked="true"]:not(:disabled)');
-    (selected || menu.querySelector("button:not(:disabled)"))?.focus();
+    (selected || menu.querySelector("button:not(:disabled), select:not(:disabled)"))?.focus();
+  }
+
+  function renderModelSettings(menu) {
+    menu.replaceChildren();
+    menu.setAttribute("role", "dialog");
+    menu.setAttribute("aria-label", "Models, reasoning and permissions");
+    const roles = state.role === "main" ? [["main", "Main"], ["work", "Work"], ["verification", "Verification"]] : [["main", state.role === "work" ? "Work" : "Verification"]];
+    for (const [role, label] of roles) {
+      const row = document.createElement("fieldset");
+      row.className = "agent-model-row";
+      const legend = document.createElement("legend");
+      legend.textContent = label;
+      row.append(legend);
+      for (const field of ["model", "reasoningEffort"]) {
+        const current = role === "main" ? (field === "model" ? state.model : state.reasoning) : state.agentModels?.[role]?.[field];
+        const wrapper = document.createElement("label");
+        wrapper.textContent = field === "model" ? "Model" : "Reasoning";
+        const select = document.createElement("select");
+        select.dataset.role = role;
+        select.dataset.field = field;
+        select.setAttribute("aria-label", label + " " + wrapper.textContent);
+        const values = field === "model" ? [...new Set(["", ...settingOptions.model, current].filter(value => typeof value === "string"))] : settingOptions.reasoning;
+        for (const value of values) {
+          const option = document.createElement("option");
+          option.value = value;
+          option.textContent = value || "Default";
+          option.selected = value === (current || "");
+          select.append(option);
+        }
+        select.disabled = currentCapabilities()[field === "model" ? "model" : "reasoning"] !== true;
+        select.addEventListener("change", function () {
+          if (role === "main") state[field === "model" ? "model" : "reasoning"] = select.value;
+          else {
+            state.agentModels = { ...state.agentModels, [role]: { ...state.agentModels?.[role], [field]: select.value || undefined } };
+          }
+          updateModeControls();
+          persist();
+          saveComposerSettings();
+        });
+        wrapper.append(select);
+        row.append(wrapper);
+      }
+      menu.append(row);
+    }
+    if (state.role === "main") {
+      const row = document.createElement("fieldset");
+      row.className = "agent-model-row";
+      const legend = document.createElement("legend");
+      legend.textContent = "Permissions · next message";
+      const select = document.createElement("select");
+      select.dataset.setting = "permissions";
+      select.setAttribute("aria-label", "Execution permissions");
+      for (const value of settingOptions.execution) {
+        const option = document.createElement("option");
+        option.value = value;
+        option.textContent = executionModeName(value);
+        option.selected = value === (state.executionMode ?? "cli-default");
+        select.append(option);
+      }
+      const help = document.createElement("p");
+      const explain = () => { help.textContent = executionModeExplanation(select.value); };
+      explain();
+      select.disabled = state.running;
+      select.addEventListener("change", function () {
+        if (state.running) return;
+        state.executionMode = select.value;
+        vscode.postMessage({ type: "execution.select", mode: select.value });
+        explain(); renderStatusBar(); persist(); saveComposerSettings();
+      });
+      row.append(legend, select, help);
+      menu.append(row);
+    }
+  }
+
+  function renderSubmissionMenu(menu) {
+    menu.replaceChildren();
+    const hint = document.createElement("p");
+    hint.className = "submission-hint";
+    hint.textContent = "Choose an item to send the current draft immediately.";
+    menu.append(hint);
+    const groups = [
+      ["Workflow", settingOptions.business.map(value => [businessModeNames[value], "direct", value, false])],
+      ["Task", settingOptions.task.map(value => [taskModeNames[value], value, "normal", false])],
+      ["Goal", [["Submit as Goal", "direct", "normal", true]]]
+    ];
+    for (const [title, entries] of groups) {
+      const group = document.createElement("div");
+      group.setAttribute("role", "group"); group.setAttribute("aria-label", title);
+      const heading = document.createElement("div"); heading.className = "submission-heading"; heading.textContent = title;
+      group.append(heading);
+      for (const [label, action, workflow, goal] of entries) {
+        const option = document.createElement("button");
+        option.type = "button"; option.className = "setting-option"; option.setAttribute("role", "menuitem");
+        option.dataset.action = action; option.dataset.workflow = workflow; option.dataset.goal = String(goal);
+        option.disabled = !state.runtimeAvailable || (goal ? currentCapabilities().goal !== true : action !== "direct" && !currentCapabilities().taskModes?.includes(action));
+        option.title = option.disabled ? "Requires a compatible runtime." : "Send draft: " + label;
+        const name = document.createElement("span"); name.textContent = label;
+        const icon = goal ? createModeIcon("M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18Zm0 5a4 4 0 1 0 0 8 4 4 0 0 0 0-8Z", "task-mode-icon") : workflow !== "normal" ? createBusinessModeIcon(workflow) : createTaskModeIcon(action);
+        option.append(icon, name, createModeIcon("M12 19V5m-6 6 6-6 6 6", "submit-icon"));
+        option.addEventListener("click", function () { closeSettingMenu(false); submit(action, workflow, goal); });
+        option.addEventListener("keydown", handleSettingMenuKeydown);
+        group.append(option);
+      }
+      menu.append(group);
+    }
   }
 
   function renderSettingMenu(setting, menu) {
-    const current = setting === "business" ? state.businessMode : setting === "task" ? state.taskMode : setting === "model" ? state.model : setting === "reasoning" ? state.reasoning : state.executionMode ?? "cli-default";
-    menu.replaceChildren();
-    const values = setting === "model" ? [...new Set([...settingOptions.model, state.model])] : settingOptions[setting];
-    for (const value of values) {
-      const option = document.createElement("button");
-      option.type = "button";
-      option.disabled = setting === "task" && !currentCapabilities().taskModes?.includes(value === "verification" ? "direct" : value);
-      if (option.disabled) option.title = "This mode requires a compatible plugin and Codex version.";
-      option.className = "setting-option";
-      option.setAttribute("role", "menuitemradio");
-      option.setAttribute("aria-checked", String(value === current));
-      option.dataset.value = value;
-      const check = document.createElementNS("http://www.w3.org/2000/svg", "svg");
-      check.classList.add("setting-check");
-      check.setAttribute("viewBox", "0 0 16 16");
-      check.setAttribute("aria-hidden", "true");
-      check.setAttribute("focusable", "false");
-      const checkPath = document.createElementNS("http://www.w3.org/2000/svg", "path");
-      checkPath.setAttribute("d", "m3 8 3 3 7-7");
-      check.append(checkPath);
-      const label = document.createElement("span");
-      label.textContent = setting === "business" ? businessModeNames[value] : setting === "task" ? taskModeNames[value] : setting === "execution" ? executionModeName(value) : value || "Default";
-      if (setting === "execution") {
-        option.title = executionModeExplanation(value);
-        option.setAttribute("aria-description", option.title);
-      }
-      if (setting === "business") {
-        option.append(createBusinessModeIcon(value), label, check);
-      } else if (setting === "task") {
-        option.append(createTaskModeIcon(value), label, check);
-      } else {
-        option.append(check, label);
-      }
-      option.addEventListener("click", function () {
-        if (setting === "business") {
-          state.businessMode = value;
-        } else if (setting === "task") {
-          state.taskMode = value;
-        } else if (setting === "model") {
-          state.model = value;
-        } else if (setting === "reasoning") {
-          state.reasoning = value;
-        } else {
-          state.executionMode = value;
-          vscode.postMessage({ type: "execution.select", mode: value });
-        }
-        updateModeControls();
-        renderStatusBar();
-        persist();
-        saveComposerSettings();
-        closeSettingMenu(true);
-      });
-      option.addEventListener("keydown", handleSettingMenuKeydown);
-      menu.append(option);
-    }
+    if (setting === "model") renderModelSettings(menu);
+    else renderSubmissionMenu(menu);
   }
 
   function createBusinessModeIcon(mode) {
@@ -2697,6 +2782,7 @@
 
   function createTaskModeIcon(mode) {
     const paths = {
+      plan: "M5 3h14v18H5ZM8 7h2m3 0h3M8 12h2m3 0h3M8 17h2m3 0h3",
       verification: "M10 3a7 7 0 1 0 0 14 7 7 0 0 0 0-14Zm5 12 6 6M6 10l3 3 5-6",
       direct: "m15 5 4 4M4 20l5-1L20 8a2.8 2.8 0 0 0-4-4L5 15l-1 5Z",
       work: "M14 6a5 5 0 0 0-6 6L3 17a2.8 2.8 0 0 0 4 4l5-5a5 5 0 0 0 6-6l-3 3-4-4 3-3Z",
@@ -2720,7 +2806,7 @@
   }
 
   function handleSettingMenuKeydown(event) {
-    const options = Array.from(event.currentTarget.parentElement.querySelectorAll(".setting-option:not(:disabled)"));
+    const options = Array.from(event.currentTarget.closest(".setting-menu").querySelectorAll(".setting-option:not(:disabled)"));
     const index = options.indexOf(event.currentTarget);
     let target;
     if (event.key === "ArrowDown") {
@@ -2752,13 +2838,8 @@
     }
   }
 
-  function settingButton(setting) {
-    return setting === "business" ? businessModeButton : setting === "task" ? workLoopButton : setting === "model" ? modelButton : setting === "reasoning" ? reasoningButton : executionModeButton;
-  }
-
-  function settingMenu(setting) {
-    return setting === "business" ? businessModeMenu : setting === "task" ? taskModeMenu : setting === "model" ? modelMenu : setting === "reasoning" ? reasoningMenu : executionModeMenu;
-  }
+  function settingButton(setting) { return setting === "model" ? modelButton : submissionButton; }
+  function settingMenu(setting) { return setting === "model" ? modelMenu : submissionMenu; }
 
   function executionModeName(mode) {
     return ({
@@ -2808,13 +2889,10 @@
       projectName: state.projectName,
       runtimeAvailable: state.runtimeAvailable,
       running: state.running,
+      agentModels: state.agentModels,
       model: state.model,
       reasoning: state.reasoning,
       fastMode: state.fastMode,
-      goalMode: state.goalMode,
-      businessMode: state.businessMode,
-      taskMode: state.taskMode,
-      workLoopMode: state.workLoopMode,
       contextUsedTokens: state.contextUsedTokens,
       contextWindowTokens: state.contextWindowTokens,
       weeklyUsedPercent: state.weeklyUsedPercent,
@@ -2843,13 +2921,12 @@
   function saveComposerSettings() {
     vscode.postMessage({
       type: "composer.settings",
+      agentModels: state.agentModels,
       model: state.model || undefined,
       reasoning: state.reasoning || undefined,
       fastMode: state.fastMode,
-      goalMode: state.goalMode,
-      businessMode: state.businessMode,
-      taskMode: state.taskMode,
-      workLoopMode: state.workLoopMode
+      goalMode: false,
+      businessMode: "normal",
     });
   }
 

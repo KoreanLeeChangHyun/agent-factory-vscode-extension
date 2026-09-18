@@ -59,56 +59,29 @@
             placeholder="Ask Agent Factory"
             aria-label="Message to Main Agent"
           ></textarea>
+          <p id="input-feedback" class="input-feedback" role="alert" hidden></p>
           <div class="composer-actions">
             <div class="composer-actions-start">
               <button id="attach-button" class="icon-button" type="button" title="Attach files or folders" aria-label="Attach files or folders">
                 <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M12 5v14M5 12h14"></path></svg>
               </button>
               <div class="setting-control">
-                <button id="model-button" class="setting-button" type="button" title="Select model" aria-label="Select model" aria-haspopup="menu" aria-expanded="false" aria-controls="model-menu">
+                <button id="model-button" class="setting-button" type="button" title="Models, reasoning and permissions" aria-label="Models, reasoning and permissions" aria-haspopup="dialog" aria-expanded="false" aria-controls="model-menu">
                   <span id="model-label">Default</span>
                   <svg class="chevron-icon" viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="m4 6 4 4 4-4"></path></svg>
                 </button>
-                <div id="model-menu" class="setting-menu" role="menu" aria-label="Select model" hidden></div>
+                <div id="model-menu" class="setting-menu agent-model-menu" role="dialog" aria-label="Models, reasoning and permissions" hidden></div>
               </div>
-              <div class="setting-control">
-                <button id="reasoning-button" class="setting-button" type="button" title="Select reasoning effort" aria-label="Select reasoning effort" aria-haspopup="menu" aria-expanded="false" aria-controls="reasoning-menu">
-                  <span id="reasoning-label">Default</span>
-                  <svg class="chevron-icon" viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="m4 6 4 4 4-4"></path></svg>
-                </button>
-                <div id="reasoning-menu" class="setting-menu" role="menu" aria-label="Select reasoning effort" hidden></div>
-              </div>
-              <div class="setting-control">
-                <button id="execution-mode-button" class="setting-button execution-mode-button" type="button" title="Permissions: Current session · Select execution permissions for the next message" aria-label="Permissions: Current session · Select execution permissions for the next message" aria-haspopup="menu" aria-expanded="false" aria-controls="execution-mode-menu">
-                  <svg class="execution-mode-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M12 3 4 6v6c0 4 4 7 8 9 4-2 8-5 8-9V6l-8-3Z"></path></svg>
-                </button>
-                <div id="execution-mode-menu" class="setting-menu" role="menu" aria-label="Select execution permissions" hidden></div>
-              </div>
-              <div class="setting-control">
-                <button id="business-mode-button" class="setting-button task-mode-button" type="button" title="Workflow: Normal" aria-label="Workflow: Normal" aria-haspopup="menu" aria-expanded="false" aria-controls="business-mode-menu">
-                  <svg class="task-mode-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M4 4h6v6H4Zm10 0h6v6h-6ZM4 14h6v6H4Zm10 0h6v6h-6Z"></path></svg>
-                </button>
-                <div id="business-mode-menu" class="setting-menu" role="menu" aria-label="Select workflow" hidden></div>
-              </div>
-              <div class="setting-control">
-                <button id="work-loop-button" class="setting-button task-mode-button" type="button" title="Task mode: Work · Select the mode for the next message" aria-label="Task mode: Work · Select the mode for the next message" aria-haspopup="menu" aria-expanded="false" aria-controls="task-mode-menu">
-                  <svg class="task-mode-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M14 6a5 5 0 0 0-6 6L3 17a2.8 2.8 0 0 0 4 4l5-5a5 5 0 0 0 6-6l-3 3-4-4 3-3Z"></path></svg>
-                </button>
-                <div id="task-mode-menu" class="setting-menu" role="menu" aria-label="Select task mode" hidden></div>
-              </div>
-              <button id="fast-mode-button" class="mode-button" type="button" title="Fast mode off" aria-label="Fast mode off" aria-pressed="false">
-                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M13 2 4 14h7l-1 8 10-13h-7l1-7Z"></path></svg>
-              </button>
-              <button id="goal-mode-button" class="mode-button" type="button" title="Goal mode off" aria-label="Goal mode off" aria-pressed="false">
-                <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8"></circle><circle cx="12" cy="12" r="3"></circle><path d="M12 2v3M12 19v3M2 12h3M19 12h3"></path></svg>
+              <button id="fast-mode-button" class="mode-button toggle-control" type="button" title="Fast mode off" aria-label="Fast mode off" aria-pressed="false">
+                <span>Fast</span><svg class="toggle-icon" viewBox="0 0 28 18" aria-hidden="true" focusable="false"><rect x="1" y="1" width="26" height="16" rx="8"></rect><circle class="toggle-thumb" cx="9" cy="9" r="4"></circle></svg>
               </button>
               <div class="utility-picker session-picker">
                 <div id="session-menu" class="utility-list-menu session-menu" role="listbox" aria-label="Main Agent sessions" hidden>
                   <div id="session-list" class="session-list"></div>
                 </div>
               </div>
-              <button id="auto-scroll-button" class="mode-button" type="button" title="Auto-scroll ON · Click to turn off" aria-label="Auto-scroll ON · Click to turn off" aria-pressed="true" aria-controls="timeline">
-                <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M4 5h8M4 10h6M4 15h8M17 3v17m-4-4 4 4 4-4"></path></svg>
+              <button id="auto-scroll-button" class="mode-button toggle-control" type="button" title="Auto-scroll ON · Click to turn off" aria-label="Auto-scroll ON · Click to turn off" aria-pressed="true" aria-controls="timeline">
+                <span>Scroll</span><svg class="toggle-icon" viewBox="0 0 28 18" aria-hidden="true" focusable="false"><rect x="1" y="1" width="26" height="16" rx="8"></rect><circle class="toggle-thumb" cx="9" cy="9" r="4"></circle></svg>
               </button>
               <div class="utility-picker question-picker">
                 <button id="question-button" class="utility-button" type="button" title="User questions" aria-label="User questions" aria-haspopup="listbox" aria-expanded="false" aria-controls="question-menu">
@@ -119,7 +92,9 @@
                 </div>
               </div>
             </div>
-            <div class="composer-actions-end">
+            <div class="composer-actions-end setting-control">
+              <div id="submission-menu" class="setting-menu submission-menu" role="menu" aria-label="Submit draft" hidden></div>
+              <button id="submission-button" class="setting-button" type="button" title="More ways to submit" aria-label="More ways to submit" aria-haspopup="menu" aria-expanded="false" aria-controls="submission-menu"><svg class="chevron-icon" viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="m4 6 4 4 4-4"></path></svg></button>
               <button id="send-button" class="send-button" type="button" title="Send (Enter)" aria-label="Send message">
                 <svg id="send-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M12 19V5M6.5 10.5 12 5l5.5 5.5"></path></svg>
                 <svg id="stop-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false" hidden><rect x="7" y="7" width="10" height="10" rx="1"></rect></svg>

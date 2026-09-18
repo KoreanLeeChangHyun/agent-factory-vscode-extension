@@ -1,3 +1,4 @@
+import type { MessageSubmission } from "../../protocol/messages";
 import { withInspectionGuidance } from "./task-selection";
 import { withBusinessMode } from "../../common/types/business-mode";
 import { randomUUID } from "node:crypto";
@@ -25,7 +26,7 @@ export interface SessionControllerEvents {
     readonly output?: string;
   }) => void;
   readonly onDecision?: (runId: string | null) => void;
-  readonly onHumanDecision?: (text: string) => void;
+  readonly onHumanDecision?: (text: string, submission: MessageSubmission) => void;
   readonly onGoal?: (goal: NativeGoal | null, error?: string) => void;
   readonly onStatusObserved?: (status: string) => void;
   readonly onError: (message: string) => void;
@@ -41,7 +42,7 @@ interface PendingSend {
   readonly attachments: readonly AttachmentReference[];
   readonly execution: ExecutionOptions;
   readonly resolve?: () => void;
-  readonly onStarted?: () => void;
+  readonly onStarted?: (submission: MessageSubmission) => void;
 }
 
 export class ChatSessionController {
@@ -50,6 +51,8 @@ export class ChatSessionController {
   private currentRunAgentId: string | undefined;
   private busy = false;
   private pendingDecisionRunId: string | undefined;
+  private submittedAgentModels: ExecutionOptions["agentModels"];
+  private pendingDecisionAgentModels: ExecutionOptions["agentModels"];
   private pendingDecisionTaskMode: ExecutionOptions["taskMode"];
   private pendingDecisionBusinessMode: ExecutionOptions["businessMode"];
   private pendingDecisionInspectionOnly: boolean | undefined;
@@ -150,10 +153,10 @@ export class ChatSessionController {
     text: string,
     attachments: readonly AttachmentReference[],
     execution: ExecutionOptions,
-    onStarted?: () => void
+    onStarted?: (submission: MessageSubmission) => void
   ): Promise<void> {
     if (this.disposed) return;
-    execution = { ...execution };
+    execution = { ...execution, ...(execution.agentModels ? { agentModels: structuredClone(execution.agentModels) } : {}) };
     attachments = attachments.map(attachment => ({ ...attachment }));
     if (this.busy || (this.goalControlPending && this.pendingGoalAction === "reopen")) {
       return new Promise((resolve) => {
@@ -182,7 +185,7 @@ export class ChatSessionController {
     attachments: readonly AttachmentReference[],
     execution: ExecutionOptions,
     checkActiveRun = true,
-    onStarted?: () => void,
+    onStarted?: (submission: MessageSubmission) => void,
     initialBatch?: PendingSend[]
   ): Promise<void> {
     // A decision answer must complete before unrelated pending input is drained.
@@ -220,8 +223,12 @@ export class ChatSessionController {
           next.push(...this.queuedSends.splice(0));
           this.events.onQueueChanged?.(0);
         }
-        // Inspection must never inherit an implementation route from a different message.
-        const boundary = next.findIndex(item => Boolean(item.execution.inspectionOnly) !== Boolean(next[0]!.execution.inspectionOnly));
+        // Each input retains its action; incompatible actions cannot share a dispatch.
+        const boundary = next.findIndex(item => (item.execution.taskMode ?? "direct") !== (next[0]!.execution.taskMode ?? "direct")
+          || JSON.stringify(item.execution.agentModels ?? {}) !== JSON.stringify(next[0]!.execution.agentModels ?? {})
+          || Boolean(item.execution.inspectionOnly) !== Boolean(next[0]!.execution.inspectionOnly)
+          || Boolean(item.execution.goalMode) !== Boolean(next[0]!.execution.goalMode)
+          || (item.execution.goalMode === true && item.execution.goalObjective !== next[0]!.execution.goalObjective));
         if (boundary > 0) {
           this.queuedSends.unshift(...next.splice(boundary));
           this.events.onQueueChanged?.(this.queuedSends.length);
@@ -231,7 +238,7 @@ export class ChatSessionController {
         if (next.length > 1) this.events.onProgress(`Submitting ${next.length} queued messages as one request. Task mode, model, and reasoning use the first message settings; permissions use their common allowed scope.`);
         await this.sendOne(merged.text, merged.attachments, merged.execution, () => {
           started = true;
-          for (const item of next) item.onStarted?.();
+          next.forEach((item, index) => item.onStarted?.(merged.submissions[index]!));
         });
         if (!this.pendingDecisionRunId && this.events.onBeforeQueueDrain) await this.events.onBeforeQueueDrain();
       } catch (error) {
@@ -277,7 +284,7 @@ export class ChatSessionController {
     onStarted: () => void
   ): Promise<void> {
     // Apply at dispatch so initial sends and decision continuations share the boundary.
-    if (execution.inspectionOnly) {
+    if (execution.inspectionOnly || execution.taskMode === "verification") {
       const inspectionExecution = { ...execution, goalMode: false };
       delete inspectionExecution.goalObjective;
       execution = inspectionExecution;
@@ -285,8 +292,9 @@ export class ChatSessionController {
     this.submittedInspectionOnly = execution.inspectionOnly;
     this.submittedBusinessMode = execution.businessMode;
     this.submittedTaskMode = execution.taskMode;
-    const content = withAttachmentReferences(text, attachments);
-    const request = execution.inspectionOnly ? withInspectionGuidance(content) : withBusinessMode(content, execution.businessMode);
+    this.submittedAgentModels = execution.agentModels;
+    // Request and display guidance were captured together before dispatch.
+    const request = text;
     const images = runtimeImages(attachments);
     if (!this.agentId) {
       const candidateAgentId = `main-${randomUUID()}`;
@@ -314,7 +322,7 @@ export class ChatSessionController {
     const taskMode = this.pendingDecisionTaskMode;
     const businessMode = this.pendingDecisionBusinessMode;
     const inspectionOnly = this.pendingDecisionInspectionOnly;
-    void this.sendAndDrainQueue(text, [], { ...execution, inspectionOnly, ...(taskMode ? { taskMode } : {}), ...(businessMode ? { businessMode } : {}), actor: "human" }, true, () => this.events.onHumanDecision?.(text));
+    void this.sendAndDrainQueue(text, [], { ...execution, agentModels: this.pendingDecisionAgentModels, inspectionOnly, ...(taskMode ? { taskMode } : {}), ...(businessMode ? { businessMode } : {}), actor: "human" }, true, (submission) => this.events.onHumanDecision?.(text, submission));
     return true;
   }
 
@@ -478,6 +486,7 @@ export class ChatSessionController {
             this.pendingDecisionRunId = runId;
             this.pendingDecisionInspectionOnly = this.submittedInspectionOnly;
             this.pendingDecisionBusinessMode = this.submittedBusinessMode;
+            this.pendingDecisionAgentModels = this.submittedAgentModels;
             this.pendingDecisionTaskMode = status.taskMode ?? this.submittedTaskMode;
             this.events.onDecision?.(runId);
           }
@@ -490,9 +499,30 @@ export class ChatSessionController {
   }
 }
 
-function mergePendingSends(items: readonly PendingSend[]): Pick<PendingSend, "text" | "attachments" | "execution"> {
+function mergePendingSends(items: readonly PendingSend[]): Pick<PendingSend, "text" | "attachments" | "execution"> & { submissions: MessageSubmission[] } {
   const first = items[0]!;
-  if (items.length === 1) return first;
+  const modelGuidance = delegatedModelGuidance(first.execution.agentModels);
+  const inspectionGuidance = first.execution.inspectionOnly ? withInspectionGuidance("") : "";
+  const workflowGuidanceParts: string[] = [];
+  const submissions = items.map(item => {
+    const restricted = item.execution.inspectionOnly || item.execution.taskMode === "verification";
+    const businessMode = restricted ? "normal" : item.execution.businessMode ?? "normal";
+    const workflowGuidance = withBusinessMode("", businessMode);
+    workflowGuidanceParts.push(workflowGuidance);
+    return {
+      taskMode: item.execution.taskMode ?? "direct",
+      businessMode,
+      goal: !restricted && item.execution.goalMode === true,
+      guidance: items.length === 1
+        ? modelGuidance + workflowGuidance + inspectionGuidance
+        : workflowGuidance + modelGuidance + inspectionGuidance
+    };
+  });
+  if (items.length === 1) return {
+    ...first,
+    text: withAttachmentReferences(first.text, first.attachments) + submissions[0]!.guidance,
+    submissions
+  };
   const execution = { ...first.execution };
   // cli-default/omitted can inherit read-only or another unknown session policy.
   // Never infer its permissions from an explicit mode on a different message.
@@ -516,8 +546,9 @@ function mergePendingSends(items: readonly PendingSend[]): Pick<PendingSend, "te
   // Each original retains its workflow; do not apply the first workflow to the batch.
   execution.businessMode = "normal";
   return {
-    text: items.map((item, index) => `--- 대기 메시지 ${index + 1} 시작 ---\n${withBusinessMode(withAttachmentReferences(item.text, item.attachments), item.execution.inspectionOnly ? "normal" : item.execution.businessMode)}\n--- 대기 메시지 ${index + 1} 끝 ---`).join("\n\n"),
+    text: items.map((item, index) => `--- 대기 메시지 ${index + 1} 시작 ---\n${withAttachmentReferences(item.text, item.attachments) + workflowGuidanceParts[index]}\n--- 대기 메시지 ${index + 1} 끝 ---`).join("\n\n") + modelGuidance + inspectionGuidance,
     attachments: items.flatMap(item => [...item.attachments]),
+    submissions,
     execution
   };
 }
@@ -562,4 +593,9 @@ function delay(milliseconds: number): Promise<void> {
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+function delegatedModelGuidance(settings: ExecutionOptions["agentModels"]): string {
+  if (!settings || !Object.keys(settings).length) return "";
+  return `\n\n[Delegated agent model settings for this request]\n${JSON.stringify(settings)}\nApply each specified role override when dispatching its agent. For exec.py submit/send use --model and --reasoning-effort. For loop.py start use --work-model/--work-reasoning-effort and --verification-model/--verification-reasoning-effort. Plan uses the Work settings in the same Work session. Preserve these overrides on revision turns. Omitted fields use the runtime default; do not substitute Main's model. These settings do not authorize extra agents or change the selected route. If the runtime does not support a requested flag, report the limitation instead of silently dropping the setting.\n[End delegated agent model settings]`;
 }

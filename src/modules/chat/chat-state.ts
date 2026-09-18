@@ -1,5 +1,7 @@
-import { BUSINESS_MODES, type BusinessMode } from "../../common/types/business-mode";
-import { TASK_SELECTIONS, type TaskSelection } from "./task-selection";
+import { parseAgentModels } from "../../common/types/agent-models";
+import type { AgentModels } from "../../common/types/agent-models";
+import type { BusinessMode } from "../../common/types/business-mode";
+import { type TaskSelection } from "./task-selection";
 import { randomUUID } from "node:crypto";
 
 export interface ChatPanelState {
@@ -9,6 +11,7 @@ export interface ChatPanelState {
   readonly role?: "main" | "work" | "verification";
   readonly verifiedWorkRunId?: string;
   readonly model?: string;
+  readonly agentModels?: AgentModels;
   readonly reasoning?: "none" | "low" | "medium" | "high" | "xhigh" | "max";
   readonly fastMode?: boolean;
   readonly goalMode?: boolean;
@@ -22,14 +25,18 @@ export interface ChatPanelState {
 
 export type ComposerPreferences = Pick<
   ChatPanelState,
-  "model" | "reasoning" | "fastMode" | "goalMode" | "workLoopMode" | "taskMode" | "businessMode"
+  "agentModels" | "model" | "reasoning" | "fastMode" | "goalMode" | "workLoopMode" | "taskMode" | "businessMode"
 >;
 
 export function createDraftChatState(preferences: ComposerPreferences = {}): ChatPanelState {
   return {
     panelId: randomUUID(),
     title: "Main Agent",
-    ...preferences
+    ...preferences,
+    businessMode: "normal",
+    goalMode: false,
+    taskMode: "direct",
+    workLoopMode: false
   };
 }
 
@@ -52,11 +59,12 @@ export function restoreChatState(
     ...(readReasoning(value.reasoning)
       ? { reasoning: readReasoning(value.reasoning) }
       : preferences.reasoning ? { reasoning: preferences.reasoning } : {}),
+    ...((parseAgentModels(value.agentModels) ?? preferences.agentModels) ? { agentModels: parseAgentModels(value.agentModels) ?? preferences.agentModels } : {}),
     fastMode: typeof value.fastMode === "boolean" ? value.fastMode : preferences.fastMode === true,
-    goalMode: typeof value.goalMode === "boolean" ? value.goalMode : preferences.goalMode === true,
-    businessMode: BUSINESS_MODES.includes(value.businessMode as BusinessMode) ? value.businessMode as BusinessMode : preferences.businessMode ?? "normal",
-    taskMode: TASK_SELECTIONS.includes(value.taskMode as TaskSelection) ? value.taskMode as TaskSelection : value.workLoopMode === true ? "work-verification" : preferences.taskMode ?? "work",
-    workLoopMode: typeof value.workLoopMode === "boolean" ? value.workLoopMode : preferences.workLoopMode === true,
+    goalMode: false,
+    businessMode: "normal",
+    taskMode: "direct",
+    workLoopMode: false,
     ...(readCount(value.contextUsedTokens) !== undefined
       ? { contextUsedTokens: readCount(value.contextUsedTokens) }
       : {}),

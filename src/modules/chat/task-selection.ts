@@ -1,11 +1,11 @@
 import { TASK_MODES, type TaskMode } from "../../infrastructure/agent-factory/agent-client";
 
 // Composer selections are distinct from the runtime's supported route enum.
-export const TASK_SELECTIONS = [...TASK_MODES, "verification"] as const;
+export const TASK_SELECTIONS = [...TASK_MODES] as const;
 export type TaskSelection = typeof TASK_SELECTIONS[number];
 
-export function taskExecution(selection: TaskSelection = "work"): { taskMode: TaskMode; inspectionOnly: boolean } {
-  return { taskMode: selection === "verification" ? "direct" : selection, inspectionOnly: selection === "verification" };
+export function taskExecution(selection: TaskSelection = "direct"): { taskMode: TaskMode; inspectionOnly: boolean } {
+  return { taskMode: selection, inspectionOnly: false };
 }
 
 export function withInspectionGuidance(text: string): string {
