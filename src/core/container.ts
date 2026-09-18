@@ -13,6 +13,7 @@ export interface Container {
 }
 
 export function createContainer(context: vscode.ExtensionContext): Container {
+  const requiredVersion: string = context.extension.packageJSON.version;
   const templateRenderer = new ChatTemplateRenderer(context.extensionUri);
   const connections = new AsyncCache<RuntimeConnection>(30_000, 4);
   const chatPanels = new ChatPanelManager(
@@ -30,10 +31,10 @@ export function createContainer(context: vscode.ExtensionContext): Container {
       const pythonPath = vscode.workspace.getConfiguration("agentFactory.mainChat").get<string>("pythonPath")?.trim() || "python3";
       const key = JSON.stringify([projectRoot, configuredPath, pythonPath, process.env.CODEX_HOME, process.env.PATH]);
       return connections.get(key, async () => {
-        const location = await locateAgentFactoryExec({ configuredPath });
+        const location = await locateAgentFactoryExec({ configuredPath, requiredVersion });
         if (!location.available) return location;
         const client = new AgentFactoryClient(location.execPath, projectRoot, pythonPath, undefined, async () => {
-          const refreshed = await locateAgentFactoryExec({ configuredPath });
+          const refreshed = await locateAgentFactoryExec({ configuredPath, requiredVersion });
           if (!refreshed.available) throw new Error(refreshed.diagnostic);
           return refreshed.execPath;
         });

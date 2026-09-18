@@ -392,6 +392,29 @@ test("plugin locator honors an override and discovers the newest install across 
   });
 });
 
+test("plugin locator keeps an older matching release when newer plugins are cached", async function (t) {
+  const { locateAgentFactoryExec } = await importTypeScript("src/infrastructure/agent-factory/plugin-locator.ts");
+  const root = await mkdtemp(join(tmpdir(), "agent-factory-version-match-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const versions = ["1.0.8+codex.old", "1.0.11+codex.new"];
+  const paths = [];
+  for (const version of versions) {
+    const plugin = join(root, "plugins/cache/agent-factory/agent-factory", version);
+    const execPath = join(plugin, "skills/agent/scripts/exec.py");
+    await mkdir(dirname(execPath), { recursive: true });
+    await mkdir(join(plugin, ".codex-plugin"));
+    await writeFile(join(plugin, ".codex-plugin/plugin.json"), JSON.stringify({ name: "agent-factory", version }));
+    await writeFile(execPath, "# fixture");
+    paths.push(execPath);
+  }
+  assert.deepEqual(await locateAgentFactoryExec({ environment: { CODEX_HOME: root }, requiredVersion: "1.0.8" }), {
+    available: true, execPath: paths[0]
+  });
+  const missing = await locateAgentFactoryExec({ environment: { CODEX_HOME: root }, requiredVersion: "1.0.9" });
+  assert.equal(missing.available, false);
+  assert.match(missing.diagnostic, /matching extension version 1\.0\.9/);
+});
+
 test("runtime client rediscovers an installed exec after its cache path is replaced", async function (t) {
   const { AgentFactoryClient } = await importTypeScript("src/infrastructure/agent-factory/agent-client.ts");
   const root = await mkdtemp(join(tmpdir(), "agent-factory-runtime-refresh-"));

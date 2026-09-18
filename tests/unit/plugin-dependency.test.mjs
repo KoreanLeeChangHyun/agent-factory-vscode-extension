@@ -109,6 +109,15 @@ test("current CLI schema activates a compatible installed plugin without request
   assert.ok(process.calls[0].options.maxBuffer > 0);
 });
 
+test("matching older installed versions work even when a newer release is available", async () => {
+  const process = queuedRunner([json(currentList(
+    [record({ version: "1.0.8+codex.old", installed: true, enabled: true })],
+    [record({ version: "1.0.11+codex.new" })]
+  ))]);
+  await dependency.ensureAgentFactoryPlugin("1.0.8", process.runner);
+  assert.deepEqual(process.calls.map(call => call.args), [["plugin", "list", "--json"]]);
+});
+
 test("installation-needed path reads a large current-schema available catalog and verifies without it", async () => {
   const candidate = record({
     pluginId: "team@agent-factory",

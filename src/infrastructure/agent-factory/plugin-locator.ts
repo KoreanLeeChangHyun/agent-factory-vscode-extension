@@ -1,11 +1,14 @@
-import { lstat, readdir } from "node:fs/promises";
+import { lstat, readdir, readFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
+
+import { semanticBase } from "./plugin-dependency";
 
 const RELATIVE_EXEC_PATH = join("skills", "agent", "scripts", "exec.py");
 
 export interface PluginLocatorOptions {
   readonly configuredPath?: string;
+  readonly requiredVersion?: string;
   readonly environment?: NodeJS.ProcessEnv;
   readonly homeDirectory?: string;
 }
@@ -48,6 +51,11 @@ export async function locateAgentFactoryExec(
       for (const version of versions) {
         const candidate = join(pluginRoot, version.name, RELATIVE_EXEC_PATH);
         try {
+          if (options.requiredVersion) {
+            const manifest = JSON.parse(await readFile(join(pluginRoot, version.name, ".codex-plugin", "plugin.json"), "utf8"));
+            if (manifest.name !== "agent-factory" || typeof manifest.version !== "string"
+              || semanticBase(manifest.version) !== semanticBase(options.requiredVersion)) continue;
+          }
           const info = await lstat(candidate);
           if (info.isFile()) candidates.push({ path: candidate, modifiedAt: info.mtimeMs });
         } catch {
@@ -65,7 +73,7 @@ export async function locateAgentFactoryExec(
   if (candidates[0]) return { available: true, execPath: candidates[0].path };
   return {
     available: false,
-    diagnostic: `Unable to find ${RELATIVE_EXEC_PATH} in the Agent Factory plugin installed from the marketplace.`
+    diagnostic: `Unable to find ${RELATIVE_EXEC_PATH} in the Agent Factory plugin${options.requiredVersion ? ` matching extension version ${semanticBase(options.requiredVersion)}` : ""} installed from the marketplace.`
   };
 }
 

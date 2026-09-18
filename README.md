@@ -61,6 +61,8 @@ codex plugin add agent-factory@agent-factory
   `agentFactory.mainChat.runtimeExecPath` only for an explicit installed `exec.py`
   path; it does not waive the matching-plugin requirement.
 
+Matching older extension and plugin releases remain usable when newer releases are available. Automatic runtime discovery selects a cached plugin with the extension’s semantic base version; a configured `runtimeExecPath` remains an explicit development override.
+
 ## Development
 
 ```sh
