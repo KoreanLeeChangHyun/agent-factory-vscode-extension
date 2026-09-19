@@ -37,6 +37,22 @@ async function checkMessageSubmission(page) {
     assert.equal(await row.locator('details').count(), 0);
   }
   const saved = await page.evaluate(() => window.saved);
+  await page.evaluate(() => window.postMessage({ type: 'chat.started', id: 'compact-guidance', text: 'ordinary-submission', attachments: [], submission: { taskMode: 'direct', businessMode: 'normal', guidance: 'Delivered instructions' } }, '*'));
+  const compact = page.locator('[data-id="compact-guidance"]');
+  await compact.waitFor();
+  for (const width of [795, 320]) {
+    await page.setViewportSize({ width, height: 740 });
+    const plainBox = await page.locator('[data-id="ordinary-submission"]').boundingBox();
+    const compactBox = await compact.boundingBox();
+    const toggleBox = await compact.locator('summary').boundingBox();
+    assert.equal(compactBox.height, plainBox.height, 'Collapsed guidance must not add a row');
+    assert.ok(toggleBox.y >= compactBox.y && toggleBox.y + toggleBox.height <= compactBox.y + compactBox.height);
+    assert.ok(toggleBox.x + toggleBox.width <= compactBox.x + compactBox.width);
+  }
+  await compact.locator('summary').click();
+  assert.equal(await compact.locator('pre').isVisible(), true);
+  await compact.locator('summary').click();
+  assert.equal(await compact.locator('pre').isVisible(), false);
   assert.deepEqual(saved.timeline.find(item => item.id === sent.id).submission, submission);
   await page.evaluate(saved => sessionStorage.setItem("submission-restoration-fixture", JSON.stringify(saved)), saved);
   await page.reload();

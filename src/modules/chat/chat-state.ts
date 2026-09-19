@@ -1,3 +1,5 @@
+import { parseAgentPermissions } from "../../common/types/agent-permissions";
+import type { AgentPermissions } from "../../common/types/agent-permissions";
 import { parseAgentModels } from "../../common/types/agent-models";
 import type { AgentModels } from "../../common/types/agent-models";
 import type { BusinessMode } from "../../common/types/business-mode";
@@ -12,6 +14,7 @@ export interface ChatPanelState {
   readonly verifiedWorkRunId?: string;
   readonly model?: string;
   readonly agentModels?: AgentModels;
+  readonly agentPermissions?: AgentPermissions;
   readonly reasoning?: "none" | "low" | "medium" | "high" | "xhigh" | "max";
   readonly fastMode?: boolean;
   readonly goalMode?: boolean;
@@ -25,7 +28,7 @@ export interface ChatPanelState {
 
 export type ComposerPreferences = Pick<
   ChatPanelState,
-  "agentModels" | "model" | "reasoning" | "fastMode" | "goalMode" | "workLoopMode" | "taskMode" | "businessMode"
+  "agentPermissions" | "agentModels" | "model" | "reasoning" | "fastMode" | "goalMode" | "workLoopMode" | "taskMode" | "businessMode"
 >;
 
 export function createDraftChatState(preferences: ComposerPreferences = {}): ChatPanelState {
@@ -60,6 +63,7 @@ export function restoreChatState(
       ? { reasoning: readReasoning(value.reasoning) }
       : preferences.reasoning ? { reasoning: preferences.reasoning } : {}),
     ...((parseAgentModels(value.agentModels) ?? preferences.agentModels) ? { agentModels: parseAgentModels(value.agentModels) ?? preferences.agentModels } : {}),
+    ...((parseAgentPermissions(value.agentPermissions) ?? preferences.agentPermissions) ? { agentPermissions: parseAgentPermissions(value.agentPermissions) ?? preferences.agentPermissions } : {}),
     fastMode: typeof value.fastMode === "boolean" ? value.fastMode : preferences.fastMode === true,
     goalMode: false,
     businessMode: "normal",

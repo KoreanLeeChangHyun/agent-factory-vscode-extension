@@ -230,7 +230,7 @@ test("running state appears above the composer as an expandable work loop panel"
   assert.match(chatStyles, /\.run-status-label\s*\{[^}]*background-size: 230% 100%;[^}]*background-repeat: no-repeat;/);
   assert.match(template, /class="run-status-copy"[\s\S]*run-status-label[\s\S]*run-status-meta/);
   assert.match(chatStyles, /\.run-status-label\s*\{[^}]*color: var\(--vscode-foreground\)[^}]*background-clip: text[^}]*animation: run-status-text-scan/);
-  assert.match(chatStyles, /var\(--vscode-foreground\) 45%,[\s\S]*color-mix\(in srgb, var\(--vscode-foreground\) 42%, var\(--af-chat-background\)\) 50%,[\s\S]*var\(--vscode-foreground\) 55%/);
+  assert.match(chatStyles, /var\(--vscode-foreground\) 45%,[\s\S]*color-mix\(in srgb, var\(--vscode-foreground\) 70%, var\(--af-chat-background\)\) 50%,[\s\S]*var\(--vscode-foreground\) 55%/);
   assert.doesNotMatch(chatStyles.match(/\.run-status-label\s*\{[^}]*\}/)[0], /ansiCyan|#94e2d5/);
   assert.doesNotMatch(chatStyles.match(/\.run-status-copy\s*\{[^}]*\}/)[0], /animation|transparent|background-image/);
   assert.match(chatStyles, /\.run-status-meta\s*\{[^}]*color: var\(--vscode-foreground\)/);

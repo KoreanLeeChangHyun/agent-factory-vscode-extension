@@ -1,3 +1,4 @@
+import { LunaBot, type BotContext } from "../codex/luna-bot";
 import { taskExecution } from "../../modules/chat/task-selection";
 import { homedir } from "node:os";
 import { extname, isAbsolute, join, resolve } from "node:path";
@@ -54,6 +55,8 @@ interface ManagedPanel {
   branchRefreshTimer?: NodeJS.Timeout;
   branchRefreshStarted?: boolean;
   runningTitle?: RunningTitle;
+  lunaBot?: LunaBot;
+  botContext?: BotContext;
 }
 
 const COMPOSER_PREFERENCES_KEY = "agentFactory.mainChat.composerPreferences";
@@ -243,7 +246,11 @@ export class ChatPanelManager implements vscode.Disposable {
       imageMutation: Promise.resolve(),
       chatSendPreparation: Promise.resolve()
     };
-    managed.runningTitle = new RunningTitle(() => managed.state.title, (title) => { panel.title = title; });
+    managed.runningTitle = new RunningTitle(() => managed.state.title, (title, frame) => {
+      panel.title = title;
+      const icon = frame === undefined ? "agent-factory.png" : `loading-squares-${frame}.svg`;
+      panel.iconPath = vscode.Uri.joinPath(this.context.extensionUri, "static", "images", icon);
+    });
     subscriptions.push(managed.runningTitle);
     subscriptions.push(new vscode.Disposable(() => {
       managed.disposed = true;
@@ -271,6 +278,7 @@ export class ChatPanelManager implements vscode.Disposable {
 
     subscriptions.push(
       panel.onDidDispose(() => {
+        managed.lunaBot?.dispose();
         if (managed.agentRefreshTimer) clearTimeout(managed.agentRefreshTimer);
         this.panels.delete(state.panelId);
         this.notifyAgents();
@@ -363,6 +371,7 @@ export class ChatPanelManager implements vscode.Disposable {
           statusItems: this.statusItems(),
           model: managed.state.model,
           agentModels: managed.state.agentModels,
+          agentPermissions: managed.state.agentPermissions,
           reasoning: managed.state.reasoning,
           businessMode: "normal",
           taskMode: "direct",
@@ -445,6 +454,7 @@ export class ChatPanelManager implements vscode.Disposable {
           taskMode: "direct",
           model: message.model,
           agentModels: message.agentModels,
+          agentPermissions: message.agentPermissions,
           reasoning: message.reasoning,
           fastMode: message.fastMode,
           goalMode: false,
@@ -529,7 +539,14 @@ export class ChatPanelManager implements vscode.Disposable {
       const filePath = isAbsolute(target.path)
         ? target.path
         : resolve(workspaceRoot ?? this.context.extensionUri.fsPath, target.path);
-      const document = await vscode.workspace.openTextDocument(vscode.Uri.file(filePath));
+      const uri = vscode.Uri.file(filePath);
+      // Let VS Code select the file's editor (including the remote image viewer).
+      // Explicit line links still require a text editor for selection/reveal.
+      if (target.line === undefined) {
+        await vscode.commands.executeCommand("vscode.open", uri, { preview: true });
+        return;
+      }
+      const document = await vscode.workspace.openTextDocument(uri);
       const editor = await vscode.window.showTextDocument(document, { preview: true });
       if (target.line !== undefined) {
         const position = new vscode.Position(Math.max(0, target.line - 1), Math.max(0, (target.column ?? 1) - 1));
@@ -693,6 +710,7 @@ export class ChatPanelManager implements vscode.Disposable {
     await this.context.globalState.update(COMPOSER_PREFERENCES_KEY, {
       model: state.model,
       agentModels: state.agentModels,
+      agentPermissions: state.agentPermissions,
       reasoning: state.reasoning,
       businessMode: "normal",
       taskMode: "direct",
@@ -826,6 +844,12 @@ export class ChatPanelManager implements vscode.Disposable {
         },
         onRunningChanged: (running) => {
           this.notifyAgents();
+          if (running) managed.botContext = "working";
+          else if (managed.botContext === "working") managed.botContext = "idle";
+          managed.lunaBot ??= new LunaBot();
+          void managed.lunaBot.react(managed.botContext ?? "idle", (mood, unavailable) => {
+            if (!managed.disposed) void this.post(managed.panel, { type: "bot.mood", mood, unavailable });
+          });
           managed.runningTitle?.setRunning(running);
           void this.post(managed.panel, { type: "run.state", running });
           this.scheduleAgentList(managed, !running);
@@ -863,7 +887,9 @@ export class ChatPanelManager implements vscode.Disposable {
         onGoal: (goal, error) => {
           void this.post(managed.panel, { type: "goal.updated", goal, error });
         },
-        onStatusObserved: () => {
+        onStatusObserved: (status) => {
+          if (status === "completed" || status === "failed") managed.botContext = status;
+          void this.post(managed.panel, { type: "run.observed", status });
           this.scheduleAgentList(managed);
         },
         onError: (message) => {
@@ -885,6 +911,10 @@ export class ChatPanelManager implements vscode.Disposable {
     if (managed.sessionTransition) {
       await managed.sessionTransition;
       if (managed.disposed) return;
+    }
+    if ((managed.state.role ?? "main") === "main" && execution.agentPermissions?.main) {
+      executionMode = execution.agentPermissions.main;
+      executionModeExplicit = true;
     }
     const goalMode = (managed.state.role ?? "main") === "main" && execution.taskMode !== "verification" && execution.goal;
     const goalObjective = goalMode ? text.trim() : undefined;
@@ -908,6 +938,7 @@ export class ChatPanelManager implements vscode.Disposable {
       ...((managed.state.role ?? "main") === "main" ? { ...taskExecution(execution.taskMode), businessMode: execution.businessMode ?? "normal" } : {}),
       model: execution.model,
       agentModels: execution.agentModels,
+      agentPermissions: execution.agentPermissions,
       reasoningEffort: execution.reasoningEffort,
       fast: execution.fast,
       goalMode,
@@ -1203,7 +1234,7 @@ function parseLocalLink(href: string): { path: string; line?: number; column?: n
   if (fragmentLocation) {
     return { path, line: Number(fragmentLocation[1]), ...(fragmentLocation[2] ? { column: Number(fragmentLocation[2]) } : {}) };
   }
-  const suffixLocation = path.match(/^(.*):(\d+)(?::(\d+))?$/);
+  const suffixLocation = path.match(/^(.*?):(\d+)(?::(\d+))?$/);
   if (suffixLocation) {
     return {
       path: suffixLocation[1]!,

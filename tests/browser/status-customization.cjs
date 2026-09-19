@@ -34,6 +34,7 @@ async function checkStatusCustomizationLayout(page) {
       assert.equal(await settings.isHidden(), true);
       const before = await layout();
       await button.click();
+      await settings.locator('#settings-panel-status').evaluate(element => { element.scrollTop = 0; });
       const box = await settings.boundingBox();
       assert.ok(box && box.height > 200, 'Catalog must be usable, not squeezed into the footer track');
       assert.ok(box.x >= 0 && box.x + box.width <= width);
@@ -41,8 +42,9 @@ async function checkStatusCustomizationLayout(page) {
       sameLayout(await layout(), before);
       const appearance = await settings.evaluate(element => {
         const style = getComputedStyle(element);
+        const panel = element.querySelector('#settings-panel-status');
         return {
-          scrollable: element.scrollHeight > element.clientHeight && ['auto', 'scroll'].includes(style.overflowY),
+          scrollable: panel.scrollHeight > panel.clientHeight && ['auto', 'scroll'].includes(getComputedStyle(panel).overflowY),
           background: style.backgroundColor
         };
       });
@@ -68,6 +70,14 @@ async function checkStatusCustomizationLayout(page) {
       assert.equal(await settings.locator('[data-item-id="agents"] button').last().evaluate(element => document.activeElement === element), true);
       assert.ok(await settings.locator('[data-item-id="agents"]').evaluate(element => element.getBoundingClientRect().height < 60), 'Selected rows must stay compact');
       await settings.locator('[data-item-id="goalBudget"] input').scrollIntoViewIfNeeded();
+      assert.equal(await settings.locator('.status-settings-heading').evaluate(element => {
+        const rect = element.getBoundingClientRect();
+        return element.contains(document.elementFromPoint(rect.x + 2, rect.y + rect.height / 2));
+      }), true, 'Settings heading must stay visible while the content scrolls');
+      assert.equal(await settings.locator('#settings-tab-bot').evaluate(element => {
+        const rect = element.getBoundingClientRect();
+        return element.contains(document.elementFromPoint(rect.x + rect.width / 2, rect.y + rect.height / 2));
+      }), true, 'Settings tabs must stay clickable while the content scrolls');
       await settings.locator('[data-item-id="goalBudget"] input').check();
       assert.ok(await page.evaluate(() => window.saved.statusItems.includes('goalBudget')));
       await page.keyboard.press('Escape');

@@ -6,17 +6,20 @@
     ? globalThis.markdownit({ html: false, linkify: true, typographer: false })
     : undefined;
   const timeline = document.getElementById("timeline");
+  const jumpToBottom = document.getElementById("jump-to-bottom");
   let commandDisclosureObserver;
   let commandDisclosureFrame;
   let commandOutputObserver;
   let commandOutputFrame;
   const emptyState = document.getElementById("empty-state");
   const prompt = document.getElementById("prompt");
+  const promptSurface = prompt.closest(".prompt-surface");
   const sendButton = document.getElementById("send-button");
   const sendIcon = document.getElementById("send-icon");
   const stopIcon = document.getElementById("stop-icon");
   const attachButton = document.getElementById("attach-button");
   const autoScrollButton = document.getElementById("auto-scroll-button");
+  const autoScrollState = document.getElementById("auto-scroll-state");
   const modelButton = document.getElementById("model-button");
   const modelLabel = document.getElementById("model-label");
   const submissionButton = document.getElementById("submission-button");
@@ -39,6 +42,7 @@
   const questionButton = document.getElementById("question-button");
   const questionMenu = document.getElementById("question-menu");
   const questionList = document.getElementById("question-list");
+  const factoryBot = document.getElementById("factory-bot");
   const runStatus = document.getElementById("run-status");
   const runStatusToggle = document.getElementById("run-status-toggle");
   const runStatusLabel = document.getElementById("run-status-label");
@@ -107,6 +111,8 @@
     verifiedWorkRunId: typeof saved?.verifiedWorkRunId === "string" ? saved.verifiedWorkRunId : undefined,
     draft: typeof saved?.draft === "string" ? saved.draft : "",
     autoScroll: saved?.autoScroll !== false,
+    botVisible: saved?.botVisible !== false,
+    botAnimations: saved?.botAnimations !== false,
     attachments: Array.isArray(saved?.attachments) ? saved.attachments.filter(function (item) {
       return item && !item.pending && !item.previewUri?.startsWith("blob:") && item.data === undefined;
     }) : [],
@@ -151,6 +157,12 @@
   };
   let syntaxRevision = 0;
   let themeUpdate = 0;
+  let botOutcome;
+  let botWaveTimer;
+  let botIdleTimer;
+  let botIdleSince;
+  let botGestureTimer;
+  let botGestureKey;
   let elapsedTimerId;
   let followLatest = true;
   let autoScrollFrame;
@@ -187,6 +199,11 @@
     syntaxRevision += 1;
     renderTimeline();
   }).observe(document.body, { attributes: true, attributeFilter: ["class"] });
+
+  factoryBot.addEventListener("pointerenter", wakeFactoryBot);
+  document.addEventListener("pointerdown", wakeFactoryBot);
+  document.addEventListener("keydown", wakeFactoryBot);
+  document.addEventListener("input", wakeFactoryBot);
 
   prompt.addEventListener("input", function () {
     state.draft = prompt.value;
@@ -233,23 +250,43 @@
     }
   });
 
-  timeline.addEventListener("scroll", function () {
-    followLatest = timeline.scrollHeight - timeline.scrollTop - timeline.clientHeight < 24;
+  function updateJumpToBottom() {
+    jumpToBottom.hidden = timeline.scrollHeight - timeline.clientHeight - timeline.scrollTop <= 24;
+  }
+
+  jumpToBottom.addEventListener("click", function () {
+    followLatest = true;
+    updateAutoScrollControl();
+    timeline.scrollTop = timeline.scrollHeight;
+    prompt.focus({ preventScroll: true });
+    updateJumpToBottom();
   });
+  timeline.addEventListener("scroll", function () {
+    followLatest = timeline.scrollHeight - timeline.clientHeight - timeline.scrollTop <= 24;
+    updateAutoScrollControl();
+    updateJumpToBottom();
+  }, { passive: true });
+  timeline.addEventListener("toggle", updateJumpToBottom, true);
+  timeline.addEventListener("load", updateJumpToBottom, true);
+  new ResizeObserver(updateJumpToBottom).observe(timeline);
+  new MutationObserver(updateJumpToBottom).observe(timeline, { childList: true, subtree: true, characterData: true });
+  updateJumpToBottom();
 
   autoScrollButton.addEventListener("click", function () {
     state.autoScroll = !state.autoScroll;
     cancelAnimationFrame(autoScrollFrame);
-    updateAutoScrollControl();
     if (state.autoScroll) {
       followLatest = true;
       timeline.scrollTop = timeline.scrollHeight;
     }
+    updateAutoScrollControl();
     persist();
   });
 
   document.addEventListener("keydown", function (event) {
     if (event.key === "Escape") {
+      // Let the native picker consume Escape before closing its settings dialog.
+      if (CSS.supports("selector(select:open)") && modelMenu.querySelector("select:open")) return;
       if (!statusSettings.hidden) { event.preventDefault(); closeStatusSettings(); return; }
       if (!sessionMenu.hidden) {
         event.preventDefault();
@@ -436,7 +473,7 @@
           if (openSettingId === "model") {
             const focused = modelMenu.contains(document.activeElement) ? { role: document.activeElement.dataset.role, field: document.activeElement.dataset.field } : undefined;
             renderSettingMenu("model", modelMenu);
-            if (focused?.role && focused?.field) modelMenu.querySelector('select[data-role="' + focused.role + '"][data-field="' + focused.field + '"]')?.focus();
+            if (focused?.role && focused?.field) modelMenu.querySelector('[data-role="' + focused.role + '"][data-field="' + focused.field + '"]')?.focus();
           }
         }
         break;
@@ -473,6 +510,7 @@
         break;
       }
       case "host.notice":
+        if (message.level === "error") { botOutcome = "failed"; renderFactoryBot(); }
         appendNotice(message.level, message.text);
         break;
       case "status.updated":
@@ -544,7 +582,6 @@
       case "chat.human-decision":
         if (typeof message.text === "string" && message.text) {
           state.timeline.push({ type: "user", id: createId(), text: message.text, submission: message.submission });
-          followLatest = true;
           renderTimeline();
           persist();
         }
@@ -566,7 +603,21 @@
           persist();
         }
         break;
+      case "bot.mood":
+        factoryBot.dataset.mood = ["calm", "curious", "cheerful", "focused"].includes(message.mood) ? message.mood : "";
+        factoryBot.dataset.brain = factoryBot.dataset.mood ? "luna" : message.unavailable === true ? "unavailable" : "local";
+        renderFactoryBot();
+        break;
+      case "run.observed":
+        botOutcome = message.status;
+        renderFactoryBot();
+        break;
       case "run.state":
+        if (message.running === true && !state.running) {
+          botOutcome = undefined;
+          clearTimeout(botWaveTimer);
+          botWaveTimer = undefined;
+        }
         state.running = message.running === true;
         state.runProgress = state.running ? (state.runProgress || "Starting Main Agent") : "";
         if (state.running && !state.runStartedAt) {
@@ -693,6 +744,7 @@
       execution: {
         ...(state.role === "main" ? { taskMode: action, businessMode: workflow } : {}),
         agentModels: state.role === "main" ? JSON.parse(JSON.stringify(state.agentModels || {})) : undefined,
+        agentPermissions: state.role === "main" ? Object.fromEntries(["main", "work", "verification"].map(role => [role, state.executionMode || "cli-default"])) : undefined,
         model: currentCapabilities().model ? state.model || undefined : undefined,
         reasoningEffort: currentCapabilities().reasoning ? state.reasoning || undefined : undefined,
         fast: currentCapabilities().fast === true && state.fastMode,
@@ -709,8 +761,8 @@
     saveComposerSettings();
     state.draft = "";
     state.attachments = [];
-    followLatest = true;
     prompt.value = "";
+    followLatest = true;
     renderAll();
     resizePrompt();
     // Sending reveals the latest content once without enabling automatic following.
@@ -983,13 +1035,32 @@
     container.append(details);
   }
 
+  function renderCommandError(container, outcome) {
+    if (!outcome.detail) return;
+    const detail = document.createElement("div");
+    detail.className = "command-error-summary";
+    detail.textContent = outcome.detail;
+    container.append(detail);
+  }
+
   function renderFactoryScripts(container, scripts, documents, event) {
     container.classList.add("managed-agent-card");
+    const outcome = globalThis.agentFactoryExecutionReferences.commandOutcome(event);
+    container.dataset.status = outcome.status;
+    const row = document.createElement("div");
+    row.className = "managed-agent-heading";
     const heading = document.createElement("strong");
-    heading.textContent = "Agent Factory · " + scripts.map(function (script) {
+    const labels = { doctor: "Check execution environment", capabilities: "Check supported features", submit: "Submit task", send: "Send follow-up", status: "Check task status", result: "Read task result", start: "Start task" };
+    heading.textContent = scripts.map(function (script) {
+      if (script.skill === "agent" && ["exec.py", "loop.py"].includes(script.script) && labels[script.action]) return labels[script.action];
       return script.script + (script.action ? " · " + script.action : "");
     }).join(" / ");
-    container.append(heading);
+    const badge = document.createElement("span");
+    badge.className = "managed-agent-status";
+    badge.textContent = outcome.label;
+    row.append(heading, badge);
+    container.append(row);
+    renderCommandError(container, outcome);
     // Keep mixed commands and failures intact, including their non-Factory output.
     renderSkillDocuments(container, documents.length ? documents : scripts.map(function (script) {
       return { skill: "agent-factory:" + script.skill, document: script.script, path: script.path };
@@ -1002,7 +1073,9 @@
     const pendingRequest = ["submit", "send", "start", "resume"].includes(managed.action) && !managed.runId;
     const matchesRun = managed.kind !== "loop" && child && !pendingRequest && (!managed.runId || child.runId === managed.runId);
     const role = managed.role || child?.role;
-    const status = matchesRun ? child.status : managed.observedStatus || "unknown";
+    const last = events[events.length - 1];
+    const outcome = globalThis.agentFactoryExecutionReferences.commandOutcome(last);
+    const status = pendingRequest && outcome.status === "failed" ? "failed" : matchesRun ? child.status : managed.observedStatus || "unknown";
     container.dataset.status = status;
     const heading = document.createElement("div");
     heading.className = "managed-agent-heading";
@@ -1018,10 +1091,10 @@
     identity.textContent = managed.agentId + (managed.runId ? " · " + managed.runId : "");
     const progress = document.createElement("div");
     progress.className = "managed-agent-progress";
-    const last = events[events.length - 1];
     const actions = { submit: "Submit run", start: "Start work", send: "Send follow-up", status: "Check status", result: "Get result", updates: "Get updates", cancel: "Cancel", resume: "Resume", reconcile: "Reconcile work", "recover-receipt": "Recover run", skip: "Skip verification" };
-    progress.textContent = (actions[managed.action] || "Check run") + (last.phase === "failed" ? " failed" : last.phase === "started" ? " in progress" : " processed");
+    progress.textContent = (actions[managed.action] || "Check run") + (outcome.status === "failed" ? " failed" : outcome.status === "running" ? " in progress" : pendingRequest ? " · Acceptance unconfirmed" : " processed");
     container.append(heading, identity, progress);
+    renderCommandError(container, outcome);
     if (child && state.role === "main") {
       const open = document.createElement("button");
       open.type = "button";
@@ -1041,6 +1114,9 @@
       const raw = document.createElement("div");
       renderTerminalCommand(raw, event.text, event.phase, event.title);
       renderCommandOutput(raw, event.output, Boolean(event.title));
+      raw.querySelectorAll("details").forEach(function (item, index) {
+        item.dataset.disclosureKey = event.id + ":" + index;
+      });
       details.append(raw);
     }
     container.append(details);
@@ -1054,7 +1130,7 @@
       if (!managed) continue;
       const key = managed.kind + ":" + managed.agentId;
       let group = groups.get(key);
-      if (!group || (group.managed.runId && managed.runId && group.managed.runId !== managed.runId) || ["submit", "start"].includes(managed.action)) {
+      if (!group || (group.managed.runId && managed.runId && group.managed.runId !== managed.runId) || ["submit", "send", "start", "resume"].includes(managed.action)) {
         group = { managed, events: [] };
         groups.set(key, group);
       } else {
@@ -1089,10 +1165,13 @@
     }
     // Missing historical guidance is unknown; never reconstruct it from today's templates.
     if (typeof submission.guidance === "string" && submission.guidance.trim()) {
+      content.classList.add("has-message-guidance");
       const details = document.createElement("details");
       details.className = "message-guidance";
       const summary = document.createElement("summary");
-      summary.append(createModeIcon("m9 5 7 7-7 7", "submission-chevron"), document.createTextNode("View delivered guidance"));
+      summary.setAttribute("aria-label", "View delivered guidance");
+      summary.title = "View delivered guidance";
+      summary.append(createModeIcon("m9 5 7 7-7 7", "submission-chevron"));
       const note = document.createElement("p");
       note.textContent = "Application-added guidance for this request. This is not the full provider prompt.";
       const guidance = document.createElement("pre");
@@ -1116,7 +1195,7 @@
       if (focusIndex >= 0) focusedControl = { id: element.dataset.id, index: focusIndex };
       displayStates.set(element.dataset.id, {
         expanded: element.querySelector(".bash-command-toggle")?.getAttribute("aria-expanded") === "true",
-        details: Array.from(element.querySelectorAll("details")).map(function (details) { return { className: details.className, open: details.open }; }),
+        details: Array.from(element.querySelectorAll("details")).map(function (details, index) { return { key: details.dataset.disclosureKey || details.className + ":" + index, open: details.open }; }),
         scroll: Array.from(element.querySelectorAll("pre")).map(function (pre) { return { top: pre.scrollTop, left: pre.scrollLeft }; })
       });
     }
@@ -1193,7 +1272,8 @@
         }
       } else if (event.type === "activity" && event.category === "command") {
         const skillDocuments = globalThis.agentFactoryExecutionReferences?.skillDocuments(event.text) || [];
-        const factoryScripts = globalThis.agentFactoryExecutionReferences?.scriptInvocations(event.text) || [];
+        const runtimeScripts = globalThis.agentFactoryExecutionReferences?.runtimeScripts(event.output) || [];
+        const factoryScripts = runtimeScripts.length ? runtimeScripts : globalThis.agentFactoryExecutionReferences?.scriptInvocations(event.text) || [];
         if (managedGroup) {
           message.classList.add("message-activity-agent");
           renderManagedAgent(content, managedGroup.managed, managedGroup.events);
@@ -1203,6 +1283,7 @@
         } else if (skillDocuments.length) {
           renderSkillDocuments(content, skillDocuments, event);
         } else {
+          renderCommandError(content, globalThis.agentFactoryExecutionReferences.commandOutcome(event));
           renderTerminalCommand(content, event.text, event.phase, event.title);
           renderCommandOutput(content, event.output, Boolean(event.title));
         }
@@ -1219,10 +1300,11 @@
         const toggle = message.querySelector(".bash-command-toggle");
         const command = message.querySelector(".bash-command-text");
         if (toggle && command && display.expanded) setCommandExpanded(command, toggle, true);
-        for (const details of message.querySelectorAll("details")) {
-          const previous = display.details.find(function (item) { return item.className === details.className; });
+        message.querySelectorAll("details").forEach(function (details, index) {
+          const key = details.dataset.disclosureKey || details.className + ":" + index;
+          const previous = display.details.find(function (item) { return item.key === key; });
           if (previous) details.open = previous.open;
-        }
+        });
       }
       // Build the replacement at its final disclosure height before touching live DOM.
       // Unchanged messages stay mounted, so OFF needs no scrollTop restoration.
@@ -1254,19 +1336,26 @@
     timeline.setAttribute("aria-busy", String(state.running));
     if (shouldFollowLatest) {
       autoScrollFrame = requestAnimationFrame(function () {
-        // The user may disable following or scroll away before this frame runs.
+        // Recheck both the preference and reading position before following.
         if (state.autoScroll && followLatest) timeline.scrollTop = timeline.scrollHeight;
       });
     }
   }
 
   function updateAutoScrollControl() {
+    const following = state.autoScroll && followLatest;
+    const status = following ? "Following latest messages" : "Paused · Jump to the bottom to resume";
     const label = state.autoScroll
-      ? "Auto-scroll ON · Click to turn off"
+      ? "Auto-scroll ON · " + status + " · Click to turn off"
       : "Auto-scroll OFF · Click to jump to the latest content and turn on";
     autoScrollButton.title = label;
     autoScrollButton.setAttribute("aria-label", label);
     autoScrollButton.setAttribute("aria-pressed", String(state.autoScroll));
+    autoScrollState.toggleAttribute("hidden", !state.autoScroll);
+    autoScrollState.setAttribute("aria-label", status);
+    autoScrollState.dataset.state = following ? "following" : "paused";
+    autoScrollState.querySelector("path").setAttribute("d", following
+      ? "m6 5 6 6 6-6m-12 8 6 6 6-6" : "M8 5v14M16 5v14");
   }
 
   function activityKindLabel(category) {
@@ -2062,7 +2151,9 @@
     if (!target) {
       return;
     }
+    cancelAnimationFrame(autoScrollFrame);
     followLatest = false;
+    updateAutoScrollControl();
     target.scrollIntoView({ block: "center" });
     target.focus({ preventScroll: true });
     target.classList.add("message-jump-target");
@@ -2136,7 +2227,77 @@
     questionButton.setAttribute("aria-label", questionButton.title);
   }
 
+  function wakeFactoryBot() {
+    botIdleSince = undefined;
+    renderFactoryBot();
+  }
+
+  function updateBotGesture(mode) {
+    const mood = factoryBot.dataset.mood || "calm";
+    const key = mode + ":" + mood;
+    if (key !== botGestureKey || mode !== "idle") {
+      clearTimeout(botGestureTimer);
+      botGestureTimer = undefined;
+      botGestureKey = key;
+    }
+    if (mode !== "idle") {
+      delete factoryBot.dataset.gesture;
+      return;
+    }
+    if (botGestureTimer !== undefined) return;
+    const pools = {
+      calm: ["breathe", "stretch", "coffee", "read", "bow", "look"],
+      curious: ["look", "read", "balance", "wave", "stretch", "shy"],
+      cheerful: ["dance", "wave", "bow", "balance", "stretch", "shy"],
+      focused: ["read", "coffee", "look", "breathe", "stretch", "bow"]
+    };
+    const choices = (pools[mood] || pools.calm).filter(function (gesture) {
+      return gesture !== factoryBot.dataset.gesture;
+    });
+    factoryBot.dataset.gesture = choices[Math.floor(Math.random() * choices.length)];
+    botGestureTimer = window.setTimeout(function () {
+      botGestureTimer = undefined;
+      renderFactoryBot();
+    }, 8000);
+  }
+
+  function renderFactoryBot() {
+    factoryBot.hidden = !state.botVisible;
+    factoryBot.dataset.animations = String(state.botAnimations);
+    let mode = state.pendingDecisionRunId ? "waiting"
+      : !state.runtimeAvailable ? "offline"
+      : state.running ? "working"
+      : botOutcome === "completed" ? "complete"
+      : botOutcome === "failed" ? "error" : "idle";
+    clearTimeout(botIdleTimer);
+    botIdleTimer = undefined;
+    if (mode === "idle") {
+      if (botIdleSince === undefined) botIdleSince = Date.now();
+      const elapsed = Date.now() - botIdleSince;
+      if (elapsed >= 60000) mode = "sleeping";
+      else {
+        if (elapsed >= 45000) mode = "drowsy";
+        botIdleTimer = window.setTimeout(renderFactoryBot, (elapsed < 45000 ? 45000 : 60000) - elapsed);
+      }
+    } else {
+      botIdleSince = undefined;
+    }
+    const labels = { drowsy: "Getting sleepy", sleeping: "Sleeping", idle: "Ready", working: "Working", waiting: "Waiting for your reply", complete: "Completed", error: "Needs attention", offline: "Resting · Runtime offline" };
+    factoryBot.dataset.state = mode;
+    updateBotGesture(mode);
+    factoryBot.title = "Factory Bot · " + labels[mode] + (factoryBot.dataset.brain === "luna" ? " · Luna (none)" : factoryBot.dataset.brain === "unavailable" ? " · Local animation (Luna unavailable)" : "");
+    factoryBot.setAttribute("aria-label", factoryBot.title);
+    if (mode === "complete" && !botWaveTimer) {
+      botWaveTimer = window.setTimeout(function () {
+        botWaveTimer = undefined;
+        if (botOutcome === "completed") botOutcome = undefined;
+        renderFactoryBot();
+      }, 2400);
+    }
+  }
+
   function renderStatusBar() {
+    renderFactoryBot();
     if (statusDragId) { statusRenderPending = true; return; }
     const focusedId = statusBar.contains(document.activeElement) ? document.activeElement.dataset.itemId : undefined;
     statusBar.replaceChildren();
@@ -2455,8 +2616,42 @@
     statusSettings.hidden = false;
     statusSettingsButton.setAttribute("aria-expanded", "true");
     renderStatusCatalog();
-    statusCatalogList.querySelector("input")?.focus();
+    statusSettings.querySelector('[role="tab"][aria-selected="true"]')?.focus();
   });
+  const settingsTabs = [...statusSettings.querySelectorAll("[data-settings-tab]")];
+  function selectSettingsTab(tab) {
+    for (const item of settingsTabs) {
+      const selected = item === tab;
+      item.setAttribute("aria-selected", String(selected));
+      item.tabIndex = selected ? 0 : -1;
+      document.getElementById(item.getAttribute("aria-controls")).hidden = !selected;
+    }
+    renderStatusCatalog();
+    tab.focus();
+  }
+  for (const tab of settingsTabs) {
+    tab.addEventListener("click", function () { selectSettingsTab(tab); });
+    tab.addEventListener("keydown", function (event) {
+      const index = settingsTabs.indexOf(tab);
+      let next;
+      if (event.key === "ArrowRight") next = (index + 1) % settingsTabs.length;
+      if (event.key === "ArrowLeft") next = (index + settingsTabs.length - 1) % settingsTabs.length;
+      if (event.key === "Home") next = 0;
+      if (event.key === "End") next = settingsTabs.length - 1;
+      if (next === undefined) return;
+      event.preventDefault();
+      selectSettingsTab(settingsTabs[next]);
+    });
+  }
+  for (const [id, key] of [["bot-visible", "botVisible"], ["bot-animations", "botAnimations"]]) {
+    const control = document.getElementById(id);
+    control.checked = state[key];
+    control.addEventListener("change", function () {
+      state[key] = control.checked;
+      renderFactoryBot();
+      persist();
+    });
+  }
   document.getElementById("status-settings-close").addEventListener("click", closeStatusSettings);
   document.getElementById("status-reset").addEventListener("click", function () {
     setStatusItems(defaultStatusItems, "Default status items and order restored.");
@@ -2611,6 +2806,7 @@
     fastModeButton.setAttribute("aria-pressed", String(state.fastMode));
     fastModeButton.setAttribute("aria-label", state.fastMode ? "Fast mode on" : "Fast mode off");
     fastModeButton.title = state.fastMode ? "Fast mode on" : "Fast mode off";
+    promptSurface.classList.toggle("is-astra", /(?:^|[-/])astra(?:$|-)/i.test(state.model || ""));
     const modelText = (state.model || "Default") + " · " + (state.reasoning || "Default");
     if (modelLabel.textContent !== modelText) modelLabel.textContent = modelText;
     modelButton.title = "Models, reasoning and permissions";
@@ -2655,49 +2851,127 @@
     menu.replaceChildren();
     menu.setAttribute("role", "dialog");
     menu.setAttribute("aria-label", "Models, reasoning and permissions");
+    const header = document.createElement("div");
+    header.className = "agent-settings-heading";
+    const title = document.createElement("strong");
+    title.textContent = "Agent settings";
+    const close = document.createElement("button");
+    close.type = "button";
+    close.className = "agent-settings-close";
+    close.setAttribute("aria-label", "Close agent settings");
+    close.append(createModeIcon("m6 6 12 12M18 6 6 18", "agent-settings-close-icon"));
+    close.addEventListener("click", function () { closeSettingMenu(true); });
+    header.append(title, close);
+    const columns = document.createElement("div");
+    columns.className = "agent-settings-columns";
+    columns.setAttribute("aria-hidden", "true");
+    for (const text of ["Agent", "Model", "Reasoning"]) {
+      const column = document.createElement("span");
+      column.textContent = text;
+      columns.append(column);
+    }
+    menu.classList.add("aligned-settings");
+    menu.append(header, columns);
     const roles = state.role === "main" ? [["main", "Main"], ["work", "Work"], ["verification", "Verification"]] : [["main", state.role === "work" ? "Work" : "Verification"]];
     for (const [role, label] of roles) {
-      const row = document.createElement("fieldset");
+      const row = document.createElement("div");
       row.className = "agent-model-row";
-      const legend = document.createElement("legend");
+      row.dataset.agentRole = role;
+      row.setAttribute("role", "group");
+      row.setAttribute("aria-label", label);
+      const legend = document.createElement("strong");
+      legend.className = "agent-model-name";
       legend.textContent = label;
       row.append(legend);
       for (const field of ["model", "reasoningEffort"]) {
         const current = role === "main" ? (field === "model" ? state.model : state.reasoning) : state.agentModels?.[role]?.[field];
         const wrapper = document.createElement("label");
-        wrapper.textContent = field === "model" ? "Model" : "Reasoning";
-        const select = document.createElement("select");
-        select.dataset.role = role;
-        select.dataset.field = field;
-        select.setAttribute("aria-label", label + " " + wrapper.textContent);
+        const fieldLabel = field === "model" ? "Model" : "Reasoning";
+        const caption = document.createElement("span");
+        caption.className = "agent-model-caption";
+        caption.textContent = fieldLabel;
+        wrapper.append(caption);
         const values = field === "model" ? [...new Set(["", ...settingOptions.model, current].filter(value => typeof value === "string"))] : settingOptions.reasoning;
-        for (const value of values) {
-          const option = document.createElement("option");
-          option.value = value;
-          option.textContent = value || "Default";
-          option.selected = value === (current || "");
-          select.append(option);
+        const isReasoning = field === "reasoningEffort";
+        const control = document.createElement(isReasoning ? "input" : "select");
+        control.dataset.role = role;
+        control.dataset.field = field;
+        control.setAttribute("aria-label", label + " " + fieldLabel);
+        const output = document.createElement("span");
+        let slider;
+        let progress;
+        if (isReasoning) {
+          wrapper.classList.add("agent-reasoning-control");
+          output.className = "agent-reasoning-value";
+          control.type = "range";
+          control.min = "0";
+          control.max = String(values.length - 1);
+          control.step = "1";
+          control.value = String(Math.max(0, values.indexOf(current || "")));
+          wrapper.append(output);
+          slider = document.createElement("span");
+          slider.className = "agent-reasoning-slider";
+          progress = document.createElement("progress");
+          progress.max = values.length - 1;
+          progress.setAttribute("aria-hidden", "true");
+          const ticks = document.createElement("span");
+          ticks.className = "agent-reasoning-ticks";
+          ticks.setAttribute("aria-hidden", "true");
+          for (const value of values) {
+            const tick = document.createElement("span");
+            tick.title = value || "Default";
+            ticks.append(tick);
+          }
+          slider.append(progress, ticks);
+        } else {
+          for (const value of values) {
+            const option = document.createElement("option");
+            option.value = value;
+            option.textContent = value || "Default";
+            option.selected = value === (current || "");
+            control.append(option);
+          }
         }
-        select.disabled = currentCapabilities()[field === "model" ? "model" : "reasoning"] !== true;
-        select.addEventListener("change", function () {
-          if (role === "main") state[field === "model" ? "model" : "reasoning"] = select.value;
+        const selectedValue = () => isReasoning ? values[Number(control.value)] : control.value;
+        const showEffort = () => {
+          if (!isReasoning) return;
+          const value = selectedValue();
+          const ultra = value === "max";
+          wrapper.classList.toggle("is-ultra", ultra);
+          output.textContent = ultra ? "ULTRA" : value ? value.toUpperCase() : "Default";
+          output.title = ultra ? "Ultra · max reasoning effort" : value || "Default";
+          control.setAttribute("aria-valuetext", value || "Default");
+          progress.value = Number(control.value);
+        };
+        showEffort();
+        control.disabled = currentCapabilities()[isReasoning ? "reasoning" : "model"] !== true;
+        control.addEventListener(isReasoning ? "input" : "change", function () {
+          const value = selectedValue();
+          showEffort();
+          if (role === "main") state[isReasoning ? "reasoning" : "model"] = value;
           else {
-            state.agentModels = { ...state.agentModels, [role]: { ...state.agentModels?.[role], [field]: select.value || undefined } };
+            state.agentModels = { ...state.agentModels, [role]: { ...state.agentModels?.[role], [field]: value || undefined } };
           }
           updateModeControls();
           persist();
           saveComposerSettings();
         });
-        wrapper.append(select);
+        if (slider) {
+          slider.append(control);
+          wrapper.append(slider);
+        } else wrapper.append(control);
         row.append(wrapper);
       }
       menu.append(row);
     }
     if (state.role === "main") {
-      const row = document.createElement("fieldset");
-      row.className = "agent-model-row";
-      const legend = document.createElement("legend");
-      legend.textContent = "Permissions · next message";
+      const row = document.createElement("div");
+      row.className = "agent-permissions-row";
+      const legend = document.createElement("div");
+      legend.className = "agent-permissions-heading";
+      const name = document.createElement("strong");
+      name.textContent = "Permissions";
+      legend.append(name);
       const select = document.createElement("select");
       select.dataset.setting = "permissions";
       select.setAttribute("aria-label", "Execution permissions");
@@ -2709,7 +2983,9 @@
         select.append(option);
       }
       const help = document.createElement("p");
-      const explain = () => { help.textContent = executionModeExplanation(select.value); };
+      help.id = "agent-permissions-description";
+      select.setAttribute("aria-describedby", help.id);
+      const explain = () => { help.textContent = executionModeExplanation(select.value); help.hidden = !help.textContent; };
       explain();
       select.disabled = state.running;
       select.addEventListener("change", function () {
@@ -2776,8 +3052,8 @@
       "cli-default": "Inherit the current session or CLI permission policy.",
       "workspace-write": "Allow writes within the workspace; other actions follow the host approval policy.",
       "danger-full-access": "Allow filesystem access outside the workspace; approvals still follow the host policy.",
-      bypass: "Disable sandbox restrictions and approval prompts."
-    })[mode] || "Use the host permission policy.";
+      bypass: ""
+    })[mode] ?? "Use the host permission policy.";
   }
 
   function createTaskModeIcon(mode) {
@@ -2867,6 +3143,8 @@
       verifiedWorkRunId: state.verifiedWorkRunId,
       draft: state.draft,
       autoScroll: state.autoScroll,
+      botVisible: state.botVisible,
+      botAnimations: state.botAnimations,
       attachments: state.attachments.filter(function (attachment) {
         return !attachment.pending && !attachment.previewUri?.startsWith("blob:");
       }).map(function (attachment) {

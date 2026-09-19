@@ -4,6 +4,15 @@ async function checkOneShotComposer(page) {
   const capability = { model: true, reasoning: true, fast: true, goal: true, taskModes: ['direct', ...actions] };
   await page.evaluate(capability => window.postMessage({ type: 'host.initialize', panelId: 'one-shot', role: 'main', runtimeAvailable: true, fastMode: true, capabilities: { submit: capability, send: capability } }, '*'), capability);
   await page.waitForFunction(() => document.querySelector('#fast-mode-button').getAttribute('aria-pressed') === 'true');
+  const alignment = await page.locator('#submission-button').evaluate(button => {
+    const bounds = button.getBoundingClientRect();
+    const icon = button.querySelector('svg').getBoundingClientRect();
+    return {
+      x: icon.x + icon.width / 2 - bounds.x - bounds.width / 2,
+      y: icon.y + icon.height / 2 - bounds.y - bounds.height / 2
+    };
+  });
+  assert.ok(Math.abs(alignment.x) < 0.5 && Math.abs(alignment.y) < 0.5, JSON.stringify(alignment));
   const last = () => page.evaluate(() => window.sentMessages.filter(m => m.type === 'chat.send').at(-1));
   const count = () => page.evaluate(() => window.sentMessages.filter(m => m.type === 'chat.send').length);
   await page.locator('#prompt').fill('   ');
@@ -13,7 +22,7 @@ async function checkOneShotComposer(page) {
   assert.match(await page.locator('#input-feedback').innerText(), /target and desired result/);
   assert.equal(await page.locator('#prompt').inputValue(), '   ');
   await page.locator('#model-button').click();
-  assert.equal(await page.locator('#model-menu select[data-role]').count(), 6);
+  assert.equal(await page.locator('#model-menu select[data-role]').count(), 3);
   const permissions = page.locator('[data-setting="permissions"]');
   await permissions.selectOption('workspace-write');
   assert.equal(await page.evaluate(() => window.sentMessages.filter(m => m.type === 'execution.select').at(-1).mode), 'workspace-write');

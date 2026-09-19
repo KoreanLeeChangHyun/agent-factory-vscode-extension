@@ -1,13 +1,13 @@
-const FRAMES = ["◜", "◝", "◞", "◟"] as const;
+const FRAME_COUNT = 6;
 
-/** Uses plain text so the running marker also follows the active editor into the window title. */
+/** Animates the tab icon while preserving the human-readable title. */
 export class RunningTitle {
   private timer: ReturnType<typeof setInterval> | undefined;
   private frame = 0;
 
   public constructor(
     private readonly title: () => string,
-    private readonly render: (title: string) => void
+    private readonly render: (title: string, frame?: number) => void
   ) {}
 
   public setRunning(running: boolean): void {
@@ -20,13 +20,13 @@ export class RunningTitle {
     this.frame = 0;
     this.refresh();
     this.timer = setInterval(() => {
-      this.frame = (this.frame + 1) % FRAMES.length;
+      this.frame = (this.frame + 1) % FRAME_COUNT;
       this.refresh();
     }, 160);
   }
 
   public refresh(): void {
-    this.render(`${FRAMES[this.frame]} ${this.title()}`);
+    this.render(this.title(), this.frame);
   }
 
   public dispose(): void {

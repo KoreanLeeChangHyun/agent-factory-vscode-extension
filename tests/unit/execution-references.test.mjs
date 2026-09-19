@@ -45,6 +45,31 @@ const managed = (command, output, children = []) => {
   return result && JSON.parse(JSON.stringify(result));
 };
 const exec = 'python3 skills/agent/scripts/exec.py';
+test('structured runtime operations render without shell parsing and reject unknown contracts', () => {
+  const scripts = output => JSON.parse(JSON.stringify(context.agentFactoryExecutionReferences.runtimeScripts(JSON.stringify(output))));
+  const operation = { schemaVersion: 1, provider: 'agent-factory', script: 'exec.py', action: 'submit' };
+  assert.equal(scripts({ operation })[0].action, 'submit');
+  const wrapped = context.agentFactoryExecutionReferences.managedCommand("python3 - <<'PY'\n# wrapper\nPY", JSON.stringify({ operation, kind: 'ack', agentId: 'work-1', runId: 'run-1', status: 'accepted' }), []);
+  assert.equal(wrapped.agentId, 'work-1');
+  assert.equal(wrapped.runId, 'run-1');
+  assert.equal(wrapped.observedStatus, 'accepted');
+  for (const changed of [{ schemaVersion: 2 }, { provider: 'other' }, { script: '__proto__' }, { action: '<script>' }]) {
+    assert.deepEqual(scripts({ operation: { ...operation, ...changed } }), []);
+  }
+  assert.deepEqual(scripts(null), []);
+});
+test('command outcomes use lifecycle and structured errors without inventing run completion', () => {
+  const outcome = event => JSON.parse(JSON.stringify(context.agentFactoryExecutionReferences.commandOutcome(event)));
+  assert.equal(outcome({ phase: 'started' }).status, 'running');
+  assert.equal(outcome({ phase: 'failed', output: 'plain stderr' }).status, 'failed');
+  assert.deepEqual(outcome({ phase: 'completed', output: '{"kind":"error","error":{"code":"invalid_dispatch_id","message":"bad ID"}}' }), {
+    status: 'failed', label: 'Failed', detail: 'invalid_dispatch_id: bad ID'
+  });
+  assert.equal(outcome({ phase: 'completed', output: '{"kind":"ack","runId":"run-1"}' }).label, 'Command completed');
+  for (const output of ['null', '[]', 'mixed output\n{}', '{"kind":"error","error":null}']) {
+    assert.equal(outcome({ phase: 'completed', output }).status, 'completed');
+  }
+});
 test('managed commands recognize explicit roles, exact runs, quoted paths and polling substitutions', () => {
   assert.equal(managed(exec + ' submit --agent work-1 --role work --message "hello --role verification"').role, 'work');
   assert.equal(managed('python3 "/repo with spaces/skills/agent/scripts/exec.py" status --agent work-1 --run-id run-1').runId, 'run-1');

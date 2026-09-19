@@ -102,7 +102,20 @@
 
   function managedCommand(command, output, children) {
     const candidates = [];
-    for (const invocation of scriptInvocations(command)) {
+    let invocations = scriptInvocations(command);
+    const structured = runtimeScripts(output);
+    if (structured.length && !invocations.length) {
+      const data = JSON.parse(output);
+      const run = data.run || data;
+      const script = structured[0];
+      const agentId = script.script === "loop.py" ? run.workAgentId : run.agentId;
+      const runId = script.script === "loop.py" ? run.loopId : run.runId;
+      if (typeof agentId === "string" && typeof runId === "string") {
+        invocations = [{ ...script, args: [script.script === "loop.py" ? "--work-agent" : "--agent", agentId,
+          script.script === "loop.py" ? "--loop-id" : "--run-id", runId] }];
+      }
+    }
+    for (const invocation of invocations) {
       const script = /^(exec|loop)\.py$/.exec(invocation.script);
       if (invocation.skill !== "agent" || !script) continue;
       const action = invocation.action;
@@ -154,5 +167,29 @@
     return [...documents.values()];
   }
 
-  globalThis.agentFactoryExecutionReferences = Object.freeze({ extract, managedCommand, skillDocuments, scriptInvocations });
+  // Runtime JSON and provider lifecycle are evidence; command names only label the
+  // activity. Never infer that a child completed because its submit command exited.
+  function commandOutcome(event) {
+    let data;
+    try { data = JSON.parse(event.output); } catch { /* Keep raw/mixed output intact. */ }
+    const error = data?.kind === "error" && typeof data.error?.message === "string" ? data.error : undefined;
+    if (event.phase === "failed" || error) return {
+      status: "failed", label: "Failed",
+      detail: error ? (typeof error.code === "string" ? error.code + ": " : "") + error.message : undefined
+    };
+    if (event.phase === "started") return { status: "running", label: "In progress" };
+    if (event.phase === "completed") return { status: "completed", label: "Command completed" };
+    return { status: "unknown", label: "Status unknown" };
+  }
+
+  function runtimeScripts(output) {
+    let operation;
+    try { operation = JSON.parse(output)?.operation; } catch { return []; }
+    const actions = { "exec.py": ["init", "location", "projects", "rebind", "map-path", "doctor", "capabilities", "submit", "send", "status", "result", "cancel", "list", "inbox", "reconcile", "goal"], "loop.py": ["start", "status", "reconcile", "recover-receipt", "skip"] };
+    if (operation?.schemaVersion !== 1 || operation.provider !== "agent-factory" ||
+        !Object.hasOwn(actions, operation.script) || !actions[operation.script].includes(operation.action)) return [];
+    return [{ skill: "agent", script: operation.script, action: operation.action, path: "", args: [] }];
+  }
+
+  globalThis.agentFactoryExecutionReferences = Object.freeze({ extract, managedCommand, skillDocuments, scriptInvocations, commandOutcome, runtimeScripts });
 })();

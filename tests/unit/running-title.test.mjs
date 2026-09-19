@@ -22,23 +22,27 @@ function harness() {
 
 test("running titles rotate, preserve renamed titles and restore on terminal state", () => {
   const { RunningTitle, timers, tick } = harness();
-  let name = "Main Agent", title;
-  const spinner = new RunningTitle(() => name, value => { title = value; });
+  let name = "Main Agent", title, frame;
+  const spinner = new RunningTitle(() => name, (value, marker) => { title = value; frame = marker; });
   spinner.setRunning(true);
-  const initial = title;
-  assert.match(title, / Main Agent$/);
+  const initial = frame;
+  assert.equal(title, "Main Agent");
   tick();
-  assert.notEqual(title, initial);
+  assert.notEqual(frame, initial);
+  for (let i = 0; i < 5; i++) tick();
+  assert.equal(frame, initial);
   spinner.setRunning(true);
   assert.equal(timers.size, 1);
   name = "New name";
   spinner.refresh();
-  assert.match(title, / New name$/);
+  assert.equal(title, "New name");
   spinner.setRunning(false);
   assert.equal(title, name);
+  assert.equal(frame, undefined);
   assert.equal(timers.size, 0);
   tick();
   assert.equal(title, name);
+  assert.equal(frame, undefined);
   spinner.setRunning(true);
   assert.equal(timers.size, 1);
   spinner.dispose();
@@ -48,8 +52,8 @@ test("running titles rotate, preserve renamed titles and restore on terminal sta
 test("closing one panel stops its animation without affecting another", () => {
   const { RunningTitle, timers, tick } = harness();
   let first, second;
-  const a = new RunningTitle(() => "A", value => { first = value; });
-  const b = new RunningTitle(() => "B", value => { second = value; });
+  const a = new RunningTitle(() => "A", (_value, frame) => { first = frame; });
+  const b = new RunningTitle(() => "B", (_value, frame) => { second = frame; });
   a.setRunning(true);
   b.setRunning(true);
   a.dispose();

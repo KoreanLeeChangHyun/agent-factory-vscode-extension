@@ -61,8 +61,41 @@ async function checkAutoScroll(page) {
   await toggle.click();
   await settle();
   assert.ok(await page.locator('#timeline').evaluate(element => Math.abs(element.scrollHeight - element.clientHeight - element.scrollTop) <= 1));
+  const indicator = page.locator('#auto-scroll-state');
+  assert.equal(await indicator.getAttribute('data-state'), 'following');
+  await page.locator('#timeline').evaluate(element => { element.scrollTop = 150; });
+  await settle();
+  assert.equal(await toggle.getAttribute('aria-pressed'), 'true');
+  assert.equal(await indicator.getAttribute('data-state'), 'paused');
+  const originalViewport = page.viewportSize();
+  for (const width of [360, 795]) {
+    await page.setViewportSize({ width, height: 740 });
+    await settle();
+    const jump = await page.locator('#jump-to-bottom').boundingBox();
+    const bot = await page.locator('#factory-bot').boundingBox();
+    assert.ok(jump && bot);
+    assert.ok(Math.abs(jump.x + jump.width / 2 - bot.x - bot.width / 2) <= 1, 'Jump button must align above the bot');
+    assert.ok(jump.y + jump.height + 6 <= bot.y, 'Jump button must not overlap the bot');
+  }
+  await page.setViewportSize(originalViewport);
+  await settle();
+  await emit({ type: 'chat.assistant', text: 'New response while reading older content' });
+  assert.equal(await page.locator('#timeline').evaluate(element => element.scrollTop), 150);
+  await page.locator('#jump-to-bottom').click();
+  await settle();
+  assert.equal(await indicator.getAttribute('data-state'), 'following');
   await emit({ type: 'chat.assistant', text: 'Following again\n\nMore content' });
-  assert.ok(await page.locator('#timeline').evaluate(element => Math.abs(element.scrollHeight - element.clientHeight - element.scrollTop) <= 1));
+  await page.waitForFunction(() => {
+    const element = document.querySelector('#timeline');
+    return Math.abs(element.scrollHeight - element.clientHeight - element.scrollTop) <= 1;
+  }, undefined, { timeout: 2000 });
+  await toggle.click();
+  assert.equal(await indicator.isVisible(), false);
+  await page.locator('#timeline').evaluate(element => { element.scrollTop = 150; });
+  await settle();
+  await page.locator('#jump-to-bottom').click();
+  assert.equal(await toggle.getAttribute('aria-pressed'), 'false');
+  assert.equal(await indicator.isVisible(), false);
 }
 
 module.exports = { checkAutoScroll };

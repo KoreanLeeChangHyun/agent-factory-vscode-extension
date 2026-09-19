@@ -1,3 +1,4 @@
+import type { AgentPermissions } from "../../common/types/agent-permissions";
 import type { AgentModels } from "../../common/types/agent-models";
 import { constants as fsConstants } from "node:fs";
 import { spawn } from "node:child_process";
@@ -48,6 +49,7 @@ export interface ExecutionOptions {
   readonly executionMode?: ExecutionMode;
   readonly model?: string;
   readonly agentModels?: AgentModels;
+  readonly agentPermissions?: AgentPermissions;
   readonly reasoningEffort?: "none" | "low" | "medium" | "high" | "xhigh" | "max";
   readonly fast?: boolean;
   readonly goalMode?: boolean;
@@ -759,6 +761,7 @@ export function executionPolicyArguments(mode: ExecutionMode = "cli-default"): s
 function executionArguments(execution: ExecutionOptions): string[] {
   const arguments_: string[] = [];
   if (execution.taskMode) arguments_.push("--task-mode", execution.taskMode);
+  if (execution.agentPermissions) arguments_.push("--agent-permissions", JSON.stringify(execution.agentPermissions));
   if (execution.model) arguments_.push("--model", execution.model);
   if (execution.reasoningEffort) arguments_.push("--reasoning-effort", execution.reasoningEffort);
   if (execution.fast !== undefined) arguments_.push(execution.fast ? "--fast" : "--no-fast");

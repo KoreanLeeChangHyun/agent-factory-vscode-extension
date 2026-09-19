@@ -13,23 +13,31 @@ let configuredMode;
 const configUpdates = [];
 const clipboardWrites = [];
 const externalOpens = [];
+const editorOpens = [];
+const textOpens = [];
+const textEditor = { revealRange() {} };
 const vscode = {
   ViewColumn: { Active: -1 },
   env: {
     clipboard: { async writeText(text) { clipboardWrites.push(text); } },
     async openExternal(uri) { externalOpens.push(uri.value); return true; }
   },
-  Uri: { parse(value) { return { value }; } },
+  Uri: { parse(value) { return { value }; }, file(fsPath) { return { fsPath }; } },
+  commands: { async executeCommand(...args) { editorOpens.push(args); } },
+  Position: class { constructor(line, character) { this.line = line; this.character = character; } },
+  Selection: class { constructor(start, end) { this.start = start; this.end = end; } },
+  Range: class { constructor(start, end) { this.start = start; this.end = end; } },
+  TextEditorRevealType: { InCenterIfOutsideViewport: 1 },
   ConfigurationTarget: { Global: 1 },
-  window: {},
-  workspace: { getConfiguration() { return {
+  window: { async showTextDocument() { return textEditor; } },
+  workspace: { async openTextDocument(uri) { textOpens.push(uri); return {}; }, getConfiguration() { return {
     get(_key, fallback) { return configuredMode ?? fallback; },
     async update(...args) { configUpdates.push(args); }
   }; } }
 };
 const module = { exports: {} };
 runInNewContext(output.outputFiles[0].text, {
-  module, exports: module.exports, Buffer, console, process, setTimeout, clearTimeout,
+  module, exports: module.exports, Buffer, URL, console, process, setTimeout, clearTimeout,
   global: { Date },
   require: name => name === "vscode" ? vscode : require(name)
 });
@@ -118,6 +126,10 @@ test("host forwards chosen execution mode for new and existing Main sessions", a
   managed.executionModeExplicit = true;
   await manager.sendChat(managed, "follow up", [], execution);
   assert.equal(calls.at(-1).executionMode, "workspace-write");
+  const agentPermissions = { main: "bypass", work: "workspace-write", verification: "danger-full-access" };
+  await manager.sendChat(managed, "role override", [], { ...execution, agentPermissions });
+  assert.equal(calls.at(-1).executionMode, "bypass");
+  assert.deepEqual(calls.at(-1).agentPermissions, agentPermissions);
 });
 
 
@@ -177,6 +189,30 @@ test("validated web links open through VS Code", async () => {
   await manager.handleMessage(managed, { type: "link.open", href: "javascript:alert(1)" });
   assert.equal(externalOpens.length, 1);
   assert.equal(notices.at(-1).level, "error");
+});
+
+test("image and other file links use the registered editor while line links retain text navigation", async () => {
+  const notices = [];
+  const manager = new module.exports.ChatPanelManager({ extensionUri: { fsPath: '/workspace' } }, {}, () => [], async () => { throw new Error('not used'); });
+  const managed = { panel: { webview: { async postMessage(message) { notices.push(message); return true; } } } };
+  const before = textOpens.length;
+  for (const [href, expected] of [
+    ['/home/deus/workspace/agent-factory/extension/out/astra-stars/stars-795-0.png', '/home/deus/workspace/agent-factory/extension/out/astra-stars/stars-795-0.png'],
+    ['file:///tmp/star%20preview.PNG', '/tmp/star preview.PNG'],
+    ['./out/preview.webp', '/workspace/out/preview.webp'],
+    ['/tmp/report.pdf', '/tmp/report.pdf'],
+    ['/tmp/readme.md', '/tmp/readme.md']
+  ]) {
+    await manager.handleMessage(managed, { type: 'link.open', href });
+    assert.deepEqual(JSON.parse(JSON.stringify(editorOpens.at(-1))), ['vscode.open', { fsPath: expected }, { preview: true }]);
+  }
+  assert.equal(textOpens.length, before, 'Binary links must never use openTextDocument');
+  const opensBeforeLine = editorOpens.length;
+  await manager.handleMessage(managed, { type: 'link.open', href: '/workspace/app.ts:12:3' });
+  assert.equal(editorOpens.length, opensBeforeLine);
+  assert.equal(textOpens.at(-1).fsPath, '/workspace/app.ts');
+  assert.deepEqual(JSON.parse(JSON.stringify(textEditor.selection.start)), { line: 11, character: 2 });
+  assert.equal(notices.length, 0);
 });
 
 test("child panels cannot switch identities to a Main session", async () => {

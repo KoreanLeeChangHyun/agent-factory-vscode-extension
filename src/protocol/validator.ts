@@ -1,3 +1,4 @@
+import { parseAgentPermissions } from "../common/types/agent-permissions";
 import { parseAgentModels } from "../common/types/agent-models";
 import { BUSINESS_MODES, type BusinessMode } from "../common/types/business-mode";
 import { TASK_SELECTIONS, type TaskSelection } from "../modules/chat/task-selection";
@@ -101,6 +102,7 @@ export function parseClientMessage(value: unknown): ClientMessage | undefined {
         (value.businessMode !== undefined && !BUSINESS_MODES.includes(value.businessMode as BusinessMode)) ||
         (value.taskMode !== undefined && !TASK_SELECTIONS.includes(value.taskMode as TaskSelection)) ||
         (value.agentModels !== undefined && !parseAgentModels(value.agentModels)) ||
+        (value.agentPermissions !== undefined && !parseAgentPermissions(value.agentPermissions)) ||
         (value.model !== undefined && (typeof value.model !== "string" || value.model.length > 100)) ||
         (value.reasoning !== undefined && (typeof value.reasoning !== "string" || !reasoningEfforts.has(value.reasoning))) ||
         typeof value.fastMode !== "boolean" ||
@@ -112,6 +114,7 @@ export function parseClientMessage(value: unknown): ClientMessage | undefined {
       return {
         type: value.type,
         ...(value.agentModels !== undefined ? { agentModels: parseAgentModels(value.agentModels) } : {}),
+        ...(value.agentPermissions !== undefined ? { agentPermissions: parseAgentPermissions(value.agentPermissions) } : {}),
         ...(typeof value.model === "string" && value.model ? { model: value.model } : {}),
         ...(typeof value.reasoning === "string"
           ? { reasoning: value.reasoning as "none" | "low" | "medium" | "high" | "xhigh" | "max" }
@@ -133,6 +136,7 @@ export function parseClientMessage(value: unknown): ClientMessage | undefined {
         (value.execution.businessMode !== undefined && !BUSINESS_MODES.includes(value.execution.businessMode as BusinessMode)) ||
         (value.execution.taskMode !== undefined && !TASK_SELECTIONS.includes(value.execution.taskMode as TaskSelection)) ||
         (value.execution.agentModels !== undefined && !parseAgentModels(value.execution.agentModels)) ||
+        (value.execution.agentPermissions !== undefined && !parseAgentPermissions(value.execution.agentPermissions)) ||
         (value.execution.model !== undefined && (
           typeof value.execution.model !== "string" || value.execution.model.length > 100
         )) ||
@@ -164,6 +168,7 @@ export function parseClientMessage(value: unknown): ClientMessage | undefined {
           ...(value.execution.businessMode !== undefined ? { businessMode: value.execution.businessMode as BusinessMode } : {}),
           ...(value.execution.taskMode !== undefined ? { taskMode: value.execution.taskMode as TaskSelection } : {}),
           ...(value.execution.agentModels !== undefined ? { agentModels: parseAgentModels(value.execution.agentModels) } : {}),
+          ...(value.execution.agentPermissions !== undefined ? { agentPermissions: parseAgentPermissions(value.execution.agentPermissions) } : {}),
           ...(typeof value.execution.model === "string" && value.execution.model
             ? { model: value.execution.model }
             : {}),

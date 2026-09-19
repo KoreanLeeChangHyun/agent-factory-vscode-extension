@@ -1,3 +1,4 @@
+import type { AgentPermissions } from "../common/types/agent-permissions";
 import type { AgentModels } from "../common/types/agent-models";
 import type { StatusItemId } from "../core/config/types";
 import type { AttachmentReference } from "../common/types/attachment";
@@ -25,6 +26,7 @@ export type ClientMessage =
       readonly taskMode?: import("../modules/chat/task-selection").TaskSelection;
         readonly model?: string;
         readonly agentModels?: AgentModels;
+  readonly agentPermissions?: AgentPermissions;
         readonly reasoningEffort?: "none" | "low" | "medium" | "high" | "xhigh" | "max";
         readonly fast: boolean;
         readonly goal: boolean;
@@ -50,6 +52,7 @@ export type ClientMessage =
       readonly type: "composer.settings";
       readonly model?: string;
       readonly agentModels?: AgentModels;
+  readonly agentPermissions?: AgentPermissions;
       readonly reasoning?: "none" | "low" | "medium" | "high" | "xhigh" | "max";
       readonly fastMode: boolean;
       readonly goalMode: boolean;
@@ -84,6 +87,7 @@ export type HostMessage =
       readonly statusItems: readonly StatusItemId[];
       readonly model?: string;
       readonly agentModels?: AgentModels;
+  readonly agentPermissions?: AgentPermissions;
       readonly reasoning?: "none" | "low" | "medium" | "high" | "xhigh" | "max";
       readonly fastMode: boolean;
       readonly goalMode: boolean;
@@ -161,6 +165,8 @@ export type HostMessage =
       readonly type: "run.state";
       readonly running: boolean;
     }
+  | { readonly type: "bot.mood"; readonly unavailable?: boolean; readonly mood?: "calm" | "curious" | "cheerful" | "focused" }
+  | { readonly type: "run.observed"; readonly status: string }
   | { readonly type: "queue.updated"; readonly count: number }
   | {
       readonly type: "workUnits.summary";

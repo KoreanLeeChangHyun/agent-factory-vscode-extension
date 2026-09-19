@@ -209,6 +209,7 @@ test("composer shows only supported controls across draft and bound sessions", a
     document: { createElementNS: element },
     renderStatusBar() { statusRenders++; },
     modelMenu: { querySelector() { return null; } }, submissionButton: button(),
+    promptSurface: { classList: { toggle() {} } },
     state: { role: 'main', businessMode: 'normal', taskMode: 'work', capabilities: { submit: { model: true }, send: {} }, model: 'gpt-6-astra', reasoning: 'medium', fastMode: true, goalMode: true },
     modelButton: button(), reasoningButton: button(), fastModeButton: button(), goalModeButton: button(), workLoopButton: button(),
     taskModeNames: { work: "Work" }, businessModeNames: { normal: "Normal" }, businessModeButton: button(),

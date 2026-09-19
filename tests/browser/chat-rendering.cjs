@@ -5,9 +5,11 @@ const path = require('node:path');
 const { chromium } = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
 const { checkStatusCustomizationLayout } = require('./status-customization.cjs');
 const { checkAutoScroll } = require('./auto-scroll.cjs');
+const { checkFactoryBot } = require('./factory-bot.cjs');
 const { checkImageComposer } = require('./image-composer.cjs');
 const { checkFactoryRendering } = require('./factory-rendering.cjs');
 const { checkAgentModels } = require('./agent-models.cjs');
+const { checkAstraStars } = require('./astra-stars.cjs');
 const { checkOneShotComposer } = require('./one-shot-composer.cjs');
 const { checkMessageSubmission } = require('./message-submission.cjs');
 
@@ -83,6 +85,12 @@ async function main() {
       window.acquireVsCodeApi = () => ({ getState: () => window.saved, setState: value => { window.saved = value; }, postMessage(message) { window.sentMessages.push(message); } });
     }, fixture);
     await page.goto('http://127.0.0.1:' + server.address().port);
+    if (process.argv.includes('--factory-bot-only')) {
+      await checkFactoryBot(page);
+      assert.deepEqual(errors, []);
+      console.log('Factory Bot states, completion, failure, reduced motion and layout checks passed.');
+      return;
+    }
     if (process.argv.includes('--document-attachments-only')) {
       const attachments = [
         { id: 'doc', kind: 'file', name: 'communication.md', uri: 'vscode-remote://ssh-remote+host/home/docs/communication.md' },
@@ -109,6 +117,12 @@ async function main() {
       await checkOneShotComposer(page);
       assert.deepEqual(errors, []);
       console.log('One-shot Goal and workflow composer checks passed.');
+      return;
+    }
+    if (process.argv.includes('--astra-stars-only')) {
+      await checkAstraStars(page);
+      assert.deepEqual(errors, []);
+      console.log('Astra starfield: animation, typing, responsive layout and reduced motion passed.');
       return;
     }
     if (process.argv.includes('--agent-models-only')) {
@@ -342,7 +356,7 @@ async function main() {
     assert.equal(await references.locator('button.execution-reference-main').count(), 1);
     await references.locator('button.execution-reference-main').click();
     assert.deepEqual(await page.evaluate(() => window.sentMessages.at(-1)), { type: 'agent.open', agentId: 'work-reference' });
-    await references.getByRole('button', { name: 'Work Run run-reference 복사', exact: true }).click();
+    await references.getByRole('button', { name: 'Work Run run-reference · Copy', exact: true }).click();
     assert.deepEqual(await page.evaluate(() => window.sentMessages.at(-1)), { type: 'reference.copy', id: 'run-reference' });
     assert.equal(await references.locator('.execution-reference-id').first().evaluate(element => getComputedStyle(element).userSelect), 'text');
     const parsedMessage = references.locator('..');
@@ -386,14 +400,31 @@ async function main() {
       const label = getComputedStyle(element.querySelector('.run-status-label'));
       const meta = getComputedStyle(element.querySelector('.run-status-meta'));
       const copy = getComputedStyle(element.querySelector('.run-status-copy'));
+      let background;
+      for (let ancestor = element; ancestor; ancestor = ancestor.parentElement) {
+        const color = getComputedStyle(ancestor).backgroundColor;
+        if (color !== 'transparent' && color !== 'rgba(0, 0, 0, 0)') { background = color; break; }
+      }
+      const canvas = document.createElement('canvas');
+      canvas.width = canvas.height = 1;
+      const context = canvas.getContext('2d');
+      const gradientColors = (label.backgroundImage.match(/(?:rgba?|color)\([^)]*\)/g) || []).map(color => {
+        context.clearRect(0, 0, 1, 1);
+        context.fillStyle = color;
+        context.fillRect(0, 0, 1, 1);
+        const pixel = context.getImageData(0, 0, 1, 1).data;
+        return `rgb(${pixel[0]}, ${pixel[1]}, ${pixel[2]})`;
+      });
       return {
+        gradientColors,
         labelColor: label.color, gradient: label.backgroundImage, labelAnimation: label.animationName,
         metaColor: meta.color, metaFill: meta.webkitTextFillColor, metaAnimation: meta.animationName,
         copyColor: copy.color, copyAnimation: copy.animationName,
-        background: getComputedStyle(element.parentElement).backgroundColor
+        background
       };
     });
     assert.equal(statusStyle.labelColor, 'rgb(212, 212, 212)');
+    assert.equal(statusStyle.background, 'rgb(30, 30, 30)');
     assert.equal(statusStyle.labelAnimation, 'run-status-text-scan');
     assert.equal(statusStyle.metaAnimation, 'none');
     assert.equal(statusStyle.copyAnimation, 'none');
@@ -410,8 +441,14 @@ async function main() {
       const foreground = luminance(color), background = luminance(statusStyle.background);
       return (Math.max(foreground, background) + 0.05) / (Math.min(foreground, background) + 0.05);
     };
-    const gradientColors = statusStyle.gradient.match(/rgb\([^)]*\)/g);
-    assert.deepEqual(gradientColors, ['rgb(212, 212, 212)', 'rgb(148, 226, 213)', 'rgb(212, 212, 212)']);
+    const gradientColors = statusStyle.gradientColors;
+    assert.equal(gradientColors.length, 3);
+    assert.equal(gradientColors[0], statusStyle.labelColor);
+    assert.equal(gradientColors[2], statusStyle.labelColor);
+    const middle = gradientColors[1].match(/\d+/g).map(Number);
+    assert.equal(middle[0], middle[1]);
+    assert.equal(middle[1], middle[2]);
+    assert.ok(luminance(gradientColors[1]) < luminance(statusStyle.labelColor));
     assert.ok(gradientColors.every(color => contrast(color) >= 4.5));
     assert.ok(contrast(statusStyle.metaColor) >= 4.5);
     const artifactDir = process.env.AF_RENDERING_ARTIFACT_DIR || path.join(root, 'out/cli-comparison');
@@ -449,32 +486,44 @@ async function main() {
           assert.equal(computed.delay, '0s');
           const screenshot = await page.locator('.run-status-label').screenshot({ path: path.join(artifactDir, 'scan-' + viewportWidth + '-' + sample + '-' + time + '.png'), animations: 'allow' });
           snapshots.set(time, screenshot);
-          const pixels = await page.evaluate(async base64 => {
-            const image = new Image();
-            image.src = 'data:image/png;base64,' + base64;
-            await image.decode();
+          const pixels = await page.evaluate(async ({ base64, baseline }) => {
+            const load = async value => {
+              const image = new Image();
+              image.src = 'data:image/png;base64,' + value;
+              await image.decode();
+              return image;
+            };
+            const image = await load(base64);
+            const resting = await load(baseline);
             const canvas = document.createElement('canvas');
             canvas.width = image.width; canvas.height = image.height;
             const context = canvas.getContext('2d');
+            context.drawImage(resting, 0, 0);
+            const before = context.getImageData(0, 0, canvas.width, canvas.height).data;
+            context.clearRect(0, 0, canvas.width, canvas.height);
             context.drawImage(image, 0, 0);
             const data = context.getImageData(0, 0, canvas.width, canvas.height).data;
             const xs = [];
+            let maxDelta = 0;
             for (let index = 0; index < data.length; index += 4) {
-              if (data[index + 1] > data[index] + 15 && data[index + 2] > data[index] + 10) xs.push(index / 4 % canvas.width);
+              const delta = Math.max(...[0, 1, 2].map(channel => Math.abs(data[index + channel] - before[index + channel])));
+              maxDelta = Math.max(maxDelta, delta);
+              if (delta > 8) xs.push(index / 4 % canvas.width);
             }
-            return { count: xs.length, center: xs.length ? xs.reduce((sum, x) => sum + x, 0) / xs.length : null };
-          }, screenshot.toString('base64'));
+            return { count: xs.length, maxDelta, center: xs.length ? xs.reduce((sum, x) => sum + x, 0) / xs.length : null };
+          }, { base64: screenshot.toString('base64'), baseline: snapshots.get(0).toString('base64') });
           const frame = { viewportWidth, sample, time, ...computed, ...pixels };
           scanFrames.push(frame);
           if (pixels.count) visibleFrames.push(frame);
-          if ([0, 2399, 2400].includes(time)) assert.equal(pixels.count, 0, 'Highlight must be fully outside the text at loop boundaries');
+          if ([0, 2399, 2400].includes(time)) {
+            // The frame 1 ms before the boundary can round a channel by one level.
+            assert.ok(pixels.maxDelta <= (time === 2399 ? 1 : 0), 'Loop boundaries must preserve resting text pixels');
+          }
         }
         assert.ok(visibleFrames.length >= 3);
         for (let index = 1; index < visibleFrames.length; index++) {
           assert.ok(visibleFrames[index].center > visibleFrames[index - 1].center, 'Highlight must move right without wrapping back');
         }
-        assert.ok(snapshots.get(0).equals(snapshots.get(2399)), 'Last frame must match the resting text');
-        assert.ok(snapshots.get(0).equals(snapshots.get(2400)), 'Loop restart must not change visible pixels');
       }
     }
     fs.writeFileSync(path.join(artifactDir, 'run-status-scan-frames.json'), JSON.stringify(scanFrames, null, 2));

@@ -7,6 +7,23 @@ async function checkImageComposer(page) {
   };
   const capabilities = { submit: { model: true, reasoning: true, fast: true, goal: true }, send: { model: true, reasoning: true, fast: true, goal: true } };
   await emit({ type: 'capabilities.updated', capabilities });
+  await page.evaluate(() => {
+    const data = new DataTransfer();
+    data.setData('text/uri-list', 'file:///test/dragged.txt');
+    document.body.dispatchEvent(new DragEvent('dragenter', { dataTransfer: data, bubbles: true, cancelable: true }));
+  });
+  assert.equal(await page.locator('#drop-overlay').isVisible(), true);
+  const overlay = await page.locator('#drop-overlay').boundingBox();
+  const composer = await page.locator('.composer').boundingBox();
+  assert.ok(overlay.x >= composer.x && overlay.y >= composer.y);
+  assert.ok(overlay.x + overlay.width <= composer.x + composer.width);
+  assert.ok(overlay.y + overlay.height <= composer.y + composer.height);
+  await page.evaluate(() => {
+    const data = new DataTransfer();
+    data.setData('text/uri-list', 'file:///test/dragged.txt');
+    document.body.dispatchEvent(new DragEvent('dragleave', { dataTransfer: data, bubbles: true, cancelable: true }));
+  });
+  assert.equal(await page.locator('#drop-overlay').isVisible(), false);
   await page.locator('#prompt').fill('before after');
   await page.locator('#prompt').evaluate(element => element.setSelectionRange(7, 7));
   await page.evaluate(() => {

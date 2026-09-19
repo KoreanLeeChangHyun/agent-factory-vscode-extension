@@ -51,6 +51,8 @@ export class ChatSessionController {
   private currentRunAgentId: string | undefined;
   private busy = false;
   private pendingDecisionRunId: string | undefined;
+  private submittedAgentPermissions: ExecutionOptions["agentPermissions"];
+  private pendingDecisionAgentPermissions: ExecutionOptions["agentPermissions"];
   private submittedAgentModels: ExecutionOptions["agentModels"];
   private pendingDecisionAgentModels: ExecutionOptions["agentModels"];
   private pendingDecisionTaskMode: ExecutionOptions["taskMode"];
@@ -156,7 +158,7 @@ export class ChatSessionController {
     onStarted?: (submission: MessageSubmission) => void
   ): Promise<void> {
     if (this.disposed) return;
-    execution = { ...execution, ...(execution.agentModels ? { agentModels: structuredClone(execution.agentModels) } : {}) };
+    execution = { ...execution, ...(execution.agentPermissions ? { agentPermissions: structuredClone(execution.agentPermissions) } : {}), ...(execution.agentModels ? { agentModels: structuredClone(execution.agentModels) } : {}) };
     attachments = attachments.map(attachment => ({ ...attachment }));
     if (this.busy || (this.goalControlPending && this.pendingGoalAction === "reopen")) {
       return new Promise((resolve) => {
@@ -225,6 +227,7 @@ export class ChatSessionController {
         }
         // Each input retains its action; incompatible actions cannot share a dispatch.
         const boundary = next.findIndex(item => (item.execution.taskMode ?? "direct") !== (next[0]!.execution.taskMode ?? "direct")
+          || JSON.stringify(item.execution.agentPermissions ?? {}) !== JSON.stringify(next[0]!.execution.agentPermissions ?? {})
           || JSON.stringify(item.execution.agentModels ?? {}) !== JSON.stringify(next[0]!.execution.agentModels ?? {})
           || Boolean(item.execution.inspectionOnly) !== Boolean(next[0]!.execution.inspectionOnly)
           || Boolean(item.execution.goalMode) !== Boolean(next[0]!.execution.goalMode)
@@ -293,6 +296,7 @@ export class ChatSessionController {
     this.submittedBusinessMode = execution.businessMode;
     this.submittedTaskMode = execution.taskMode;
     this.submittedAgentModels = execution.agentModels;
+    this.submittedAgentPermissions = execution.agentPermissions;
     // Request and display guidance were captured together before dispatch.
     const request = text;
     const images = runtimeImages(attachments);
@@ -322,7 +326,7 @@ export class ChatSessionController {
     const taskMode = this.pendingDecisionTaskMode;
     const businessMode = this.pendingDecisionBusinessMode;
     const inspectionOnly = this.pendingDecisionInspectionOnly;
-    void this.sendAndDrainQueue(text, [], { ...execution, agentModels: this.pendingDecisionAgentModels, inspectionOnly, ...(taskMode ? { taskMode } : {}), ...(businessMode ? { businessMode } : {}), actor: "human" }, true, (submission) => this.events.onHumanDecision?.(text, submission));
+    void this.sendAndDrainQueue(text, [], { ...execution, agentModels: this.pendingDecisionAgentModels, agentPermissions: this.pendingDecisionAgentPermissions, inspectionOnly, ...(taskMode ? { taskMode } : {}), ...(businessMode ? { businessMode } : {}), actor: "human" }, true, (submission) => this.events.onHumanDecision?.(text, submission));
     return true;
   }
 
@@ -487,6 +491,7 @@ export class ChatSessionController {
             this.pendingDecisionInspectionOnly = this.submittedInspectionOnly;
             this.pendingDecisionBusinessMode = this.submittedBusinessMode;
             this.pendingDecisionAgentModels = this.submittedAgentModels;
+            this.pendingDecisionAgentPermissions = this.submittedAgentPermissions;
             this.pendingDecisionTaskMode = status.taskMode ?? this.submittedTaskMode;
             this.events.onDecision?.(runId);
           }
@@ -501,7 +506,9 @@ export class ChatSessionController {
 
 function mergePendingSends(items: readonly PendingSend[]): Pick<PendingSend, "text" | "attachments" | "execution"> & { submissions: MessageSubmission[] } {
   const first = items[0]!;
-  const modelGuidance = delegatedModelGuidance(first.execution.agentModels);
+  const modelGuidance = (first.execution.taskMode ?? "direct") === "direct"
+    ? ""
+    : delegatedModelGuidance(first.execution.agentModels) + delegatedPermissionGuidance(first.execution.agentPermissions);
   const inspectionGuidance = first.execution.inspectionOnly ? withInspectionGuidance("") : "";
   const workflowGuidanceParts: string[] = [];
   const submissions = items.map(item => {
@@ -598,4 +605,10 @@ function errorMessage(error: unknown): string {
 function delegatedModelGuidance(settings: ExecutionOptions["agentModels"]): string {
   if (!settings || !Object.keys(settings).length) return "";
   return `\n\n[Delegated agent model settings for this request]\n${JSON.stringify(settings)}\nApply each specified role override when dispatching its agent. For exec.py submit/send use --model and --reasoning-effort. For loop.py start use --work-model/--work-reasoning-effort and --verification-model/--verification-reasoning-effort. Plan uses the Work settings in the same Work session. Preserve these overrides on revision turns. Omitted fields use the runtime default; do not substitute Main's model. These settings do not authorize extra agents or change the selected route. If the runtime does not support a requested flag, report the limitation instead of silently dropping the setting.\n[End delegated agent model settings]`;
+}
+
+function delegatedPermissionGuidance(settings: ExecutionOptions["agentPermissions"]): string {
+  if (!settings) return "";
+  const roles = { work: settings.work, verification: settings.verification };
+  return `\n\n[Delegated agent permissions for this request]\n${JSON.stringify(roles)}\nThese are Human-selected role permissions. For loop.py start pass --work-execution-mode and --verification-execution-mode with the specified values. Plan uses Work permissions. For standalone exec.py submit/send: workspace-write and danger-full-access map to --sandbox <value> --approval-policy never --human-approval-policy required; bypass maps to --sandbox danger-full-access --approval-policy never --human-approval-policy bypass. cli-default retains the inherited runtime policy. Preserve the captured permissions on revisions. Do not silently substitute another role's permissions. If the installed runtime does not support these flags, report the limitation instead of dropping the permissions. Permissions do not authorize extra tasks or source edits by Verification.\n[End delegated agent permissions]`;
 }

@@ -12,15 +12,16 @@
   </head>
   <body>
     <main class="chat-shell" aria-label="Main Agent chat">
-      <section id="timeline" class="timeline" aria-live="polite" aria-label="Conversation">
-        <div id="empty-state" class="empty-state">
-          <img class="brand-mark" src="{{iconUri}}" alt="" aria-hidden="true" />
-          <h1>Agent Factory</h1>
-        </div>
-      </section>
-
-      <div id="drop-overlay" class="drop-overlay" hidden>
-        <strong>Drop files or folders to attach</strong>
+      <div class="timeline-region">
+        <section id="timeline" class="timeline" aria-live="polite" aria-label="Conversation">
+          <div id="empty-state" class="empty-state">
+            <img class="brand-mark" src="{{iconUri}}" alt="" aria-hidden="true" />
+            <h1>Agent Factory</h1>
+          </div>
+        </section>
+        <button id="jump-to-bottom" class="jump-to-bottom" type="button" title="Jump to latest message" aria-label="Jump to latest message" aria-controls="timeline" hidden>
+          <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="m6 5 6 6 6-6m-12 8 6 6 6-6"></path></svg>
+        </button>
       </div>
 
       <section class="composer-region" aria-label="Compose message">
@@ -51,21 +52,87 @@
         </div>
         <section id="pending-message-queue" aria-label="Queued messages" hidden></section>
         <div class="composer">
+          <div id="drop-overlay" class="drop-overlay" hidden>
+            <strong>Drop files or folders to attach</strong>
+          </div>
+          <div id="factory-bot" class="factory-bot" data-state="idle" role="img" aria-label="Factory Bot · Ready" title="Factory Bot · Ready">
+            <svg viewBox="0 0 40 40" aria-hidden="true" focusable="false">
+              <ellipse class="bot-shadow" cx="20" cy="37" rx="10" ry="2"/>
+              <g class="bot-body">
+                <path class="bot-antenna" d="M20 9V5"/><circle class="bot-signal" cx="20" cy="4" r="2"/>
+                <path class="bot-arm bot-arm-left" d="M10 25 6 28 7 31"/>
+                <path class="bot-arm bot-arm-right" d="M30 25 34 28 33 31"/>
+                <rect class="bot-shell" x="11" y="22" width="18" height="12" rx="4"/>
+                <path class="bot-feet" d="M15 34v2m10-2v2"/>
+                <rect class="bot-shell" x="7" y="9" width="26" height="17" rx="6"/>
+                <rect class="bot-face" x="10" y="12" width="20" height="11" rx="4"/>
+                <g class="bot-eyes"><path d="M15 16v3m10-3v3"/></g>
+                <path class="bot-mouth" d="M18 21h4"/>
+                <path class="bot-badge" d="M17 29h6m-3-2v4"/>
+                <g class="bot-prop bot-cup"><path class="bot-shell" d="M24 26h9v7h-9Zm9 1h3v4h-3"/><path class="bot-steam" d="M26 23q-2-2 0-4m4 4q-2-2 0-4"/></g>
+                <g class="bot-prop bot-book"><path class="bot-shell" d="M9 27q5-2 11 1 6-3 11-1v8q-5-2-11 0-6-2-11 0Z"/><path class="bot-prop-line" d="M20 28v7m-8-5 5 1m6 0 5-1"/></g>
+              </g>
+              <path class="bot-sleep-marks" d="M30 8h4l-4 4h4m1-11h4l-4 4h4"/>
+              <path class="bot-celebration" d="m3 8 2 2m30-2-2 2M3 18h2m30 0h2m-3-15-1 2M7 3l1 2"/>
+              <g class="bot-computer">
+                <path class="bot-antenna" d="M11 10V6"/><circle class="bot-signal" cx="11" cy="5" r="1.8"/>
+                <rect class="bot-shell" x="5" y="23" width="12" height="11" rx="3"/>
+                <path class="bot-feet" d="M8 34v2h4m3-2v2h4"/>
+                <path class="bot-shell" d="M8 10h9a4 4 0 0 1 4 4v2l2 2-2 2v2a3 3 0 0 1-3 3H8a4 4 0 0 1-4-4v-7a4 4 0 0 1 4-4Z"/>
+                <rect class="bot-face" x="14" y="13" width="6" height="9" rx="2"/>
+                <path class="bot-eyes" d="M18 16v3"/>
+                <circle class="bot-shell" cx="8" cy="17" r="2"/>
+                <path class="bot-laptop-base" d="M19 32h17v2H19Z"/>
+                <path class="bot-laptop-case" d="m30 32 5-15h3l-5 15Z"/>
+                <path class="bot-screen-code" d="m34 20-3 9"/>
+                <path class="bot-typing-hand bot-typing-left" d="m15 26 5 4h5"/>
+                <path class="bot-typing-hand bot-typing-right" d="m12 27 6 5h5"/>
+              </g>
+            </svg>
+          </div>
           <div id="attachment-list" class="attachment-list" aria-label="Attachments"></div>
-          <textarea
-            id="prompt"
-            rows="1"
-            maxlength="100000"
-            placeholder="Ask Agent Factory"
-            aria-label="Message to Main Agent"
-          ></textarea>
+          <div class="prompt-surface">
+            <div class="astra-stars" aria-hidden="true">
+              <span class="astra-star"></span>
+              <span class="astra-star"></span>
+              <span class="astra-star"></span>
+              <span class="astra-star"></span>
+              <span class="astra-star"></span>
+              <span class="astra-star"></span>
+              <span class="astra-star"></span>
+              <span class="astra-star"></span>
+              <span class="astra-star"></span>
+              <span class="astra-star"></span>
+              <span class="astra-star"></span>
+              <span class="astra-star"></span>
+              <span class="astra-star"></span>
+              <span class="astra-star"></span>
+              <span class="astra-star"></span>
+              <span class="astra-star"></span>
+              <span class="astra-star"></span>
+              <span class="astra-star"></span>
+              <span class="astra-star"></span>
+              <span class="astra-star"></span>
+              <span class="astra-star"></span>
+              <span class="astra-star"></span>
+              <span class="astra-star"></span>
+              <span class="astra-star"></span>
+            </div>
+            <textarea
+              id="prompt"
+              rows="1"
+              maxlength="100000"
+              placeholder="Ask Agent Factory"
+              aria-label="Message to Main Agent"
+            ></textarea>
+          </div>
           <p id="input-feedback" class="input-feedback" role="alert" hidden></p>
           <div class="composer-actions">
             <div class="composer-actions-start">
               <button id="attach-button" class="icon-button" type="button" title="Attach files or folders" aria-label="Attach files or folders">
                 <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M12 5v14M5 12h14"></path></svg>
               </button>
-              <div class="setting-control">
+              <div class="setting-control agent-settings-control">
                 <button id="model-button" class="setting-button" type="button" title="Models, reasoning and permissions" aria-label="Models, reasoning and permissions" aria-haspopup="dialog" aria-expanded="false" aria-controls="model-menu">
                   <span id="model-label">Default</span>
                   <svg class="chevron-icon" viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="m4 6 4 4 4-4"></path></svg>
@@ -82,10 +149,11 @@
               </div>
               <button id="auto-scroll-button" class="mode-button toggle-control" type="button" title="Auto-scroll ON · Click to turn off" aria-label="Auto-scroll ON · Click to turn off" aria-pressed="true" aria-controls="timeline">
                 <span>Scroll</span><svg class="toggle-icon" viewBox="0 0 28 18" aria-hidden="true" focusable="false"><rect x="1" y="1" width="26" height="16" rx="8"></rect><circle class="toggle-thumb" cx="9" cy="9" r="4"></circle></svg>
+                <svg id="auto-scroll-state" class="scroll-state-icon" viewBox="0 0 24 24" role="img" aria-label="Following latest messages" focusable="false"><path d="m6 5 6 6 6-6m-12 8 6 6 6-6"></path></svg>
               </button>
               <div class="utility-picker question-picker">
-                <button id="question-button" class="utility-button" type="button" title="User questions" aria-label="User questions" aria-haspopup="listbox" aria-expanded="false" aria-controls="question-menu">
-                  <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><circle cx="5" cy="7" r="1"></circle><circle cx="5" cy="12" r="1"></circle><circle cx="5" cy="17" r="1"></circle><path d="M9 7h10M9 12h10M9 17h10"></path></svg>
+                <button id="question-button" class="utility-button question-button" type="button" title="User questions" aria-label="User questions" aria-haspopup="listbox" aria-expanded="false" aria-controls="question-menu">
+                  <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M14 3H5a2 2 0 0 0-2 2v11l4-3h7a2 2 0 0 0 2-2V5a2 2 0 0 0-2-2Z"></path><path d="M8 16v1a2 2 0 0 0 2 2h7l4 3V11a2 2 0 0 0-2-2"></path></svg>
                 </button>
                 <div id="question-menu" class="utility-list-menu question-menu" role="listbox" aria-label="User questions" hidden>
                   <div id="question-list" class="question-list"></div>
@@ -94,7 +162,14 @@
             </div>
             <div class="composer-actions-end setting-control">
               <div id="submission-menu" class="setting-menu submission-menu" role="menu" aria-label="Submit draft" hidden></div>
-              <button id="submission-button" class="setting-button" type="button" title="More ways to submit" aria-label="More ways to submit" aria-haspopup="menu" aria-expanded="false" aria-controls="submission-menu"><svg class="chevron-icon" viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="m4 6 4 4 4-4"></path></svg></button>
+              <button id="submission-button" class="setting-button" type="button" title="More ways to submit" aria-label="More ways to submit" aria-haspopup="menu" aria-expanded="false" aria-controls="submission-menu">
+                <svg class="submission-galaxy-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                  <path class="galaxy-band" d="M17 4C10 4 3 10 3 15c0 4 7 3 12-1s7-9 4-10M7 20c5 0 12-5 14-10"></path>
+                  <path d="m12 7 1.3 3.7L17 12l-3.7 1.3L12 17l-1.3-3.7L7 12l3.7-1.3Z"></path>
+                  <path d="m5 3 .6 1.4L7 5l-1.4.6L5 7l-.6-1.4L3 5l1.4-.6Z"></path>
+                  <circle cx="19" cy="19" r="1"></circle>
+                </svg>
+              </button>
               <button id="send-button" class="send-button" type="button" title="Send (Enter)" aria-label="Send message">
                 <svg id="send-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M12 19V5M6.5 10.5 12 5l5.5 5.5"></path></svg>
                 <svg id="stop-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false" hidden><rect x="7" y="7" width="10" height="10" rx="1"></rect></svg>
@@ -116,16 +191,38 @@
       <div id="agents-menu" class="utility-list-menu agents-menu" role="listbox" aria-label="Called work and verification agents" hidden>
         <div id="agents-list" class="agents-list"></div>
       </div>
-      <section id="status-settings" class="status-settings" aria-label="Status bar settings" hidden>
-        <div class="status-settings-heading"><strong>Status bar</strong><button id="status-settings-close" type="button" aria-label="Close status bar settings" title="Close"><svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="m4 4 8 8M12 4l-8 8"></path></svg></button></div>
-        <p class="status-settings-hint">Select items to display · Drag or use arrows to reorder</p>
+      <section id="status-settings" class="status-settings" aria-label="Settings" hidden>
+        <div class="status-settings-heading"><strong>Settings</strong><button id="status-settings-close" type="button" aria-label="Close settings" title="Close"><svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="m4 4 8 8M12 4l-8 8"></path></svg></button></div>
+        <div class="settings-tabs" role="tablist" aria-label="Settings categories">
+          <button id="settings-tab-status" type="button" role="tab" aria-selected="true" aria-controls="settings-panel-status" data-settings-tab="status">Status bar</button>
+          <button id="settings-tab-bot" type="button" role="tab" aria-selected="false" aria-controls="settings-panel-bot" data-settings-tab="bot" tabindex="-1">Bot</button>
+          <button id="settings-tab-keyboard" type="button" role="tab" aria-selected="false" aria-controls="settings-panel-keyboard" data-settings-tab="keyboard" tabindex="-1">Keyboard shortcuts</button>
+        </div>
+        <div id="settings-panel-status" class="settings-panel" role="tabpanel" aria-labelledby="settings-tab-status">
         <div id="status-catalog" class="status-catalog"></div>
         <div class="status-settings-footer"><span tabindex="0" title="The current connection does not provide costs, remaining credits, limit resets, short-term limits, account-wide tokens, input/output/cache breakdowns, or processing speed.">Some metrics are unavailable</span><button id="status-reset" type="button">Restore defaults</button></div>
+        </div>
+        <div id="settings-panel-bot" class="settings-panel" role="tabpanel" aria-labelledby="settings-tab-bot" hidden>
+          <label class="settings-option"><input id="bot-visible" type="checkbox" checked>Show bot</label>
+          <p class="status-settings-hint">Show the companion above the message box. This only changes its visibility.</p>
+          <label class="settings-option"><input id="bot-animations" type="checkbox" checked>Animate bot</label>
+          <p class="status-settings-hint">Your system’s reduced motion preference takes priority. These preferences are saved for this chat.</p>
+        </div>
+        <div id="settings-panel-keyboard" class="settings-panel" role="tabpanel" aria-labelledby="settings-tab-keyboard" tabindex="0" hidden>
+          <p class="status-settings-hint">Keyboard controls in this chat</p>
+          <dl class="settings-shortcuts">
+            <div><dt>Send message</dt><dd><kbd>Enter</kbd></dd></div>
+            <div><dt>New line</dt><dd><kbd>Shift</kbd> + <kbd>Enter</kbd></dd></div>
+            <div><dt>Close settings or an open menu</dt><dd><kbd>Esc</kbd></dd></div>
+            <div><dt>Move between controls</dt><dd><kbd>Tab</kbd> / <kbd>Shift</kbd> + <kbd>Tab</kbd></dd></div>
+            <div><dt>Switch settings tabs</dt><dd><kbd>←</kbd> / <kbd>→</kbd></dd></div>
+          </dl>
+        </div>
         <span id="status-announcement" role="status" aria-live="polite"></span>
       </section>
       <div class="status-footer">
         <div id="status-bar" class="status-bar" aria-label="Agent status"></div>
-        <button id="status-settings-button" class="status-settings-button" type="button" aria-controls="status-settings" aria-expanded="false" aria-label="Status bar settings" title="Status bar settings">
+        <button id="status-settings-button" class="status-settings-button" type="button" aria-controls="status-settings" aria-expanded="false" aria-label="Settings" title="Settings">
           <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round">
             <path d="m9 3-.5 3-2 1.2L3.7 6l-3 5 2.3 2v2l-2.3 2 3 5 2.8-1.2 2 1.2.5 3h6l.5-3 2-1.2 2.8 1.2 3-5-2.3-2v-2l2.3-2-3-5-2.8 1.2-2-1.2L15 3Z" transform="translate(2 0) scale(.83)" />
             <circle cx="12" cy="12" r="3" />

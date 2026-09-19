@@ -465,6 +465,28 @@ test('all message actions retain queue identity and cannot merge across routes',
   assert.deepEqual(calls.slice(1).map(call => call.text), actions);
 });
 
+test('direct requests omit delegated instructions while managed routes retain model overrides', async () => {
+  const calls = [], accepted = [];
+  const agentModels = { work: { model: 'worker-one' }, verification: { model: 'review-two' } };
+  const controller = new ChatSessionController(runtime({
+    async send(agentId, text, options) { calls.push({ text, options }); return { agentId, runId: String(calls.length) }; }
+  }), events(), 'main-existing', { pollIntervalMs: 0 });
+  const modes = [undefined, 'direct', 'work', 'plan', 'verification', 'plan-work', 'work-verification', 'plan-work-verification'];
+  for (const taskMode of modes) {
+    await controller.send('Hello', [], { taskMode, agentModels }, value => accepted.push(value));
+    const call = calls.at(-1), submission = accepted.at(-1);
+    assert.deepEqual(call.options.agentModels, agentModels);
+    if (!taskMode || taskMode === 'direct') {
+      assert.equal(call.text, 'Hello');
+      assert.equal(submission.guidance, '');
+    } else {
+      assert.match(call.text, /\[Delegated agent model settings for this request\]/);
+      assert.ok(call.text.includes(JSON.stringify(agentModels)));
+      assert.equal(call.text, 'Hello' + submission.guidance);
+    }
+  }
+});
+
 test('delegated role settings stay separate across queued dispatches and reach Main guidance', async () => {
   const calls = [], terminal = deferred();
   const controller = new ChatSessionController(runtime({
@@ -541,4 +563,26 @@ test('single dispatch acknowledges exact application suffix and effective Goal/V
   assert.equal(accepted[0].goal, true);
   await controller.send('Inspect', [], { taskMode: 'verification', businessMode: 'design', goalMode: true }, value => accepted.push(value));
   assert.deepEqual(accepted[1], { taskMode: 'verification', businessMode: 'normal', goal: false, guidance: '' });
+});
+
+test('role permissions stay captured and prevent queue merging', async () => {
+  const calls = [], terminal = deferred();
+  const controller = new ChatSessionController(runtime({
+    async send(agentId, text, options) { calls.push({ text, options }); return { agentId, runId: String(calls.length) }; },
+    async status(_agentId, runId) { if (runId === '1') await terminal.promise; return { status: 'completed' }; }
+  }), events(), 'main-existing', { pollIntervalMs: 0 });
+  const first = controller.send('active', [], {});
+  await tick();
+  const one = { work: 'workspace-write' };
+  const two = { work: 'bypass' };
+  const second = controller.send('second', [], { taskMode: 'work', agentPermissions: one });
+  const third = controller.send('third', [], { taskMode: 'work', agentPermissions: two });
+  terminal.resolve();
+  await Promise.all([first, second, third]);
+  assert.equal(calls.length, 3);
+  assert.match(calls[1].text, /workspace-write/);
+  assert.deepEqual(calls[1].options.agentPermissions, one);
+  assert.deepEqual(calls[2].options.agentPermissions, two);
+  assert.match(calls[2].text, /bypass/);
+  assert.match(calls[1].text, /--work-execution-mode/);
 });
