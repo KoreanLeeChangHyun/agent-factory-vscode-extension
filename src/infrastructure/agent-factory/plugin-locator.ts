@@ -1,3 +1,4 @@
+import { localize } from "../../common/localization";
 import { lstat, readdir, readFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
@@ -26,7 +27,7 @@ export async function locateAgentFactoryExec(
       ? { available: true, execPath: configured }
       : {
           available: false,
-          diagnostic: `The configured Agent Factory exec.py is not a valid regular file: ${configured}`
+          diagnostic: localize("ui.the.configured.agent.factory.exec.py.is.not.a.valid.regular.file.0", configured)
         };
   }
 
@@ -66,14 +67,14 @@ export async function locateAgentFactoryExec(
   } catch {
     return {
       available: false,
-      diagnostic: `Unable to find the Agent Factory plugin cache: ${cacheRoot}`
+      diagnostic: localize("ui.unable.to.find.the.agent.factory.plugin.cache.0", cacheRoot)
     };
   }
   candidates.sort((left, right) => right.modifiedAt - left.modifiedAt || right.path.localeCompare(left.path));
   if (candidates[0]) return { available: true, execPath: candidates[0].path };
   return {
     available: false,
-    diagnostic: `Unable to find ${RELATIVE_EXEC_PATH} in the Agent Factory plugin${options.requiredVersion ? ` matching extension version ${semanticBase(options.requiredVersion)}` : ""} installed from the marketplace.`
+    diagnostic: localize("ui.unable.to.find.0.in.the.agent.factory.plugin.1.installed.from.the.marketplace", RELATIVE_EXEC_PATH, options.requiredVersion ? localize("ui.matching.extension.version.0", semanticBase(options.requiredVersion)) : "")
   };
 }
 

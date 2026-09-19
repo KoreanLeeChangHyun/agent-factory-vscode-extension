@@ -19,6 +19,9 @@ export function bootstrap(context: vscode.ExtensionContext): void {
     vscode.commands.registerCommand("agentFactory.mainChat.rename", async () => {
       await container.chatPanels.renameActive();
     }),
+    vscode.commands.registerCommand("agentFactory.mainChat.clearConversation", async () => {
+      await container.chatPanels.clearActiveConversation();
+    }),
     vscode.commands.registerCommand("agentFactory.loadingAnimations.preview", async () => {
       await LoadingAnimationGallery.open(context.extensionUri);
     }),

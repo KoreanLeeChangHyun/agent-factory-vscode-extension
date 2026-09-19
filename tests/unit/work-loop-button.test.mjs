@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
-import { runInNewContext } from "node:vm";
+import { runUiInNewContext as runInNewContext } from "../support/ui-localization.mjs";
 import test from "node:test";
 
 const script = await readFile(new URL("../../static/js/chat.js", import.meta.url), "utf8");
@@ -132,7 +132,9 @@ test("action menu sends supported drafts without persisting a selection during e
   };
   const renderer = script.slice(script.indexOf("  function renderSubmissionMenu("), script.indexOf("  function handleSettingMenuKeydown("));
   runInNewContext(renderer + '\nrenderSettingMenu("task", menu);', context);
-  const options = menu.children[2].children.filter(item => item.dataset.action);
+  const actionOptions = () => menu.children.flatMap(group => group.children.filter(item => item.dataset.action));
+  const options = actionOptions();
+  assert.deepEqual(options.map(item => item.dataset.action), Object.keys(names));
   assert.equal(options.length, 6);
   assert.equal(options[0].disabled, false);
   assert.equal(options.find(item => item.dataset.action === "plan-work").disabled, true);
@@ -144,7 +146,7 @@ test("action menu sends supported drafts without persisting a selection during e
   assert.deepEqual(calls, ["verification"]);
   context.currentCapabilities = () => ({ taskModes: ["direct", "work", "plan-work"] });
   runInNewContext('renderSettingMenu("task", menu);', context);
-  const planWork = menu.children[2].children.find(item => item.dataset.action === "plan-work");
+  const planWork = actionOptions().find(item => item.dataset.action === "plan-work");
   assert.equal(planWork.disabled, false);
   planWork.handlers.click();
   assert.equal(context.state.taskMode, "work");
@@ -152,7 +154,7 @@ test("action menu sends supported drafts without persisting a selection during e
   assert.equal(context.state.running, true);
   context.currentCapabilities = () => ({ taskModes: ["work"] });
   runInNewContext('renderSettingMenu("task", menu);', context);
-  assert.equal(menu.children[2].children.find(item => item.dataset.action === "verification").disabled, true);
+  assert.equal(actionOptions().find(item => item.dataset.action === "verification").disabled, true);
 });
 
 

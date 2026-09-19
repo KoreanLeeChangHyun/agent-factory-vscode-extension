@@ -1,3 +1,4 @@
+import { localize } from "./localization";
 export const MAX_IMAGE_COUNT = 8;
 export const MAX_IMAGE_BYTES = 10 * 1024 * 1024;
 export const MAX_TOTAL_IMAGE_BYTES = 20 * 1024 * 1024;
@@ -10,10 +11,10 @@ export function canStageImage(currentCount: number, currentBytes: number, nextBy
 export function decodeBrowserImage(data: string, declaredSize: number, mediaType: string): Buffer {
   const content = Buffer.from(data, "base64");
   if (content.byteLength !== declaredSize || content.toString("base64") !== data) {
-    throw new Error("Image attachment data size does not match.");
+    throw new Error(localize("ui.image.attachment.data.size.does.not.match"));
   }
   if (!hasImageSignature(content, mediaType)) {
-    throw new Error("Image content does not match its media type.");
+    throw new Error(localize("ui.image.content.does.not.match.its.media.type"));
   }
   return content;
 }

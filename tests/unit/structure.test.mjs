@@ -1,6 +1,11 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
+import { createRequire } from "node:module";
+import { runUiInNewContext } from "../support/ui-localization.mjs";
+const ui = createRequire(import.meta.url)("../../static/js/localization.js");
+const nls = JSON.parse(await readFile(new URL("../../package.nls.json", import.meta.url), "utf8"));
+const nlsKo = JSON.parse(await readFile(new URL("../../package.nls.ko.json", import.meta.url), "utf8"));
 
 const packageJson = JSON.parse(await readFile(new URL("../../package.json", import.meta.url), "utf8"));
 const template = await readFile(new URL("../../templates/chat.html", import.meta.url), "utf8");
@@ -22,7 +27,9 @@ test("loading animation gallery previews themed candidates from the command pale
   const command = packageJson.contributes.commands.find(function (item) {
     return item.command === "agentFactory.loadingAnimations.preview";
   });
-  assert.equal(command.title, "Preview Loading Animations");
+  assert.equal(command.title, "%agentFactory.loadingAnimations.preview.title%");
+  assert.equal(nls[command.title.slice(1, -1)], "Preview Loading Animations");
+  assert.equal(nlsKo[command.title.slice(1, -1)], "로딩 애니메이션 미리보기");
   assert.match(bootstrap, /registerCommand\("agentFactory\.loadingAnimations\.preview"/);
   assert.match(loadingGallery, /class="sample-card/g);
   assert.match(loadingGallery, /id="motion-toggle"/);
@@ -116,10 +123,11 @@ test("composer groups model, reasoning and permissions beside submission actions
   assert.match(template, /id="model-menu"[^>]*role="dialog"/);
   assert.match(template, /id="submission-menu"[^>]*role="menu"/);
   assert.match(template, /id="submission-button"/);
-  assert.doesNotMatch(template, /id="(?:reasoning|execution-mode|goal-mode)-button"/);
+  assert.doesNotMatch(template, /id="(?:reasoning|execution-mode)-button"/);
   assert.match(chatScript, /select.dataset.setting = "permissions"/);
   assert.match(chatScript, /type: "execution\.select", mode: select.value/);
   assert.match(template, /id="fast-mode-button"/);
+  assert.match(template, /id="goal-mode-button"[^>]*aria-pressed="false"[^>]*hidden/);
 });
 
 test("composer uses one SVG send button that becomes the stop control", function () {
@@ -132,9 +140,9 @@ test("composer uses one SVG send button that becomes the stop control", function
 test("composer submits active-run input to the host queue and retains the empty-composer stop control", function () {
   assert.doesNotMatch(chatScript, /state\.running \|\| !state\.capabilities/);
   assert.match(chatScript, /state\.running && !hasComposerContent\(\)/);
-  assert.match(chatScript, /"Add message to queue"/);
+  assert.match(chatScript, /t\("ui\.add\.message\.to\.queue"\)/);
   assert.match(chatScript, /case "queue\.updated"/);
-  assert.match(chatScript, /queue: "Queue " \+ Math\.max/);
+  assert.match(chatScript, /queue: t\("ui\.queue"\) \+ Math\.max/);
   assert.match(panelManager, /onQueueChanged: \(count\)/);
   assert.match(panelManager, /managed\.chatSendPreparation = sendPreparation\.then/);
 });
@@ -182,7 +190,7 @@ test("status bar includes active Work and Verification counts", function () {
   assert.match(agentClient, /last_token_usage/);
   assert.match(agentClient, /model_context_window/);
   assert.match(agentClient, /window_minutes !== 7 \* 24 \* 60/);
-  assert.match(chatScript, /agents: main \? state\.workUnitsKnown \? "Work " \+ state\.workUnits\.workActive \+ " · Verify " \+ state\.workUnits\.verificationActive/);
+  assert.match(chatScript, /agents: main \? state\.workUnitsKnown \? t\("status\.agents", state\.workUnits\.workActive, state\.workUnits\.verificationActive\)/);
   assert.match(template, /id="agents-menu"[^>]*aria-label="Called work and verification agents"/);
   assert.match(chatScript, /type: "agents\.request"/);
   assert.match(chatScript, /type: "agent\.open", agentId: agent\.agentId/);
@@ -247,7 +255,7 @@ test("runtime status stays in the loader while concrete activity updates the tim
   assert.match(chatScript, /case "run\.activity":[\s\S]*upsertActivity\(message\.id, message\.category, message\.phase, message\.text, message\.diff, message\.title, message\.output\)/);
   assert.match(chatScript, /event\.type === "activity" && event\.id === id/);
   assert.match(chatStyles, /\.message-activity/);
-  assert.match(chatScript, /runStatusLabel\.textContent = state\.runProgress \|\| "Working"/);
+  assert.match(chatScript, /runStatusLabel\.textContent = localizedText\(state\.runProgress, state\.runProgressLocalization\) \|\| t\("ui\.working"\)/);
 });
 
 test("commands, file changes, tools, and assistant responses have distinct presentation", function () {
@@ -255,7 +263,7 @@ test("commands, file changes, tools, and assistant responses have distinct prese
   assert.doesNotMatch(chatScript, /event\.type === "assistant" \? "Response"/);
   assert.doesNotMatch(chatScript, /return "Bash"/);
   assert.match(chatScript, /renderTerminalCommand\(content, event\.text, event\.phase, event\.title\)/);
-  assert.match(chatScript, /if \(category === "file"\) return "Git changes"/);
+  assert.match(chatScript, /if \(category === "file"\) return t\("ui\.git\.changes"\)/);
   assert.match(chatStyles, /\.message-activity-command \.message-content[\s\S]*font-family/);
   assert.doesNotMatch(chatStyles, /\.message-activity-command\s*\{[^}]*(?:border|background):/);
   assert.match(chatStyles, /\.git-diff-overview/);
@@ -275,7 +283,7 @@ test("recognized read commands use concise activity labels instead of Bash text"
   assert.doesNotMatch(agentClient, /return truncate\(summary, 140\)/);
   assert.match(agentClient, /return summary\.trim\(\) \|\| undefined/);
   assert.match(agentClient, /title === "Read run request"/);
-  assert.match(agentClient, /return \[statusUpdate\("Main Agent is analyzing the request"\)\]/);
+  assert.match(agentClient, /return \[statusUpdate\(localize\("ui\.main\.agent\.is\.analyzing\.the\.request"\)\)\]/);
   assert.match(agentClient, /return "Read run result"/);
   assert.match(chatScript, /context\.title = command/);
   assert.match(chatScript, /text\.append\(context\);[\s\S]*container\.append\(row\);[\s\S]*return;/);
@@ -293,9 +301,13 @@ test("adjacent reads of the same skill or run document collapse into one activit
 
 test("read activities visibly distinguish in-progress and completed phases", function () {
   assert.match(chatScript, /readActivityDisplayTitle\(title, phaseValue\)/);
-  assert.match(chatScript, /return title\.replace\("Read Skill · ", "Reading Skill · "\)/);
-  assert.doesNotMatch(chatScript, /return "Reading run request"/);
-  assert.match(chatScript, /return "Reading run result"/);
+  const source = chatScript.slice(chatScript.indexOf('  function readActivityDisplayTitle('), chatScript.indexOf('  function createCommandOutput('));
+  const render = runUiInNewContext(source + '\nreadActivityDisplayTitle;', {});
+  assert.equal(render('Read Skill · example', 'started'), 'Reading Skill · example');
+  assert.equal(render('Read Skill · example', 'completed'), 'Read Skill · example');
+  assert.equal(render('Read run result', 'started'), 'Reading run result');
+  assert.equal(render('Read run result', 'completed'), 'Read run result');
+  assert.equal(render('opaque command title', 'started'), 'opaque command title');
 });
 
 test("activity completion uses accessible success and failure dots instead of text labels", function () {
@@ -310,11 +322,11 @@ test("activity completion uses accessible success and failure dots instead of te
 
 test("terminal commands show three lines before offering an accessible command expansion", function () {
   assert.match(chatScript, /renderTerminalCommand\(content, event\.text, event\.phase, event\.title\)/);
-  assert.match(chatScript, /prompt\.textContent = phaseValue === "failed" \? "Failed " : phaseValue === "completed" \? "Ran " : "Running "/);
+  assert.match(chatScript, /prompt\.textContent = phaseValue === "failed" \? t\("ui\.failed\.0f4f56"\) : phaseValue === "completed" \? t\("ui\.ran"\) : t\("ui\.running"\)/);
   assert.match(chatScript, /row\.append\(createActivityPhase\(phaseValue\), text\)/);
   assert.match(chatScript, /toggle\.hidden = text\.scrollHeight <= text\.clientHeight \+ 1/);
   assert.match(chatScript, /new ResizeObserver\(scheduleCommandDisclosureMeasurement\)/);
-  assert.match(chatScript, /toggle\.setAttribute\("aria-label", "Expand full command"\)/);
+  assert.match(chatScript, /toggle\.setAttribute\("aria-label", t\("ui\.expand\.full\.command"\)\)/);
   assert.match(chatScript, /toggle\.setAttribute\("aria-expanded", String\(expanded\)\)/);
   assert.match(chatScript, /togglePath\.setAttribute\("d", "m4 6 4 4 4-4"\)/);
   assert.match(chatStyles, /\.bash-command-text\s*\{[^}]*max-height: calc\(1\.5em \* 3\)/);
@@ -341,8 +353,8 @@ test("terminal commands and extension-aware diffs use VS Code TextMate highlight
 
 test("Git changes render a bounded unified diff preview with file statistics", function () {
   assert.match(chatScript, /renderGitDiff\(content, event\.diff, event\.text, event\.phase\)/);
-  assert.match(chatScript, /Edited " \+ \(files\.length === 1 \? files\[0\]\.path/);
-  assert.match(chatScript, /summary\.textContent = "View Git diff"/);
+  assert.match(chatScript, /t\("ui\.edited"\) \+ \(files\.length === 1 \? files\[0\]\.path/);
+  assert.match(chatScript, /summary\.textContent = t\("ui\.view\.git\.diff"\)/);
   assert.match(chatScript, /line\.startsWith\("@@"\)/);
   assert.match(chatStyles, /\.git-diff-preview pre/);
   assert.match(chatStyles, /\.git-diff-addition/);
@@ -371,8 +383,10 @@ test("reasoning options match the installed runtime capability", function () {
 test("status settings uses an accessible SVG-only button", function () {
   const button = template.match(/<button\b[^>]*id="status-settings-button"[^>]*>([\s\S]*?)<\/button>/);
   assert.ok(button);
-  assert.match(button[0], /aria-label="Status bar settings"/);
-  assert.match(button[0], /title="Status bar settings"/);
+  assert.match(button[0], /aria-label="Settings"/);
+  assert.match(button[0], /data-i18n-aria-label="ui.settings"/);
+  assert.equal(ui.format("ui.settings", "ko"), "설정");
+  assert.match(button[0], /title="Settings"/);
   assert.match(button[0], /aria-controls="status-settings"/);
   assert.match(button[1], /<svg[^>]*aria-hidden="true"[^>]*focusable="false"/);
   assert.equal(button[1].replace(/<[^>]*>/g, '').trim(), '');

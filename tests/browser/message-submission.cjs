@@ -63,3 +63,28 @@ async function checkMessageSubmission(page) {
   assert.equal(await page.locator('[data-id="legacy-submission"] .message-submission').count(), 0);
 }
 module.exports = { checkMessageSubmission };
+
+async function checkMessageLayout(page) {
+  const text = ('작업·검증 루프를 실행해 주세요. 긴 요청과 첨부 설명이 다음 메시지와 겹치면 안 됩니다.\n').repeat(18);
+  await page.evaluate(text => sessionStorage.setItem('submission-restoration-fixture', JSON.stringify({ timeline: [
+    { type: 'user', id: 'layout-short', text: '이미지 아이콘을 확인해 주세요.' },
+    { type: 'user', id: 'layout-long', text, submission: { taskMode: 'work-verification', guidance: text } },
+    { type: 'assistant', id: 'layout-answer', phase: 'final', text: '확인 결과입니다.\n\n- Work 실행: `run-example`\n- 최종 판정: pass' }
+  ] })), text);
+  await page.reload();
+  await page.locator('[data-id="layout-long"]').waitFor({ state: 'attached' });
+  for (const width of [795, 360]) {
+    await page.setViewportSize({ width, height: 420 });
+    for (const open of [false, true, false]) {
+      await page.locator('[data-id="layout-long"] details').evaluate((el, value) => { el.open = value; }, open);
+      const collisions = await page.locator('#timeline > .message').evaluateAll(messages => messages.flatMap((message, index) => {
+        const box = message.getBoundingClientRect();
+        const content = message.querySelector('.message-content').getBoundingClientRect();
+        const next = messages[index + 1]?.getBoundingClientRect();
+        return content.bottom > box.bottom + 1 || (next && content.bottom > next.top + 1) ? [message.dataset.id] : [];
+      }));
+      assert.deepEqual(collisions, [], `Messages must retain their content height: width=${width}, expanded=${open}`);
+    }
+  }
+}
+module.exports.checkMessageLayout = checkMessageLayout;

@@ -1,3 +1,4 @@
+import { localize, describeLocalizedMessage, joinLocalizedMessages, type LocalizedMessage } from "../../common/localization";
 import type { MessageSubmission } from "../../protocol/messages";
 import { withInspectionGuidance } from "./task-selection";
 import { withBusinessMode } from "../../common/types/business-mode";
@@ -13,7 +14,7 @@ export interface SessionControllerEvents {
   readonly onRunningChanged: (running: boolean) => void;
   readonly onQueueChanged?: (count: number) => void;
   readonly onBeforeQueueDrain?: () => Promise<void>;
-  readonly onAssistantText: (text: string, phase?: "commentary" | "final", runId?: string) => void;
+  readonly onAssistantText: (text: string, phase?: "commentary" | "final", runId?: string, localization?: LocalizedMessage) => void;
   readonly onProgress: (text: string) => void;
   readonly onUsage: (usedTokens: number, contextWindowTokens: number, weeklyUsedPercent?: number) => void;
   readonly onActivity: (activity: {
@@ -25,7 +26,7 @@ export interface SessionControllerEvents {
     readonly diff?: string;
     readonly output?: string;
   }) => void;
-  readonly onDecision?: (runId: string | null) => void;
+  readonly onDecision?: (runId: string | null, canApprove?: boolean) => void;
   readonly onHumanDecision?: (text: string, submission: MessageSubmission) => void;
   readonly onGoal?: (goal: NativeGoal | null, error?: string) => void;
   readonly onStatusObserved?: (status: string) => void;
@@ -51,6 +52,7 @@ export class ChatSessionController {
   private currentRunAgentId: string | undefined;
   private busy = false;
   private pendingDecisionRunId: string | undefined;
+  private pendingDecisionCanApprove = false;
   private submittedAgentPermissions: ExecutionOptions["agentPermissions"];
   private pendingDecisionAgentPermissions: ExecutionOptions["agentPermissions"];
   private submittedAgentModels: ExecutionOptions["agentModels"];
@@ -65,6 +67,7 @@ export class ChatSessionController {
   private cancellationInFlight: Promise<void> | undefined;
   private goalControlPending = false;
   private pendingGoalAction: GoalAction | undefined;
+  private conversationResetInFlight: Promise<{ readonly conversationId: string; readonly startedAt: string }> | undefined;
   private disposed = false;
   private readonly queuedSends: PendingSend[] = [];
 
@@ -84,6 +87,28 @@ export class ChatSessionController {
   public get runId(): string | undefined { return this.currentRunId; }
   public get queueLength(): number { return this.queuedSends.length; }
 
+  public get conversationResetBlockedReason(): string | undefined {
+    if (this.conversationResetInFlight) return localize("ui.a.conversation.reset.is.already.processing");
+    if (this.running || this.currentRunId) return localize("ui.finish.or.cancel.the.current.run.first");
+    if (this.queuedSends.length) return localize("ui.send.restore.or.remove.queued.messages.first");
+    if (this.pendingDecisionRunId) return localize("ui.resolve.the.pending.human.decision.first");
+    if (this.goalControlPending) return localize("ui.wait.for.the.goal.control.request.to.finish");
+    return undefined;
+  }
+
+  public async resetConversation(): Promise<{ readonly conversationId: string; readonly startedAt: string }> {
+    const blocked = this.conversationResetBlockedReason;
+    if (blocked) throw new Error(blocked);
+    if (!this.agentId) throw new Error(localize("ui.send.a.message.before.clearing.this.conversation"));
+    const reset = this.runtime.resetConversation(this.agentId);
+    this.conversationResetInFlight = reset;
+    try {
+      return await reset;
+    } finally {
+      if (this.conversationResetInFlight === reset) this.conversationResetInFlight = undefined;
+    }
+  }
+
   public dispose(): void {
     this.disposed = true;
     for (const queued of this.queuedSends.splice(0)) queued.resolve?.();
@@ -91,6 +116,7 @@ export class ChatSessionController {
   }
 
   public async reconnect(): Promise<boolean> {
+    if (this.conversationResetInFlight) await this.conversationResetInFlight;
     if (this.disposed || this.running) return this.running;
     if (!this.agentId) {
       this.releaseBusyAndDrainQueue();
@@ -107,7 +133,7 @@ export class ChatSessionController {
       if (active) {
         this.currentRunId = active.runId;
         this.currentRunAgentId = active.agentId;
-        this.events.onProgress("Reconnected to the active run.");
+        this.events.onProgress(localize("ui.reconnected.to.the.active.run"));
         await this.flushCancellation();
         void this.followExistingRun(active.agentId, active.runId);
         return true;
@@ -157,6 +183,7 @@ export class ChatSessionController {
     execution: ExecutionOptions,
     onStarted?: (submission: MessageSubmission) => void
   ): Promise<void> {
+    if (this.conversationResetInFlight) await this.conversationResetInFlight;
     if (this.disposed) return;
     execution = { ...execution, ...(execution.agentPermissions ? { agentPermissions: structuredClone(execution.agentPermissions) } : {}), ...(execution.agentModels ? { agentModels: structuredClone(execution.agentModels) } : {}) };
     attachments = attachments.map(attachment => ({ ...attachment }));
@@ -167,7 +194,7 @@ export class ChatSessionController {
       });
     }
     if (this.goalControlPending) {
-      this.events.onError("The previous Goal control request is still processing. Send again after it finishes.");
+      this.events.onError(localize("ui.the.previous.goal.control.request.is.still.processing.send.again.after.it.finishes"));
       if (!this.running) this.events.onRunningChanged(false);
       return;
     }
@@ -208,13 +235,13 @@ export class ChatSessionController {
           if (active) {
             this.currentRunId = active.runId;
             this.currentRunAgentId = active.agentId;
-            this.events.onProgress("Queued messages will run together after the current run finishes.");
+            this.events.onProgress(localize("ui.queued.messages.will.run.together.after.the.current.run.finishes"));
             await this.flushCancellation();
             await this.pollUntilTerminal(active.agentId, active.runId);
             this.currentRunId = undefined;
             this.currentRunAgentId = undefined;
             this.cancelRequested = false;
-            if (this.pendingDecisionRunId) throw new Error("Queued messages will be processed together after your decision.");
+            if (this.pendingDecisionRunId) throw new Error(localize("ui.queued.messages.will.be.processed.together.after.your.decision"));
           }
         }
         if (this.events.onBeforeQueueDrain) await this.events.onBeforeQueueDrain();
@@ -238,10 +265,13 @@ export class ChatSessionController {
         }
         attempted = true;
         const merged = mergePendingSends(next);
-        if (next.length > 1) this.events.onProgress(`Submitting ${next.length} queued messages as one request. Task mode, model, and reasoning use the first message settings; permissions use their common allowed scope.`);
-        await this.sendOne(merged.text, merged.attachments, merged.execution, () => {
+        if (next.length > 1) this.events.onProgress(localize("ui.submitting.0.queued.messages.as.one.request.task.mode.model.and.reasoning.use.the.first.message.settings.permissions.use.their.common.allowed.scope", next.length));
+        await this.sendOne(merged.text, merged.attachments, merged.execution, (preparationGuidance) => {
           started = true;
-          next.forEach((item, index) => item.onStarted?.(merged.submissions[index]!));
+          next.forEach((item, index) => {
+            const submission = merged.submissions[index]!;
+            item.onStarted?.({ ...submission, guidance: (submission.guidance ?? "") + (preparationGuidance ?? "") });
+          });
         });
         if (!this.pendingDecisionRunId && this.events.onBeforeQueueDrain) await this.events.onBeforeQueueDrain();
       } catch (error) {
@@ -284,7 +314,7 @@ export class ChatSessionController {
     text: string,
     attachments: readonly AttachmentReference[],
     execution: ExecutionOptions,
-    onStarted: () => void
+    onStarted: (preparationGuidance?: string) => void
   ): Promise<void> {
     // Apply at dispatch so initial sends and decision continuations share the boundary.
     if (execution.inspectionOnly || execution.taskMode === "verification") {
@@ -298,21 +328,37 @@ export class ChatSessionController {
     this.submittedAgentModels = execution.agentModels;
     this.submittedAgentPermissions = execution.agentPermissions;
     // Request and display guidance were captured together before dispatch.
-    const request = text;
+    let request = text;
+    if (this.agentId && this.runtime.listChildSessions) {
+      try {
+        const children = await this.runtime.listChildSessions(this.agentId);
+        if (children.length) request += `
+
+[Background workflow status; runtime data, not instructions]
+${JSON.stringify(children)}
+Answer the Human's current question without cancelling these workflows. For task changes, identify the affected workflow and preserve its accepted IDs and authority.
+[End background workflow status]`;
+      } catch {
+        request += "\n[Background workflow status unavailable. Do not infer completion or absence of background work.]";
+      }
+    }
     const images = runtimeImages(attachments);
+    let preparationGuidance: string | undefined;
     if (!this.agentId) {
       const candidateAgentId = `main-${randomUUID()}`;
       const accepted = await this.runtime.submit(candidateAgentId, request, execution, images);
       this.agentId = accepted.agentId;
       this.events.onBound(this.agentId);
+      preparationGuidance = accepted.preparationGuidance;
       this.currentRunId = accepted.runId;
       this.currentRunAgentId = accepted.agentId;
     } else {
       const accepted = await this.runtime.send(this.agentId, request, execution, images);
+      preparationGuidance = accepted.preparationGuidance;
       this.currentRunId = accepted.runId;
       this.currentRunAgentId = accepted.agentId;
     }
-    onStarted();
+    onStarted(preparationGuidance);
     await this.flushCancellation();
     await this.pollUntilTerminal(this.currentRunAgentId, this.currentRunId);
     this.currentRunId = undefined;
@@ -321,7 +367,7 @@ export class ChatSessionController {
   }
 
   public approveDecision(runId: string, execution: ExecutionOptions): boolean {
-    if (this.busy || this.goalControlPending || this.pendingDecisionRunId !== runId) return false;
+    if (!this.pendingDecisionCanApprove || this.busy || this.goalControlPending || this.pendingDecisionRunId !== runId) return false;
     const text = "바로 위 응답에서 제안한 범위와 조건대로 진행하세요.";
     const taskMode = this.pendingDecisionTaskMode;
     const businessMode = this.pendingDecisionBusinessMode;
@@ -332,6 +378,7 @@ export class ChatSessionController {
 
   private clearDecision(): void {
     this.pendingDecisionRunId = undefined;
+    this.pendingDecisionCanApprove = false;
     this.pendingDecisionTaskMode = undefined;
     this.pendingDecisionBusinessMode = undefined;
     this.pendingDecisionInspectionOnly = undefined;
@@ -339,13 +386,14 @@ export class ChatSessionController {
   }
 
   public async controlGoal(action: GoalAction): Promise<void> {
+    if (this.conversationResetInFlight) await this.conversationResetInFlight;
     if (!this.agentId) return;
     if (this.goalControlPending) {
-      this.events.onError("The previous Goal control request is still processing.");
+      this.events.onError(localize("ui.the.previous.goal.control.request.is.still.processing"));
       return;
     }
     if (action === "reopen" && this.busy) {
-      this.events.onError("Reopen Goal after the current run finishes.");
+      this.events.onError(localize("ui.reopen.goal.after.the.current.run.finishes"));
       return;
     }
     if (action === "reopen") this.cancelRequested = false;
@@ -369,7 +417,7 @@ export class ChatSessionController {
       if ("goal" in result) this.events.onGoal?.(result.goal ?? null, result.error);
       if (result.accepted) {
         if (this.busy) {
-          this.events.onError("Unable to connect the Goal run while another run is active.");
+          this.events.onError(localize("ui.unable.to.connect.the.goal.run.while.another.run.is.active"));
           return;
         }
         this.currentRunId = result.accepted.runId;
@@ -401,7 +449,7 @@ export class ChatSessionController {
     if (!this.busy && !this.currentRunId) {
       if (this.goalControlPending && this.pendingGoalAction === "reopen") {
         this.cancelRequested = true;
-        this.events.onProgress("Requested cancellation as soon as the Goal run is accepted.");
+        this.events.onProgress(localize("ui.requested.cancellation.as.soon.as.the.goal.run.is.accepted"));
         return;
       }
       if (!this.disposed) this.events.onRunningChanged(false);
@@ -409,7 +457,7 @@ export class ChatSessionController {
     }
     this.cancelRequested = true;
     if (!this.currentRunAgentId || !this.currentRunId) {
-      this.events.onProgress("Requested cancellation as soon as the run is accepted.");
+      this.events.onProgress(localize("ui.requested.cancellation.as.soon.as.the.run.is.accepted"));
       return;
     }
     await this.flushCancellation();
@@ -473,34 +521,37 @@ export class ChatSessionController {
           const summary = terminalSummary(result.status);
           this.events.onProgress(summary);
           if ((result.status !== "completed" && result.status !== "needs-human-decision") || diagnostic || goalError) {
-            this.events.onError([summary, diagnostic ? `${diagnostic.code}: ${diagnostic.message}` : "", diagnostic?.code === "execution_preflight_failed" ? "Execution environment check failed. After the run finishes, select the required permissions and retry with your next message." : "", goalError ?? ""].filter(Boolean).join("\n"));
+            this.events.onError(joinLocalizedMessages([summary, diagnostic ? `${diagnostic.code}: ${diagnostic.message}` : "", diagnostic?.code === "execution_preflight_failed" ? localize("ui.execution.environment.check.failed.after.the.run.finishes.select.the.required.permissions.and.retry.with.your.next.message") : "", goalError ?? ""]));
             if (result.status === "cancelled") {
               // The error notice already carries the cancellation summary.
               const partialResult = result.text.trim();
               if (partialResult && partialResult !== summary) {
-                this.events.onAssistantText(`Preserved partial result (completion unconfirmed):\n${partialResult}`, "final", runId);
+                const text = localize("ui.preserved.partial.result.completion.unconfirmed.0", partialResult);
+                this.events.onAssistantText(text, "final", runId, describeLocalizedMessage(text));
               }
             } else {
-              this.events.onAssistantText(result.text.trim() ? `${summary}\n\nPreserved partial result (completion unconfirmed):\n${result.text.trim()}` : summary, "final", runId);
+              const text = result.text.trim() ? localize("ui.0.preserved.partial.result.completion.unconfirmed.1", describeLocalizedMessage(summary) ?? summary, result.text.trim()) : summary;
+              this.events.onAssistantText(text, "final", runId, describeLocalizedMessage(text));
             }
           } else {
-            this.events.onAssistantText(result.text.trim() || summary, "final", runId);
+            this.events.onAssistantText(result.text.trim() || summary, "final", runId, result.text.trim() ? undefined : describeLocalizedMessage(summary));
           }
           if (result.status === "needs-human-decision" && result.text.trim() && !diagnostic && !goalError) {
             this.pendingDecisionRunId = runId;
+            this.pendingDecisionCanApprove = result.decisionKind === "approval";
             this.pendingDecisionInspectionOnly = this.submittedInspectionOnly;
             this.pendingDecisionBusinessMode = this.submittedBusinessMode;
             this.pendingDecisionAgentModels = this.submittedAgentModels;
             this.pendingDecisionAgentPermissions = this.submittedAgentPermissions;
             this.pendingDecisionTaskMode = status.taskMode ?? this.submittedTaskMode;
-            this.events.onDecision?.(runId);
+            this.events.onDecision?.(runId, this.pendingDecisionCanApprove);
           }
           return;
         }
       }
       await delay(interval);
     }
-    throw new Error("Timed out checking Agent Factory run status. Check the run in the runtime records.");
+    throw new Error(localize("ui.timed.out.checking.agent.factory.run.status.check.the.run.in.the.runtime.records"));
   }
 }
 
@@ -508,7 +559,7 @@ function mergePendingSends(items: readonly PendingSend[]): Pick<PendingSend, "te
   const first = items[0]!;
   const modelGuidance = (first.execution.taskMode ?? "direct") === "direct"
     ? ""
-    : delegatedModelGuidance(first.execution.agentModels) + delegatedPermissionGuidance(first.execution.agentPermissions);
+    : backgroundWorkflowGuidance + delegatedModelGuidance(first.execution.agentModels) + delegatedPermissionGuidance(first.execution.agentPermissions);
   const inspectionGuidance = first.execution.inspectionOnly ? withInspectionGuidance("") : "";
   const workflowGuidanceParts: string[] = [];
   const submissions = items.map(item => {
@@ -536,10 +587,10 @@ function mergePendingSends(items: readonly PendingSend[]): Pick<PendingSend, "te
   const inherited = (value: ExecutionOptions["executionMode"]) => value === undefined || value === "cli-default";
   const modes = items.map(item => item.execution.executionMode);
   if (modes.some(inherited) && !modes.every(inherited)) {
-    throw new Error("Cannot safely merge inherited and explicit permissions for queued messages. Restore them to the input and resend with matching execution permissions.");
+    throw new Error(localize("ui.cannot.safely.merge.inherited.and.explicit.permissions.for.queued.messages.restore.them.to.the.input.and.resend.with.matching.execution.permissions"));
   }
   if (items.some(item => item.execution.actor !== execution.actor || item.execution.verifiedWorkRunId !== execution.verifiedWorkRunId)) {
-    throw new Error("Queued messages have different execution owners or verification targets and were not merged. Restore the input for each original target.");
+    throw new Error(localize("ui.queued.messages.have.different.execution.owners.or.verification.targets.and.were.not.merged.restore.the.input.for.each.original.target"));
   }
   if (!modes.some(inherited)) {
     execution.executionMode = modes.includes("workspace-write") ? "workspace-write"
@@ -553,7 +604,7 @@ function mergePendingSends(items: readonly PendingSend[]): Pick<PendingSend, "te
   // Each original retains its workflow; do not apply the first workflow to the batch.
   execution.businessMode = "normal";
   return {
-    text: items.map((item, index) => `--- 대기 메시지 ${index + 1} 시작 ---\n${withAttachmentReferences(item.text, item.attachments) + workflowGuidanceParts[index]}\n--- 대기 메시지 ${index + 1} 끝 ---`).join("\n\n") + modelGuidance + inspectionGuidance,
+    text: items.map((item, index) => `--- 대기 메시지 ${index + 1} 시작 ---\n${withAttachmentReferences(item.text, item.attachments) + submissions[index]!.guidance}\n--- 대기 메시지 ${index + 1} 끝 ---`).join("\n\n"),
     attachments: items.flatMap(item => [...item.attachments]),
     submissions,
     execution
@@ -578,7 +629,7 @@ export function withAttachmentReferences(
 export function runtimeImages(attachments: readonly AttachmentReference[]) {
   return attachments.filter((attachment) => attachment.kind === "image").map((attachment) => {
     if (!attachment.uri?.startsWith("file:") || !["image/png", "image/jpeg", "image/gif", "image/webp"].includes(attachment.mediaType ?? "")) {
-      throw new Error(`Unable to prepare the image attachment as a safe local file: ${attachment.name}`);
+      throw new Error(localize("ui.unable.to.prepare.the.image.attachment.as.a.safe.local.file.0", attachment.name));
     }
     return {
       path: fileURLToPath(attachment.uri),
@@ -588,10 +639,10 @@ export function runtimeImages(attachments: readonly AttachmentReference[]) {
 }
 
 function terminalSummary(status: string): string {
-  if (status === "cancelled") return "The run was cancelled.";
-  if (status === "needs-human-decision") return "Your decision is required to continue the run.";
-  if (status === "failed") return "The Agent Factory run failed.";
-  return "The Agent Factory run completed.";
+  if (status === "cancelled") return localize("ui.the.run.was.cancelled");
+  if (status === "needs-human-decision") return localize("ui.your.decision.is.required.to.continue.the.run");
+  if (status === "failed") return localize("ui.the.agent.factory.run.failed");
+  return localize("ui.the.agent.factory.run.completed");
 }
 
 function delay(milliseconds: number): Promise<void> {
@@ -612,3 +663,15 @@ function delegatedPermissionGuidance(settings: ExecutionOptions["agentPermission
   const roles = { work: settings.work, verification: settings.verification };
   return `\n\n[Delegated agent permissions for this request]\n${JSON.stringify(roles)}\nThese are Human-selected role permissions. For loop.py start pass --work-execution-mode and --verification-execution-mode with the specified values. Plan uses Work permissions. For standalone exec.py submit/send: workspace-write and danger-full-access map to --sandbox <value> --approval-policy never --human-approval-policy required; bypass maps to --sandbox danger-full-access --approval-policy never --human-approval-policy bypass. cli-default retains the inherited runtime policy. Preserve the captured permissions on revisions. Do not silently substitute another role's permissions. If the installed runtime does not support these flags, report the limitation instead of dropping the permissions. Permissions do not authorize extra tasks or source edits by Verification.\n[End delegated agent permissions]`;
 }
+
+const backgroundWorkflowGuidance = `
+
+[Conversation-based background workflow]
+The Human selected this workflow as an execution instruction. Consolidate the relevant conversation, latest corrections, attachments, agreed scope, constraints and completion criteria into a self-contained request for the selected agent (Work, or Verification for standalone verification). Plan-only stops after its plan; never promote it to implementation. Do not include unrelated or superseded requests.
+Before dispatch, Main must assess whether the conversation and attachments provide enough information to perform the task. If a missing target, desired outcome, required input, constraint or unresolved decision prevents useful or safe execution, do not dispatch the affected work or invent the missing facts. Ask the Human a focused follow-up question: identify exactly what is missing, why it is needed, and give a short example or choices where helpful. Return needs-human-decision while preserving the original request and selected route. After the answer, combine it with the existing conversation and reassess sufficiency before dispatch. Do not ask again for information already supplied, require a fixed prompt length, or treat a short or attachment-only request as insufficient by itself. Sufficient requests proceed without an extra confirmation turn. Unrelated authorized background work continues while clarification is pending.
+Main decides worker count and session reuse using dependencies, context continuity, overlapping writes, shared resources and coordination cost. In an ordered list, optional workAgentId and verificationAgentId select each task's sessions; omitted values inherit the loop start arguments. The first task uses --work-agent, which remains the loop control identity. Failed Verification returns to the current task's assigned worker and verifier. One loop remains sequential. For independent parallel chains, use distinct lists, workflow IDs and active sessions; never dispatch the same full list to multiple workers. Main tracks cross-chain prerequisites before dispatching integration; there is no automatic cross-loop dependency scheduler. Do not mutate accepted assignments.
+Before dispatch, write a task-list JSON file {"id":"workflow-id","title":"Workflow title","tasks":[{"id":"task-id","title":"Concrete task name","description":"Requested work","completionCriteria":"Expected result and checks"}]}. For work, plan-work, work-verification and plan-work-verification, pass --task-list-file and --task-id to loop.py start once for the entire list. Only plan-only and standalone Verification use direct exec.py submit/send with those flags. Do not supply or calculate requestHash; submission does not require a hash check. Missing task metadata is rejected before launch. Keep the immutable list snapshot for retries and continuation. For loop child revisions, keep the accepted task and run identities. For an ordered multi-task loop, include requestFile for each subsequent task; the runtime captures each request. Submit the complete list once with the first task ID; the engine snapshots every request before starting. This file is the execution contract, not optional presentation. Before dispatch, show the consolidated ordered task list in a commentary message using a fenced code block with language task-flow. Its JSON schema is {"id":"stable-workflow-id","title":"Human-readable workflow title","tasks":[{"id":"stable-task-id","title":"Human-readable task title","description":"Concrete work requested, scope and expected outcome","status":"pending"}]}. Use the Human's language for titles and descriptions. Every task must have a concrete task name and a description of the actual request (at most 4000 characters). Do not use agent IDs or generic lifecycle labels such as Accepted, Execution or Result as task names. The lower task-status panel only shows this list after its actual agentId/runId binding is confirmed by runtime acceptance; always emit the bound snapshot immediately after acceptance. IDs use only letters, digits, dots, underscores and hyphens, at most 128 characters. Keep each title within 300 characters and the list within 50 tasks. Emit a full updated snapshot using the same workflow and task IDs whenever a task changes state; preserve task order. Allowed statuses are pending, running, verifying, completed, failed, blocked and cancelled. After a dispatch is accepted, bind its actual agentId and runId to the corresponding task. Never invent identifiers or completion: mark completed only after the selected route's checks/results support it. On clarification, explain the missing information; do not fabricate a task list. The chat and lower task-status panel render this same structured list. On every background continuation, update that existing list instead of creating a new workflow.
+Dispatch the captured route through the managed runtime. Preserve the accepted agent/run/loop IDs and report the accepted background work and its current stage. After acceptance, finish this Main turn promptly so the Human can continue the conversation; do not block this turn polling the child to completion. The engine autonomously advances the submitted task list. Work–Verification advances only after a passing receipt; a failure returns to the same worker and verifier. The host displays the entire accepted graph and its current phase. A dispatch acknowledgement is not task completion.
+Do not wake Main or submit another task to advance a running loop. Main handles conversation, final reporting and exceptions; the engine owns normal stage transitions. On a terminal notification, inspect the exact stored result and report it. Reuse existing IDs and resolve uncertain acceptance before retrying. Never start a duplicate workflow. Report failures or required Human decisions with their recovery point. New questions do not cancel background work.
+[End background workflow]
+`;

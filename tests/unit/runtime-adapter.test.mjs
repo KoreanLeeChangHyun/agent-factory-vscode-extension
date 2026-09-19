@@ -4,7 +4,7 @@ import { appendFile, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "no
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import test from "node:test";
-import { runInNewContext } from "node:vm";
+import { runUiInNewContext as runInNewContext } from "../support/ui-localization.mjs";
 import { build } from "esbuild";
 
 const runtimeTestHome = await mkdtemp(join(tmpdir(), "af-extension-home-"));
@@ -28,6 +28,41 @@ async function importTypeScript(relativePath) {
   const source = output.outputFiles[0].text;
   return import(`data:text/javascript;base64,${Buffer.from(source).toString("base64")}`);
 }
+
+test("conversation history restores ordered durable messages and honors reset boundaries", async (t) => {
+  const { AgentFactoryClient } = await importTypeScript("src/infrastructure/agent-factory/agent-client.ts");
+  const root = await mkdtemp(join(tmpdir(), "af-history-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const agentRoot = join(agentsRoot(root), "main-history");
+  await mkdir(agentRoot, { recursive: true });
+  const sessionPath = join(agentRoot, "session.json");
+  await writeFile(sessionPath, JSON.stringify({ agentId: "main-history" }));
+  async function run(id, fields = {}) {
+    const directory = join(agentRoot, "runs", id);
+    await mkdir(directory, { recursive: true });
+    await writeFile(join(directory, "state.json"), JSON.stringify({ agentId: "main-history", runId: id, status: "completed", ...fields }));
+    await writeFile(join(directory, "request.md"), `question ${id}`);
+    await writeFile(join(directory, "result.md"), `answer ${id}`);
+  }
+  await run("run-002");
+  await run("run-001");
+  await run("run-003", { status: "running" });
+  const client = new AgentFactoryClient(new URL("../fixtures/fake-exec.py", import.meta.url).pathname, root);
+  assert.deepEqual((await client.history("main-history")).messages.map(item => item.text), [
+    "question run-001", "answer run-001", "question run-002", "answer run-002"
+  ]);
+  await writeFile(sessionPath, JSON.stringify({ agentId: "main-history", conversationId: "conversation-new" }));
+  assert.deepEqual((await client.history("main-history")).messages, []);
+  await run("run-004", { conversationId: "conversation-new" });
+  const restored = await client.history("main-history");
+  assert.equal(restored.conversationId, "conversation-new");
+  assert.equal(restored.messages.length, 2);
+  assert.equal(await readFile(join(agentRoot, "runs/run-001/result.md"), "utf8"), "answer run-001");
+  // History paths are derived from the bound run, never supplied by state contents.
+  await rm(join(agentRoot, "runs/run-004/request.md"));
+  await symlink(join(agentRoot, "runs/run-001/result.md"), join(agentRoot, "runs/run-004/request.md"));
+  await assert.rejects(client.history("main-history"));
+});
 
 test("failed results expose provider errors and retain fallback diagnostics", async function (t) {
   const { AgentFactoryClient } = await importTypeScript("src/infrastructure/agent-factory/agent-client.ts");
@@ -192,6 +227,32 @@ raise SystemExit(2)
   await assert.rejects(client.listSessions(), /specific runtime failure/);
 });
 
+test("conversation reset uses the runtime command and requires retained-history evidence", async function (t) {
+  const { AgentFactoryClient } = await importTypeScript("src/infrastructure/agent-factory/agent-client.ts");
+  const root = await mkdtemp(join(tmpdir(), "agent-factory-reset-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const calls = [];
+  const client = new AgentFactoryClient("/unused/exec.py", root);
+  client.command = async (arguments_) => {
+    calls.push(arguments_);
+    return {
+      kind: "conversation-reset", agentId: "main-test",
+      conversationId: "conversation-new", startedAt: "2026-09-19T00:00:00Z",
+      historyRetained: true
+    };
+  };
+  assert.deepEqual(await client.resetConversation("main-test"), {
+    conversationId: "conversation-new", startedAt: "2026-09-19T00:00:00Z"
+  });
+  assert.deepEqual(calls[0], ["reset-conversation", "--project-root", root, "--agent", "main-test"]);
+  client.command = async () => ({
+    kind: "conversation-reset", agentId: "main-test",
+    conversationId: "conversation-new", startedAt: "2026-09-19T00:00:00Z",
+    historyRetained: false
+  });
+  await assert.rejects(client.resetConversation("main-test"), /invalid conversation reset response/i);
+});
+
 test("composer shows only supported controls across draft and bound sessions", async function () {
   const script = await readFile(new URL('../../static/js/chat.js', import.meta.url), 'utf8');
   const functions = script.slice(script.indexOf('  function currentCapabilities()'), script.indexOf('  function openSetting(setting)'));
@@ -205,8 +266,10 @@ test("composer shows only supported controls across draft and bound sessions", a
   });
   const button = () => Object.assign(element('http://www.w3.org/1999/xhtml', 'button'), { parentElement: {} });
   let statusRenders = 0;
+  const clearButton = button();
+  const clearControl = script.slice(script.indexOf('  function updateConversationClearControl()'), script.indexOf('  function resetConversationState()'));
   const context = {
-    document: { createElementNS: element },
+    document: { createElementNS: element, querySelector() { return null; }, getElementById() { return clearButton; } },
     renderStatusBar() { statusRenders++; },
     modelMenu: { querySelector() { return null; } }, submissionButton: button(),
     promptSurface: { classList: { toggle() {} } },
@@ -216,7 +279,8 @@ test("composer shows only supported controls across draft and bound sessions", a
     executionModeButton: button(), executionModeLabel: {}, modelLabel: {}, reasoningLabel: {}, openSettingId: undefined,
     goalPanel: { querySelectorAll() { return []; } }, goalStatus: {}, nativeGoal: null, goalError: undefined
   };
-  runInNewContext(functions + iconFunction + '\nupdateModeControls();', context);
+  runInNewContext(functions + iconFunction + clearControl + '\nupdateModeControls();', context);
+  assert.equal(clearButton.disabled, true);
   assert.equal(statusRenders, 1);
   assert.equal(context.modelButton.parentElement.hidden, false);
   assert.equal(context.submissionButton.hidden, false);
@@ -225,10 +289,12 @@ test("composer shows only supported controls across draft and bound sessions", a
   runInNewContext('updateModeControls();', context);
   assert.equal(context.modelButton.parentElement.hidden, false);
   assert.equal(statusRenders, 2);
+  assert.equal(clearButton.disabled, false);
   assert.equal(context.state.model, 'gpt-6-astra');
   context.state.role = 'work';
   runInNewContext('updateModeControls();', context);
   assert.equal(context.submissionButton.hidden, true);
+  assert.equal(clearButton.hidden, true);
 });
 
 test("chat panel restoration preserves composer settings and context usage", async function () {
@@ -268,6 +334,7 @@ test("webview persistence carries weekly usage through chat state restoration", 
   );
   let serialized;
   runInNewContext(persist + "\npersist();", {
+    currentTaskFlows: () => [],
     state: {
       panelId: "panel-one",
       title: "Main Agent",
@@ -540,6 +607,23 @@ test("runtime client invokes official commands and reads the bounded managed res
   assert.ok(outputUpdates[3].output.endsWith("…"));
   const commentary = "전체 진행 설명 ".repeat(100);
   await writeFile(eventsPath, [
+    { type: "item.started", item: { id: "web-1", type: "webSearch", action: { type: "search", queries: ["첫 검색", "second query"] } } },
+    { type: "item.completed", item: { id: "web-1", type: "webSearch", action: { type: "search", queries: ["첫 검색", "second query"] } } },
+    { type: "item.completed", item: { id: "web-2", type: "web_search", query: "legacy query" } },
+    { type: "item.started", item: { id: "web-3", type: "webSearch" } },
+    { type: "item.completed", item: { id: "web-3", type: "webSearch", status: "failed" } }
+  ].map(JSON.stringify).join("\n") + "\n");
+  const webUpdates = (await client.updates("main-test", "run-fake", 0)).updates;
+  assert.deepEqual(webUpdates.filter(update => update.kind === "activity").map(({ id, category, phase, text, title }) => ({ id, category, phase, text, title })), [
+    { id: "web-1", category: "tool", phase: "started", text: "첫 검색\nsecond query", title: "Web search" },
+    { id: "web-1", category: "tool", phase: "completed", text: "첫 검색\nsecond query", title: "Web search" },
+    { id: "web-2", category: "tool", phase: "completed", text: "legacy query", title: "Web search" },
+    { id: "web-3", category: "tool", phase: "started", text: "Web search", title: "Web search" },
+    { id: "web-3", category: "tool", phase: "failed", text: "Web search", title: "Web search" }
+  ]);
+  assert.equal(webUpdates[1].text, "Searching the web");
+  assert.equal(webUpdates.at(-1).text, "Web search failed");
+  await writeFile(eventsPath, [
     { type: "native.commentary", text: "   " },
     { type: "native.commentary", text: commentary },
     { type: "item.completed", item: { id: "reasoning", type: "reasoning", text: "private reasoning" } }
@@ -568,6 +652,7 @@ test("runtime client invokes official commands and reads the bounded managed res
   await writeFile(childState, JSON.stringify({ status: "completed" }));
   assert.deepEqual(await client.listChildSessions("main-parent"), [{
     agentId: "work-hidden",
+    parentRunId: "run-parent",
     runId: "run-child",
     role: "work",
     status: "completed",
@@ -1037,7 +1122,7 @@ test(`human decision approvals preserve ${taskMode}, are explicit, once-only and
     async send(agentId, text, execution) { sent.push({ text, execution }); return { agentId, runId: "reply-run" }; },
     async updates() { return { cursor: 0, updates: [] }; },
     async status() { return { status: nextStatus }; },
-    async result() { return { status: nextStatus, text: "제안한 범위로 진행할까요?" }; }
+    async result() { return { status: nextStatus, text: "제안한 범위로 진행할까요?", decisionKind: nextStatus === "needs-human-decision" ? "approval" : undefined }; }
   };
   const events = {
     onBound() {}, onRunningChanged() {}, onProgress() {}, onActivity() {}, onUsage() {},
@@ -1061,7 +1146,7 @@ test(`human decision approvals preserve ${taskMode}, are explicit, once-only and
   assert.equal(sent.length, 1);
   assert.equal(sent[0].execution.actor, "human");
   assert.equal(sent[0].execution.taskMode, taskMode);
-  assert.equal(sent[0].text, human[0]);
+  assert.ok(sent[0].text.startsWith(human[0]));
   assert.equal(controller.approveDecision("proposal-run", {}), false);
   nextStatus = "needs-human-decision";
   await controller.send("another proposal", [], {});
@@ -1323,6 +1408,12 @@ test("current run child lookup excludes agents called by earlier turns", async t
   assert.deepEqual(await client.listChildSessions("main-parent", "run-new"), []);
   await writeFile(newEvents, event);
   assert.equal((await client.listChildSessions("main-parent", "run-new")).length, 1);
+  await writeFile(join(dirname(oldEvents), "state.json"), JSON.stringify({ taskMode: "work-verification" }));
+  await writeFile(join(dirname(newEvents), "state.json"), JSON.stringify({ taskMode: "direct" }));
+  await writeFile(childState, JSON.stringify({ status: "completed", parentAgentId: "main-parent", parentRunId: "run-old" }));
+  const tracked = (await client.listChildSessions("main-parent"))[0];
+  assert.equal(tracked.parentRunId, "run-old", "A later status lookup must not replace dispatch authority");
+  assert.equal(tracked.taskMode, "work-verification");
   await assert.rejects(client.listChildSessions("main-parent", "../run-old"));
 });
 
@@ -1359,8 +1450,8 @@ test("direct managed commands discover children through shell wrappers and retai
   const shell = command => `/usr/bin/zsh -lc '${command.replaceAll("'", "'\\''")}'`;
   await writeFile(events, [event(shell(work)), event(shell(verification), JSON.stringify({ kind: "ack", agentId: "verification-hidden", runId: "run-verification" }))].join("\n"));
   assert.deepEqual(await client.listChildSessions("main-parent", "run-current"), [
-    { agentId: "verification-hidden", role: "verification", runId: "run-verification", status: "running", verifiedWorkRunId: "run-old", updatedAt: "2026-09-01T11:00:00Z" },
-    { agentId: "work-hidden", role: "work", runId: "run-old", status: "completed", updatedAt: "2026-09-01T10:00:00Z" }
+    { parentRunId: "run-current", agentId: "verification-hidden", role: "verification", runId: "run-verification", status: "running", verifiedWorkRunId: "run-old", updatedAt: "2026-09-01T11:00:00Z" },
+    { parentRunId: "run-current", agentId: "work-hidden", role: "work", runId: "run-old", status: "completed", updatedAt: "2026-09-01T10:00:00Z" }
   ]);
   const polling = `for i in {1..15}; do state_json=$(python3 skills/agent/scripts/exec.py status --agent verification-hidden --run-id run-verification); done`;
   await writeFile(events, event(shell(polling)));
@@ -1549,7 +1640,8 @@ test("cancellation summaries are shown once on restore and live delivery without
   Object.assign(context, {
     state: { timeline: [{ ...notice, text: summary + "\nprovider: diagnostic" }] },
     message: { ...final, type: "chat.assistant" },
-    createId: () => "new", renderTimeline() {}, persist() {}
+    createId: () => "new", renderTimeline() {}, renderRunStatus() {}, renderWorkLoopPanel() {},
+    extractTaskFlows: () => ({ flows: [] }), persist() {}
   });
   runInNewContext('switch (message.type) {\n' + handler + '\n}', context);
   assert.equal(context.state.timeline.length, 1);
@@ -1578,4 +1670,50 @@ test("cancelled controller results emit one notice and preserve only meaningful 
     assert.equal(texts.length, resultText === "Saved partial work" ? 1 : 0);
     if (texts.length) assert.match(texts[0], /Saved partial work/);
   }
+});
+
+test("runtime result carries only explicit decision metadata for pending decisions", async () => {
+  const { AgentFactoryClient } = await importTypeScript("src/infrastructure/agent-factory/agent-client.ts");
+  const client = new AgentFactoryClient("/unused", "/unused");
+  client.readManagedResult = async () => "Which target?";
+  for (const status of ["completed", "needs-human-decision"]) {
+    for (const decisionKind of [undefined, "approval", "clarification", "unknown"]) {
+      client.command = async () => ({ run: { status, resultPath: "/unused/result.md", decisionKind } });
+      const result = await client.result("main-test", "run-test");
+      assert.equal(result.decisionKind, status === "needs-human-decision" && ["approval", "clarification"].includes(decisionKind) ? decisionKind : undefined);
+    }
+  }
+});
+
+test('workflow monitor reconciles only owned loops with the captured parent binding', async () => {
+  const { AgentFactoryClient } = await importTypeScript('src/infrastructure/agent-factory/agent-client.ts');
+  const root = await mkdtemp(join(tmpdir(), 'af-workflow-monitor-'));
+  try {
+    const directory = agentsRoot(root);
+    const parent = join(directory, 'main-owner', 'runs', 'run-parent', 'state.json');
+    await mkdir(dirname(parent), { recursive: true });
+    const policy = { schemaVersion: 1, sandboxPolicy: { type: 'workspace-write', writable_roots: [root] }, approvalPolicy: 'never' };
+    await writeFile(parent, JSON.stringify({ executionPolicy: policy }));
+    const loopRoot = join(directory, 'work-one', 'loops', 'loop-one');
+    await mkdir(loopRoot, { recursive: true });
+    await writeFile(join(loopRoot, 'state.json'), JSON.stringify({ workflow: { id: 'flow' }, status: 'active', parentStatePath: parent }));
+    await writeFile(join(root, 'loop.py'), `import json, os, sys\nprint(json.dumps({'kind':'work-verification-loop','loopId':'loop-one','status':'active','parent':os.environ.get('AGENT_FACTORY_PARENT_STATE'),'policy':json.loads(os.environ['AGENT_FACTORY_EXECUTION_POLICY']),'operation':sys.argv[1]}))\n`);
+    const client = new AgentFactoryClient(join(root, 'exec.py'), root);
+    client.location = async () => ({ home: runtimeTestHome, projectId: 'project-test', agentsRoot: directory });
+    const children = [{ agentId: 'work-one', role: 'work', status: 'running', runId: 'run-one' }];
+    const snapshots = await client.advanceWorkflows('main-owner', children);
+    assert.equal(snapshots.length, 1);
+    assert.equal(snapshots[0].parent, parent);
+    assert.deepEqual(snapshots[0].policy, policy);
+    assert.equal(snapshots[0].operation, 'reconcile');
+    assert.deepEqual(await client.advanceWorkflows('main-other', children), []);
+    await writeFile(join(loopRoot, 'state.json'), JSON.stringify({ workflow: { id: 'flow' }, status: 'completed', parentStatePath: parent }));
+    const completed = (await client.advanceWorkflows('main-owner', children))[0];
+    assert.equal(completed.operation, 'status');
+    assert.deepEqual(completed.policy, policy);
+    await writeFile(parent, '{}');
+    await assert.rejects(client.advanceWorkflows('main-owner', children), /workflow parent execution policy/);
+    await writeFile(parent, JSON.stringify({ executionPolicy: [] }));
+    await assert.rejects(client.advanceWorkflows('main-owner', children), /workflow parent execution policy/);
+  } finally { await rm(root, { recursive: true, force: true }); }
 });

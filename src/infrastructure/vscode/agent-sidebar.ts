@@ -1,12 +1,15 @@
+import { localize } from "../../common/localization";
 import * as vscode from "vscode";
 import { randomUUID } from "node:crypto";
 import type { ChatPanelManager, SidebarAgent } from "./chat-panel-manager";
 
+type ArchivedAgent = Pick<SidebarAgent["state"], "panelId" | "agentId" | "title">;
 interface Group { id: string; name: string }
 interface Layout { groups: Group[]; assignments: Record<string, string> }
 type Node = { kind: "group"; group: Group } | { kind: "agent"; agent: SidebarAgent };
 const VIEW = "agentFactory.agents";
 const STORAGE = "agentFactory.sidebar.groups";
+const ARCHIVE_STORAGE = "agentFactory.sidebar.archived";
 const DRAG_MIME = "application/vnd.code.tree.agentfactory.agents";
 
 export class AgentSidebar implements vscode.TreeDataProvider<Node>, vscode.TreeDragAndDropController<Node>, vscode.Disposable {
@@ -17,6 +20,8 @@ export class AgentSidebar implements vscode.TreeDataProvider<Node>, vscode.TreeD
   public readonly onDidChangeTreeData = this.changed.event;
   private readonly subscriptions: vscode.Disposable[] = [this.changed];
   private agents: SidebarAgent[] = [];
+  private archived: ArchivedAgent[];
+  private archiveWrite: Promise<void> = Promise.resolve();
   private layout: Layout;
   private revision = 0;
   private disposed = false;
@@ -24,6 +29,10 @@ export class AgentSidebar implements vscode.TreeDataProvider<Node>, vscode.TreeD
   private readonly view: vscode.TreeView<Node>;
 
   public constructor(private readonly context: vscode.ExtensionContext, private readonly panels: ChatPanelManager) {
+    const archived = context.workspaceState.get<ArchivedAgent[]>(ARCHIVE_STORAGE);
+    this.archived = Array.isArray(archived) ? archived.filter(entry =>
+      typeof entry?.panelId === "string" && typeof entry.title === "string" &&
+      (entry.agentId === undefined || typeof entry.agentId === "string")) : [];
     const saved = context.workspaceState.get<Layout>(STORAGE);
     this.layout = {
       groups: Array.isArray(saved?.groups) ? saved.groups.filter(group => typeof group?.id === "string" && typeof group.name === "string") : [],
@@ -47,7 +56,52 @@ export class AgentSidebar implements vscode.TreeDataProvider<Node>, vscode.TreeD
     command("move", node => this.move(node));
     command("renameGroup", node => this.renameGroup(node));
     command("deleteGroup", node => this.deleteGroup(node));
+    command("archive", node => this.archive(node));
+    command("restore", () => this.restoreArchived());
     void this.refresh();
+  }
+
+  private isArchived(state: ArchivedAgent): boolean {
+    return this.archived.some(entry => entry.panelId === state.panelId ||
+      Boolean(entry.agentId && entry.agentId === state.agentId));
+  }
+
+  private updateMessage(): void {
+    this.view.message = this.agents.some(agent => !this.isArchived(agent.state)) ? undefined
+      : this.archived.length ? localize("ui.sidebar.archived.empty")
+      : localize("ui.use.the.button.to.start.a.new.agent.chat");
+  }
+
+  private updateArchive(change: (entries: ArchivedAgent[]) => ArchivedAgent[]): Promise<void> {
+    const write = this.archiveWrite.then(async () => {
+      const next = change(this.archived);
+      await this.context.workspaceState.update(ARCHIVE_STORAGE, next);
+      this.archived = next;
+      this.updateMessage();
+      this.changed.fire(undefined);
+    });
+    this.archiveWrite = write.catch(() => undefined);
+    return write;
+  }
+
+  private async archive(node?: Node): Promise<void> {
+    if (node?.kind !== "agent") return;
+    const current = this.agents.find(agent => agent.state.panelId === node.agent.state.panelId);
+    if (!current) return;
+    const { panelId, agentId, title } = current.state;
+    // This only changes sidebar visibility; open tabs and running work remain intact.
+    await this.updateArchive(entries => this.isArchived(current.state) ? entries
+      : [...entries, { panelId, agentId, title }]);
+  }
+
+  private async restoreArchived(): Promise<void> {
+    await this.archiveWrite;
+    const selected = await vscode.window.showQuickPick(this.archived.map(entry => ({
+      label: entry.title, description: entry.agentId, entry
+    })), { title: localize("ui.sidebar.restore"), placeHolder: localize("ui.sidebar.restore.hint") });
+    if (!selected) return;
+    await this.updateArchive(entries => entries.filter(entry => entry.panelId !== selected.entry.panelId));
+    await this.refresh();
   }
 
   private scheduleRefresh(): void {
@@ -61,17 +115,18 @@ export class AgentSidebar implements vscode.TreeDataProvider<Node>, vscode.TreeD
       const agents = await this.panels.sidebarAgents();
       if (this.disposed || revision !== this.revision) return;
       this.agents = agents;
-      this.view.message = agents.length ? undefined : "Use the ＋ button to start a new agent chat.";
+      this.updateMessage();
       this.changed.fire(undefined);
     } catch (error) {
       if (this.disposed || revision !== this.revision) return;
-      this.view.message = `Unable to load the list. Refresh to try again. ${error instanceof Error ? error.message : String(error)}`;
+      this.view.message = localize("ui.unable.to.load.the.list.refresh.to.try.again.0", error instanceof Error ? error.message : String(error));
     }
   }
 
   public getChildren(node?: Node): Node[] {
     if (node?.kind === "agent") return [];
     const agents = this.agents.filter(agent => {
+      if (this.isArchived(agent.state)) return false;
       const groupId = this.layout.assignments[agent.state.panelId];
       return node ? groupId === node.group.id : !this.layout.groups.some(group => group.id === groupId);
     }).map(agent => ({ kind: "agent" as const, agent }));
@@ -91,10 +146,10 @@ export class AgentSidebar implements vscode.TreeDataProvider<Node>, vscode.TreeD
     const item = new vscode.TreeItem(state.title, vscode.TreeItemCollapsibleState.None);
     item.id = `agent:${state.panelId}`;
     item.contextValue = "agentFactoryAgent";
-    item.description = running ? "Running" : state.agentId ? undefined : "New chat";
+    item.description = running ? localize("ui.running.73989d") : state.agentId ? undefined : localize("ui.new.chat");
     item.tooltip = [state.title, state.agentId, state.model].filter(Boolean).join("\n");
     item.iconPath = new vscode.ThemeIcon(running ? "loading~spin" : "comment-discussion");
-    item.command = { command: "agentFactory.sidebar.open", title: "Open Agent", arguments: [node] };
+    item.command = { command: "agentFactory.sidebar.open", title: localize("ui.open.agent"), arguments: [node] };
     return item;
   }
 
@@ -126,7 +181,7 @@ export class AgentSidebar implements vscode.TreeDataProvider<Node>, vscode.TreeD
 
   private async name(title: string, value = ""): Promise<string | undefined> {
     const name = await vscode.window.showInputBox({ title, value, ignoreFocusOut: true,
-      validateInput: value => !value.trim() ? "Enter a name." : value.trim().length > 80 ? "Enter no more than 80 characters." : undefined });
+      validateInput: value => !value.trim() ? localize("ui.enter.a.name") : value.trim().length > 80 ? localize("ui.enter.no.more.than.80.characters") : undefined });
     return name?.trim() || undefined;
   }
 
@@ -137,14 +192,14 @@ export class AgentSidebar implements vscode.TreeDataProvider<Node>, vscode.TreeD
 
   private async rename(node?: Node): Promise<void> {
     if (node?.kind !== "agent") return;
-    const title = await this.name("Rename Agent", node.agent.state.title);
+    const title = await this.name(localize("ui.rename.agent"), node.agent.state.title);
     if (!title) return;
     await this.panels.renameSidebarAgent(node.agent.state, title);
     await this.refresh();
   }
 
   private async newGroup(): Promise<void> {
-    const name = await this.name("New Agent Group");
+    const name = await this.name(localize("ui.new.agent.group"));
     if (!name) return;
     this.layout.groups.push({ id: randomUUID(), name });
     await this.save();
@@ -154,7 +209,7 @@ export class AgentSidebar implements vscode.TreeDataProvider<Node>, vscode.TreeD
     if (node?.kind !== "group") return;
     const group = this.layout.groups.find(group => group.id === node.group.id);
     if (!group) return;
-    const name = await this.name("Rename Group", group.name);
+    const name = await this.name(localize("ui.rename.group"), group.name);
     if (!name) return;
     group.name = name;
     await this.save();
@@ -163,9 +218,9 @@ export class AgentSidebar implements vscode.TreeDataProvider<Node>, vscode.TreeD
   private async move(node?: Node): Promise<void> {
     if (node?.kind !== "agent") return;
     const selected = await vscode.window.showQuickPick([
-      { label: "No group", id: "" },
+      { label: localize("ui.no.group"), id: "" },
       ...this.layout.groups.map(group => ({ label: group.name, id: group.id }))
-    ], { title: "Select Agent Group", placeHolder: node.agent.state.title });
+    ], { title: localize("ui.select.agent.group"), placeHolder: node.agent.state.title });
     if (!selected) return;
     if (selected.id) this.layout.assignments[node.agent.state.panelId] = selected.id;
     else delete this.layout.assignments[node.agent.state.panelId];

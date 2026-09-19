@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
-import { runInNewContext } from 'node:vm';
+import { runUiInNewContext as runInNewContext } from '../support/ui-localization.mjs';
 import test from 'node:test';
 import { build } from 'esbuild';
 
@@ -66,9 +66,9 @@ test('queue promotes only accepted requests and batches snapshots and active ide
 test('decision-required pauses batching until an explicit answer is accepted', async () => {
   const terminal = deferred(), sent = [], promoted = [];
   const controller = new ChatSessionController(runtime({
-    async send(agentId, text) { sent.push(text); return { agentId, runId: text === 'proposal' ? 'proposal' : 'next' }; },
+    async send(agentId, text) { sent.push(text); return { agentId, runId: text.startsWith('proposal') ? 'proposal' : 'next' }; },
     async status(_agentId, runId) { if (runId === 'proposal') await terminal.promise; return { status: 'completed' }; },
-    async result(_agentId, runId) { return { status: runId === 'proposal' ? 'needs-human-decision' : 'completed', text: 'result' }; }
+    async result(_agentId, runId) { return { status: runId === 'proposal' ? 'needs-human-decision' : 'completed', text: 'result', decisionKind: runId === 'proposal' ? 'approval' : undefined }; }
   }), events(), 'main-existing', { pollIntervalMs: 0 });
   const first = controller.send('proposal', [], { taskMode: 'work' });
   await tick();
@@ -76,7 +76,8 @@ test('decision-required pauses batching until an explicit answer is accepted', a
   const third = controller.send('also queued', [], {}, () => promoted.push('also queued'));
   terminal.resolve(); await first;
   assert.equal(controller.queueLength, 2);
-  assert.deepEqual(sent, ['proposal']);
+  assert.equal(sent.length, 1);
+  assert.match(sent[0], /^proposal\n/);
   assert.deepEqual(promoted, []);
   assert.equal(controller.approveDecision('proposal', {}), true);
   await Promise.all([second, third]);
@@ -131,6 +132,60 @@ test('explicit stop targets only the current run and preserves queued requests',
   assert.deepEqual(sent, ['first', 'second']);
 });
 
+test('conversation reset requires an idle controller and preserves the Agent binding', async () => {
+  const resets = [];
+  const controller = new ChatSessionController(runtime({
+    async resetConversation(agentId) {
+      resets.push(agentId);
+      return { conversationId: 'conversation-new', startedAt: '2026-09-19T00:00:00Z' };
+    }
+  }), events(), 'main-existing', { pollIntervalMs: 0 });
+  assert.equal(controller.conversationResetBlockedReason, undefined);
+  assert.deepEqual(await controller.resetConversation(), {
+    conversationId: 'conversation-new', startedAt: '2026-09-19T00:00:00Z'
+  });
+  assert.deepEqual(resets, ['main-existing']);
+
+  const terminal = deferred();
+  const busy = new ChatSessionController(runtime({
+    async send(agentId) { return { agentId, runId: 'active-run' }; },
+    async status() { await terminal.promise; return { status: 'completed' }; },
+    async resetConversation() { throw new Error('must not reach runtime'); }
+  }), events(), 'main-existing', { pollIntervalMs: 0 });
+  const active = busy.send('active', [], {});
+  await tick();
+  assert.match(busy.conversationResetBlockedReason, /current run/i);
+  await assert.rejects(() => busy.resetConversation(), /current run/i);
+  terminal.resolve();
+  await active;
+});
+
+test('conversation reset serializes sends and cannot overtake an accepting send', async () => {
+  const reset = deferred(), calls = [];
+  const controller = new ChatSessionController(runtime({
+    async resetConversation() { calls.push('reset'); return reset.promise; },
+    async send(agentId, text) { calls.push(`send:${text}`); return { agentId, runId: text }; }
+  }), events(), 'main-existing', { pollIntervalMs: 0 });
+  const resetting = controller.resetConversation();
+  const afterReset = controller.send('after-reset', [], {});
+  await tick();
+  assert.deepEqual(calls, ['reset']);
+  reset.resolve({ conversationId: 'conversation-next', startedAt: '2026-09-19T00:00:00Z' });
+  await Promise.all([resetting, afterReset]);
+  assert.deepEqual(calls, ['reset', 'send:after-reset']);
+
+  const acceptance = deferred();
+  const accepting = new ChatSessionController(runtime({
+    async send(agentId) { return acceptance.promise.then(() => ({ agentId, runId: 'accepted' })); },
+    async resetConversation() { throw new Error('must not reach runtime'); }
+  }), events(), 'main-existing', { pollIntervalMs: 0 });
+  const sending = accepting.send('accepting', [], {});
+  assert.match(accepting.conversationResetBlockedReason, /current run/i);
+  await assert.rejects(() => accepting.resetConversation(), /current run/i);
+  acceptance.resolve();
+  await sending;
+});
+
 test('webview acceptance replay promotes exactly once and preserves queued image previews', async () => {
   const script = await readFile(new URL('../../static/js/chat.js', import.meta.url), 'utf8');
   const handler = script.slice(script.indexOf('      case "chat.started":'), script.indexOf('      case "queue.updated":'));
@@ -138,7 +193,8 @@ test('webview acceptance replay promotes exactly once and preserves queued image
   const context = {
     state: { pendingRequests: [{ id: 'one', execution: { taskMode: 'plan-work', businessMode: 'design', goal: false }, attachments: [{ name: 'input.png', previewUri: 'safe-preview' }] }], timeline: [] },
     message: { type: 'chat.started', id: 'one', text: 'request', attachments: [] },
-    summarizeChildAgents: () => ({}), renderAll() {}, persist() {}
+    summarizeChildAgents: () => ({}), renderAll() {}, persist() {},
+    timeline: { scrollTop: 0, scrollHeight: 1000 }, updateAutoScrollControl() {}, updateJumpToBottom() {}
   };
   const replay = () => runInNewContext(`${submissionHelper}
 switch (message.type) { ${handler} }`, context);
@@ -329,7 +385,7 @@ test('workflow guidance follows each queued snapshot and Normal preserves ordina
   options.businessMode = 'planning';
   terminal.resolve();
   await Promise.all([first, interview, design]);
-  assert.equal(calls[0].text, 'ordinary');
+  assert.match(calls[0].text, /^ordinary(?:\n|$)/);
   assert.equal(calls[1].execution.taskMode, 'work');
   assert.equal(calls[1].execution.businessMode, 'normal');
   assert.equal((calls[1].text.match(/Workflow guidance for this message only:/g) || []).length, 2);
@@ -350,7 +406,7 @@ test('new sessions receive Planning guidance while retaining original promotion 
     }
   }), events(), undefined, { pollIntervalMs: 0 });
   await controller.send('Plan this feature', [], { taskMode: 'work', businessMode: 'planning' }, () => promoted.push('Plan this feature'));
-  assert.match(calls[0].text, /^Plan this feature\n\n\[Workflow guidance for this message only: planning\]/);
+  assert.match(calls[0].text, /^Plan this feature[\s\S]*\[Workflow guidance for this message only: planning\]/);
   assert.equal(calls[0].execution.taskMode, 'work');
   assert.deepEqual(promoted, ['Plan this feature']);
 });
@@ -383,7 +439,7 @@ test('inspection snapshots are dispatched separately from queued implementation'
   assert.match(calls[1].text, /Do not implement repairs/);
   assert.doesNotMatch(calls[1].text, /Workflow guidance|Implement later/);
   assert.equal(calls[2].execution.taskMode, 'work');
-  assert.equal(calls[2].text, 'Implement later');
+  assert.match(calls[2].text, /^Implement later\n/);
 });
 
 test('inspection decision continuation retains its original constraints', async () => {
@@ -395,7 +451,7 @@ test('inspection decision continuation retains its original constraints', async 
       return { agentId, runId: calls.length === 1 ? 'inspection' : 'answer' };
     },
     async result(_agentId, runId) {
-      return { status: runId === 'inspection' ? 'needs-human-decision' : 'completed', text: 'Select target' };
+      return { status: runId === 'inspection' ? 'needs-human-decision' : 'completed', text: 'Approve inspection proposal', decisionKind: runId === 'inspection' ? 'approval' : undefined };
     }
   }), events(), 'main-existing', { pollIntervalMs: 0 });
   await controller.send('Inspect', [], { taskMode: 'direct', inspectionOnly: true });
@@ -462,7 +518,7 @@ test('all message actions retain queue identity and cannot merge across routes',
   terminal.resolve();
   await Promise.all([holding, ...pending]);
   assert.deepEqual(calls.slice(1).map(call => call.execution.taskMode), actions);
-  assert.deepEqual(calls.slice(1).map(call => call.text), actions);
+  assert.deepEqual(calls.slice(1).map(call => call.text.split('\n')[0]), actions);
 });
 
 test('direct requests omit delegated instructions while managed routes retain model overrides', async () => {
@@ -562,7 +618,10 @@ test('single dispatch acknowledges exact application suffix and effective Goal/V
   assert.equal(calls[0], '  Original goal  ' + accepted[0].guidance);
   assert.equal(accepted[0].goal, true);
   await controller.send('Inspect', [], { taskMode: 'verification', businessMode: 'design', goalMode: true }, value => accepted.push(value));
-  assert.deepEqual(accepted[1], { taskMode: 'verification', businessMode: 'normal', goal: false, guidance: '' });
+  assert.equal(accepted[1].taskMode, 'verification');
+  assert.equal(accepted[1].businessMode, 'normal');
+  assert.equal(accepted[1].goal, false);
+  assert.equal(calls[1], 'Inspect' + accepted[1].guidance);
 });
 
 test('role permissions stay captured and prevent queue merging', async () => {
@@ -586,3 +645,37 @@ test('role permissions stay captured and prevent queue merging', async () => {
   assert.match(calls[2].text, /bypass/);
   assert.match(calls[1].text, /--work-execution-mode/);
 });
+
+
+test('Main answers a new question with background identities after workflow acceptance', async () => {
+  const calls = [];
+  const children = [{ agentId: 'work-background', runId: 'work-run', role: 'work', status: 'running' }];
+  const controller = new ChatSessionController(runtime({
+    async listChildSessions() { return children; },
+    async send(agentId, text, execution) { calls.push({ text, execution }); return { agentId, runId: `main-${calls.length}` }; }
+  }), events(), 'main-existing', { pollIntervalMs: 0 });
+  await controller.send('Execute the agreed workflow', [], { taskMode: 'work' });
+  assert.match(calls[0].text, /finish this Main turn promptly/);
+  assert.equal(controller.running, false);
+  await controller.send('What does this setting mean?', [], { taskMode: 'direct' });
+  assert.equal(calls[1].execution.taskMode, 'direct');
+  assert.match(calls[1].text, /work-background/);
+  assert.match(calls[1].text, /without cancelling/);
+  assert.equal(children[0].status, 'running');
+});
+
+for (const decisionKind of [undefined, 'clarification']) {
+  test(`non-approval decision ${decisionKind} rejects approve and accepts direct answer`, async () => {
+    const sent = [], decisions = [];
+    const controller = new ChatSessionController(runtime({
+      async send(agentId, text) { sent.push(text); return { agentId, runId: sent.length === 1 ? 'question' : 'answer' }; },
+      async result(_agentId, runId) { return { status: runId === 'question' ? 'needs-human-decision' : 'completed', text: 'Which target?', decisionKind: runId === 'question' ? decisionKind : undefined }; }
+    }), { ...events(), onDecision: (...args) => decisions.push(args) }, 'main-existing', { pollIntervalMs: 0 });
+    await controller.send('Investigate', [], {});
+    assert.equal(controller.approveDecision('question', {}), false);
+    assert.equal(sent.length, 1);
+    assert.deepEqual(decisions.at(-1), ['question', false]);
+    await controller.send('Target A', [], {});
+    assert.equal(sent.length, 2);
+  });
+}

@@ -10,10 +10,13 @@ const clientMessageTypes = new Set([
   "client.ready",
   "execution.select",
   "reference.copy",
+  "message.copy",
   "link.open",
+  "image.resolve",
   "chat.send",
   "decision.approve",
   "run.cancel",
+  "conversation.clear",
   "goal.control",
   "sessions.request",
   "models.request",
@@ -39,10 +42,14 @@ export function parseClientMessage(value: unknown): ClientMessage | undefined {
   }
 
   switch (value.type) {
+    case "image.resolve":
     case "link.open":
       if (typeof value.href !== "string" || value.href.length < 1 || value.href.length > 8192 || /[\u0000-\u001f]/.test(value.href)) return undefined;
       if (!/^(?:https?:\/\/|mailto:|file:\/\/|\/|\.\.?\/)/i.test(value.href)) return undefined;
       return { type: value.type, href: value.href };
+    case "message.copy":
+      if (typeof value.text !== "string" || !value.text.length || value.text.length > 100_000) return undefined;
+      return { type: value.type, text: value.text };
     case "reference.copy":
       if (typeof value.id !== "string" || !/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(value.id)) return undefined;
       return { type: value.type, id: value.id };
@@ -86,6 +93,7 @@ export function parseClientMessage(value: unknown): ClientMessage | undefined {
     case "client.ready":
     case "queue.resume":
     case "run.cancel":
+    case "conversation.clear":
     case "sessions.request":
     case "models.request":
     case "agents.request":

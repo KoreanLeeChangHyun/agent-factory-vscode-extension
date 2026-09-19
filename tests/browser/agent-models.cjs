@@ -67,10 +67,7 @@ async function checkAgentModels(page) {
     assert.equal(await reasoning.getAttribute('aria-valuetext'), 'medium');
     const modelBox = await page.locator('#model-menu select[data-role="main"]').boundingBox();
     const rangeBox = await reasoning.boundingBox();
-    const permissionsBox = await page.locator('[data-setting="permissions"]').boundingBox();
     assert.ok(Math.abs(modelBox.width - rangeBox.width) < 1);
-    assert.ok(Math.abs(modelBox.width - permissionsBox.width) < 1);
-    if (width > 480) assert.ok(Math.abs(permissionsBox.x - modelBox.x) < 1);
     const rows = await page.locator('.agent-model-row').evaluateAll(rows => rows.map(row => {
       const rect = node => { const r = node.getBoundingClientRect(); return { x: r.x, y: r.y + r.height / 2, width: r.width, height: r.height }; };
       return [rect(row.querySelector('select[data-field="model"]')), rect(row.querySelector('input[type="range"]'))];
@@ -101,6 +98,10 @@ async function checkAgentModels(page) {
 
   }
   assert.equal(await page.locator('[data-permission-role]').count(), 0);
+  assert.equal(await page.locator('#model-menu [data-setting="permissions"]').count(), 0);
+  await page.keyboard.press('Escape');
+  await page.locator('#status-settings-button').click();
+  await page.locator('#settings-tab-general').click();
   const common = page.locator('[data-setting="permissions"]');
   await common.selectOption('bypass');
   assert.equal(await page.locator('#agent-permissions-description').isVisible(), false);
@@ -112,11 +113,11 @@ async function checkAgentModels(page) {
   await page.locator('#prompt').press('Enter');
   assert.deepEqual(await page.evaluate(() => window.sentMessages.filter(m => m.type === 'chat.send').at(-1).execution.agentPermissions), { main: 'workspace-write', work: 'workspace-write', verification: 'workspace-write' });
   assert.equal(await page.evaluate(() => window.saved.agentPermissions), undefined);
-  await page.locator('#model-button').click();
+  await page.locator('#status-settings-button').click();
   await emit({ type: 'run.state', running: true });
-  assert.equal(await page.locator('#model-menu select[data-setting="permissions"]').isDisabled(), true);
-  await page.getByRole('button', { name: 'Close agent settings', exact: true }).click();
-  assert.equal(await page.locator('#model-menu').isVisible(), false);
-  assert.equal(await page.locator('#model-button').evaluate(element => element === document.activeElement), true);
+  assert.equal(await page.locator('#general-permissions select[data-setting="permissions"]').isDisabled(), true);
+  await page.locator('#status-settings-close').click();
+  assert.equal(await page.locator('#status-settings').isVisible(), false);
+  assert.equal(await page.locator('#status-settings-button').evaluate(element => element === document.activeElement), true);
 }
 module.exports = { checkAgentModels };

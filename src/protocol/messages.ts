@@ -5,6 +5,7 @@ import type { AttachmentReference } from "../common/types/attachment";
 
 /** Captured submission intent and app-added guidance, never the full provider prompt. */
 export interface MessageSubmission {
+  readonly backgroundContinuation?: boolean;
   readonly taskMode: import("../modules/chat/task-selection").TaskSelection;
   readonly businessMode: import("../common/types/business-mode").BusinessMode;
   readonly goal: boolean;
@@ -14,7 +15,9 @@ export interface MessageSubmission {
 export type ClientMessage =
   | { readonly type: "client.ready" }
   | { readonly type: "execution.select"; readonly mode: import("../infrastructure/agent-factory/agent-client").ExecutionMode }
+  | { readonly type: "message.copy"; readonly text: string }
   | { readonly type: "reference.copy"; readonly id: string }
+  | { readonly type: "image.resolve"; readonly href: string }
   | { readonly type: "link.open"; readonly href: string }
   | {
       readonly type: "chat.send";
@@ -37,6 +40,7 @@ export type ClientMessage =
   | { readonly type: "goal.control"; readonly action: import("../infrastructure/agent-factory/agent-client").GoalAction }
   | { readonly type: "queue.resume" }
   | { readonly type: "run.cancel" }
+  | { readonly type: "conversation.clear" }
   | { readonly type: "sessions.request" }
   | { readonly type: "models.request" }
   | { readonly type: "session.select"; readonly agentId: string }
@@ -98,6 +102,8 @@ export type HostMessage =
       readonly contextWindowTokens?: number;
       readonly weeklyUsedPercent?: number;
       readonly queueCount: number;
+      readonly conversationId?: string;
+      readonly resetConversation?: boolean;
       readonly pendingMessageIds?: readonly string[];
     }
   | {
@@ -122,7 +128,9 @@ export type HostMessage =
       readonly type: "chat.renamed";
       readonly title: string;
     }
-  | { readonly type: "session.bound"; readonly agentId: string; readonly reset?: boolean }
+  | { readonly type: "session.bound"; readonly agentId: string; readonly reset?: boolean; readonly conversationId?: string }
+  | { readonly type: "conversation.cleared"; readonly conversationId: string }
+  | { readonly type: "conversation.history"; readonly agentId: string; readonly history: import("../infrastructure/agent-factory/agent-client").ConversationHistory }
   | { readonly type: "sessions.open" }
   | {
       readonly type: "sessions.list";
@@ -134,6 +142,7 @@ export type HostMessage =
     }
   | {
       readonly type: "agents.list";
+      readonly workflows?: readonly Record<string, unknown>[];
       readonly agents: readonly {
         readonly agentId: string;
         readonly role: "work" | "verification";
@@ -141,9 +150,10 @@ export type HostMessage =
         readonly updatedAt?: string;
       }[];
     }
-  | { readonly type: "decision.pending"; readonly runId: string | null }
+  | { readonly type: "decision.pending"; readonly runId: string | null; readonly canApprove?: boolean }
   | { readonly type: "chat.human-decision"; readonly submission?: MessageSubmission; readonly text: string }
-  | { readonly type: "chat.assistant"; readonly text: string; readonly phase?: "commentary" | "final"; readonly runId?: string }
+  | { readonly type: "chat.assistant"; readonly localization?: { readonly text?: import("../common/localization").LocalizedMessage }; readonly text: string; readonly phase?: "commentary" | "final"; readonly runId?: string }
+  | { readonly type: "image.resolved"; readonly href: string; readonly src?: string }
   | { readonly type: "run.progress"; readonly text: string }
   | {
       readonly type: "context.usage";
@@ -175,3 +185,11 @@ export type HostMessage =
       readonly verificationActive: number;
       readonly totalCalled: number;
     };
+
+/** Optional display metadata never alters the underlying runtime or message payload. */
+export type LocalizedHostMessage = HostMessage & {
+  readonly localization?: {
+    readonly text?: import("../common/localization").LocalizedMessage;
+    readonly error?: import("../common/localization").LocalizedMessage;
+  };
+};

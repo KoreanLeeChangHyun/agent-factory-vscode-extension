@@ -1,6 +1,8 @@
+import { localize, setHostLanguage } from "./common/localization";
 import * as vscode from "vscode";
 import { bootstrap } from "./core/bootstrap";
 import { ensureAgentFactoryPlugin } from "./infrastructure/agent-factory/plugin-dependency";
+import { developmentPluginRoot, validateDevelopmentPlugin } from "./infrastructure/agent-factory/development-plugin";
 
 export interface ActivationServices {
   readonly ensurePlugin: (requiredVersion: string) => Promise<void>;
@@ -15,6 +17,7 @@ export function activate(
   context: vscode.ExtensionContext,
   services: ActivationServices = defaultActivationServices()
 ): Promise<void> {
+  setHostLanguage(vscode.env?.language || "en");
   const pending = activations.get(context);
   if (pending) return pending.then(() => undefined);
   const activation = start(context, services);
@@ -32,20 +35,23 @@ async function start(context: vscode.ExtensionContext, services: ActivationServi
     try {
       const requiredVersion: unknown = context.extension.packageJSON.version;
       if (typeof requiredVersion !== "string" || !requiredVersion.trim()) {
-        throw new Error("Unable to read the extension version.");
+        throw new Error(localize("ui.unable.to.read.the.extension.version"));
       }
+      const developmentRoot = developmentPluginRoot(context.extensionMode === vscode.ExtensionMode.Development);
       await services.withProgress({
         location: vscode.ProgressLocation.Notification,
-        title: "Checking Agent Factory plugin dependencies…",
+        title: localize("ui.checking.agent.factory.plugin.dependencies"),
         cancellable: false
-      }, () => services.ensurePlugin(requiredVersion));
+      }, () => developmentRoot
+        ? validateDevelopmentPlugin(developmentRoot, requiredVersion)
+        : services.ensurePlugin(requiredVersion));
     } catch (error) {
-      const detail = error instanceof Error ? error.message : "An unknown error occurred.";
+      const detail = error instanceof Error ? error.message : localize("ui.an.unknown.error.occurred");
       const action = await services.showErrorMessage(
-        `Unable to start Agent Factory. ${detail} Check the workspace extension host (SSH, WSL or container when remote), then Retry.`,
-        "Retry"
+        localize("ui.unable.to.start.agent.factory.0.check.the.workspace.extension.host.ssh.wsl.or.container.when.remote.then.retry", detail),
+        localize("ui.retry")
       );
-      if (action === "Retry") continue;
+      if (action === localize("ui.retry")) continue;
       return false;
     }
     services.bootstrap(context);

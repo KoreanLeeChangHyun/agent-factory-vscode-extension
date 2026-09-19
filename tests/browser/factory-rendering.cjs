@@ -26,6 +26,23 @@ async function checkFactoryRendering(page) {
   assert.equal(await page.locator('[data-id="failed-submit"] .managed-agent-card').getAttribute('data-status'), 'failed');
   assert.equal(await page.locator('[data-id="failed-submit"] .command-error-summary script').count(), 0);
   assert.match(await page.locator('[data-id="failed-submit"] .command-error-summary').textContent(), /<script>unsafe<\/script>/);
+  for (const event of [
+    { id: 'plain-test', category: 'command', phase: 'completed', text: 'python3 -m unittest discover', output: 'line\n'.repeat(20) + 'OK' },
+    { id: 'plain-failure', category: 'command', phase: 'failed', text: 'python3 scripts/check_site_links.py', output: 'Broken link' },
+    { id: 'plain-tool', category: 'tool', phase: 'completed', text: 'Tool result' },
+    { id: 'factory-path-only', category: 'command', phase: 'completed', text: 'sha256sum /tmp/.agent-factory/result.md', output: 'checksum' }
+  ]) {
+    await page.evaluate(event => window.dispatchEvent(new MessageEvent('message', { data: { type: 'run.activity', ...event } })), event);
+    const content = page.locator(`[data-id="${event.id}"] > .message-content`);
+    assert.equal(await content.evaluate(el => getComputedStyle(el).borderTopStyle), 'none');
+    assert.equal(await content.evaluate(el => getComputedStyle(el).backgroundColor), 'rgba(0, 0, 0, 0)');
+    assert.equal(await content.locator('.managed-agent-card').count(), 0);
+  }
+  assert.equal(await page.locator('[data-id="factory-util"] .managed-agent-card').evaluate(el => getComputedStyle(el).borderTopStyle), 'solid');
+  const ordinaryDetails = page.locator('[data-id="plain-test"] .terminal-output-details');
+  await ordinaryDetails.locator('summary').click();
+  assert.match(await ordinaryDetails.textContent(), /OK/);
+  assert.equal(await page.locator('[data-id="plain-failure"] .message-phase').getAttribute('aria-label'), 'Failed');
   // A utility's lifecycle updates one item; it does not append another card.
   await page.evaluate(() => window.postMessage({ type: 'run.activity', id: 'factory-util', category: 'command', phase: 'failed', text: 'env X=1 python3 -u skills/agent/scripts/exec.py capabilities', output: 'failed output' }, '*'));
   await page.waitForFunction(() => document.querySelector('[data-id="factory-util"] .managed-agent-status')?.textContent === 'Failed');

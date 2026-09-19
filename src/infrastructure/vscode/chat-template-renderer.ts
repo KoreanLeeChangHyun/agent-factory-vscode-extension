@@ -29,6 +29,8 @@ export class ChatTemplateRenderer {
     );
 
     const replacements: Readonly<Record<string, string>> = {
+    "{{localizationScriptUri}}": webview.asWebviewUri(vscode.Uri.joinPath(this.extensionUri, "static", "js", "localization.js")).toString(),
+      "{{hostLanguage}}": vscode.env.language,
       "{{cspSource}}": webview.cspSource,
       "{{nonce}}": nonce,
       "{{styleUri}}": styleUri.toString(),

@@ -139,3 +139,62 @@ test("drag and drop ignores cancellation, group drags, foreign payloads and stal
   h.sidebar.dispose();
   other.sidebar.dispose();
 });
+
+test("archiving hides agents across refresh and reload while preserving records and groups", async () => {
+  const storage = new Map();
+  const h = harness(storage);
+  await h.sidebar.refresh();
+  const first = h.sidebar.getChildren()[0];
+  h.inputs.push('Preserved group');
+  await h.run('newGroup');
+  h.picks.push(1);
+  await h.run('move', first);
+  await h.run('archive', first);
+  const group = h.sidebar.getChildren()[0];
+  assert.equal(h.sidebar.getChildren(group).length, 0);
+  assert.equal(h.agents.length, 2, 'Underlying agents are retained');
+  await h.sidebar.refresh();
+  assert.equal(h.sidebar.getChildren(group).length, 0);
+  h.sidebar.dispose();
+  const restored = harness(storage);
+  await restored.sidebar.refresh();
+  assert.equal(restored.sidebar.getChildren(restored.sidebar.getChildren()[0]).length, 0);
+  await restored.run('restore');
+  assert.equal(storage.get('agentFactory.sidebar.archived').length, 1);
+  restored.picks.push(0);
+  await restored.run('restore');
+  assert.equal(restored.sidebar.getChildren(restored.sidebar.getChildren()[0])[0].agent.state.panelId, 'draft-one');
+  assert.equal(storage.get('agentFactory.sidebar.archived').length, 0);
+  restored.sidebar.dispose();
+});
+
+test("archiving a running agent does not stop it and matches its runtime identity", async () => {
+  const h = harness();
+  await h.sidebar.refresh();
+  const running = h.sidebar.getChildren()[1];
+  await Promise.all([h.run('archive', running), h.run('archive', running)]);
+  assert.equal(h.storage.get('agentFactory.sidebar.archived').length, 1);
+  assert.equal(h.agents[1].running, true);
+  h.agents[1].state.panelId = 'restored-panel';
+  await h.sidebar.refresh();
+  assert.deepEqual(Array.from(h.sidebar.getChildren(), node => node.agent.state.panelId), ['draft-one']);
+  h.picks.push(0);
+  await h.run('restore');
+  assert.equal(h.sidebar.getChildren().length, 2);
+  assert.equal(h.agents[1].running, true);
+  h.sidebar.dispose();
+});
+
+test("archive storage failures leave the agent visible and allow retry", async () => {
+  const h = harness();
+  await h.sidebar.refresh();
+  const agent = h.sidebar.getChildren()[0];
+  const set = h.storage.set;
+  h.storage.set = () => { throw new Error('storage unavailable'); };
+  await assert.rejects(h.run('archive', agent), /storage unavailable/);
+  assert.equal(h.sidebar.getChildren().length, 2);
+  h.storage.set = set;
+  await h.run('archive', agent);
+  assert.equal(h.sidebar.getChildren().length, 1);
+  h.sidebar.dispose();
+});

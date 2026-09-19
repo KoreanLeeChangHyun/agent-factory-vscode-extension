@@ -4,3 +4,4 @@
 !templates/**
 !package.json
 !README.md
+!package.nls*.json

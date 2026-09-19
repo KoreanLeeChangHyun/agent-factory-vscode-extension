@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import { build } from "esbuild";
-import { readFile } from "node:fs/promises";
+import { readFile, mkdir, mkdtemp, writeFile, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join, dirname } from "node:path";
 import test from "node:test";
 
 async function importTypeScript(relativePath, mockExtensionImports = false) {
@@ -12,7 +14,7 @@ async function importTypeScript(relativePath, mockExtensionImports = false) {
       buildApi.onResolve({ filter: /core\/bootstrap$/ }, () => ({ path: "bootstrap", namespace: "mock" }));
       buildApi.onResolve({ filter: /plugin-dependency$/ }, () => ({ path: "dependency", namespace: "mock" }));
       buildApi.onLoad({ filter: /.*/, namespace: "mock" }, (args) => {
-        if (args.path === "vscode") return { contents: "export const ProgressLocation = { Notification: 15 }; export const window = {};" };
+        if (args.path === "vscode") return { contents: "export const ExtensionMode = { Production: 1, Development: 2, Test: 3 }; export const ProgressLocation = { Notification: 15 }; export const window = {};" };
         if (args.path === "bootstrap") return { contents: "export function bootstrap() {}" };
         return { contents: "export async function ensureAgentFactoryPlugin() {}" };
       });
@@ -31,6 +33,72 @@ async function importTypeScript(relativePath, mockExtensionImports = false) {
 }
 
 const dependency = await importTypeScript("src/infrastructure/agent-factory/plugin-dependency.ts");
+
+test("development activation uses live local sources without installation and fails closed", async (t) => {
+  const root = await mkdtemp(join(tmpdir(), "af-dev-plugin-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const previous = process.env.AGENT_FACTORY_DEV_PLUGIN_ROOT;
+  process.env.AGENT_FACTORY_DEV_PLUGIN_ROOT = root;
+  t.after(() => {
+    if (previous === undefined) delete process.env.AGENT_FACTORY_DEV_PLUGIN_ROOT;
+    else process.env.AGENT_FACTORY_DEV_PLUGIN_ROOT = previous;
+  });
+  const { activate } = await importTypeScript("src/extension.ts", true);
+  let bootstraps = 0;
+  const errors = [];
+  const services = {
+    ensurePlugin: async () => { assert.fail("development must not install a plugin"); },
+    bootstrap: () => { bootstraps++; },
+    withProgress: async (_, task) => task(),
+    showErrorMessage: async (message) => { errors.push(message); }
+  };
+  const context = () => ({ extensionMode: 2, extension: { packageJSON: { version: "1.0.2" } } });
+  await activate(context(), services);
+  assert.equal(bootstraps, 0);
+  for (const file of [".codex-plugin/plugin.json", "skills/agent/scripts/exec.py",
+    ...["agent", "convention", "document"].map(name => `skills/${name}/SKILL.md`)]) {
+    await mkdir(dirname(join(root, file)), { recursive: true });
+    await writeFile(join(root, file), file.endsWith(".json")
+      ? JSON.stringify({ name: "agent-factory", version: "1.0.2+codex.dev" }) : "local source");
+  }
+  await activate(context(), services);
+  assert.equal(bootstraps, 1);
+  await writeFile(join(root, ".codex-plugin/plugin.json"), JSON.stringify({ name: "agent-factory", version: "2.0.0" }));
+  await activate(context(), services);
+  assert.equal(bootstraps, 1);
+  assert.equal(errors.length, 2);
+  assert.match(errors[1], /must match extension version/);
+});
+
+test("production activation ignores an inherited development plugin root", async (t) => {
+  const previous = process.env.AGENT_FACTORY_DEV_PLUGIN_ROOT;
+  process.env.AGENT_FACTORY_DEV_PLUGIN_ROOT = "/nonexistent/development/plugin";
+  t.after(() => {
+    if (previous === undefined) delete process.env.AGENT_FACTORY_DEV_PLUGIN_ROOT;
+    else process.env.AGENT_FACTORY_DEV_PLUGIN_ROOT = previous;
+  });
+  const { activate } = await importTypeScript("src/extension.ts", true);
+  let installedChecks = 0;
+  let bootstraps = 0;
+  await activate({ extensionMode: 1, extension: { packageJSON: { version: "1.0.2" } } }, {
+    ensurePlugin: async () => { installedChecks++; },
+    bootstrap: () => { bootstraps++; },
+    withProgress: async (_, task) => task(),
+    showErrorMessage: async (message) => { assert.fail(message); }
+  });
+  assert.equal(installedChecks, 1);
+  assert.equal(bootstraps, 1);
+});
+
+test("development root and child environment require explicit development selection", async () => {
+  const { developmentPluginRoot, pluginRuntimeEnvironment } = await importTypeScript("src/infrastructure/agent-factory/development-plugin.ts");
+  const inherited = { PATH: "/usr/bin", AGENT_FACTORY_DEV_PLUGIN_ROOT: "/local/plugin" };
+  assert.equal(developmentPluginRoot(false, inherited), undefined);
+  assert.equal(developmentPluginRoot(true, inherited), "/local/plugin");
+  assert.deepEqual(pluginRuntimeEnvironment(undefined, inherited), { PATH: "/usr/bin" });
+  assert.deepEqual(pluginRuntimeEnvironment("/f5/plugin", inherited), { PATH: "/usr/bin", AGENT_FACTORY_DEV_PLUGIN_ROOT: "/f5/plugin" });
+  assert.equal(inherited.AGENT_FACTORY_DEV_PLUGIN_ROOT, "/local/plugin");
+});
 
 test("release metadata and installation guidance stay coupled", async () => {
   const packageJson = JSON.parse(await readFile(new URL("../../package.json", import.meta.url), "utf8"));

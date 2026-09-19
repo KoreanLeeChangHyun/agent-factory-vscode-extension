@@ -1,3 +1,4 @@
+import { localize } from "../common/localization";
 import * as vscode from "vscode";
 import { resolveStatusItems } from "./config/resolver";
 import { ChatPanelManager } from "../infrastructure/vscode/chat-panel-manager";
@@ -5,6 +6,7 @@ import { ChatTemplateRenderer } from "../infrastructure/vscode/chat-template-ren
 import { locateAgentFactoryExec } from "../infrastructure/agent-factory/plugin-locator";
 import { AgentFactoryClient } from "../infrastructure/agent-factory/agent-client";
 import { AsyncCache } from "../common/async-cache";
+import { developmentPluginRoot, developmentExecPath } from "../infrastructure/agent-factory/development-plugin";
 
 type RuntimeConnection = { readonly available: true; readonly client: AgentFactoryClient } | { readonly available: false; readonly diagnostic: string };
 
@@ -23,11 +25,13 @@ export function createContainer(context: vscode.ExtensionContext): Container {
     async () => {
       const projectRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
       if (!projectRoot) {
-        return { available: false, diagnostic: "Open a VS Code workspace to run Main Agent." };
+        return { available: false, diagnostic: localize("host.workspace.required") };
       }
-      const configuredPath = vscode.workspace
+      const isDevelopment = context.extensionMode === vscode.ExtensionMode.Development;
+      const developmentRoot = developmentPluginRoot(isDevelopment);
+      const configuredPath = developmentRoot ? developmentExecPath(developmentRoot) : isDevelopment ? vscode.workspace
         .getConfiguration("agentFactory.mainChat")
-        .get<string>("runtimeExecPath");
+        .get<string>("runtimeExecPath") : undefined;
       const pythonPath = vscode.workspace.getConfiguration("agentFactory.mainChat").get<string>("pythonPath")?.trim() || "python3";
       const key = JSON.stringify([projectRoot, configuredPath, pythonPath, process.env.CODEX_HOME, process.env.PATH]);
       return connections.get(key, async () => {
@@ -37,7 +41,7 @@ export function createContainer(context: vscode.ExtensionContext): Container {
           const refreshed = await locateAgentFactoryExec({ configuredPath, requiredVersion });
           if (!refreshed.available) throw new Error(refreshed.diagnostic);
           return refreshed.execPath;
-        });
+        }, undefined, developmentRoot);
         const diagnosis = await client.diagnose();
         if (!diagnosis.available) return diagnosis;
         return { available: true, client };

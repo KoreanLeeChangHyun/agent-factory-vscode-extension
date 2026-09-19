@@ -1,3 +1,4 @@
+import { localize } from "../../common/localization";
 import { execFile } from "node:child_process";
 import { homedir } from "node:os";
 import { runtimeEnvironment } from "./process-environment";
@@ -76,7 +77,7 @@ async function ensurePlugin(requiredBase: string, runner: ProcessRunner): Promis
     .sort(compareCandidates)[0];
   if (!candidate) {
     throw new PluginDependencyError(
-      `Unable to install Agent Factory plugin version ${requiredBase}. The configured catalogs do not offer this exact version. Refresh the official marketplace or install the matching extension version, then Retry.`
+      localize("ui.unable.to.install.agent.factory.plugin.version.0.the.configured.catalogs.do.not.offer.this.exact.version.refresh.the.official.marketplace.or.install.the.matching.extension.version.then.retry", requiredBase)
     );
   }
 
@@ -84,14 +85,14 @@ async function ensurePlugin(requiredBase: string, runner: ProcessRunner): Promis
     runner,
     ["plugin", "add", candidate.pluginId, "--json"],
     ADD_TIMEOUT_MS,
-    "Agent Factory plugin installation"
+    localize("ui.agent.factory.plugin.installation")
   );
-  parseJsonObject(addResult.stdout, "Agent Factory plugin installation result");
+  parseJsonObject(addResult.stdout, localize("ui.agent.factory.plugin.installation.result"));
 
   records = await listPlugins(runner, "installed");
   if (!hasCompatibleInstalledPlugin(records.filter((record) => record.pluginId === candidate.pluginId), requiredBase)) {
     throw new PluginDependencyError(
-      `Unable to confirm that Agent Factory plugin ${requiredBase} is active after installation. Check the Codex plugin settings.`
+      localize("ui.unable.to.confirm.that.agent.factory.plugin.0.is.active.after.installation.check.the.codex.plugin.settings", requiredBase)
     );
   }
 }
@@ -100,20 +101,20 @@ async function ensureOfficialMarketplace(runner: ProcessRunner): Promise<void> {
   if (await hasOfficialMarketplace(runner)) return;
   const result = await invoke(runner,
     ["plugin", "marketplace", "add", OFFICIAL_SOURCE, "--ref", "main", "--json"],
-    ADD_TIMEOUT_MS, "Register official Agent Factory marketplace");
-  parseJsonObject(result.stdout, "Marketplace registration result");
+    ADD_TIMEOUT_MS, localize("ui.register.official.agent.factory.marketplace"));
+  parseJsonObject(result.stdout, localize("ui.marketplace.registration.result"));
   if (!await hasOfficialMarketplace(runner)) {
-    throw new PluginDependencyError("Unable to confirm official Agent Factory marketplace registration. Retry after checking Codex marketplace settings.");
+    throw new PluginDependencyError(localize("ui.unable.to.confirm.official.agent.factory.marketplace.registration.retry.after.checking.codex.marketplace.settings"));
   }
 }
 
 async function hasOfficialMarketplace(runner: ProcessRunner): Promise<boolean> {
   const result = await invoke(runner, ["plugin", "marketplace", "list", "--json"],
-    LIST_TIMEOUT_MS, "List Codex marketplaces");
-  const value = parseJsonObject(result.stdout, "Codex marketplace list");
+    LIST_TIMEOUT_MS, localize("ui.list.codex.marketplaces"));
+  const value = parseJsonObject(result.stdout, localize("ui.codex.marketplace.list"));
   if (!Array.isArray(value.marketplaces)
     || value.marketplaces.some((entry) => !isObject(entry) || !isNonEmptyString(entry.name))) {
-    throw new PluginDependencyError("The Codex marketplace list has an invalid format.");
+    throw new PluginDependencyError(localize("ui.the.codex.marketplace.list.has.an.invalid.format"));
   }
   const matches = value.marketplaces.filter((entry) => entry.name === "agent-factory");
   if (!matches.length) return false;
@@ -129,14 +130,14 @@ async function hasOfficialMarketplace(runner: ProcessRunner): Promise<boolean> {
     || matches[0].marketplaceSource.sourceType !== "git"
     || typeof matches[0].marketplaceSource.source !== "string"
     || !sources.has(matches[0].marketplaceSource.source)) {
-    throw new PluginDependencyError("Marketplace name conflict: agent-factory is configured with a different or unconfirmed source. Resolve it in Codex marketplace settings, then Retry. No source was overwritten.");
+    throw new PluginDependencyError(localize("ui.marketplace.name.conflict.agent.factory.is.configured.with.a.different.or.unconfirmed.source.resolve.it.in.codex.marketplace.settings.then.retry.no.source.was.overwritten"));
   }
   return true;
 }
 
 export function semanticBase(version: string): string {
   const base = version.split("+", 1)[0]?.trim();
-  if (!base) throw new PluginDependencyError("The plugin version is empty or invalid.");
+  if (!base) throw new PluginDependencyError(localize("ui.the.plugin.version.is.empty.or.invalid"));
   return base;
 }
 
@@ -149,7 +150,7 @@ async function listPlugins(
     runner,
     includeAvailable ? LIST_AVAILABLE_ARGUMENTS : LIST_INSTALLED_ARGUMENTS,
     LIST_TIMEOUT_MS,
-    includeAvailable ? "List available Codex plugins" : "List installed Codex plugins",
+    includeAvailable ? localize("ui.list.available.codex.plugins") : localize("ui.list.installed.codex.plugins"),
     includeAvailable ? MAX_AVAILABLE_OUTPUT_BYTES : MAX_OUTPUT_BYTES
   );
   return parsePluginRecords(result.stdout, list);
@@ -165,27 +166,27 @@ async function invoke(
   try {
     const result = await runner(CODEX_COMMAND, arguments_, { timeout, maxBuffer: maxOutputBytes });
     if (typeof result?.stdout !== "string") {
-      throw new PluginDependencyError(`${operation} returned a non-string result.`);
+      throw new PluginDependencyError(localize("ui.0.returned.a.non.string.result", operation));
     }
     if (Buffer.byteLength(result.stdout, "utf8") > maxOutputBytes) {
-      throw new PluginDependencyError(`${operation} output exceeded the size limit.`);
+      throw new PluginDependencyError(localize("ui.0.output.exceeded.the.size.limit", operation));
     }
     return result;
   } catch (error) {
     if (error instanceof PluginDependencyError) throw error;
     if (isErrorWithCode(error, "ENOENT")) {
       throw new PluginDependencyError(
-        `${operation} failed. The Codex CLI executable was not found. Check its installation and PATH.`,
+        localize("ui.0.failed.the.codex.cli.executable.was.not.found.check.its.installation.and.path", operation),
         { cause: error }
       );
     }
     if (isErrorWithCode(error, "ERR_CHILD_PROCESS_STDIO_MAXBUFFER")) {
-      throw new PluginDependencyError(`${operation} output exceeded the size limit.`, { cause: error });
+      throw new PluginDependencyError(localize("ui.0.output.exceeded.the.size.limit", operation), { cause: error });
     }
     if (isTimedOutProcess(error)) {
-      throw new PluginDependencyError(`${operation} timed out. Please try again shortly.`, { cause: error });
+      throw new PluginDependencyError(localize("ui.0.timed.out.please.try.again.shortly", operation), { cause: error });
     }
-    throw new PluginDependencyError(`${operation} failed. Check the Codex CLI installation and execution environment.`, {
+    throw new PluginDependencyError(localize("ui.0.failed.check.the.codex.cli.installation.and.execution.environment", operation), {
       cause: error
     });
   }
@@ -199,7 +200,7 @@ function parsePluginRecords(
   try {
     value = JSON.parse(stdout);
   } catch (error) {
-    throw new PluginDependencyError("The Codex plugin list is not valid JSON.", { cause: error });
+    throw new PluginDependencyError(localize("ui.the.codex.plugin.list.is.not.valid.json"), { cause: error });
   }
   const records = Array.isArray(value)
     ? value
@@ -209,7 +210,7 @@ function parsePluginRecords(
         ? value.plugins
         : undefined;
   if (!records) {
-    throw new PluginDependencyError(`The Codex plugin list JSON is missing the ${list} array.`);
+    throw new PluginDependencyError(localize("ui.the.codex.plugin.list.json.is.missing.the.0.array", list));
   }
   return records.map((record, index) => validatePluginRecord(record, index));
 }
@@ -222,7 +223,7 @@ function validatePluginRecord(value: unknown, index: number): PluginRecord {
     || !isNonEmptyString(value.version)
     || typeof value.installed !== "boolean"
     || typeof value.enabled !== "boolean") {
-    throw new PluginDependencyError(`Codex plugin list record ${index + 1} has an invalid format.`);
+    throw new PluginDependencyError(localize("ui.codex.plugin.list.record.0.has.an.invalid.format", index + 1));
   }
   return {
     pluginId: value.pluginId,
@@ -239,9 +240,9 @@ function parseJsonObject(stdout: string, label: string): Readonly<Record<string,
   try {
     value = JSON.parse(stdout);
   } catch (error) {
-    throw new PluginDependencyError(`${label} is not valid JSON.`, { cause: error });
+    throw new PluginDependencyError(localize("ui.0.is.not.valid.json", label), { cause: error });
   }
-  if (!isObject(value)) throw new PluginDependencyError(`${label} is not a JSON object.`);
+  if (!isObject(value)) throw new PluginDependencyError(localize("ui.0.is.not.a.json.object", label));
   return value;
 }
 

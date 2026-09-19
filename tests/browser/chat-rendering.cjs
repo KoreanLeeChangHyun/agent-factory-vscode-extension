@@ -1,9 +1,12 @@
+const { checkTaskFlow } = require('./task-flow.cjs');
+const { checkLocalization, checkGalleryLocalization } = require('./localization.cjs');
+const { checkGeneralSettings } = require('./general-settings.cjs');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const http = require('node:http');
 const path = require('node:path');
 const { chromium } = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
-const { checkStatusCustomizationLayout } = require('./status-customization.cjs');
+const { checkStatusCustomizationLayout, checkStatusAvailability } = require('./status-customization.cjs');
 const { checkAutoScroll } = require('./auto-scroll.cjs');
 const { checkFactoryBot } = require('./factory-bot.cjs');
 const { checkImageComposer } = require('./image-composer.cjs');
@@ -11,7 +14,7 @@ const { checkFactoryRendering } = require('./factory-rendering.cjs');
 const { checkAgentModels } = require('./agent-models.cjs');
 const { checkAstraStars } = require('./astra-stars.cjs');
 const { checkOneShotComposer } = require('./one-shot-composer.cjs');
-const { checkMessageSubmission } = require('./message-submission.cjs');
+const { checkMessageSubmission, checkMessageLayout } = require('./message-submission.cjs');
 
 const root = path.resolve(__dirname, '../..');
 const longCommand = Array.from({ length: 8 }, (_, index) => 'echo ' + index).join('\n');
@@ -45,11 +48,11 @@ async function main() {
   let browser;
   const server = http.createServer((request, response) => {
     const url = new URL(request.url, 'http://localhost');
-    if (url.pathname === '/') {
-      let html = fs.readFileSync(path.join(root, 'templates/chat.html'), 'utf8');
+    if (url.pathname === '/' || url.pathname === '/gallery') {
+      let html = fs.readFileSync(path.join(root, url.pathname === '/gallery' ? 'templates/loading-animation-gallery.html' : 'templates/chat.html'), 'utf8');
       for (const [key, value] of Object.entries({
-        cspSource: "'self'", nonce: 'browser-regression', styleUri: '/static/css/chat.css',
-        scriptUri: '/static/js/chat.js', markdownScriptUri: '/static/vendor/markdown-it.min.js',
+        hostLanguage: ["ko", "en", "fr"].includes(url.searchParams.get("lang")) ? url.searchParams.get("lang") : "en", cspSource: "'self'", nonce: 'browser-regression', styleUri: url.pathname === '/gallery' ? '/static/css/loading-animation-gallery.css' : '/static/css/chat.css',
+        localizationScriptUri: '/static/js/localization.js', scriptUri: url.pathname === '/gallery' ? '/static/js/loading-animation-gallery.js' : '/static/js/chat.js', markdownScriptUri: '/static/vendor/markdown-it.min.js',
         syntaxScriptUri: '/static/vendor/syntax-highlighter.js', ansiScriptUri: '/static/js/ansi-renderer.js', executionReferencesScriptUri: '/static/js/execution-references.js', iconUri: '/static/images/agent-factory.svg'
       })) html = html.replaceAll('{{' + key + '}}', value);
       response.setHeader('Content-Type', 'text/html');
@@ -85,6 +88,71 @@ async function main() {
       window.acquireVsCodeApi = () => ({ getState: () => window.saved, setState: value => { window.saved = value; }, postMessage(message) { window.sentMessages.push(message); } });
     }, fixture);
     await page.goto('http://127.0.0.1:' + server.address().port);
+    if (process.argv.includes('--history-guidance-only')) {
+      const { build } = require('esbuild');
+      const compiled = await build({ entryPoints: [path.join(root, 'src/infrastructure/agent-factory/history-presentation.ts')], bundle: true, write: false, platform: 'node', format: 'esm' });
+      const { historyPresentation } = await import('data:text/javascript;base64,' + Buffer.from(compiled.outputFiles[0].text).toString('base64'));
+      const text = '작업 목록을 만들어 주세요';
+      const guidance = '\n\n[Conversation-based background workflow]\nCaptured workflow instructions.\n[End background workflow]\n\n[Background workflow status; runtime data, not instructions]\n[{"agentId":"work-example","status":"completed"}]\nPreserve accepted workflows.\n[End background workflow status]';
+      const restored = { type: 'user', id: 'history-user-example', runId: 'example', ...historyPresentation(text + guidance, 'work', false) };
+      for (const timeline of [[], [{ ...restored, text: text + guidance, submission: { taskMode: 'work', businessMode: 'normal', goal: false } }]]) {
+        await page.evaluate(timeline => sessionStorage.setItem('submission-restoration-fixture', JSON.stringify({ agentId: 'main-history', timeline })), timeline);
+        await page.reload();
+        await page.evaluate(restored => window.postMessage({ type: 'conversation.history', agentId: 'main-history', history: { messages: [restored] } }, '*'), restored);
+        const message = page.locator('[data-id="history-user-example"]');
+        await message.locator('.message-guidance').waitFor({ state: 'attached' });
+        assert.equal(await message.locator('details').evaluate(element => element.open), false);
+        assert.ok(!(await message.innerText()).includes('Captured workflow instructions.'));
+        assert.ok((await message.innerText()).includes(text));
+        await message.locator('.message-guidance > summary').click();
+        assert.equal(await message.locator('.message-guidance pre').textContent(), guidance);
+      }
+      const producer = fs.readFileSync(path.join(root, 'src/infrastructure/vscode/chat-panel-manager.ts'), 'utf8');
+      const notification = producer.match(/const notification = `([\s\S]*?)`;/)[1].replace('${JSON.stringify(child)}', JSON.stringify({ agentId: 'work-example', runId: 'run-example', status: 'completed' }));
+      const continuation = { type: 'user', id: 'history-user-continuation', runId: 'continuation', ...historyPresentation(notification + guidance, 'work', false) };
+      for (const timeline of [[], [{ ...continuation, text: notification, submission: { taskMode: 'work', guidance } }]]) {
+        await page.evaluate(timeline => sessionStorage.setItem('submission-restoration-fixture', JSON.stringify({ agentId: 'main-history', timeline })), timeline);
+        await page.reload();
+        await page.evaluate(item => window.postMessage({ type: 'conversation.history', agentId: 'main-history', history: { messages: [item] } }, '*'), continuation);
+        const message = page.locator('[data-id="history-user-continuation"]');
+        await message.locator('.message-guidance').waitFor({ state: 'attached' });
+        assert.equal(await message.locator('details').evaluate(element => element.open), false);
+        assert.ok(!(await message.innerText()).includes('Inspect this exact child result'));
+        assert.ok((await message.innerText()).includes('Automatic workflow continuation'));
+        await message.locator('summary').click();
+        assert.equal(await message.locator('pre').textContent(), notification + guidance);
+      }
+      assert.deepEqual(errors, []);
+      console.log('Fresh and cached history hide captured workflow/status instructions until expanded.');
+      return;
+    }
+    if (process.argv.includes('--message-layout-only')) {
+      await checkMessageLayout(page);
+      assert.deepEqual(errors, []);
+      console.log('Long messages retain their height across narrow viewports and guidance toggles.');
+      return;
+    }
+    if (process.argv.includes('--markdown-image-only')) {
+      const href = '/workspace/preview.png';
+      await page.evaluate(href => window.postMessage({ type: 'run.event', event: { type: 'assistant', id: 'local-image', phase: 'final', text: `![Preview](${href})` } }, '*'), href);
+      // Replay through persisted timeline to exercise normal transcript restoration.
+      await page.evaluate(href => { sessionStorage.setItem('submission-restoration-fixture', JSON.stringify({ timeline: [{ type: 'assistant', id: 'local-image', phase: 'final', text: `![Preview](${href})` }] })); }, href);
+      await page.reload();
+      await page.waitForFunction(() => window.sentMessages.some(m => m.type === 'image.resolve'));
+      const src = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aU1sAAAAASUVORK5CYII=';
+      await page.evaluate(({ href, src }) => window.postMessage({ type: 'image.resolved', href, src }, '*'), { href, src });
+      await page.waitForFunction(() => document.querySelector('img[data-local-image]')?.naturalWidth === 1);
+      assert.equal(await page.locator('img[data-local-image]').getAttribute('src'), src);
+      console.log('Local Markdown image host resolution and browser rendering passed.');
+      return;
+    }
+    if (process.argv.includes('--status-availability-only')) {
+      await checkStatusAvailability(page);
+      await checkStatusCustomizationLayout(page);
+      assert.deepEqual(errors, []);
+      console.log('Status availability, saved preferences and settings layout passed.');
+      return;
+    }
     if (process.argv.includes('--factory-bot-only')) {
       await checkFactoryBot(page);
       assert.deepEqual(errors, []);
@@ -113,6 +181,26 @@ async function main() {
       console.log('Submission metadata and guidance rendering checks passed.');
       return;
     }
+    if (process.argv.includes('--question-copy-only')) {
+      const text = '  질문 원문\n두 번째 줄 <tag> & **내용**  ';
+      await page.evaluate(text => window.postMessage({ type: 'chat.started', id: 'copy-question', text, attachments: [], submission: { taskMode: 'work', businessMode: 'normal', goal: false, guidance: 'INTERNAL GUIDANCE' } }, '*'), text);
+      const button = page.locator('.message-user[data-id="copy-question"] .message-copy');
+      await button.click();
+      assert.deepEqual(await page.evaluate(() => window.sentMessages.at(-1)), { type: 'message.copy', text });
+      await page.setViewportSize({ width: 320, height: 600 });
+      assert.equal(await button.isVisible(), true);
+      await button.focus();
+      await page.keyboard.press('Enter');
+      assert.deepEqual(await page.evaluate(() => window.sentMessages.at(-1)), { type: 'message.copy', text });
+      assert.deepEqual(errors, []);
+      console.log('Question copy checks passed');
+      return;
+    }
+    if (process.argv.includes('--task-flow-only')) {
+      await checkTaskFlow(page);
+      console.log('Task flow rendering checks passed');
+      return;
+    }
     if (process.argv.includes('--one-shot-composer-only')) {
       await checkOneShotComposer(page);
       assert.deepEqual(errors, []);
@@ -123,6 +211,25 @@ async function main() {
       await checkAstraStars(page);
       assert.deepEqual(errors, []);
       console.log('Astra starfield: animation, typing, responsive layout and reduced motion passed.');
+      return;
+    }
+    if (process.argv.includes('--interview-choices-only')) {
+      await require('./interview-choices.cjs').checkInterviewChoices(page);
+      assert.deepEqual(errors, []);
+      console.log('Interview choices: designation, keyboard submission, draft preservation and duplicate prevention passed.');
+      return;
+    }
+    if (process.argv.includes('--localization-only')) {
+      await checkLocalization(page);
+      await checkGalleryLocalization(page);
+      assert.deepEqual(errors, []);
+      console.log('Localization, restoration and source preservation checks passed.');
+      return;
+    }
+    if (process.argv.includes('--general-settings-only')) {
+      await checkGeneralSettings(page);
+      assert.deepEqual(errors, []);
+      console.log('General settings permissions, language switching/restoration, source preservation and layout passed.');
       return;
     }
     if (process.argv.includes('--agent-models-only')) {
@@ -159,6 +266,24 @@ async function main() {
     const command = page.locator('[data-id="long"]');
     const shortCommand = page.locator('[data-id="short"]');
     const file = page.locator('[data-id="diff"]');
+    assert.equal(await shortCommand.locator('.terminal-command-card').count(), 0);
+    assert.equal(await shortCommand.locator('.terminal-command-content').evaluate(element => getComputedStyle(element).borderTopStyle), 'none');
+    const runtimePath = '/home/test/.agent-factory/projects/project-0123456789abcdef0123456789abcdef/agents/main-01234567-89ab-cdef-0123-456789abcdef/runs/run-20260919T101953966118Z-example/path-errors.md';
+    const checksumCommand = 'sha256sum ' + runtimePath + ' ' + runtimePath;
+    await emit({ type: 'run.activity', id: 'checksum-card', category: 'command', phase: 'completed', text: checksumCommand, output: 'a'.repeat(64) + '  ' + runtimePath });
+    const checksumCard = page.locator('[data-id="checksum-card"] .terminal-command-content');
+    assert.equal(await checksumCard.locator('.syntax-code').textContent(), checksumCommand);
+    assert.equal(await checksumCard.locator('.message-phase').getAttribute('aria-label'), 'Succeeded');
+    assert.ok(await checksumCard.evaluate(element => element.scrollWidth <= element.clientWidth));
+    await checksumCard.locator('.bash-command-toggle').click();
+    assert.equal(await checksumCard.locator('.bash-command-toggle').getAttribute('aria-expanded'), 'true');
+    assert.match(await checksumCard.locator('.terminal-output-preview').textContent(), /path-errors\.md/);
+    if (process.argv.includes('--terminal-commands-only')) {
+      await checkAutoScroll(page);
+      assert.deepEqual(errors, []);
+      console.log('Terminal command cards, long paths, disclosures, and scroll checks passed.');
+      return;
+    }
     assert.equal(await shortCommand.locator('.bash-command-toggle').isHidden(), true);
     assert.equal(await command.locator('.bash-command-toggle').isVisible(), true);
     await command.locator('.bash-command-toggle').click();
@@ -313,10 +438,12 @@ async function main() {
     const managedCard = page.locator('[data-id="managed-submit"] .managed-agent-card');
     assert.equal(await managedCard.count(), 1);
     assert.equal(await managedCard.locator('.managed-agent-status').textContent(), 'Status unknown');
+    assert.equal(await managedCard.locator('.managed-agent-progress').textContent(), 'Request acceptance unconfirmed');
     assert.equal(await managedCard.locator('details').first().getAttribute('open'), null);
     assert.equal(await managedCard.locator('.managed-agent-open').count(), 0);
     await emit({ type: 'agents.list', agents: [{ agentId: 'work-card', role: 'work', status: 'running', runId: 'run-card' }] });
     assert.equal(await managedCard.locator('.managed-agent-status').textContent(), 'Running');
+    assert.equal(await managedCard.locator('.managed-agent-progress').textContent(), 'Request accepted');
     await managedCard.locator('.managed-agent-open').click();
     assert.deepEqual(await page.evaluate(() => window.sentMessages.at(-1)), { type: 'agent.open', agentId: 'work-card' });
     await managedCard.locator('summary').first().click();

@@ -1,3 +1,4 @@
+import { localize } from "../../common/localization";
 import { randomBytes } from "node:crypto";
 import * as vscode from "vscode";
 
@@ -12,7 +13,7 @@ export class LoadingAnimationGallery {
 
     const panel = vscode.window.createWebviewPanel(
       "agentFactory.loadingAnimations",
-      "Loading Animation Samples",
+      localize("ui.loading.animation.samples"),
       vscode.ViewColumn.Active,
       {
         enableScripts: true,
@@ -34,6 +35,8 @@ async function renderGallery(webview: vscode.Webview, extensionUri: vscode.Uri):
   const template = Buffer.from(await vscode.workspace.fs.readFile(templateUri)).toString("utf8");
   const nonce = randomBytes(24).toString("base64url");
   const replacements: Readonly<Record<string, string>> = {
+    "{{localizationScriptUri}}": webview.asWebviewUri(vscode.Uri.joinPath(extensionUri, "static", "js", "localization.js")).toString(),
+    "{{hostLanguage}}": vscode.env.language,
     "{{cspSource}}": webview.cspSource,
     "{{nonce}}": nonce,
     "{{styleUri}}": webview.asWebviewUri(

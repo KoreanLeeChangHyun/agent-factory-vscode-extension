@@ -1,3 +1,5 @@
+import { readMarkdownImage } from "./markdown-image";
+import { localize, describeLocalizedMessage } from "../../common/localization";
 import { LunaBot, type BotContext } from "../codex/luna-bot";
 import { taskExecution } from "../../modules/chat/task-selection";
 import { homedir } from "node:os";
@@ -52,6 +54,8 @@ interface ManagedPanel {
   themeTimer?: NodeJS.Timeout;
   agentRefreshTimer?: NodeJS.Timeout;
   lastAgentRefreshAt?: number;
+  agentRefreshInFlight?: boolean;
+  backgroundContinuation?: boolean;
   branchRefreshTimer?: NodeJS.Timeout;
   branchRefreshStarted?: boolean;
   runningTitle?: RunningTitle;
@@ -93,9 +97,16 @@ export class ChatPanelManager implements vscode.Disposable {
     if ((state.role ?? "main") !== "main") return Promise.resolve();
     const snapshot = { ...state };
     const write = this.sidebarAgentWrite.then(async () => {
-      const saved = this.savedAgents().filter(entry => entry.panelId !== snapshot.panelId &&
-        (!snapshot.agentId || entry.agentId !== snapshot.agentId));
-      await this.context.workspaceState?.update(SIDEBAR_AGENTS_KEY, [...saved, snapshot]);
+      // Opening or updating a chat must not move its sidebar entry to the end.
+      let replaced = false;
+      const saved = this.savedAgents().flatMap(entry => {
+        if (entry.panelId !== snapshot.panelId && (!snapshot.agentId || entry.agentId !== snapshot.agentId)) return [entry];
+        if (replaced) return [];
+        replaced = true;
+        return [snapshot];
+      });
+      if (!replaced) saved.push(snapshot);
+      await this.context.workspaceState?.update(SIDEBAR_AGENTS_KEY, saved);
     });
     this.sidebarAgentWrite = write.catch(() => undefined);
     void write.then(() => this.notifyAgents(), () => undefined);
@@ -190,22 +201,22 @@ export class ChatPanelManager implements vscode.Disposable {
   public async renameActive(): Promise<void> {
     const managed = this.findActivePanel();
     if (!managed) {
-      await vscode.window.showInformationMessage("Select the Main Agent chat tab to rename first.");
+      await vscode.window.showInformationMessage(localize("ui.select.the.main.agent.chat.tab.to.rename.first"));
       return;
     }
 
     const title = await vscode.window.showInputBox({
-      title: "Rename Main Agent",
-      prompt: "Enter the name to display on this chat tab.",
+      title: localize("ui.rename.main.agent"),
+      prompt: localize("ui.enter.the.name.to.display.on.this.chat.tab"),
       value: managed.state.title,
       valueSelection: [0, managed.state.title.length],
       validateInput(value) {
         const length = value.trim().length;
         if (length === 0) {
-          return "Enter a name.";
+          return localize("ui.enter.a.name");
         }
         if (length > 80) {
-          return "The name must be no more than 80 characters.";
+          return localize("ui.the.name.must.be.no.more.than.80.characters");
         }
         return undefined;
       }
@@ -220,6 +231,15 @@ export class ChatPanelManager implements vscode.Disposable {
     if (managed.controller?.running) managed.runningTitle?.refresh();
     await this.post(managed.panel, { type: "chat.renamed", title: normalizedTitle });
     this.rememberAgent(managed.state);
+  }
+
+  public async clearActiveConversation(): Promise<void> {
+    const managed = this.findActivePanel();
+    if (!managed) {
+      await vscode.window.showInformationMessage(localize("ui.select.the.main.agent.chat.tab.to.clear.first"));
+      return;
+    }
+    await this.transitionConversation(managed);
   }
 
   public dispose(): void {
@@ -341,7 +361,7 @@ export class ChatPanelManager implements vscode.Disposable {
       await this.post(managed.panel, {
         type: "host.notice",
         level: "error",
-        text: "Received an invalid message from the chat view."
+        text: localize("ui.received.an.invalid.message.from.the.chat.view")
       });
       return;
     }
@@ -355,6 +375,24 @@ export class ChatPanelManager implements vscode.Disposable {
         await this.refreshTheme(managed);
         const connection = await this.connectRuntime();
         const capabilities = connection.available ? await connection.client.capabilities(managed.state.agentId) : undefined;
+        let runtimeConversationId: string | undefined;
+        if (managed.state.agentId && connection.available) {
+          runtimeConversationId = (await connection.client.listSessions())
+            .find(session => session.agentId === managed.state.agentId)?.conversationId;
+        }
+        const resetConversation = Boolean(runtimeConversationId && runtimeConversationId !== managed.state.conversationId);
+        if (runtimeConversationId) {
+          managed.state = {
+            ...managed.state,
+            conversationId: runtimeConversationId,
+            ...(resetConversation ? {
+              contextUsedTokens: undefined,
+              contextWindowTokens: undefined,
+              weeklyUsedPercent: undefined
+            } : {})
+          };
+          if (resetConversation) managed.startedMessages = [];
+        }
         if (managed.state.agentId && !managed.executionMode) {
           await this.post(managed.panel, { type: "execution.updated", mode: capabilities?.executionMode });
         }
@@ -382,9 +420,10 @@ export class ChatPanelManager implements vscode.Disposable {
           contextWindowTokens: managed.state.contextWindowTokens,
           weeklyUsedPercent: managed.state.weeklyUsedPercent,
           pendingMessageIds: [...(managed.pendingMessageIds ?? [])],
-          queueCount: managed.controller?.queueLength ?? 0
+          queueCount: managed.controller?.queueLength ?? 0,
+          conversationId: runtimeConversationId,
+          resetConversation
         });
-        for (const started of managed.startedMessages ?? []) await this.post(managed.panel, started);
         if (!connection.available) {
           await this.post(managed.panel, {
             type: "host.notice",
@@ -395,10 +434,16 @@ export class ChatPanelManager implements vscode.Disposable {
         await this.sendModelList(managed);
         if (managed.state.agentId) await this.post(managed.panel, { type: "session.bound", agentId: managed.state.agentId });
         if (managed.state.agentId && connection.available) {
+          await this.restoreConversationHistory(managed, connection.client);
+          // Completed messages come from durable history. Only the active request
+          // can still need its in-memory acceptance replay.
+          if (managed.controller?.running) {
+            for (const started of (managed.startedMessages ?? []).slice(-1)) await this.post(managed.panel, started);
+          }
           await this.ensureController(managed);
           try { await managed.controller?.reconnect(); }
           catch (error) {
-            await this.post(managed.panel, { type: "host.notice", level: "error", text: `Unable to check the active run: ${error instanceof Error ? error.message : String(error)}` });
+            await this.post(managed.panel, { type: "host.notice", level: "error", text: localize("ui.unable.to.check.the.active.run.0", error instanceof Error ? describeLocalizedMessage(error.message) ?? error.message : String(error)) });
           }
         }
         this.scheduleAgentList(managed, true);
@@ -407,8 +452,14 @@ export class ChatPanelManager implements vscode.Disposable {
           void this.refreshBranch(managed);
         }
         return;
+      case "message.copy":
+        await vscode.env.clipboard.writeText(message.text);
+        return;
       case "reference.copy":
         await vscode.env.clipboard.writeText(message.id);
+        return;
+      case "image.resolve":
+        await this.post(managed.panel, { type: "image.resolved", href: message.href, src: await readMarkdownImage(message.href, (vscode.workspace.workspaceFolders ?? []).map(folder => folder.uri.fsPath)) });
         return;
       case "link.open":
         await this.openLink(managed, message.href);
@@ -444,7 +495,7 @@ export class ChatPanelManager implements vscode.Disposable {
           ...(managed.state.verifiedWorkRunId ? { verifiedWorkRunId: managed.state.verifiedWorkRunId } : {})
         })) {
           await this.post(managed.panel, { type: "decision.pending", runId: null });
-          await this.post(managed.panel, { type: "host.notice", level: "warning", text: "This request has already been answered or has expired. Reply directly in the current conversation." });
+          await this.post(managed.panel, { type: "host.notice", level: "warning", text: localize("ui.this.request.has.already.been.answered.or.has.expired.reply.directly.in.the.current.conversation") });
         }
         return;
       case "composer.settings":
@@ -478,6 +529,10 @@ export class ChatPanelManager implements vscode.Disposable {
           await managed.controller.cancel();
         }
         return;
+      case "conversation.clear": {
+        await this.transitionConversation(managed);
+        return;
+      }
       case "sessions.request":
         await this.sendSessionList(managed);
         return;
@@ -492,7 +547,7 @@ export class ChatPanelManager implements vscode.Disposable {
         return;
       case "session.select":
         if (managed.sessionTransition) {
-          await this.post(managed.panel, { type: "host.notice", level: "warning", text: "Another session is loading." });
+          await this.post(managed.panel, { type: "host.notice", level: "warning", text: localize("ui.another.session.is.loading") });
           return;
         }
         const transition = this.selectSession(managed, message.agentId);
@@ -540,6 +595,14 @@ export class ChatPanelManager implements vscode.Disposable {
         ? target.path
         : resolve(workspaceRoot ?? this.context.extensionUri.fsPath, target.path);
       const uri = vscode.Uri.file(filePath);
+      // Archives are downloadable artifacts, not text documents or editor previews.
+      if (/\.(?:zip|7z|rar|tar|tgz|gz|bz2|xz)$/i.test(filePath)) {
+        const destination = await vscode.window.showSaveDialog({ defaultUri: uri });
+        if (!destination) return;
+        if (destination.scheme === uri.scheme && destination.authority === uri.authority && destination.path === uri.path) return;
+        await vscode.workspace.fs.copy(uri, destination, { overwrite: true });
+        return;
+      }
       // Let VS Code select the file's editor (including the remote image viewer).
       // Explicit line links still require a text editor for selection/reveal.
       if (target.line === undefined) {
@@ -557,7 +620,7 @@ export class ChatPanelManager implements vscode.Disposable {
       await this.post(managed.panel, {
         type: "host.notice",
         level: "error",
-        text: `Unable to open the link: ${error instanceof Error ? error.message : String(error)}`
+        text: localize("ui.unable.to.open.the.link.0", error instanceof Error ? describeLocalizedMessage(error.message) ?? error.message : String(error))
       });
     }
   }
@@ -610,32 +673,101 @@ export class ChatPanelManager implements vscode.Disposable {
       return;
     }
     const agentId = managed.state.agentId;
-    const running = managed.controller?.running === true;
-    const runId = managed.controller?.runId;
-    if (running && !runId) {
-      await this.post(managed.panel, { type: "agents.list", agents: [] });
-      return;
-    }
-    const connection = await this.connectRuntime();
-    if (!connection.available) {
-      await this.post(managed.panel, { type: "host.notice", level: "error", text: connection.diagnostic });
-      return;
-    }
+    if (managed.disposed || managed.agentRefreshInFlight) return;
+    managed.agentRefreshInFlight = true;
     try {
-      const agents = await connection.client.listChildSessions(agentId, running ? runId : undefined);
-      if (managed.state.agentId !== agentId || (managed.controller?.running === true) !== running || managed.controller?.runId !== runId) return;
-      await this.post(managed.panel, { type: "agents.list", agents });
+      const connection = await this.connectRuntime();
+      if (!connection.available) return;
+      let agents = await connection.client.listChildSessions(agentId);
+      const workflows = await connection.client.advanceWorkflows?.(agentId, agents);
+      if (workflows?.length) agents = await connection.client.listChildSessions(agentId);
+      if (managed.disposed || managed.state.agentId !== agentId) return;
+      await this.post(managed.panel, { type: "agents.list", agents, workflows });
+      if (workflows) await this.reportWorkflowResults(managed, workflows);
+      await this.continueBackgroundWork(managed, agents.filter(agent => !workflows?.some(flow => flow.workAgentId === agent.agentId || flow.verificationAgentId === agent.agentId ||
+        (Array.isArray((flow.workflow as { tasks?: unknown[] } | undefined)?.tasks) &&
+          ((flow.workflow as { tasks: { workAgentId?: string; verificationAgentId?: string }[] }).tasks).some(task =>
+            task.workAgentId === agent.agentId || task.verificationAgentId === agent.agentId)))));
     } catch (error) {
       await this.post(managed.panel, {
         type: "host.notice",
         level: "error",
         text: error instanceof Error ? error.message : String(error)
       });
+    } finally {
+      managed.agentRefreshInFlight = false;
+      if (!managed.disposed && managed.state.agentId === agentId) this.scheduleAgentList(managed);
     }
   }
 
+  private async reportWorkflowResults(managed: ManagedPanel, workflows: readonly Record<string, unknown>[]): Promise<void> {
+    const key = `agentFactory.workflowResults.${managed.state.agentId}`;
+    const states = { ...this.context.workspaceState?.get<Record<string, string>>(key) };
+    for (const flow of workflows) {
+      if (typeof flow.loopId !== "string" || typeof flow.status !== "string") continue;
+      if (flow.status === "active") { states[flow.loopId] = "active"; continue; }
+      if (states[flow.loopId] === flow.status || states[flow.loopId] === `delivery-error:${flow.status}`) continue;
+      if (managed.disposed || managed.backgroundContinuation || managed.controller?.running ||
+          managed.pendingMessageIds?.size || !managed.controller || managed.controller.conversationResetBlockedReason) continue;
+      managed.backgroundContinuation = true;
+      const id = flow.loopId;
+      const status = flow.status;
+      void managed.controller.send(`[Engine workflow result — not a new Human request]
+${JSON.stringify(flow)}
+The engine owns execution and has stopped at this recorded state. Report the complete result or the exact exception to the Human. Do not dispatch a next task, restart this workflow, or grant missing approval.`, [], { taskMode: "direct" }, () => {
+        states[id] = status;
+        void this.context.workspaceState?.update(key, states);
+      }).catch(error => {
+        states[id] = `delivery-error:${status}`;
+        void this.context.workspaceState?.update(key, states);
+        return this.post(managed.panel, { type: "host.notice", level: "error", text: String(error) });
+      }).finally(() => { managed.backgroundContinuation = false; });
+    }
+    await this.context.workspaceState?.update(key, states);
+  }
+
+  private async continueBackgroundWork(managed: ManagedPanel, agents: readonly import("../agent-factory/agent-client").ChildAgentSession[]): Promise<void> {
+    const key = `agentFactory.background.${managed.state.agentId}`;
+    const saved = this.context.workspaceState?.get<Record<string, string>>(key);
+    const states = { ...saved };
+    const terminal = new Set(["completed", "failed", "cancelled", "needs-human-decision"]);
+    const pending = [];
+    for (const agent of agents) {
+      if (!agent.runId) continue;
+      const id = `${agent.agentId}/${agent.runId}`;
+      if (!saved) states[id] = agent.status;
+      else if (terminal.has(agent.status) && states[id] !== agent.status && states[id] !== `delivery-error:${agent.status}`) pending.push(agent);
+      else if (!terminal.has(agent.status)) states[id] = agent.status;
+    }
+    await this.context.workspaceState?.update(key, states);
+    if (managed.disposed || managed.backgroundContinuation || managed.controller?.running ||
+        managed.pendingMessageIds?.size || !managed.controller || managed.controller.conversationResetBlockedReason || !pending.length) return;
+    // Keep distinct workflow routes separate; later polls deliver the remaining events.
+    const child = pending.find(child => child.taskMode && child.taskMode !== "direct");
+    if (!child) return;
+    managed.backgroundContinuation = true;
+    const notification = `[Background workflow continuation — not a new Human request]
+${JSON.stringify(child)}
+Inspect this exact child result and the existing workflow from conversation context. Reconcile its existing loop and continue only the captured, already-authorized route. Do not duplicate dispatch. If the child needs a Human decision or failed, report it; do not automatically grant approval or retry failed work. Return promptly after any next child is accepted. Answer any pending Human questions while preserving this workflow.`;
+    let accepted = false;
+    void managed.controller.send(notification, [], { taskMode: child.taskMode }, () => {
+      accepted = true;
+      states[`${child.agentId}/${child.runId}`] = child.status;
+      void Promise.resolve(this.context.workspaceState?.update(key, states)).catch(error => this.post(managed.panel, { type: "host.notice", level: "error", text: String(error) }));
+    }).catch(error => this.post(managed.panel, { type: "host.notice", level: "error", text: String(error) }))
+      .finally(async () => {
+        try {
+          if (!accepted) {
+            states[`${child.agentId}/${child.runId}`] = `delivery-error:${child.status}`;
+            await this.context.workspaceState?.update(key, states);
+            if (!managed.disposed) await this.post(managed.panel, { type: "host.notice", level: "error", text: localize("ui.background.continuation.failed", child.agentId, child.runId!) });
+          }
+        } finally { managed.backgroundContinuation = false; }
+      }).catch(error => this.post(managed.panel, { type: "host.notice", level: "error", text: String(error) }));
+  }
+
   private scheduleAgentList(managed: ManagedPanel, immediate = false): void {
-    if (!managed.state.agentId || (managed.state.role ?? "main") !== "main") return;
+    if (managed.disposed || !managed.state.agentId || (managed.state.role ?? "main") !== "main") return;
     const elapsed = Date.now() - (managed.lastAgentRefreshAt ?? 0);
     const delay = immediate ? 0 : Math.max(0, AGENT_REFRESH_INTERVAL_MS - elapsed);
     if (managed.agentRefreshTimer) {
@@ -663,7 +795,7 @@ export class ChatPanelManager implements vscode.Disposable {
         await this.post(managed.panel, {
           type: "host.notice",
           level: "warning",
-          text: "Unable to find the work or verification session called by Main Agent."
+          text: localize("ui.unable.to.find.the.work.or.verification.session.called.by.main.agent")
         });
         return;
       }
@@ -725,7 +857,7 @@ export class ChatPanelManager implements vscode.Disposable {
       await this.post(managed.panel, {
         type: "host.notice",
         level: "warning",
-        text: "Other Main Agent sessions can only be loaded from a Main Agent panel."
+        text: localize("ui.other.main.agent.sessions.can.only.be.loaded.from.a.main.agent.panel")
       });
       return;
     }
@@ -735,7 +867,7 @@ export class ChatPanelManager implements vscode.Disposable {
       await this.post(managed.panel, {
         type: "host.notice",
         level: "warning",
-        text: "Load another session after the current run finishes."
+        text: localize("ui.load.another.session.after.the.current.run.finishes")
       });
       return;
     }
@@ -754,11 +886,12 @@ export class ChatPanelManager implements vscode.Disposable {
     try {
       const sessions = await connection.client.listSessions();
       if (managed.disposed) return;
-      if (!sessions.some((session) => session.agentId === agentId)) {
+      const selectedSession = sessions.find((session) => session.agentId === agentId);
+      if (!selectedSession) {
         await this.post(managed.panel, {
           type: "host.notice",
           level: "warning",
-          text: "The selected Main Agent session was not found in the current project."
+          text: localize("ui.the.selected.main.agent.session.was.not.found.in.the.current.project")
         });
         await this.post(managed.panel, { type: "sessions.list", sessions });
         return;
@@ -767,7 +900,7 @@ export class ChatPanelManager implements vscode.Disposable {
         await this.post(managed.panel, {
           type: "host.notice",
           level: "warning",
-          text: "Load another session after the current run finishes."
+          text: localize("ui.load.another.session.after.the.current.run.finishes")
         });
         return;
       }
@@ -782,12 +915,17 @@ export class ChatPanelManager implements vscode.Disposable {
       managed.controller = undefined;
       managed.executionMode = undefined;
       managed.executionModeExplicit = false;
-      managed.state = { ...managed.state, agentId, contextUsedTokens: undefined, contextWindowTokens: undefined, weeklyUsedPercent: undefined };
+      managed.state = {
+        ...managed.state, agentId, conversationId: selectedSession.conversationId,
+        contextUsedTokens: undefined, contextWindowTokens: undefined, weeklyUsedPercent: undefined
+      };
       await this.post(managed.panel, { type: "execution.updated", mode: managed.executionMode });
       if (managed.disposed) return;
       await this.rememberAgent(managed.state);
       if (managed.disposed) return;
-      await this.post(managed.panel, { type: "session.bound", agentId, reset: true });
+      await this.post(managed.panel, { type: "session.bound", agentId, reset: true, conversationId: selectedSession.conversationId });
+      if (managed.disposed) return;
+      await this.restoreConversationHistory(managed, connection.client);
       if (managed.disposed) return;
       await this.reconnectController(managed);
       if (managed.disposed) return;
@@ -838,6 +976,7 @@ export class ChatPanelManager implements vscode.Disposable {
         onBound: (agentId) => {
           managed.state = { ...managed.state, agentId, contextUsedTokens: undefined, contextWindowTokens: undefined, weeklyUsedPercent: undefined };
           this.rememberAgent(managed.state);
+          if (!this.context.workspaceState?.get(`agentFactory.background.${agentId}`)) void this.context.workspaceState?.update(`agentFactory.background.${agentId}`, {});
           void this.post(managed.panel, { type: "execution.updated", mode: managed.executionMode ?? this.defaultExecutionMode() });
           void this.post(managed.panel, { type: "session.bound", agentId });
           this.scheduleAgentList(managed, true);
@@ -865,11 +1004,11 @@ export class ChatPanelManager implements vscode.Disposable {
         onQueueChanged: (count) => {
           void this.post(managed.panel, { type: "queue.updated", count });
         },
-        onAssistantText: (responseText, phase, runId) => {
-          void this.post(managed.panel, { type: "chat.assistant", text: responseText, phase, runId });
+        onAssistantText: (responseText, phase, runId, localization) => {
+          void this.post(managed.panel, { type: "chat.assistant", text: responseText, phase, runId, ...(localization ? { localization: { text: localization } } : {}) });
         },
-        onDecision: (runId) => {
-          void this.post(managed.panel, { type: "decision.pending", runId });
+        onDecision: (runId, canApprove) => {
+          void this.post(managed.panel, { type: "decision.pending", runId, canApprove });
         },
         onHumanDecision: (text, submission) => {
           void this.post(managed.panel, { type: "chat.human-decision", text, submission });
@@ -899,6 +1038,112 @@ export class ChatPanelManager implements vscode.Disposable {
     }
   }
 
+  private async transitionConversation(managed: ManagedPanel): Promise<void> {
+    if (managed.sessionTransition) {
+      await this.post(managed.panel, { type: "host.notice", level: "warning", text: localize("ui.another.session.is.loading") });
+      return;
+    }
+    const transition = this.clearConversation(managed);
+    managed.sessionTransition = transition;
+    try {
+      await transition;
+    } finally {
+      if (managed.sessionTransition === transition) managed.sessionTransition = undefined;
+    }
+  }
+
+  private async clearConversation(managed: ManagedPanel): Promise<void> {
+    if ((managed.state.role ?? "main") !== "main") {
+      await this.post(managed.panel, { type: "host.notice", level: "error", text: localize("ui.only.main.agent.conversations.can.be.cleared") });
+      return;
+    }
+    await this.ensureController(managed);
+    if (!managed.controller) return;
+    if (managed.pendingMessageIds?.size) {
+      await this.post(managed.panel, { type: "host.notice", level: "warning", text: localize("ui.wait.for.pending.messages.to.be.accepted.or.rejected.before.clearing.the.conversation") });
+      return;
+    }
+    const blocked = managed.controller.conversationResetBlockedReason;
+    if (blocked) {
+      await this.post(managed.panel, { type: "host.notice", level: "warning", text: blocked });
+      return;
+    }
+    if (managed.state.agentId) {
+      const connection = await this.connectRuntime();
+      if (!connection.available) {
+        await this.post(managed.panel, { type: "host.notice", level: "error", text: connection.diagnostic });
+        return;
+      }
+      let activeChildren: readonly import("../agent-factory/agent-client").ChildAgentSession[];
+      try {
+        activeChildren = (await connection.client.listChildSessions(managed.state.agentId))
+          .filter(child => ["accepted", "queued", "starting", "running", "cancelling"].includes(child.status));
+      } catch (error) {
+        await this.post(managed.panel, {
+          type: "host.notice", level: "error",
+          text: localize("ui.unable.to.confirm.child.agent.state.0", error instanceof Error ? describeLocalizedMessage(error.message) ?? error.message : String(error))
+        });
+        return;
+      }
+      if (activeChildren.length) {
+        await this.post(managed.panel, {
+          type: "host.notice", level: "warning",
+          text: localize("ui.wait.for.the.active.work.or.verification.agent.to.finish.before.clearing.the.conversation")
+        });
+        return;
+      }
+    }
+    const answer = await vscode.window.showWarningMessage(
+      localize("ui.start.a.new.conversation.in.this.chat.the.main.agent.identity.settings.and.historical.run.records.will.be.retained"),
+      { modal: true },
+      localize("ui.clear.conversation")
+    );
+    if (answer !== localize("ui.clear.conversation")) return;
+    if (managed.pendingMessageIds?.size || managed.controller.conversationResetBlockedReason) {
+      await this.post(managed.panel, {
+        type: "host.notice", level: "warning",
+        text: managed.pendingMessageIds?.size
+          ? localize("ui.a.message.is.now.pending.wait.for.it.to.be.accepted.or.rejected.before.clearing.the.conversation")
+          : managed.controller.conversationResetBlockedReason ?? localize("ui.the.conversation.is.busy")
+      });
+      return;
+    }
+    try {
+      const reset = await managed.controller.resetConversation();
+      managed.state = {
+        ...managed.state,
+        conversationId: reset.conversationId,
+        contextUsedTokens: undefined,
+        contextWindowTokens: undefined,
+        weeklyUsedPercent: undefined
+      };
+      await this.rememberAgent(managed.state);
+      await this.post(managed.panel, { type: "conversation.cleared", conversationId: reset.conversationId });
+      await vscode.window.showInformationMessage(localize("ui.started.a.new.conversation.historical.run.records.were.retained"));
+      this.scheduleAgentList(managed, true);
+    } catch (error) {
+      await this.post(managed.panel, {
+        type: "host.notice", level: "error",
+        text: localize("ui.unable.to.clear.the.conversation.0", error instanceof Error ? describeLocalizedMessage(error.message) ?? error.message : String(error))
+      });
+    }
+  }
+
+  private async restoreConversationHistory(managed: ManagedPanel, client: import("../agent-factory/agent-client").AgentRuntimeClient): Promise<void> {
+    const agentId = managed.state.agentId;
+    if (!agentId || !client.history) return;
+    try {
+      const history = await client.history(agentId);
+      if (managed.disposed || managed.state.agentId !== agentId ||
+          history.conversationId !== managed.state.conversationId) return;
+      await this.post(managed.panel, { type: "conversation.history", agentId, history });
+    } catch (error) {
+      if (managed.disposed || managed.state.agentId !== agentId) return;
+      await this.post(managed.panel, { type: "host.notice", level: "error",
+        text: `Unable to restore conversation history: ${error instanceof Error ? error.message : String(error)}` });
+    }
+  }
+
   private async sendChat(
     managed: ManagedPanel,
     text: string,
@@ -919,19 +1164,29 @@ export class ChatPanelManager implements vscode.Disposable {
     const goalMode = (managed.state.role ?? "main") === "main" && execution.taskMode !== "verification" && execution.goal;
     const goalObjective = goalMode ? text.trim() : undefined;
     if (goalMode && (!goalObjective || goalObjective.length > 4000)) {
-      throw new Error("Enter a chat message of 1–4,000 characters or turn off Goal.");
+      throw new Error(localize("ui.enter.a.chat.message.of.1.4.000.characters.or.turn.off.goal"));
     }
     await this.ensureController(managed);
-    if (!managed.controller) throw new Error("Unable to connect to the runtime. Queued messages have been preserved.");
+    if (!managed.controller) throw new Error(localize("ui.unable.to.connect.to.the.runtime.queued.messages.have.been.preserved"));
     const preparedAttachments = await Promise.all(attachments.map(async (attachment) => {
       if (attachment.kind !== "image") return attachment;
       const uri = await this.imageAttachmentPath(managed.state.panelId, attachment.id);
-      if (!uri) throw new Error(`Unable to locate the original image attachment: ${attachment.name}`);
+      if (!uri) throw new Error(localize("ui.unable.to.locate.the.original.image.attachment.0", attachment.name));
       const mediaType = imageMediaType(uri.fsPath);
-      if (!mediaType) throw new Error(`Unsupported image attachment: ${attachment.name}`);
+      if (!mediaType) throw new Error(localize("ui.unsupported.image.attachment.0", attachment.name));
       const info = await vscode.workspace.fs.stat(uri);
       return { ...attachment, uri: uri.toString(), mediaType, size: info.size, previewUri: undefined };
     }));
+    if (this.context.workspaceState && managed.state.agentId && (managed.state.role ?? "main") === "main") {
+      const key = `agentFactory.background.${managed.state.agentId}`;
+      if (!this.context.workspaceState?.get(key)) {
+        const connection = await this.connectRuntime();
+        if (connection.available) {
+          const existing = await connection.client.listChildSessions(managed.state.agentId);
+          await this.context.workspaceState?.update(key, Object.fromEntries(existing.filter(child => child.runId).map(child => [`${child.agentId}/${child.runId}`, child.status])));
+        }
+      }
+    }
     let started = false;
     void managed.controller.send(text, preparedAttachments, {
       ...((managed.state.role ?? "main") === "main" && (!managed.state.agentId || executionModeExplicit) ? { executionMode } : {}),
@@ -979,8 +1234,8 @@ export class ChatPanelManager implements vscode.Disposable {
       // Windows/Linux cannot select files and folders together: that opens a folder picker.
       canSelectFolders: false,
       canSelectMany: true,
-      title: "Attach files to chat",
-      openLabel: "Attach to chat"
+      title: localize("ui.attach.files.to.chat"),
+      openLabel: localize("ui.attach.to.chat")
     });
     if (!uris?.length) {
       return;
@@ -1030,11 +1285,11 @@ export class ChatPanelManager implements vscode.Disposable {
       }
     } catch (error) {
       await Promise.all(createdImageIds.map(id => this.removeImageAttachment(managed, id, false)));
-      await this.post(panel, { type: "host.notice", level: "error", text: `Unable to prepare attachments: ${error instanceof Error ? error.message : String(error)}` });
+      await this.post(panel, { type: "host.notice", level: "error", text: localize("ui.unable.to.prepare.attachments.0", error instanceof Error ? describeLocalizedMessage(error.message) ?? error.message : String(error)) });
       return;
     }
     if (attachments.length) await this.post(panel, { type: "attachments.add", attachments });
-    if (rejectedImages) await this.post(panel, { type: "host.notice", level: "warning", text: `Excluded ${rejectedImages} images due to attachment limits (up to 8 images, 10 MiB each, 20 MiB total).` });
+    if (rejectedImages) await this.post(panel, { type: "host.notice", level: "warning", text: localize("ui.excluded.0.images.due.to.attachment.limits.up.to.8.images.10.mib.each.20.mib.total", rejectedImages) });
   }
 
   private async createTextAttachment(managed: ManagedPanel, text: string): Promise<void> {
@@ -1063,7 +1318,7 @@ export class ChatPanelManager implements vscode.Disposable {
       await this.post(managed.panel, {
         type: "host.notice",
         level: "error",
-        text: `Unable to create a file from pasted text: ${error instanceof Error ? error.message : String(error)}`
+        text: localize("ui.unable.to.create.a.file.from.pasted.text.0", error instanceof Error ? describeLocalizedMessage(error.message) ?? error.message : String(error))
       });
     }
   }
@@ -1075,13 +1330,13 @@ export class ChatPanelManager implements vscode.Disposable {
     try {
       const content = decodeBrowserImage(message.data, message.size, message.mediaType);
       const stagedBytes = [...managed.imageAttachments.values()].reduce((total, size) => total + size, 0);
-      if (!canStageImage(managed.imageAttachments.size, stagedBytes, content.byteLength)) throw new Error("Image attachment limit exceeded.");
+      if (!canStageImage(managed.imageAttachments.size, stagedBytes, content.byteLength)) throw new Error(localize("ui.image.attachment.limit.exceeded"));
       const attachment = await this.persistImage(managed.panel, managed.state.panelId, message.id, message.name, message.mediaType, content);
       managed.imageAttachments.set(message.id, content.byteLength);
       await this.post(managed.panel, { type: "attachments.add", attachments: [attachment] });
     } catch (error) {
       await this.post(managed.panel, { type: "attachment.rejected", id: message.id });
-      await this.post(managed.panel, { type: "host.notice", level: "error", text: `Unable to save the image attachment: ${error instanceof Error ? error.message : String(error)}` });
+      await this.post(managed.panel, { type: "host.notice", level: "error", text: localize("ui.unable.to.save.the.image.attachment.0", error instanceof Error ? describeLocalizedMessage(error.message) ?? error.message : String(error)) });
     }
   }
 
@@ -1105,7 +1360,7 @@ export class ChatPanelManager implements vscode.Disposable {
   private async persistImage(panel: vscode.WebviewPanel, panelId: string, id: string, name: string, mediaType: string, content: Buffer): Promise<AttachmentReference> {
     assertAttachmentScopeId(panelId, "panel");
     assertAttachmentScopeId(id, "attachment");
-    if (content.byteLength < 1 || content.byteLength > 10 * 1024 * 1024 || !hasImageSignature(content, mediaType)) throw new Error("The image is unsupported or too large.");
+    if (content.byteLength < 1 || content.byteLength > 10 * 1024 * 1024 || !hasImageSignature(content, mediaType)) throw new Error(localize("ui.the.image.is.unsupported.or.too.large"));
     const suffix = imageSuffix(mediaType);
     const directory = vscode.Uri.joinPath(this.context.globalStorageUri, "chat-images", panelId, id.slice(0, 2));
     await vscode.workspace.fs.createDirectory(directory);
@@ -1131,7 +1386,7 @@ export class ChatPanelManager implements vscode.Disposable {
   private async openImageAttachment(managed: ManagedPanel, id: string): Promise<void> {
     const uri = await this.imageAttachmentPath(managed.state.panelId, id);
     if (!uri) {
-      await this.post(managed.panel, { type: "host.notice", level: "warning", text: "The original image no longer exists." });
+      await this.post(managed.panel, { type: "host.notice", level: "warning", text: localize("ui.the.original.image.no.longer.exists") });
       return;
     }
     await vscode.commands.executeCommand("vscode.open", uri);
@@ -1143,7 +1398,7 @@ export class ChatPanelManager implements vscode.Disposable {
       if (uri) await unlink(uri.fsPath);
       managed.imageAttachments.delete(id);
     } catch (error) {
-      if (report) await this.post(managed.panel, { type: "host.notice", level: "warning", text: `Unable to clean up temporary image files: ${error instanceof Error ? error.message : String(error)}` });
+      if (report) await this.post(managed.panel, { type: "host.notice", level: "warning", text: localize("ui.unable.to.clean.up.temporary.image.files.0", error instanceof Error ? describeLocalizedMessage(error.message) ?? error.message : String(error)) });
     }
   }
 
@@ -1170,7 +1425,7 @@ export class ChatPanelManager implements vscode.Disposable {
       try {
         await vscode.workspace.getConfiguration("agentFactory.mainChat").update("statusItems", items, target);
       } catch {
-        await this.post(panel, { type: "host.notice", level: "warning", text: "Unable to save status bar settings. Reloading the saved settings." });
+        await this.post(panel, { type: "host.notice", level: "warning", text: localize("ui.unable.to.save.status.bar.settings.reloading.the.saved.settings") });
       } finally {
         this.pendingStatusWrites -= 1;
         await this.refreshStatusItems();
@@ -1194,7 +1449,13 @@ export class ChatPanelManager implements vscode.Disposable {
   }
 
   private async post(panel: vscode.WebviewPanel, message: HostMessage): Promise<void> {
-    await panel.webview.postMessage(message);
+    const text = (message.type === "host.notice" || message.type === "run.progress")
+      ? describeLocalizedMessage(message.text) : message.type === "chat.assistant" ? message.localization?.text : undefined;
+    const error = message.type === "goal.updated" && message.error ? describeLocalizedMessage(message.error) : undefined;
+    const localized: import("../../protocol/messages").LocalizedHostMessage = text || error
+      ? { ...message, localization: { ...(text ? { text } : {}), ...(error ? { error } : {}) } }
+      : message;
+    await panel.webview.postMessage(localized);
   }
 
   private findActivePanel(): ManagedPanel | undefined {
@@ -1209,7 +1470,7 @@ export class ChatPanelManager implements vscode.Disposable {
 }
 
 function workspaceName(): string {
-  return vscode.workspace.name ?? "No workspace";
+  return vscode.workspace.name ?? localize("ui.no.workspace");
 }
 
 function parseLocalLink(href: string): { path: string; line?: number; column?: number } {
@@ -1257,25 +1518,25 @@ function imageMediaType(path: string): string | undefined {
 
 function imageSuffix(mediaType: string): string {
   const suffix = ({ "image/png": ".png", "image/jpeg": ".jpg", "image/gif": ".gif", "image/webp": ".webp" } as Record<string, string>)[mediaType];
-  if (!suffix) throw new Error("Unsupported image format.");
+  if (!suffix) throw new Error(localize("ui.unsupported.image.format"));
   return suffix;
 }
 
 async function readSafeImage(path: string): Promise<Buffer> {
-  if (await realpath(path) !== resolve(path)) throw new Error("Symbolic link images cannot be attached.");
+  if (await realpath(path) !== resolve(path)) throw new Error(localize("ui.symbolic.link.images.cannot.be.attached"));
   const file = await openFile(path, fsConstants.O_RDONLY | fsConstants.O_NOFOLLOW);
   try {
     const before = await file.stat();
-    if (!before.isFile() || before.size < 1 || before.size > 10 * 1024 * 1024) throw new Error("Image size is outside the allowed range.");
+    if (!before.isFile() || before.size < 1 || before.size > 10 * 1024 * 1024) throw new Error(localize("ui.image.size.is.outside.the.allowed.range"));
     const content = await file.readFile();
     const after = await file.stat();
-    if (before.dev !== after.dev || before.ino !== after.ino || before.size !== after.size || before.mtimeMs !== after.mtimeMs) throw new Error("The image changed while being read.");
+    if (before.dev !== after.dev || before.ino !== after.ino || before.size !== after.size || before.mtimeMs !== after.mtimeMs) throw new Error(localize("ui.the.image.changed.while.being.read"));
     return content;
   } finally { await file.close(); }
 }
 
 function assertAttachmentScopeId(value: string, label: string): void {
-  if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(value)) throw new Error(`${label} image scope is invalid`);
+  if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(value)) throw new Error(localize("ui.0.image.scope.is.invalid", label));
 }
 
 function uniqueUris(uris: readonly vscode.Uri[]): vscode.Uri[] {
@@ -1288,5 +1549,5 @@ function fallbackHtml(error: unknown): string {
     .replaceAll("&", "&amp;")
     .replaceAll("<", "&lt;")
     .replaceAll(">", "&gt;");
-  return `<!doctype html><html><body><p>Unable to load the chat view.</p><pre>${escaped}</pre></body></html>`;
+  return `<!doctype html><html><body><p>${localize("ui.unable.to.load.the.chat.view")}</p><pre>${escaped}</pre></body></html>`;
 }

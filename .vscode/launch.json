@@ -12,7 +12,10 @@
       "outFiles": [
         "${workspaceFolder}/dist/**/*.js"
       ],
-      "preLaunchTask": "npm: build"
+      "preLaunchTask": "npm: build",
+      "env": {
+        "AGENT_FACTORY_DEV_PLUGIN_ROOT": "${workspaceFolder}/../plugin"
+      }
     }
   ],
   "inputs": [

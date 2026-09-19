@@ -27,6 +27,10 @@ async function checkStatusCustomizationLayout(page) {
     await page.evaluate(items => window.postMessage({ type: 'status.updated', items }, '*'), items);
     await page.waitForFunction(items => JSON.stringify(window.saved.statusItems) === JSON.stringify(items), items);
   };
+  await page.evaluate(() => {
+    window.dispatchEvent(new MessageEvent('message', { data: { type: 'workUnits.summary', activeUnits: 0, totalCalled: 0 } }));
+    window.dispatchEvent(new MessageEvent('message', { data: { type: 'goal.updated', goal: { status: 'active', tokensUsed: 0, timeUsedSeconds: 0, tokenBudget: 1000 } } }));
+  });
   try {
     for (const width of [420, 900]) {
       await page.setViewportSize({ width, height: 740 });
@@ -34,6 +38,7 @@ async function checkStatusCustomizationLayout(page) {
       assert.equal(await settings.isHidden(), true);
       const before = await layout();
       await button.click();
+      await page.locator("#settings-tab-status").click();
       await settings.locator('#settings-panel-status').evaluate(element => { element.scrollTop = 0; });
       const box = await settings.boundingBox();
       assert.ok(box && box.height > 200, 'Catalog must be usable, not squeezed into the footer track');
@@ -93,3 +98,28 @@ async function checkStatusCustomizationLayout(page) {
 }
 
 module.exports = { checkStatusCustomizationLayout };
+
+async function checkStatusAvailability(page) {
+  const emit = data => page.evaluate(data => window.dispatchEvent(new MessageEvent('message', { data })), data);
+  const items = ['status', 'goalTokens', 'goalBudget', 'goalTime', 'contextUsed', 'weekly'];
+  await emit({ type: 'host.initialize', runtimeAvailable: true, statusItems: items, capabilities: { submit: {}, send: {} } });
+  await emit({ type: 'goal.updated', goal: null });
+  await page.locator('#status-settings-button').click();
+  await page.locator('#settings-tab-status').click();
+  const bar = page.locator('#status-bar');
+  for (const id of items.slice(1)) {
+    assert.equal(await bar.locator(`[data-item-id="${id}"]`).count(), 0);
+    assert.equal(await page.locator(`#status-settings [data-item-id="${id}"]`).count(), 0);
+  }
+  assert.equal(await page.getByText('Some metrics are unavailable', { exact: true }).count(), 0);
+  await emit({ type: 'goal.updated', goal: { status: 'active', tokensUsed: 0, timeUsedSeconds: 0, tokenBudget: 500 } });
+  for (const id of ['goalTokens', 'goalBudget', 'goalTime']) {
+    assert.equal(await bar.locator(`[data-item-id="${id}"]`).count(), 1, 'Zero is a provided value');
+    assert.equal(await page.locator(`#status-settings [data-item-id="${id}"]`).count(), 1);
+  }
+  await emit({ type: 'goal.updated', goal: null });
+  assert.equal(await bar.locator('[data-item-id="goalBudget"]').count(), 0);
+  assert.deepEqual(await page.evaluate(() => window.saved.statusItems), items, 'Hidden selections retain their saved order');
+  await page.locator('#status-settings-close').click();
+}
+module.exports.checkStatusAvailability = checkStatusAvailability;

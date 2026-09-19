@@ -10,6 +10,7 @@ export interface ChatPanelState {
   readonly panelId: string;
   readonly title: string;
   readonly agentId?: string;
+  readonly conversationId?: string;
   readonly role?: "main" | "work" | "verification";
   readonly verifiedWorkRunId?: string;
   readonly model?: string;
@@ -80,6 +81,9 @@ export function restoreChatState(
       : {}),
     ...(readNonEmptyString(value.agentId)
       ? { agentId: readNonEmptyString(value.agentId) }
+      : {}),
+    ...(readManagedId(value.conversationId)
+      ? { conversationId: readManagedId(value.conversationId) }
       : {})
   };
 }

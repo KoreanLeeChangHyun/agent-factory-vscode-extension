@@ -15,6 +15,9 @@ const clipboardWrites = [];
 const externalOpens = [];
 const editorOpens = [];
 const textOpens = [];
+let saveDestination;
+const saveDialogs = [];
+const fileCopies = [];
 const textEditor = { revealRange() {} };
 const vscode = {
   ViewColumn: { Active: -1 },
@@ -29,8 +32,8 @@ const vscode = {
   Range: class { constructor(start, end) { this.start = start; this.end = end; } },
   TextEditorRevealType: { InCenterIfOutsideViewport: 1 },
   ConfigurationTarget: { Global: 1 },
-  window: { async showTextDocument() { return textEditor; } },
-  workspace: { async openTextDocument(uri) { textOpens.push(uri); return {}; }, getConfiguration() { return {
+  window: { async showSaveDialog(options) { saveDialogs.push(options); return saveDestination; }, async showTextDocument() { return textEditor; } },
+  workspace: { fs: { async copy(...args) { fileCopies.push(args); } }, async openTextDocument(uri) { textOpens.push(uri); return {}; }, getConfiguration() { return {
     get(_key, fallback) { return configuredMode ?? fallback; },
     async update(...args) { configUpdates.push(args); }
   }; } }
@@ -130,6 +133,44 @@ test("host forwards chosen execution mode for new and existing Main sessions", a
   await manager.sendChat(managed, "role override", [], { ...execution, agentPermissions });
   assert.equal(calls.at(-1).executionMode, "bypass");
   assert.deepEqual(calls.at(-1).agentPermissions, agentPermissions);
+});
+
+test("conversation clear publishes its boundary before a racing chat is promoted", async () => {
+  let releaseBoundary;
+  const boundaryReady = new Promise(resolve => { releaseBoundary = resolve; });
+  const posted = [];
+  const manager = new module.exports.ChatPanelManager({}, {}, () => [], async () => { throw new Error("not used"); });
+  manager.clearConversation = async managed => {
+    await boundaryReady;
+    managed.state.conversationId = "conversation-new";
+    await manager.post(managed.panel, { type: "conversation.cleared", conversationId: "conversation-new" });
+  };
+  const submission = { taskMode: "direct", businessMode: "normal", goal: false };
+  const managed = {
+    state: { role: "main", panelId: "panel" },
+    panel: { webview: { async postMessage(message) { posted.push(message); return true; } } },
+    imageAttachments: new Map(),
+    controller: {
+      async send(_text, _attachments, _execution, onStarted) { onStarted(submission); }
+    }
+  };
+
+  const clearing = manager.handleMessage(managed, { type: "conversation.clear" });
+  const sending = manager.handleMessage(managed, {
+    type: "chat.send", id: "racing-message", text: "new request", attachments: [],
+    execution: { taskMode: "direct", businessMode: "normal", fast: false, goal: false }
+  });
+  await new Promise(resolve => setImmediate(resolve));
+  assert.deepEqual(posted, []);
+  assert.equal(managed.pendingMessageIds.has("racing-message"), true);
+
+  releaseBoundary();
+  await Promise.all([clearing, sending]);
+  await new Promise(resolve => setImmediate(resolve));
+  assert.deepEqual(posted.map(message => message.type), ["conversation.cleared", "chat.started"]);
+  assert.deepEqual(JSON.parse(JSON.stringify(posted[1])), {
+    type: "chat.started", id: "racing-message", text: "new request", attachments: [], submission
+  });
 });
 
 
@@ -384,6 +425,46 @@ test("sidebar session writes serialize read-modify-write updates", async () => {
   assert.deepEqual(Array.from(storage.get("agentFactory.sidebar.agents"), state => state.panelId), ["one", "two"]);
 });
 
+test("opening and updating saved sidebar chats preserves their order across reload", async () => {
+  const key = "agentFactory.sidebar.agents";
+  const storage = new Map([[key, [
+    { panelId: "one", title: "One", role: "main" },
+    { panelId: "two", title: "Two", role: "main", agentId: "main-two" },
+    { panelId: "three", title: "Three", role: "main" }
+  ]]]);
+  const context = { workspaceState: {
+    get: key => storage.get(key),
+    async update(key, value) { storage.set(key, value); }
+  } };
+  const createManager = () => new module.exports.ChatPanelManager(context, {}, () => [], async () => ({ available: false }));
+  const manager = createManager();
+  manager.composerPreferences = () => ({});
+  manager.webviewOptions = () => ({});
+  manager.attach = async (_panel, state) => manager.rememberAgent(state);
+  const originalCreate = vscode.window.createWebviewPanel;
+  vscode.window.createWebviewPanel = () => ({});
+  try {
+    for (const index of [0, 1, 0]) {
+      await manager.openSidebarAgent((await manager.sidebarAgents())[index].state);
+      assert.deepEqual(Array.from(await manager.sidebarAgents(), entry => entry.state.panelId), ["one", "two", "three"]);
+    }
+    await manager.renameSidebarAgent((await manager.sidebarAgents())[1].state, "Renamed");
+    // A newly bound runtime identity updates the draft's existing slot.
+    await manager.rememberAgent({ panelId: "one", title: "One", role: "main", agentId: "main-one" });
+    await manager.rememberAgent({ panelId: "four", title: "Four", role: "main" });
+    const restored = await createManager().sidebarAgents();
+    assert.deepEqual(Array.from(restored, entry => entry.state.panelId), ["one", "two", "three", "four"]);
+    assert.equal(restored[1].state.title, "Renamed");
+    assert.equal(restored[0].state.agentId, "main-one");
+    // Duplicate runtime identities are still coalesced without moving the entry.
+    storage.get(key).push({ panelId: "duplicate", title: "Duplicate", role: "main", agentId: "main-two" });
+    await manager.rememberAgent({ panelId: "two", title: "Updated", role: "main", agentId: "main-two" });
+    assert.deepEqual(Array.from(await manager.sidebarAgents(), entry => entry.state.panelId), ["one", "two", "three", "four"]);
+  } finally {
+    vscode.window.createWebviewPanel = originalCreate;
+  }
+});
+
 test("sidebar catalog merges runtime sessions with saved names and reuses an open panel", async () => {
   const storage = new Map();
   const posted = [], revealed = [];
@@ -476,4 +557,123 @@ test("status customization serializes rapid edits, broadcasts saved empty select
   } finally {
     vscode.workspace.getConfiguration = original;
   }
+});
+
+
+test("background completion wakes Main once, waits for conversation, and survives reload", async () => {
+  const storage = new Map([["agentFactory.background.main-one", {}]]);
+  const context = { workspaceState: { get: key => storage.get(key), async update(key, value) { storage.set(key, structuredClone(value)); } } };
+  const manager = new module.exports.ChatPanelManager(context, {}, () => [], async () => ({ available: false }));
+  const calls = [];
+  const managed = { state: { agentId: "main-one", role: "main" }, controller: {
+    running: false,
+    async send(text, attachments, execution, accepted) { calls.push({ text, execution }); accepted(); }
+  } };
+  const child = { agentId: "work-one", runId: "run-one", parentRunId: "parent-one", role: "work", status: "running", taskMode: "work-verification" };
+  await manager.continueBackgroundWork(managed, [child]);
+  assert.equal(calls.length, 0);
+  child.status = "completed";
+  managed.controller.running = true;
+  await manager.continueBackgroundWork(managed, [child]);
+  assert.equal(calls.length, 0, "Questions in progress take priority");
+  managed.controller.running = false;
+  managed.controller.conversationResetBlockedReason = "Human decision pending";
+  await manager.continueBackgroundWork(managed, [child]);
+  assert.equal(calls.length, 0, "Background updates must not approve pending decisions");
+  managed.controller.conversationResetBlockedReason = undefined;
+  await manager.continueBackgroundWork(managed, [child]);
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].execution.taskMode, "work-verification");
+  assert.match(calls[0].text, /run-one/);
+  assert.match(calls[0].text, /Do not duplicate dispatch/);
+  const restored = new module.exports.ChatPanelManager(context, {}, () => [], async () => ({ available: false }));
+  await restored.continueBackgroundWork(managed, [child]);
+  assert.equal(calls.length, 1);
+  await restored.continueBackgroundWork(managed, [{ ...child, runId: "run-two", status: "failed" }]);
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(calls.length, 2);
+  assert.match(calls[1].text, /do not automatically grant approval or retry failed work/);
+});
+
+test("initial background discovery does not replay historical completed work", async () => {
+  const storage = new Map();
+  const manager = new module.exports.ChatPanelManager({ workspaceState: {
+    get: key => storage.get(key), async update(key, value) { storage.set(key, value); }
+  } }, {}, () => [], async () => ({ available: false }));
+  let sends = 0;
+  await manager.continueBackgroundWork({ state: { agentId: "main-old" }, controller: { async send() { sends++; } } },
+    [{ agentId: "work-old", runId: "run-old", status: "completed", taskMode: "work" }]);
+  assert.equal(sends, 0);
+});
+
+test("uncertain background acceptance is surfaced without automatic retry storms", async () => {
+  const storage = new Map([["agentFactory.background.main-one", {}]]), posted = [];
+  const manager = new module.exports.ChatPanelManager({ workspaceState: {
+    get: key => storage.get(key), async update(key, value) { storage.set(key, structuredClone(value)); }
+  } }, {}, () => [], async () => ({ available: false }));
+  let sends = 0;
+  const managed = { state: { agentId: "main-one" }, panel: { webview: { async postMessage(message) { posted.push(message); } } },
+    controller: { async send() { sends++; } } };
+  const child = { agentId: "work-one", runId: "run-one", status: "completed", taskMode: "work" };
+  await manager.continueBackgroundWork(managed, [child]);
+  await new Promise(resolve => setImmediate(resolve));
+  await manager.continueBackgroundWork(managed, [child]);
+  assert.equal(sends, 1);
+  assert.equal(storage.get("agentFactory.background.main-one")["work-one/run-one"], "delivery-error:completed");
+  assert.equal(posted.at(-1).type, "host.notice");
+  assert.equal(posted.at(-1).level, "error");
+});
+
+ test("question copy preserves original multiline text through the host clipboard", async () => {
+  const manager = new module.exports.ChatPanelManager({}, {}, () => [], async () => { throw new Error("not used"); });
+  const managed = { panel: { webview: { async postMessage() { return true; } } } };
+  const text = "  질문 원문\n두 번째 줄 <tag> & **내용**  ";
+  await manager.handleMessage(managed, { type: "message.copy", text });
+  assert.equal(clipboardWrites.at(-1), text);
+  const before = clipboardWrites.length;
+  for (const text of [null, "", "x".repeat(100001)]) await manager.handleMessage(managed, { type: "message.copy", text });
+  assert.equal(clipboardWrites.length, before);
+});
+
+ test("archive links offer binary save, preserve cancellation and avoid editor fallback", async () => {
+  const notices = [];
+  const manager = new module.exports.ChatPanelManager({ extensionUri: { fsPath: '/workspace' } }, {}, () => [], async () => { throw new Error('not used'); });
+  const managed = { panel: { webview: { async postMessage(message) { notices.push(message); return true; } } } };
+  const editorsBefore = editorOpens.length, textsBefore = textOpens.length;
+  saveDestination = { scheme: 'vscode-local', authority: '', path: '/Downloads/icons.zip' };
+  for (const href of ['/workspace/out/icons.zip', 'file:///tmp/icon%20set.ZIP', './out/icons.tar.gz']) {
+    await manager.handleMessage(managed, { type: 'link.open', href });
+    assert.equal(fileCopies.at(-1)[1], saveDestination);
+    assert.equal(fileCopies.at(-1)[2].overwrite, true);
+  }
+  assert.equal(saveDialogs.at(-1).defaultUri.fsPath, '/workspace/out/icons.tar.gz');
+  const copiesBefore = fileCopies.length;
+  saveDestination = undefined;
+  await manager.handleMessage(managed, { type: 'link.open', href: '/workspace/out/icons.zip' });
+  assert.equal(fileCopies.length, copiesBefore, 'Cancelling must not copy or open the archive');
+  assert.equal(editorOpens.length, editorsBefore);
+  assert.equal(textOpens.length, textsBefore);
+  assert.equal(notices.length, 0);
+});
+
+test("task-assigned workers stay under the engine instead of legacy continuation", async () => {
+  const agents = ['loop-owner', 'default-verifier', 'second-worker', 'second-verifier', 'legacy-worker']
+    .map(agentId => ({ agentId, runId: 'run-one', status: 'completed', role: 'work' }));
+  const workflows = [{ workAgentId: 'loop-owner', verificationAgentId: 'default-verifier', workflow: {
+    tasks: [{ workAgentId: 'second-worker', verificationAgentId: 'second-verifier' }]
+  } }];
+  const manager = new module.exports.ChatPanelManager({}, {}, () => [], async () => ({ available: true, client: {
+    async listChildSessions() { return agents; }, async advanceWorkflows() { return workflows; }
+  } }));
+  let legacy;
+  manager.scheduleAgentList = () => {};
+  manager.reportWorkflowResults = async () => {};
+  manager.continueBackgroundWork = async (_managed, children) => { legacy = children; };
+  const messages = [];
+  await manager.sendAgentList({ state: { agentId: 'main-test' }, panel: { webview: {
+    async postMessage(message) { messages.push(message); return true; }
+  } } });
+  assert.deepEqual(legacy.map(agent => agent.agentId), ['legacy-worker']);
+  assert.equal(messages[0].type, 'agents.list');
 });

@@ -1,8 +1,12 @@
+import { localize } from "../../common/localization";
+import { submissionContext } from "./submission-context";
+import { historyPresentation } from "./history-presentation";
 import type { AgentPermissions } from "../../common/types/agent-permissions";
 import type { AgentModels } from "../../common/types/agent-models";
 import { constants as fsConstants } from "node:fs";
 import { spawn } from "node:child_process";
 import { runtimeEnvironment } from "./process-environment";
+import { pluginRuntimeEnvironment } from "./development-plugin";
 import { lstat, mkdtemp, open as openFile, readFile, readdir, realpath, rm, writeFile } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
@@ -33,6 +37,7 @@ export interface ExecutionCapabilities {
   readonly fast: boolean;
   readonly goal: boolean;
   readonly images?: boolean;
+  readonly automaticRequestHash?: boolean;
   readonly taskModes?: readonly TaskMode[];
   readonly diagnostic?: string;
 }
@@ -70,6 +75,7 @@ export interface NativeGoal {
 export type GoalAction = "get" | "refresh" | "pause" | "cancel" | "disable" | "reopen";
 
 export interface RunAcceptance {
+  readonly preparationGuidance?: string;
   readonly agentId: string;
   readonly runId: string;
 }
@@ -87,6 +93,7 @@ export interface RunStatus {
 }
 
 export interface RunResult extends RunStatus {
+  readonly decisionKind?: "approval" | "clarification";
   readonly text: string;
 }
 
@@ -118,12 +125,28 @@ export type RunUpdate =
 
 export interface MainAgentSession {
   readonly agentId: string;
-  readonly sessionId: string;
+  readonly sessionId?: string;
+  readonly conversationId?: string;
   readonly updatedAt?: string;
   readonly model?: string;
 }
 
+export interface ConversationHistory {
+  readonly conversationId?: string;
+  readonly messages: readonly {
+    readonly type: "user" | "assistant";
+    readonly id: string;
+    readonly runId: string;
+    readonly text: string;
+    readonly phase?: "final";
+    readonly submission?: import("../../protocol/messages").MessageSubmission;
+  }[];
+}
+
 export interface ChildAgentSession {
+  readonly taskBinding?: Record<string, unknown>;
+  readonly parentRunId?: string;
+  readonly taskMode?: TaskMode;
   readonly agentId: string;
   readonly runId?: string;
   readonly role: "work" | "verification";
@@ -133,6 +156,7 @@ export interface ChildAgentSession {
 }
 
 export interface AgentRuntimeClient {
+  history?(agentId: string): Promise<ConversationHistory>;
   capabilities(agentId?: string): Promise<{ readonly submit: ExecutionCapabilities; readonly send: ExecutionCapabilities; readonly executionMode?: "read-only" | "workspace-write" | "danger-full-access" | "bypass" }>;
   submit(agentId: string, message: string, execution: ExecutionOptions, images?: readonly RuntimeImageInput[]): Promise<RunAcceptance>;
   send(agentId: string, message: string, execution: ExecutionOptions, images?: readonly RuntimeImageInput[]): Promise<RunAcceptance>;
@@ -142,8 +166,10 @@ export interface AgentRuntimeClient {
   cancel(agentId: string, runId: string): Promise<void>;
   activeRun(agentId: string): Promise<RunAcceptance | undefined>;
   goal(agentId: string, action: GoalAction): Promise<{ readonly goal?: NativeGoal | null; readonly accepted?: RunAcceptance; readonly error?: string }>;
+  resetConversation(agentId: string): Promise<{ readonly conversationId: string; readonly startedAt: string }>;
   listSessions(): Promise<readonly MainAgentSession[]>;
   listChildSessions(mainAgentId: string, runId?: string): Promise<readonly ChildAgentSession[]>;
+  advanceWorkflows?(mainAgentId: string, agents: readonly ChildAgentSession[]): Promise<readonly Record<string, unknown>[]>;
 }
 
 export class AgentFactoryClient implements AgentRuntimeClient {
@@ -172,10 +198,10 @@ export class AgentFactoryClient implements AgentRuntimeClient {
         || value.projectRoot !== await realProjectRoot(this.projectRoot)
         || value.runtimeRoot !== join(value.home, "projects", value.projectId)
         || value.agentsRoot !== join(value.home, "projects", value.projectId, "agents")) {
-      throw new Error("Invalid Agent Factory storage location response.");
+      throw new Error(localize("ui.invalid.agent.factory.storage.location.response"));
     }
     const expectedHome = resolve(process.env.AGENT_FACTORY_HOME ?? join(homedir(), ".agent-factory"));
-    if (value.home !== expectedHome) throw new Error("Agent Factory storage home binding does not match.");
+    if (value.home !== expectedHome) throw new Error(localize("ui.agent.factory.storage.home.binding.does.not.match"));
     await checkManagedComponents(value.agentsRoot as string);
     this.eventSnapshot = undefined;
     this.contextUsageSnapshots.clear();
@@ -184,7 +210,7 @@ export class AgentFactoryClient implements AgentRuntimeClient {
 
   private async managedPath(agentId: string, ...members: string[]): Promise<string> {
     if (!MANAGED_ID.test(agentId) || members.some((member) => !MANAGED_ID.test(member))) {
-      throw new Error("Invalid Agent Factory managed path.");
+      throw new Error(localize("ui.invalid.agent.factory.managed.path"));
     }
     const location = await this.location();
     const path = join(location.agentsRoot, agentId, ...members);
@@ -195,18 +221,18 @@ export class AgentFactoryClient implements AgentRuntimeClient {
   private eventSnapshot?: { readonly path: string; readonly signature: string; readonly lines: readonly string[] };
 
   public async capabilities(agentId?: string): ReturnType<AgentRuntimeClient["capabilities"]> {
-    return this.capabilityCache.get(agentId ?? "", () => this.readCapabilities(agentId));
+    return this.capabilityCache.get(JSON.stringify([this.execPath, agentId ?? ""]), () => this.readCapabilities(agentId));
   }
 
   private async readCapabilities(agentId?: string): ReturnType<AgentRuntimeClient["capabilities"]> {
     const document = await this.command(["capabilities", "--project-root", this.projectRoot, ...(agentId ? ["--agent", agentId] : [])]);
     if (document.kind !== "execution-capabilities" || document.schemaVersion !== "0.1.0") {
-      throw new Error("Update to an Agent Factory runtime that provides native capability information.");
+      throw new Error(localize("ui.update.to.an.agent.factory.runtime.that.provides.native.capability.information"));
     }
     const readCapabilities = (value: unknown): ExecutionCapabilities => {
       const record = readRecord(value, "execution capabilities");
       for (const key of ["model", "reasoning", "fast", "goal"]) {
-        if (typeof record[key] !== "boolean") throw new Error("Invalid Codex capability response format.");
+        if (typeof record[key] !== "boolean") throw new Error(localize("ui.invalid.codex.capability.response.format"));
       }
       return {
         ...record,
@@ -225,32 +251,46 @@ export class AgentFactoryClient implements AgentRuntimeClient {
   public async goal(agentId: string, action: GoalAction): Promise<{ goal?: NativeGoal | null; accepted?: RunAcceptance; error?: string }> {
     const document = await this.command(["goal", "--project-root", this.projectRoot, "--agent", agentId, action]);
     if (document.kind === "ack") {
-      if (action !== "reopen") throw new Error("Agent Factory Goal control accepted an unexpected run.");
+      if (action !== "reopen") throw new Error(localize("ui.agent.factory.goal.control.accepted.an.unexpected.run"));
       return { accepted: readAcceptance(document, agentId) };
     }
     if (document.kind === "goal-control") return {};
     return { goal: readNativeGoal(document.goal), ...(typeof document.error === "string" ? { error: document.error } : {}) };
   }
 
+  public async resetConversation(agentId: string): Promise<{ conversationId: string; startedAt: string }> {
+    const document = await this.command([
+      "reset-conversation", "--project-root", this.projectRoot, "--agent", agentId
+    ]);
+    if (document.kind !== "conversation-reset" || document.agentId !== agentId ||
+        typeof document.conversationId !== "string" || !MANAGED_ID.test(document.conversationId) ||
+        typeof document.startedAt !== "string" || document.historyRetained !== true) {
+      throw new Error(localize("ui.the.agent.factory.runtime.returned.an.invalid.conversation.reset.response"));
+    }
+    this.contextUsageSnapshots.clear();
+    this.eventSnapshot = undefined;
+    return { conversationId: document.conversationId, startedAt: document.startedAt };
+  }
+
   private async checkedExecution(command: "submit" | "send", execution: ExecutionOptions, agentId?: string, hasImages = false): Promise<string[]> {
     const supported = (await this.capabilities(agentId))[command];
     if (execution.taskMode && !supported.taskModes?.includes(execution.taskMode)) {
-      throw new Error("Update the Agent Factory plugin and Codex to versions that support the selected task mode.");
+      throw new Error(localize("ui.update.the.agent.factory.plugin.and.codex.to.versions.that.support.the.selected.task.mode"));
     }
     if (hasImages && supported.images !== true) {
       throw new Error(
-        `The current Agent Factory runtime has an incompatible ${command} image transfer contract. ` +
-        "Install or update the Agent Factory plugin to a version compatible with this extension, then " +
-        "reload the VS Code extension host and try attaching the images again."
+        localize("ui.the.current.agent.factory.runtime.has.an.incompatible.0.image.transfer.contract", command) +
+        localize("ui.install.or.update.the.agent.factory.plugin.to.a.version.compatible.with.this.extension.then") +
+        localize("ui.reload.the.vs.code.extension.host.and.try.attaching.the.images.again")
       );
     }
     const unsupported = [
-      execution.model && !supported.model ? "model changes" : "",
-      execution.reasoningEffort && !supported.reasoning ? "reasoning effort" : "",
-      execution.fast && !supported.fast ? "Fast" : "",
-      execution.goalMode && !supported.goal ? "Goal" : ""
+      execution.model && !supported.model ? localize("host.setting.model") : "",
+      execution.reasoningEffort && !supported.reasoning ? localize("host.setting.reasoning") : "",
+      execution.fast && !supported.fast ? localize("ui.fast") : "",
+      execution.goalMode && !supported.goal ? localize("ui.goal") : ""
     ].filter(Boolean);
-    if (unsupported.length) throw new Error(`The current runtime ${command} command does not support these settings: ${unsupported.join(", ")}.`);
+    if (unsupported.length) throw new Error(localize("ui.the.current.runtime.0.command.does.not.support.these.settings.1", command, unsupported.join(", ")));
     return executionArguments(execution);
   }
   public constructor(
@@ -259,7 +299,8 @@ export class AgentFactoryClient implements AgentRuntimeClient {
     private readonly pythonCommand = "python3",
     private readonly codexHome = process.env.CODEX_HOME ?? join(homedir(), ".codex"),
     private readonly rediscoverExecPath?: () => Promise<string>,
-    private readonly now = Date.now
+    private readonly now = Date.now,
+    private readonly developmentRoot?: string
   ) {}
 
   public async diagnose(): Promise<{ readonly available: true } | { readonly available: false; readonly diagnostic: string }> {
@@ -271,7 +312,7 @@ export class AgentFactoryClient implements AgentRuntimeClient {
       }
       return {
         available: false,
-        diagnostic: output.stderr.trim() || "Unable to run Agent Factory exec.py."
+        diagnostic: output.stderr.trim() || localize("ui.unable.to.run.agent.factory.exec.py")
       };
     } catch (error) {
       return {
@@ -282,7 +323,7 @@ export class AgentFactoryClient implements AgentRuntimeClient {
   }
 
   public async submit(agentId: string, message: string, execution: ExecutionOptions, images: readonly RuntimeImageInput[] = []): Promise<RunAcceptance> {
-    const document = await this.inputCommand([
+    const { document, preparationGuidance } = await this.inputCommand([
       "submit",
       "--project-root",
       this.projectRoot,
@@ -293,11 +334,11 @@ export class AgentFactoryClient implements AgentRuntimeClient {
       ...executionPolicyArguments(execution.executionMode),
       ...await this.checkedExecution("submit", execution, undefined, images.length > 0)
     ], message, images);
-    return readAcceptance(document, agentId);
+    return { ...readAcceptance(document, agentId), ...(preparationGuidance ? { preparationGuidance } : {}) };
   }
 
   public async send(agentId: string, message: string, execution: ExecutionOptions, images: readonly RuntimeImageInput[] = []): Promise<RunAcceptance> {
-    const document = await this.inputCommand([
+    const { document, preparationGuidance } = await this.inputCommand([
       "send",
       "--project-root",
       this.projectRoot,
@@ -306,14 +347,28 @@ export class AgentFactoryClient implements AgentRuntimeClient {
       ...executionPolicyArguments(execution.executionMode),
       ...await this.checkedExecution("send", execution, agentId, images.length > 0)
     ], message, images);
-    return readAcceptance(document, agentId);
+    return { ...readAcceptance(document, agentId), ...(preparationGuidance ? { preparationGuidance } : {}) };
   }
 
-  private async inputCommand(arguments_: string[], message: string, images: readonly RuntimeImageInput[]): Promise<Record<string, unknown>> {
-    if (images.length === 0) return this.command([...arguments_, "--message", message]);
-    if (images.length > 8) throw new Error("You can attach up to 8 images.");
+  private async inputCommand(arguments_: string[], message: string, images: readonly RuntimeImageInput[]): Promise<{ document: Record<string, unknown>; preparationGuidance?: string }> {
+    let preparationGuidance: string | undefined;
+    const modeIndex = arguments_.indexOf("--task-mode");
+    if (modeIndex >= 0 && arguments_[modeIndex + 1] !== "direct") {
+      preparationGuidance = await submissionContext(this.projectRoot, this.execPath);
+    }
+    return { document: await this.rawInputCommand(arguments_, message + (preparationGuidance ?? ""), images), preparationGuidance };
+  }
+
+  private async rawInputCommand(arguments_: string[], message: string, images: readonly RuntimeImageInput[]): Promise<Record<string, unknown>> {
+    if (images.length === 0 && Buffer.byteLength(message, "utf8") <= 64 * 1024) return this.command([...arguments_, "--message", message]);
+    if (images.length > 8) throw new Error(localize("ui.you.can.attach.up.to.8.images"));
     const directory = await mkdtemp(join(tmpdir(), "agent-factory-input-"));
     try {
+      if (images.length === 0) {
+        const requestPath = join(directory, "request.md");
+        await writeFile(requestPath, message, { mode: 0o600, flag: "wx" });
+        return await this.command([...arguments_, "--request-file", requestPath]);
+      }
       const contractImages: { path: string; mediaType: string }[] = [];
       let total = 0;
       for (const [index, image] of images.entries()) {
@@ -322,13 +377,13 @@ export class AgentFactoryClient implements AgentRuntimeClient {
         let content: Buffer;
         try {
           const before = await source.stat();
-          if (!before.isFile() || before.size < 1 || before.size > 10 * 1024 * 1024) throw new Error("Image file size is outside the allowed range.");
+          if (!before.isFile() || before.size < 1 || before.size > 10 * 1024 * 1024) throw new Error(localize("ui.image.file.size.is.outside.the.allowed.range"));
           content = await source.readFile();
           const after = await source.stat();
-          if (before.dev !== after.dev || before.ino !== after.ino || before.size !== after.size || before.mtimeMs !== after.mtimeMs) throw new Error("The image file changed while being read.");
+          if (before.dev !== after.dev || before.ino !== after.ino || before.size !== after.size || before.mtimeMs !== after.mtimeMs) throw new Error(localize("ui.the.image.file.changed.while.being.read"));
         } finally { await source.close(); }
         total += content.byteLength;
-        if (total > 20 * 1024 * 1024) throw new Error("Total image size must not exceed 20 MiB.");
+        if (total > 20 * 1024 * 1024) throw new Error(localize("ui.total.image.size.must.not.exceed.20.mib"));
         const name = `${String(index).padStart(2, "0")}${suffix}`;
         await writeFile(join(directory, name), content, { mode: 0o600, flag: "wx" });
         contractImages.push({ path: name, mediaType: image.mediaType });
@@ -375,23 +430,70 @@ export class AgentFactoryClient implements AgentRuntimeClient {
     return undefined;
   }
 
+  public async history(agentId: string): Promise<ConversationHistory> {
+    const sessionPath = await this.managedPath(agentId, "session.json");
+    const readSession = async () => readRecord(JSON.parse((await readManagedBytes(sessionPath, 256 * 1024)).toString("utf8")), "history session");
+    const session = await readSession();
+    if (session.agentId !== agentId) throw new Error("Invalid conversation history binding.");
+    const conversationId = typeof session.conversationId === "string" ? session.conversationId : undefined;
+    const runsPath = await this.managedPath(agentId, "runs");
+    const entries = await readdir(runsPath, { withFileTypes: true }).catch(error => {
+      if (isMissingFile(error)) return [];
+      throw error;
+    });
+    const messages: ConversationHistory["messages"][number][] = [];
+    let bytes = 0;
+    for (const entry of entries.filter(entry => entry.isDirectory() && !entry.isSymbolicLink() && MANAGED_ID.test(entry.name))
+      .sort((a, b) => a.name.localeCompare(b.name))) {
+      const statePath = await this.managedPath(agentId, "runs", entry.name, "state.json");
+      let state: Record<string, unknown>;
+      try { state = readRecord(JSON.parse((await readManagedBytes(statePath, 256 * 1024)).toString("utf8")), "history run"); }
+      catch (error) { if (isMissingFile(error)) continue; throw error; }
+      if (state.agentId !== agentId || state.runId !== entry.name) throw new Error("Invalid conversation history run binding.");
+      if ((state.conversationId ?? undefined) !== conversationId) continue;
+      // The controller replays active-run events separately after history is restored.
+      if (!["completed", "failed", "cancelled", "needs-human-decision"].includes(String(state.status))) continue;
+      const requestPath = await this.managedPath(agentId, "runs", entry.name, "request.md");
+      const request = (await readManagedBytes(requestPath, 8 * 1024 * 1024)).toString("utf8");
+      bytes += Buffer.byteLength(request);
+      if (bytes > 32 * 1024 * 1024) throw new Error("Conversation history exceeds the loading limit.");
+      const taskMode = TASK_MODES.includes(state.taskMode as TaskMode) ? state.taskMode as TaskMode : "direct";
+      const options = readRecordOrUndefined(state.executionOptions);
+      messages.push({ type: "user", id: `history-user-${entry.name}`, runId: entry.name,
+        ...historyPresentation(request, taskMode, options?.goalMode === true) });
+      if (["completed", "failed", "cancelled", "needs-human-decision"].includes(String(state.status))) {
+        const resultPath = await this.managedPath(agentId, "runs", entry.name, "result.md");
+        let response = "";
+        try { response = await this.readManagedResult(resultPath, agentId, entry.name); }
+        catch (error) { if (!isMissingFile(error)) throw error; }
+        bytes += Buffer.byteLength(response);
+        if (bytes > 32 * 1024 * 1024) throw new Error("Conversation history exceeds the loading limit.");
+        if (response) messages.push({ type: "assistant", id: `history-assistant-${entry.name}`, runId: entry.name, text: response, phase: "final" });
+      }
+    }
+    if (((await readSession()).conversationId ?? undefined) !== conversationId) {
+      throw new Error("The conversation changed while history was loading. Reopen the conversation.");
+    }
+    return { conversationId, messages };
+  }
+
   public async updates(agentId: string, runId: string, cursor: number): Promise<RunUpdates> {
     if (!MANAGED_ID.test(agentId) || !MANAGED_ID.test(runId) || !Number.isInteger(cursor) || cursor < 0) {
-      throw new Error("Invalid Agent Factory progress event request.");
+      throw new Error(localize("ui.invalid.agent.factory.progress.event.request"));
     }
     const path = await this.managedPath(agentId, "runs", runId, "events.jsonl");
     let lines: readonly string[];
     try {
       const info = await lstat(path);
       if (!info.isFile() || info.size > MAX_EVENTS_BYTES) {
-        throw new Error("The Agent Factory event file is missing or exceeds the size limit.");
+        throw new Error(localize("ui.the.agent.factory.event.file.is.missing.or.exceeds.the.size.limit"));
       }
       const signature = `${info.dev}:${info.ino}:${info.size}:${info.mtimeMs}:${info.ctimeMs}`;
       if (this.eventSnapshot?.path === path && this.eventSnapshot.signature === signature) {
         lines = this.eventSnapshot.lines;
       } else {
         const bytes = await readManagedBytes(path, MAX_EVENTS_BYTES);
-        if (bytes.length > MAX_EVENTS_BYTES) throw new Error("The Agent Factory event file exceeds the size limit.");
+        if (bytes.length > MAX_EVENTS_BYTES) throw new Error(localize("ui.the.agent.factory.event.file.exceeds.the.size.limit"));
         const content = bytes.toString("utf8");
         const splitLines = content.split("\n");
         if (!content.endsWith("\n")) splitLines.pop();
@@ -487,6 +589,7 @@ export class AgentFactoryClient implements AgentRuntimeClient {
     return {
       ...diagnostics,
       status,
+      ...(status === "needs-human-decision" && (run.decisionKind === "approval" || run.decisionKind === "clarification") ? { decisionKind: run.decisionKind } : {}),
       text
     };
   }
@@ -529,7 +632,7 @@ export class AgentFactoryClient implements AgentRuntimeClient {
   public async listSessions(): Promise<readonly MainAgentSession[]> {
     const document = await this.command(["list", "--project-root", this.projectRoot]);
     if (!Array.isArray(document.agents) || document.agents.length > 1_000) {
-      throw new Error("Invalid Agent Factory session list response.");
+      throw new Error(localize("ui.invalid.agent.factory.session.list.response"));
     }
     return document.agents.flatMap((value) => {
       const agent = readRecordOrUndefined(value);
@@ -538,32 +641,71 @@ export class AgentFactoryClient implements AgentRuntimeClient {
         agent.role !== "main" ||
         typeof agent.agentId !== "string" ||
         !MANAGED_ID.test(agent.agentId) ||
-        typeof agent.sessionId !== "string" ||
-        !agent.sessionId
+        (agent.sessionId !== null && (typeof agent.sessionId !== "string" || !agent.sessionId))
       ) {
         return [];
       }
       return [{
         agentId: agent.agentId,
-        sessionId: agent.sessionId,
+        ...(typeof agent.sessionId === "string" ? { sessionId: agent.sessionId } : {}),
+        ...(typeof agent.conversationId === "string" && MANAGED_ID.test(agent.conversationId)
+          ? { conversationId: agent.conversationId } : {}),
         ...(typeof agent.updatedAt === "string" ? { updatedAt: agent.updatedAt } : {}),
         ...(typeof agent.model === "string" && agent.model ? { model: agent.model } : {})
       }];
     }).sort((left, right) => (right.updatedAt ?? "").localeCompare(left.updatedAt ?? ""));
   }
 
+  public async advanceWorkflows(mainAgentId: string, agents: readonly ChildAgentSession[]): Promise<readonly Record<string, unknown>[]> {
+    const location = await this.location();
+    const snapshots: Record<string, unknown>[] = [];
+    for (const agentId of new Set(agents.filter(agent => agent.role === "work").map(agent => agent.agentId))) {
+      const directory = await this.managedPath(agentId, "loops");
+      const entries = await readdir(directory, { withFileTypes: true }).catch(error => {
+        if ((error as NodeJS.ErrnoException).code === "ENOENT") return [];
+        throw error;
+      });
+      for (const entry of entries.slice(-100)) {
+        if (!entry.isDirectory() || !MANAGED_ID.test(entry.name)) continue;
+        const path = await this.managedPath(agentId, "loops", entry.name, "state.json");
+        const info = await lstat(path);
+        if (info.size > MAX_RESULT_BYTES) throw new Error("Workflow state exceeds limit");
+        const state = JSON.parse(await readFile(path, "utf8"));
+        if (!state.workflow || typeof state.parentStatePath !== "string") continue;
+        const parentRun = state.parentStatePath.split(sep).at(-2);
+        if (!parentRun || !MANAGED_ID.test(parentRun) || state.parentStatePath !== await this.managedPath(mainAgentId, "runs", parentRun, "state.json")) continue;
+        const parent = readRecord(JSON.parse((await readManagedBytes(state.parentStatePath, MAX_RESULT_BYTES)).toString("utf8")), "workflow parent run");
+        const policy = readRecord(parent.executionPolicy, "workflow parent execution policy");
+        // Bind both values to the same captured run. The runtime validates the
+        // snapshot against that run and its session before advancing any work.
+        const output = await runBoundedProcess(this.pythonCommand, [join(dirname(this.execPath), "loop.py"),
+          state.status === "active" ? "reconcile" : "status", "--project-root", this.projectRoot,
+          "--runtime-home", location.home, "--project-id", location.projectId,
+          "--work-agent", agentId, "--loop-id", entry.name], COMMAND_TIMEOUT_MS, MAX_PROCESS_OUTPUT_BYTES,
+          { ...pluginRuntimeEnvironment(this.developmentRoot),
+            AGENT_FACTORY_PARENT_STATE: state.parentStatePath,
+            AGENT_FACTORY_EXECUTION_POLICY: JSON.stringify(policy) });
+        const snapshot = JSON.parse(output.stdout);
+        if (output.exitCode !== 0 || snapshot.kind === "error") throw new Error(snapshot.error?.message || "Workflow reconciliation failed");
+        snapshots.push(snapshot);
+      }
+    }
+    return snapshots;
+  }
+
   public async listChildSessions(mainAgentId: string, runId?: string): Promise<readonly ChildAgentSession[]> {
     if (!MANAGED_ID.test(mainAgentId)) {
-      throw new Error("Invalid Main Agent identifier.");
+      throw new Error(localize("ui.invalid.main.agent.identifier"));
     }
-    if (runId !== undefined && !MANAGED_ID.test(runId)) throw new Error("Invalid Main Agent run identifier.");
+    if (runId !== undefined && !MANAGED_ID.test(runId)) throw new Error(localize("ui.invalid.main.agent.run.identifier"));
     const referenced = await this.discoverChildAgents(mainAgentId, runId);
     if (referenced.size === 0) return [];
     const document = await this.command(["list", "--project-root", this.projectRoot]);
     if (!Array.isArray(document.agents) || document.agents.length > 1_000) {
-      throw new Error("Invalid Agent Factory session list response.");
+      throw new Error(localize("ui.invalid.agent.factory.session.list.response"));
     }
     const agents: ChildAgentSession[] = [];
+    const parentModes = new Map<string, TaskMode | undefined>();
     for (const value of document.agents) {
       const agent = readRecordOrUndefined(value);
       if (
@@ -578,9 +720,24 @@ export class AgentFactoryClient implements AgentRuntimeClient {
       const latest = reference.pending
         ? { status: "unknown" }
         : await this.latestRunInfo(agent.agentId, reference.runId);
+      // Read-only status commands in later conversation turns are not dispatch authority.
+      const parentRunId = latest.parentAgentId === mainAgentId && latest.parentRunId ? latest.parentRunId : reference.parentRunId;
+      if (parentRunId && !parentModes.has(parentRunId)) {
+        const path = await this.managedPath(mainAgentId, "runs", parentRunId, "state.json");
+        try {
+          const parent = readRecord(JSON.parse((await readManagedBytes(path, 256 * 1024)).toString("utf8")), "parent run");
+          parentModes.set(parentRunId, TASK_MODES.includes(parent.taskMode as TaskMode) ? parent.taskMode as TaskMode : undefined);
+        } catch (error) {
+          if (!isMissingFile(error)) throw error;
+          parentModes.set(parentRunId, undefined);
+        }
+      }
       agents.push({
+        parentRunId,
+        ...(parentRunId && parentModes.get(parentRunId) ? { taskMode: parentModes.get(parentRunId) } : {}),
         agentId: agent.agentId,
         role: agent.role,
+        ...(latest.taskBinding ? { taskBinding: latest.taskBinding } : {}),
         status: latest.status,
         ...(latest.runId ? { runId: latest.runId } : {}),
         ...(latest.verifiedWorkRunId ? { verifiedWorkRunId: latest.verifiedWorkRunId } : {}),
@@ -637,6 +794,7 @@ export class AgentFactoryClient implements AgentRuntimeClient {
               } catch { /* Command output may also contain ordinary log lines. */ }
             }
           }
+          reference.parentRunId = run.name;
           runChildren.set(reference.agentId, reference);
         }
       }
@@ -647,7 +805,7 @@ export class AgentFactoryClient implements AgentRuntimeClient {
     return childIds;
   }
 
-  private async latestRunInfo(agentId: string, runId?: string): Promise<{ readonly status: string; readonly runId?: string; readonly verifiedWorkRunId?: string }> {
+  private async latestRunInfo(agentId: string, runId?: string): Promise<{ readonly status: string; readonly runId?: string; readonly verifiedWorkRunId?: string; readonly parentAgentId?: string; readonly parentRunId?: string; readonly taskBinding?: Record<string, unknown> }> {
     const runsDirectory = await this.managedPath(agentId, "runs");
     try {
       const runs = (await readdir(runsDirectory, { withFileTypes: true }))
@@ -661,8 +819,11 @@ export class AgentFactoryClient implements AgentRuntimeClient {
           const state = readRecordOrUndefined(JSON.parse((await readManagedBytes(statePath, 256 * 1024)).toString("utf8")));
           if (typeof state?.status === "string" && state.status) {
             return {
+              ...(readRecordOrUndefined(state.taskBinding) ? { taskBinding: readRecordOrUndefined(state.taskBinding) } : {}),
               status: state.status,
               runId: run.name,
+              ...(typeof state.parentAgentId === "string" && MANAGED_ID.test(state.parentAgentId) ? { parentAgentId: state.parentAgentId } : {}),
+              ...(typeof state.parentRunId === "string" && MANAGED_ID.test(state.parentRunId) ? { parentRunId: state.parentRunId } : {}),
               ...(typeof state.verifiedWorkRunId === "string" && MANAGED_ID.test(state.verifiedWorkRunId)
                 ? { verifiedWorkRunId: state.verifiedWorkRunId }
                 : {})
@@ -687,19 +848,19 @@ export class AgentFactoryClient implements AgentRuntimeClient {
     );
     if (output.exitCode !== 0 && ["submit", "send"].includes(arguments_[0] ?? "") && arguments_.includes("--approval-policy") &&
       /unrecognized arguments|unknown option|no such option/i.test(output.stderr)) {
-      throw new Error("The current Agent Factory runtime does not support execution permission selection. Update the plugin and try again.");
+      throw new Error(localize("ui.the.current.agent.factory.runtime.does.not.support.execution.permission.selection.update.the.plugin.and.try.again"));
     }
     let document: unknown;
     try {
       document = JSON.parse(output.stdout);
     } catch {
-      throw new Error(output.stderr.trim() || "The Agent Factory runtime did not return a valid JSON response.");
+      throw new Error(output.stderr.trim() || localize("ui.the.agent.factory.runtime.did.not.return.a.valid.json.response"));
     }
     const record = readRecord(document, "runtime response");
     if (output.exitCode !== 0 || record.kind === "error") {
       const nested = readRecordOrUndefined(record.error);
       const message = typeof nested?.message === "string" ? nested.message : typeof record.message === "string" ? record.message : output.stderr.trim();
-      throw new Error(message || `The Agent Factory runtime command failed with exit code ${output.exitCode}.`);
+      throw new Error(message || localize("ui.the.agent.factory.runtime.command.failed.with.exit.code.0", output.exitCode));
     }
     return record;
   }
@@ -711,17 +872,17 @@ export class AgentFactoryClient implements AgentRuntimeClient {
   ): Promise<ProcessOutput> {
     try {
       const info = await lstat(this.execPath);
-      if (!info.isFile()) throw new Error("Agent Factory exec.py is not a regular file.");
+      if (!info.isFile()) throw new Error(localize("ui.agent.factory.exec.py.is.not.a.regular.file"));
     } catch (error) {
       if (!isMissingFile(error)) throw error;
       await this.refreshExecPath(error);
     }
     try {
-      return await runBoundedProcess(this.pythonCommand, [this.execPath, ...arguments_], timeoutMs, maxOutputBytes);
+      return await runBoundedProcess(this.pythonCommand, [this.execPath, ...arguments_], timeoutMs, maxOutputBytes, pluginRuntimeEnvironment(this.developmentRoot));
     } catch (error) {
       if (!this.rediscoverExecPath || !isMissingFile(error)) throw error;
       await this.refreshExecPath(error);
-      return runBoundedProcess(this.pythonCommand, [this.execPath, ...arguments_], timeoutMs, maxOutputBytes);
+      return runBoundedProcess(this.pythonCommand, [this.execPath, ...arguments_], timeoutMs, maxOutputBytes, pluginRuntimeEnvironment(this.developmentRoot));
     }
   }
 
@@ -740,11 +901,11 @@ export class AgentFactoryClient implements AgentRuntimeClient {
     const expectedPath = await this.managedPath(agentId, "runs", runId, "result.md");
     const resolvedPath = resolve(path);
     if (resolvedPath !== expectedPath) {
-      throw new Error("The Agent Factory runtime returned a result path outside the expected scope.");
+      throw new Error(localize("ui.the.agent.factory.runtime.returned.a.result.path.outside.the.expected.scope"));
     }
     const info = await lstat(resolvedPath);
     if (!info.isFile() || info.size > MAX_RESULT_BYTES) {
-      throw new Error("The Agent Factory result file is missing or exceeds the size limit.");
+      throw new Error(localize("ui.the.agent.factory.result.file.is.missing.or.exceeds.the.size.limit"));
     }
     return (await readManagedBytes(resolvedPath, MAX_RESULT_BYTES)).toString("utf8");
   }
@@ -754,7 +915,7 @@ export function executionPolicyArguments(mode: ExecutionMode = "cli-default"): s
   if (mode === "cli-default") return [];
   const humanApprovalPolicy = mode === "bypass" ? "bypass" : "required";
   if (mode === "bypass") mode = "danger-full-access";
-  if (mode !== "workspace-write" && mode !== "danger-full-access") throw new Error("Invalid execution permissions.");
+  if (mode !== "workspace-write" && mode !== "danger-full-access") throw new Error(localize("ui.invalid.execution.permissions"));
   return ["--sandbox", mode, "--approval-policy", "never", "--human-approval-policy", humanApprovalPolicy];
 }
 
@@ -773,6 +934,7 @@ function executionArguments(execution: ExecutionOptions): string[] {
 }
 
 interface ChildAgentReference {
+  parentRunId?: string;
   readonly agentId: string;
   runId?: string;
   pending?: boolean;
@@ -878,17 +1040,17 @@ async function progressUpdates(line: string, projectRoot: string, ownResultPath:
   const event = readRecordOrUndefined(value);
   if (!event) return [];
   if (event.type === "goal.updated") return [{ kind: "goal", goal: readNativeGoal(event.goal) }];
-  if (event.type === "goal.error") return [{ kind: "goal", goal: null, error: typeof event.message === "string" ? event.message : "Goal status needs attention" }];
-  if (event.type === "goal.continuing") return [statusUpdate("The goal is active. Codex will continue with the next turn.")];
+  if (event.type === "goal.error") return [{ kind: "goal", goal: null, error: typeof event.message === "string" ? event.message : localize("ui.goal.status.needs.attention") }];
+  if (event.type === "goal.continuing") return [statusUpdate(localize("ui.the.goal.is.active.codex.will.continue.with.the.next.turn"))];
   if (event.type === "native.commentary") {
     return typeof event.text === "string" && event.text.trim()
-      ? [{ kind: "commentary", text: event.text }, statusUpdate("Working")]
+      ? [{ kind: "commentary", text: event.text }, statusUpdate(localize("ui.working"))]
       : [];
   }
-  if (event.type === "thread.started") return [statusUpdate("Main Agent connected")];
-  if (event.type === "turn.started") return [statusUpdate("Main Agent is analyzing the request")];
+  if (event.type === "thread.started") return [statusUpdate(localize("ui.main.agent.connected"))];
+  if (event.type === "turn.started") return [statusUpdate(localize("ui.main.agent.is.analyzing.the.request"))];
   if (event.type === "turn.completed") {
-    return [statusUpdate("Finalizing response")];
+    return [statusUpdate(localize("ui.finalizing.response"))];
   }
   const item = readRecordOrUndefined(event.item);
   if (!item || (event.type !== "item.started" && event.type !== "item.completed")) return [];
@@ -901,41 +1063,55 @@ async function progressUpdates(line: string, projectRoot: string, ownResultPath:
         /^(?:.*\/)?(?:cat|head|tail|sed)$/.test(words[0] ?? "") &&
         words.includes(ownResultPath) && words.slice(1).every(word =>
           word === ownResultPath || /^(?:-n|-q|--|-?\d+|\d+(?:,\d+)?p)$/.test(word)));
-      if (ownResultRead) return [statusUpdate("Finalizing response")];
+      if (ownResultRead) return [statusUpdate(localize("ui.finalizing.response"))];
     }
-    const detail = summarizeCommand(item.command) ?? "No command details";
+    const detail = summarizeCommand(item.command) ?? localize("ui.no.command.details");
     const title = summarizeReadActivity(item.command);
     const output = typeof item.aggregatedOutput === "string" ? item.aggregatedOutput : item.aggregated_output;
     const failed = completed && typeof item.exit_code === "number" && item.exit_code !== 0;
     if (title === "Read run request") {
-      return [statusUpdate("Main Agent is analyzing the request")];
+      return [statusUpdate(localize("ui.main.agent.is.analyzing.the.request"))];
     }
     return compactUpdates(
       itemId ? activityUpdate(itemId, "command", failed ? "failed" : completed ? "completed" : "started", detail, undefined, title, typeof output === "string" ? truncate(output, 32768) : undefined) : undefined,
-      statusUpdate(failed ? "Checking command failure" : completed ? "Analyzing results" : "Running command")
+      statusUpdate(failed ? localize("ui.checking.command.failure") : completed ? localize("ui.analyzing.results") : localize("ui.running.command"))
     );
   }
   if (item.type === "file_change") {
     if (changesOnlyManagedRunFiles(item.changes, projectRoot)) {
-      return [statusUpdate(completed ? "Checking response record" : "Recording response")];
+      return [statusUpdate(completed ? localize("ui.checking.response.record") : localize("ui.recording.response"))];
     }
-    const detail = summarizeChanges(item.changes, projectRoot) ?? "No changed file details";
+    const detail = summarizeChanges(item.changes, projectRoot) ?? localize("ui.no.changed.file.details");
     const diff = completed ? await readGitDiff(item.changes, projectRoot) : undefined;
     return compactUpdates(
       itemId ? activityUpdate(itemId, "file", completed ? "completed" : "started", detail, diff) : undefined,
-      statusUpdate(completed ? "Checking Git changes" : "Applying Git changes")
+      statusUpdate(completed ? localize("ui.checking.git.changes") : localize("ui.applying.git.changes"))
+    );
+  }
+  if (item.type === "webSearch" || item.type === "web_search") {
+    const action = readRecordOrUndefined(item.action);
+    const queries = Array.isArray(action?.queries) ? action.queries.filter((query): query is string => typeof query === "string") : [];
+    const detail = queries.length ? queries.join("\n")
+      : typeof action?.query === "string" ? action.query
+      : typeof item.query === "string" ? item.query
+      : typeof action?.url === "string" ? action.url
+      : localize("ui.web.search");
+    const failed = item.status === "failed" || (completed && item.error != null);
+    return compactUpdates(
+      itemId ? activityUpdate(itemId, "tool", failed ? "failed" : completed ? "completed" : "started", truncate(detail, 32768), undefined, localize("ui.web.search")) : undefined,
+      statusUpdate(failed ? localize("ui.web.search.failed") : completed ? localize("ui.analyzing.results") : localize("ui.searching.the.web"))
     );
   }
   if (item.type === "mcp_tool_call") {
-    const detail = [item.server, item.tool].filter((value) => typeof value === "string").join("/") || "No tool details";
+    const detail = [item.server, item.tool].filter((value) => typeof value === "string").join("/") || localize("ui.no.tool.details");
     const failed = completed && item.error !== null && item.error !== undefined;
     return compactUpdates(
       itemId ? activityUpdate(itemId, "tool", failed ? "failed" : completed ? "completed" : "started", detail) : undefined,
-      statusUpdate(failed ? "Checking connected tool failure" : completed ? "Analyzing results" : "Running connected tool")
+      statusUpdate(failed ? localize("ui.checking.connected.tool.failure") : completed ? localize("ui.analyzing.results") : localize("ui.running.connected.tool"))
     );
   }
-  if (item.type === "reasoning") return [statusUpdate("Reasoning")];
-  if (item.type === "agent_message") return [statusUpdate("Finalizing response")];
+  if (item.type === "reasoning") return [statusUpdate(localize("ui.reasoning"))];
+  if (item.type === "agent_message") return [statusUpdate(localize("ui.finalizing.response"))];
   return [];
 }
 
@@ -945,7 +1121,7 @@ function readNativeGoal(value: unknown): NativeGoal | null {
   if (typeof goal.threadId !== "string" || typeof goal.objective !== "string" || goal.objective.length > 4000 ||
       !["active", "paused", "blocked", "usageLimited", "budgetLimited", "complete"].includes(String(goal.status)) ||
       readTokenCount(goal.tokensUsed) === undefined || readTokenCount(goal.timeUsedSeconds) === undefined) {
-    throw new Error("Invalid native Goal state.");
+    throw new Error(localize("ui.invalid.native.goal.state"));
   }
   return { threadId: goal.threadId, objective: goal.objective, status: goal.status as NativeGoal["status"],
     tokensUsed: Number(goal.tokensUsed), timeUsedSeconds: Number(goal.timeUsedSeconds),
@@ -1212,10 +1388,11 @@ export function runBoundedProcess(
   executable: string,
   arguments_: readonly string[],
   timeoutMs: number,
-  maxOutputBytes: number
+  maxOutputBytes: number,
+  environment: NodeJS.ProcessEnv = process.env
 ): Promise<ProcessOutput> {
   return new Promise((resolvePromise, reject) => {
-    const child = spawn(executable, [...arguments_], { stdio: ["ignore", "pipe", "pipe"], env: runtimeEnvironment() });
+    const child = spawn(executable, [...arguments_], { stdio: ["ignore", "pipe", "pipe"], env: runtimeEnvironment(environment) });
     const stdout: Buffer[] = [];
     const stderr: Buffer[] = [];
     let outputBytes = 0;
@@ -1237,7 +1414,7 @@ export function runBoundedProcess(
     const collect = (target: Buffer[], chunk: Buffer) => {
       outputBytes += chunk.length;
       if (outputBytes > maxOutputBytes) {
-        finishWithError(new Error("Agent Factory runtime output exceeded the size limit."));
+        finishWithError(new Error(localize("ui.agent.factory.runtime.output.exceeded.the.size.limit")));
         return;
       }
       target.push(chunk);
@@ -1245,7 +1422,7 @@ export function runBoundedProcess(
     child.stdout.on("data", (chunk: Buffer) => collect(stdout, chunk));
     child.stderr.on("data", (chunk: Buffer) => collect(stderr, chunk));
     child.on("error", (error) => {
-      const wrapped = new Error(`Unable to start the Agent Factory runtime process: ${error.message}`) as NodeJS.ErrnoException;
+      const wrapped = new Error(localize("ui.unable.to.start.the.agent.factory.runtime.process.0", error.message)) as NodeJS.ErrnoException;
       wrapped.code = (error as NodeJS.ErrnoException).code;
       finishWithError(wrapped);
     });
@@ -1260,7 +1437,7 @@ export function runBoundedProcess(
       });
     });
     timer = setTimeout(
-      () => finishWithError(new Error("The Agent Factory runtime command timed out.")),
+      () => finishWithError(new Error(localize("ui.the.agent.factory.runtime.command.timed.out"))),
       timeoutMs
     );
   });
@@ -1275,14 +1452,14 @@ function readAcceptance(document: Record<string, unknown>, expectedAgentId: stri
     typeof document.runId !== "string" ||
     !MANAGED_ID.test(document.runId)
   ) {
-    throw new Error("The Agent Factory runtime did not return a valid run acceptance response.");
+    throw new Error(localize("ui.the.agent.factory.runtime.did.not.return.a.valid.run.acceptance.response"));
   }
   return { agentId: document.agentId, runId: document.runId };
 }
 
 function imageSuffix(mediaType: RuntimeImageInput["mediaType"]): string {
   const suffix = { "image/png": ".png", "image/jpeg": ".jpg", "image/gif": ".gif", "image/webp": ".webp" }[mediaType];
-  if (!suffix) throw new Error("Unsupported image format.");
+  if (!suffix) throw new Error(localize("ui.unsupported.image.format"));
   return suffix;
 }
 
@@ -1297,14 +1474,14 @@ function runDiagnostics(run: Record<string, unknown>): Pick<RunStatus, "error" |
 function readRunStatus(document: Record<string, unknown>): string {
   const run = readRecord(document.run, "run status");
   if (typeof run.status !== "string") {
-    throw new Error("Invalid Agent Factory runtime execution status.");
+    throw new Error(localize("ui.invalid.agent.factory.runtime.execution.status"));
   }
   return run.status;
 }
 
 function readRecord(value: unknown, label: string): Record<string, unknown> {
   if (typeof value !== "object" || value === null || Array.isArray(value)) {
-    throw new Error(`Invalid Agent Factory ${label} format.`);
+    throw new Error(localize("ui.invalid.agent.factory.0.format", label));
   }
   return value as Record<string, unknown>;
 }
@@ -1322,7 +1499,7 @@ async function checkManagedComponents(path: string): Promise<void> {
     try {
       const info = await lstat(cursor);
       if (info.isSymbolicLink() || (cursor !== absolute && !info.isDirectory())) {
-        throw new Error("Unsafe link or file type in an Agent Factory managed path.");
+        throw new Error(localize("ui.unsafe.link.or.file.type.in.an.agent.factory.managed.path"));
       }
     } catch (error) {
       if (isMissingFile(error)) return;
@@ -1337,7 +1514,7 @@ async function readManagedBytes(path: string, limit: number): Promise<Buffer> {
   try {
     const before = await file.stat();
     if (!before.isFile() || before.size > limit || await realpath(path) !== resolve(path)) {
-      throw new Error("Unsafe Agent Factory file path or size.");
+      throw new Error(localize("ui.unsafe.agent.factory.file.path.or.size"));
     }
     const bytes = Buffer.alloc(limit + 1);
     let offset = 0;
@@ -1349,7 +1526,7 @@ async function readManagedBytes(path: string, limit: number): Promise<Buffer> {
     const after = await lstat(path);
     if (offset > limit || after.isSymbolicLink() || before.dev !== after.dev || before.ino !== after.ino
         || await realpath(path) !== resolve(path)) {
-      throw new Error("The Agent Factory file was replaced while being read.");
+      throw new Error(localize("ui.the.agent.factory.file.was.replaced.while.being.read"));
     }
     return bytes.subarray(0, offset);
   } finally {

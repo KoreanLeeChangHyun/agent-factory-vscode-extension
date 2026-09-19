@@ -54,9 +54,15 @@ async function checkAutoScroll(page) {
     await page.evaluate(() => { window.scrollWrites = 0; });
     const sent = await page.evaluate(() => window.sentMessages.filter(message => message.type === 'chat.send').at(-1));
     await emit({ type: 'chat.started', id: sent.id, text: sent.text, attachments: [] });
+    assert.ok(await page.locator('#timeline').evaluate(el => el.scrollHeight - el.clientHeight - el.scrollTop <= 1), 'Acceptance reveals the newly inserted request');
+    assert.equal(await page.evaluate(() => window.scrollWrites), 1, 'Local submission acceptance scrolls once');
+    assert.equal(await toggle.getAttribute('aria-pressed'), 'false');
+    await page.evaluate(() => { window.scrollWrites = 0; });
+    await emit({ type: 'chat.started', id: sent.id, text: sent.text, attachments: [] });
+    assert.equal(await page.evaluate(() => window.scrollWrites), 0, 'Replayed acceptance must not jump again');
     await emit({ type: 'chat.assistant', text: 'Streaming after send\n\nMore content' });
     await emit({ type: 'run.activity', id: 'after-send-' + method, category: 'command', phase: 'started', text: 'echo progress', output: 'first' });
-    assert.equal(await page.evaluate(() => window.scrollWrites), 0, 'Acceptance and streaming after send must keep automatic scrolling OFF');
+    assert.equal(await page.evaluate(() => window.scrollWrites), 0, 'Streaming after acceptance keeps automatic scrolling OFF');
   }
   await toggle.click();
   await settle();

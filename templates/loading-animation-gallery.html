@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en">
+<html lang="{{hostLanguage}}" data-host-language="{{hostLanguage}}">
   <head>
     <meta charset="UTF-8" />
     <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src {{cspSource}}; script-src 'nonce-{{nonce}}';" />
@@ -12,67 +12,68 @@
       <header class="gallery-header">
         <div>
           <p class="eyebrow">Agent Factory · UI Lab</p>
-          <h1>Loading Animations</h1>
-          <p class="intro">Compare six options at the size and theme used by the run status bar.</p>
+          <h1 data-i18n="ui.loading.animations">Loading Animations</h1>
+          <p class="intro" data-i18n="ui.compare.six.options.at.the.size.and.theme.used.by.the.run.status.bar">Compare six options at the size and theme used by the run status bar.</p>
         </div>
-        <div class="gallery-controls" aria-label="Animation controls">
-          <button id="motion-toggle" type="button" aria-pressed="false">Pause</button>
-          <button id="motion-replay" type="button">Replay</button>
+        <div class="gallery-controls" aria-label="Animation controls" data-i18n-aria-label="ui.animation.controls">
+          <button id="motion-toggle" type="button" aria-pressed="false" data-i18n="ui.pause">Pause</button>
+          <button id="motion-replay" type="button" data-i18n="ui.replay">Replay</button>
         </div>
       </header>
 
-      <section class="sample-grid" aria-label="Loading animation options">
+      <section class="sample-grid" aria-label="Loading animation options" data-i18n-aria-label="ui.loading.animation.options">
         <article class="sample-card is-current">
-          <div class="sample-heading"><span class="sample-number">01</span><h2>Text shimmer</h2><span class="current-badge">Current</span></div>
-          <p>A highlight moves across the status text for a subtle, information-focused effect.</p>
-          <div class="status-preview variant-shimmer" role="img" aria-label="Text shimmer loading animation">
-            <span class="marker pulse-dot"></span><span class="status-label">Verifying work results</span><span class="elapsed">18s</span><span class="agent-count">Work 2 · Verification 1</span><span class="chevron">⌃</span>
+          <div class="sample-heading"><span class="sample-number">01</span><h2 data-i18n="ui.text.shimmer">Text shimmer</h2><span class="current-badge" data-i18n="ui.current">Current</span></div>
+          <p data-i18n="ui.a.highlight.moves.across.the.status.text.for.a.subtle.information.focused.effect">A highlight moves across the status text for a subtle, information-focused effect.</p>
+          <div class="status-preview variant-shimmer" role="img" aria-label="Text shimmer loading animation" data-i18n-aria-label="ui.text.shimmer.loading.animation">
+            <span class="marker pulse-dot"></span><span class="status-label" data-i18n="ui.verifying.work.results">Verifying work results</span><span class="elapsed" data-i18n="ui.18s">18s</span><span class="agent-count" data-i18n="ui.work.2.verification.1">Work 2 · Verification 1</span><span class="chevron">⌃</span>
           </div>
         </article>
 
         <article class="sample-card">
-          <div class="sample-heading"><span class="sample-number">02</span><h2>Soft pulse</h2></div>
-          <p>A small dot gently pulses, keeping long-running work easy on the eyes.</p>
-          <div class="status-preview variant-pulse" role="img" aria-label="Soft pulse loading animation">
-            <span class="marker pulse-dot"></span><span class="status-label">Verifying work results</span><span class="elapsed">18s</span><span class="agent-count">Work 2 · Verification 1</span><span class="chevron">⌃</span>
+          <div class="sample-heading"><span class="sample-number">02</span><h2 data-i18n="ui.soft.pulse">Soft pulse</h2></div>
+          <p data-i18n="ui.a.small.dot.gently.pulses.keeping.long.running.work.easy.on.the.eyes">A small dot gently pulses, keeping long-running work easy on the eyes.</p>
+          <div class="status-preview variant-pulse" role="img" aria-label="Soft pulse loading animation" data-i18n-aria-label="ui.soft.pulse.loading.animation">
+            <span class="marker pulse-dot"></span><span class="status-label" data-i18n="ui.verifying.work.results">Verifying work results</span><span class="elapsed" data-i18n="ui.18s">18s</span><span class="agent-count" data-i18n="ui.work.2.verification.1">Work 2 · Verification 1</span><span class="chevron">⌃</span>
           </div>
         </article>
 
         <article class="sample-card">
-          <div class="sample-heading"><span class="sample-number">03</span><h2>Orbit</h2></div>
-          <p>Small particles orbit the center to show that the agent is still working.</p>
-          <div class="status-preview variant-orbit" role="img" aria-label="Orbit loading animation">
-            <span class="marker orbit"><i></i></span><span class="status-label">Verifying work results</span><span class="elapsed">18s</span><span class="agent-count">Work 2 · Verification 1</span><span class="chevron">⌃</span>
+          <div class="sample-heading"><span class="sample-number">03</span><h2 data-i18n="ui.orbit">Orbit</h2></div>
+          <p data-i18n="ui.small.particles.orbit.the.center.to.show.that.the.agent.is.still.working">Small particles orbit the center to show that the agent is still working.</p>
+          <div class="status-preview variant-orbit" role="img" aria-label="Orbit loading animation" data-i18n-aria-label="ui.orbit.loading.animation">
+            <span class="marker orbit"><i></i></span><span class="status-label" data-i18n="ui.verifying.work.results">Verifying work results</span><span class="elapsed" data-i18n="ui.18s">18s</span><span class="agent-count" data-i18n="ui.work.2.verification.1">Work 2 · Verification 1</span><span class="chevron">⌃</span>
           </div>
         </article>
 
         <article class="sample-card">
-          <div class="sample-heading"><span class="sample-number">04</span><h2>Thinking dots</h2></div>
-          <p>Three dots rise in sequence for a familiar conversational effect.</p>
-          <div class="status-preview variant-dots" role="img" aria-label="Thinking dots loading animation">
-            <span class="marker dots"><i></i><i></i><i></i></span><span class="status-label">Verifying work results</span><span class="elapsed">18s</span><span class="agent-count">Work 2 · Verification 1</span><span class="chevron">⌃</span>
+          <div class="sample-heading"><span class="sample-number">04</span><h2 data-i18n="ui.thinking.dots">Thinking dots</h2></div>
+          <p data-i18n="ui.three.dots.rise.in.sequence.for.a.familiar.conversational.effect">Three dots rise in sequence for a familiar conversational effect.</p>
+          <div class="status-preview variant-dots" role="img" aria-label="Thinking dots loading animation" data-i18n-aria-label="ui.thinking.dots.loading.animation">
+            <span class="marker dots"><i></i><i></i><i></i></span><span class="status-label" data-i18n="ui.verifying.work.results">Verifying work results</span><span class="elapsed" data-i18n="ui.18s">18s</span><span class="agent-count" data-i18n="ui.work.2.verification.1">Work 2 · Verification 1</span><span class="chevron">⌃</span>
           </div>
         </article>
 
         <article class="sample-card">
-          <div class="sample-heading"><span class="sample-number">05</span><h2>Signal</h2></div>
-          <p>Short bars rise and fall, suggesting multiple agents working in parallel.</p>
-          <div class="status-preview variant-signal" role="img" aria-label="Signal loading animation">
-            <span class="marker signal"><i></i><i></i><i></i><i></i></span><span class="status-label">Verifying work results</span><span class="elapsed">18s</span><span class="agent-count">Work 2 · Verification 1</span><span class="chevron">⌃</span>
+          <div class="sample-heading"><span class="sample-number">05</span><h2 data-i18n="ui.signal">Signal</h2></div>
+          <p data-i18n="ui.short.bars.rise.and.fall.suggesting.multiple.agents.working.in.parallel">Short bars rise and fall, suggesting multiple agents working in parallel.</p>
+          <div class="status-preview variant-signal" role="img" aria-label="Signal loading animation" data-i18n-aria-label="ui.signal.loading.animation">
+            <span class="marker signal"><i></i><i></i><i></i><i></i></span><span class="status-label" data-i18n="ui.verifying.work.results">Verifying work results</span><span class="elapsed" data-i18n="ui.18s">18s</span><span class="agent-count" data-i18n="ui.work.2.verification.1">Work 2 · Verification 1</span><span class="chevron">⌃</span>
           </div>
         </article>
 
         <article class="sample-card">
-          <div class="sample-heading"><span class="sample-number">06</span><h2>Progress track</h2></div>
-          <p>A highlight moves along the bottom to show progress across the run area.</p>
-          <div class="status-preview variant-track" role="img" aria-label="Progress track loading animation">
-            <span class="marker pulse-dot"></span><span class="status-label">Verifying work results</span><span class="elapsed">18s</span><span class="agent-count">Work 2 · Verification 1</span><span class="chevron">⌃</span><span class="track"></span>
+          <div class="sample-heading"><span class="sample-number">06</span><h2 data-i18n="ui.progress.track">Progress track</h2></div>
+          <p data-i18n="ui.a.highlight.moves.along.the.bottom.to.show.progress.across.the.run.area">A highlight moves along the bottom to show progress across the run area.</p>
+          <div class="status-preview variant-track" role="img" aria-label="Progress track loading animation" data-i18n-aria-label="ui.progress.track.loading.animation">
+            <span class="marker pulse-dot"></span><span class="status-label" data-i18n="ui.verifying.work.results">Verifying work results</span><span class="elapsed" data-i18n="ui.18s">18s</span><span class="agent-count" data-i18n="ui.work.2.verification.1">Work 2 · Verification 1</span><span class="chevron">⌃</span><span class="track"></span>
           </div>
         </article>
       </section>
 
-      <p class="gallery-note">Animations appear still when reduced motion is enabled in your system settings.</p>
+      <p class="gallery-note" data-i18n="ui.animations.appear.still.when.reduced.motion.is.enabled.in.your.system.settings">Animations appear still when reduced motion is enabled in your system settings.</p>
     </main>
+    <script nonce="{{nonce}}" src="{{localizationScriptUri}}"></script>
     <script nonce="{{nonce}}" src="{{scriptUri}}"></script>
   </body>
 </html>

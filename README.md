@@ -16,6 +16,9 @@ Use Agent Factory Main Agent sessions in VS Code editor tabs.
 - Workflow choices immediately submit the current draft once; ordinary sends use Normal.
 - Goal immediately submits the current draft as a goal and sits before Fast. Fast remains a persistent toggle.
 - Permissions and attachments remain available.
+- **Clear conversation** starts a fresh internal Codex thread in the current chat while
+  retaining the Main Agent identity, settings, and historical run records. It is
+  available only while the current run, queue, decision, and Goal controls are idle.
 - **Plan · Work** runs actual Codex Plan then implementation in the same Work
   session, followed by Main checks without separate Verification. It requires
   runtime support; queued inputs retain their action and different actions never merge.
@@ -58,8 +61,8 @@ codex plugin add agent-factory@agent-factory
 - The plugin is fully installable and usable without this extension. Both are
   released together; the extension does not contain or bundle the plugin.
 - Set `agentFactory.mainChat.pythonPath` if Python is not found. Use
-  `agentFactory.mainChat.runtimeExecPath` only for an explicit installed `exec.py`
-  path; it does not waive the matching-plugin requirement.
+  `agentFactory.mainChat.runtimeExecPath` only as an `exec.py` override in the
+  Extension Development Host; normal windows ignore this setting.
 
 Matching older extension and plugin releases remain usable when newer releases are available. Automatic runtime discovery selects a cached plugin with the extension’s semantic base version; a configured `runtimeExecPath` remains an explicit development override.
 
@@ -71,6 +74,16 @@ npm run check
 ```
 
 - Press **F5** to launch the Extension Development Host.
+- F5 uses the sibling `../plugin` checkout directly for the runtime, role prompts,
+  and Agent Factory skill/reference bindings. No plugin reinstall is needed.
+  The local plugin must have the same base version as the extension; missing or
+  mismatched sources block activation instead of falling back to an installed copy.
+  Plugin Python changes apply to new runtime processes; already running agents keep
+  their loaded code and instructions. Restart F5 after extension code changes.
+  Normal launches use the installed plugin even if a development path setting or
+  environment variable is inherited. The debug launch sets
+  `AGENT_FACTORY_DEV_PLUGIN_ROOT`, which is honored only in VS Code development mode
+  and explicitly passed to that development client's runtime processes.
 - Use `npm run package` to build a VSIX.
 - Release tooling is in [scripts/release.mjs](scripts/release.mjs). Publish the
   matching companion plugin first. The default extension release workflow prepares

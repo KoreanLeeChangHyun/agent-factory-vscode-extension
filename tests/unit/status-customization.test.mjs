@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
-import { runInNewContext } from "node:vm";
+import { runUiInNewContext as runInNewContext } from "../support/ui-localization.mjs";
 import test from "node:test";
 import { build } from "esbuild";
 
@@ -34,7 +34,7 @@ function harness() {
   const nodes = new Map();
   const context = {
     document: { createElement: element, createElementNS: (_namespace, _tag) => element(), getElementById(id) { if (!nodes.has(id)) nodes.set(id, element()); return nodes.get(id); }, querySelectorAll: () => elements },
-    state: { statusItems: ["project", "branch", "queue"], title: "Main", role: "main", runtimeAvailable: true, workUnitsKnown: true, workUnits: { workActive: 1, verificationActive: 2, totalCalled: 3 }, queueCount: 0 },
+    state: { statusItems: ["project", "branch", "queue"], title: "Main", projectName: "fixture-project", branch: "fixture-branch", role: "main", runtimeAvailable: true, workUnitsKnown: true, workUnits: { workActive: 1, verificationActive: 2, totalCalled: 3 }, queueCount: 0 },
     nativeGoal: null, goalError: undefined, taskModeNames: { work: "Work" },
     currentCapabilities: () => ({ model: true, reasoning: true, fast: true }),
     renderStatusBar() {},
@@ -44,6 +44,8 @@ function harness() {
   runInNewContext([
     section('  const defaultStatusItems =', '  const longPasteThreshold'),
     section('  function setStatusItems(', '  statusSettingsButton.addEventListener'),
+    section('  function statusItemAvailable(', '  function statusLabel('),
+    section('  function safePercentOrUndefined(', '  function normalizeSettingValue('),
     section('  function statusLabel(', '  function updateSendButton('),
     section('  function normalizeStatusItems(', '  function saveComposerSettings('),
     section('  function safeCountOrUndefined(', '  function normalizeStatusItems('),
@@ -66,6 +68,7 @@ test("selection preserves empty arrays, order and legacy IDs without injecting h
 
 test("catalog checkboxes toggle fields and keyboard buttons persist ordered choices", () => {
   const { run, nodes, context, sent } = harness();
+  context.state.weeklyUsedPercent = 0;
   run('renderStatusCatalog()');
   const row = id => nodes.get('status-catalog').children.find(node => node.dataset.itemId === id);
   const checkbox = row('branch').children[0].children[0].children[0];
@@ -78,6 +81,26 @@ test("catalog checkboxes toggle fields and keyboard buttons persist ordered choi
   row('weekly').children[1].children[0].handlers.click();
   assert.deepEqual(sent.at(-1).items, ['project', 'weekly', 'queue']);
   assert.equal(row('project').children[1].children[0].disabled, true);
+});
+
+test("catalog availability follows real metrics without discarding saved selections", () => {
+  const { run, context, nodes } = harness();
+  context.state.statusItems = ['project', 'context', 'weekly'];
+  const rows = () => nodes.get('status-catalog').children.filter(node => node.dataset.itemId).map(node => node.dataset.itemId);
+  run('renderStatusCatalog()');
+  assert.ok(rows().includes('project'));
+  assert.ok(!rows().includes('context'));
+  assert.ok(!rows().includes('weekly'));
+  Object.assign(context.state, { contextUsedTokens: 0, contextWindowTokens: 100, weeklyUsedPercent: 0 });
+  run('renderStatusCatalog()');
+  assert.ok(rows().includes('context'));
+  assert.ok(rows().includes('weekly'));
+  context.state.contextUsedTokens = undefined;
+  context.state.weeklyUsedPercent = undefined;
+  run('renderStatusCatalog()');
+  assert.ok(!rows().includes('context'));
+  assert.ok(!rows().includes('weekly'));
+  assert.deepEqual(clean(context.state.statusItems), ['project', 'context', 'weekly']);
 });
 
 test("native drag inserts before/after target and ignores external drags", () => {
@@ -227,7 +250,7 @@ test("host config and protocol accept the complete catalog and reject malformed 
   const { resolveStatusItems } = await load('src/core/config/resolver.ts');
   const { parseClientMessage } = await load('src/protocol/validator.ts');
   const { run } = harness();
-  const catalog = clean(run('Object.keys(statusCatalog)'));
+  const catalog = clean(run('Object.keys(statusCatalog())'));
   assert.deepEqual(resolveStatusItems(catalog), catalog);
   assert.deepEqual(resolveStatusItems([]), []);
   assert.deepEqual(resolveStatusItems(['queue', 'bad', 'queue', 'elapsed']), ['queue', 'elapsed']);

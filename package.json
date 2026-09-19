@@ -1,7 +1,7 @@
 {
   "name": "agent-factory-main-chat",
   "displayName": "Agent Factory Main Chat",
-  "description": "Main Agent chat sessions in VS Code editor tabs.",
+  "description": "%extension.description%",
   "version": "1.0.11",
   "publisher": "agent-factory",
   "icon": "static/images/agent-factory.png",
@@ -20,6 +20,7 @@
     "onCommand:agentFactory.mainChat.open",
     "onCommand:agentFactory.mainChat.resume",
     "onCommand:agentFactory.mainChat.rename",
+    "onCommand:agentFactory.mainChat.clearConversation",
     "onCommand:agentFactory.loadingAnimations.preview",
     "onWebviewPanel:agentFactory.mainChat",
     "onView:agentFactory.agents"
@@ -29,66 +30,83 @@
     "commands": [
       {
         "command": "agentFactory.mainChat.open",
-        "title": "Add Main Agent Chat",
+        "title": "%agentFactory.mainChat.open.title%",
         "category": "Agent Factory",
         "icon": "$(add)"
       },
       {
         "command": "agentFactory.mainChat.resume",
-        "title": "Agent Factory: Resume Main Agent",
+        "title": "%agentFactory.mainChat.resume.title%",
         "category": "Agent Factory"
       },
       {
         "command": "agentFactory.mainChat.rename",
-        "title": "Rename Main Agent",
+        "title": "%agentFactory.mainChat.rename.title%",
+        "category": "Agent Factory"
+      },
+      {
+        "command": "agentFactory.mainChat.clearConversation",
+        "title": "%agentFactory.mainChat.clearConversation.title%",
         "category": "Agent Factory"
       },
       {
         "command": "agentFactory.loadingAnimations.preview",
-        "title": "Preview Loading Animations",
+        "title": "%agentFactory.loadingAnimations.preview.title%",
         "category": "Agent Factory"
       },
       {
         "command": "agentFactory.sidebar.refresh",
-        "title": "Refresh Agents",
+        "title": "%agentFactory.sidebar.refresh.title%",
         "category": "Agent Factory",
         "icon": "$(refresh)"
       },
       {
         "command": "agentFactory.sidebar.open",
-        "title": "Open Agent",
+        "title": "%agentFactory.sidebar.open.title%",
         "category": "Agent Factory",
         "icon": "$(comment-discussion)"
       },
       {
         "command": "agentFactory.sidebar.rename",
-        "title": "Rename Agent",
+        "title": "%agentFactory.sidebar.rename.title%",
         "category": "Agent Factory",
         "icon": "$(edit)"
       },
       {
         "command": "agentFactory.sidebar.newGroup",
-        "title": "New Agent Group",
+        "title": "%agentFactory.sidebar.newGroup.title%",
         "category": "Agent Factory",
         "icon": "$(new-folder)"
       },
       {
         "command": "agentFactory.sidebar.move",
-        "title": "Move Agent to Group",
+        "title": "%agentFactory.sidebar.move.title%",
         "category": "Agent Factory",
         "icon": "$(folder)"
       },
       {
         "command": "agentFactory.sidebar.renameGroup",
-        "title": "Rename Group",
+        "title": "%agentFactory.sidebar.renameGroup.title%",
         "category": "Agent Factory",
         "icon": "$(edit)"
       },
       {
         "command": "agentFactory.sidebar.deleteGroup",
-        "title": "Ungroup",
+        "title": "%agentFactory.sidebar.deleteGroup.title%",
         "category": "Agent Factory",
         "icon": "$(ungroup-by-ref-type)"
+      },
+      {
+        "command": "agentFactory.sidebar.archive",
+        "title": "%agentFactory.sidebar.archive.title%",
+        "category": "Agent Factory",
+        "icon": "$(archive)"
+      },
+      {
+        "command": "agentFactory.sidebar.restore",
+        "title": "%agentFactory.sidebar.restore.title%",
+        "category": "Agent Factory",
+        "icon": "$(discard)"
       }
     ],
     "menus": {
@@ -108,6 +126,11 @@
           "command": "agentFactory.mainChat.rename",
           "when": "activeWebviewPanelId == agentFactory.mainChat",
           "group": "2_workspace@1"
+        },
+        {
+          "command": "agentFactory.mainChat.clearConversation",
+          "when": "activeWebviewPanelId == agentFactory.mainChat",
+          "group": "2_workspace@2"
         }
       ],
       "view/title": [
@@ -125,6 +148,11 @@
           "command": "agentFactory.sidebar.refresh",
           "when": "view == agentFactory.agents",
           "group": "navigation@3"
+        },
+        {
+          "command": "agentFactory.sidebar.restore",
+          "when": "view == agentFactory.agents",
+          "group": "navigation@4"
         }
       ],
       "view/item/context": [
@@ -147,6 +175,11 @@
           "command": "agentFactory.sidebar.deleteGroup",
           "when": "view == agentFactory.agents && viewItem == agentFactoryGroup",
           "group": "organization@1"
+        },
+        {
+          "command": "agentFactory.sidebar.archive",
+          "when": "view == agentFactory.agents && viewItem == agentFactoryAgent",
+          "group": "organization@2"
         }
       ]
     },
@@ -195,20 +228,20 @@
               "goalBudget"
             ]
           },
-          "description": "Choose which information to display and its order in the status bar settings below the chat. Drag items or use the move buttons to reorder them. An empty array hides all items.",
+          "description": "%agentFactory.mainChat.statusItems.description%",
           "uniqueItems": true
         },
         "agentFactory.mainChat.pythonPath": {
           "type": "string",
           "scope": "machine",
           "default": "",
-          "description": "Python 3.10+ executable path on the extension host (without shell arguments). Empty uses python3 from PATH. On macOS, select your installed Python if the system Python is older."
+          "description": "%agentFactory.mainChat.pythonPath.description%"
         },
         "agentFactory.mainChat.runtimeExecPath": {
           "type": "string",
           "scope": "machine-overridable",
           "default": "",
-          "description": "Optional absolute path to the installed Agent Factory skills/agent/scripts/exec.py. When empty, the extension searches CODEX_HOME or ~/.codex plugin cache."
+          "description": "%agentFactory.mainChat.runtimeExecPath.description%"
         },
         "agentFactory.mainChat.executionMode": {
           "type": "string",
@@ -221,12 +254,12 @@
           ],
           "default": "danger-full-access",
           "enumDescriptions": [
-            "New sessions use CLI settings; existing sessions keep their saved policy.",
-            "Allow workspace writes without requesting additional approval during execution.",
-            "Allow full file system and network access without requesting additional approval during execution.",
-            "Allow full access and proceed without execution approval or plan reapproval."
+            "%agentFactory.mainChat.executionMode.enum.0%",
+            "%agentFactory.mainChat.executionMode.enum.1%",
+            "%agentFactory.mainChat.executionMode.enum.2%",
+            "%agentFactory.mainChat.executionMode.enum.3%"
           ],
-          "description": "Permissions for the next Main Agent run. The default allows full file system and network access without additional execution approval. You can restrict access to workspace writes or CLI defaults. Permissions can change between runs in the same session; the current run is unaffected."
+          "description": "%agentFactory.mainChat.executionMode.description%"
         }
       }
     },
@@ -243,7 +276,7 @@
       "agentFactory": [
         {
           "id": "agentFactory.agents",
-          "name": "Agents"
+          "name": "%agentFactory.agents.name%"
         }
       ]
     }
@@ -253,7 +286,7 @@
     "release": "node scripts/release.mjs",
     "watch": "node scripts/build.mjs --watch",
     "check": "npm run typecheck && npm run check:static && npm run test && npm run build",
-    "check:static": "node --check static/js/chat.js && node --check static/js/ansi-renderer.js && node --check static/js/execution-references.js && node --check static/js/loading-animation-gallery.js",
+    "check:static": "node --check static/js/localization.js && node --check static/js/chat.js && node --check static/js/ansi-renderer.js && node --check static/js/execution-references.js && node --check static/js/loading-animation-gallery.js",
     "typecheck": "tsc --noEmit",
     "test": "node --test tests/unit/*.test.mjs",
     "package": "npm run check && node -e \"require('node:fs').mkdirSync('releases', { recursive: true })\" && node --require ./scripts/node-file-polyfill.cjs ./node_modules/@vscode/vsce/vsce package --allow-missing-repository --out releases",

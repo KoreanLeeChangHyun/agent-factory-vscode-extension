@@ -2,6 +2,12 @@
   "use strict";
 
   const vscode = acquireVsCodeApi();
+  let displayLanguage = vscode.getState()?.uiLanguage || "auto";
+  function uiLocale() { return globalThis.AgentFactoryI18n.locale(displayLanguage, document.documentElement.dataset.hostLanguage || navigator.language); }
+  function t(key, ...values) { return globalThis.AgentFactoryI18n.format(key, uiLocale(), ...values); }
+  function localizedText(value, descriptor) { return globalThis.AgentFactoryI18n.resolve(descriptor, uiLocale(), value); }
+  function reasoningDisplayLabel(value) { return value ? uiLocale() === "en" ? value : t("ui." + value) : t("ui.default"); }
+
   const markdown = typeof globalThis.markdownit === "function"
     ? globalThis.markdownit({ html: false, linkify: true, typographer: false })
     : undefined;
@@ -26,13 +32,15 @@
   const submissionMenu = document.getElementById("submission-menu");
   const inputFeedback = document.getElementById("input-feedback");
   const modelMenu = document.getElementById("model-menu");
+  const goalModeButton = document.getElementById("goal-mode-button");
   const fastModeButton = document.getElementById("fast-mode-button");
-  const businessModeNames = { normal: "Normal", interview: "Interview", planning: "Planning", design: "Design" };
-  const taskModeNames = { plan: "Plan", verification: "Verification", direct: "Direct", work: "Work", "plan-work": "Plan · Work", "work-verification": "Work · Verification", "plan-work-verification": "Plan · Work · Verification" };
+  const businessModeNames = () => ({ normal: t("ui.normal"), interview: t("ui.interview"), planning: t("ui.planning"), design: t("ui.design") });
+  const taskModeNames = () => ({ plan: t("ui.plan"), verification: t("ui.verification"), direct: t("ui.direct"), work: t("ui.work"), "plan-work": t("ui.plan.work"), "work-verification": t("ui.work.verification"), "plan-work-verification": t("ui.plan.work.verification") });
   const goalPanel = document.getElementById("goal-panel");
   const goalStatus = document.getElementById("goal-status");
   let nativeGoal = null;
   let goalError;
+  let goalErrorLocalization;
   goalPanel.addEventListener("click", function (event) {
     const action = event.target.closest("[data-goal-action]")?.dataset.goalAction;
     if (action && state.agentId) vscode.postMessage({ type: "goal.control", action });
@@ -65,34 +73,34 @@
     execution: ["cli-default", "workspace-write", "danger-full-access", "bypass"]
   };
   const defaultStatusItems = ["status", "agents", "project", "branch", "context", "queue"];
-  const statusCatalog = {
-    status: ["Run status", "Current running, queued, or decision status"],
-    agents: ["Active agents", "Number of Main Agent work and verification agents"],
-    project: ["Project", "Current VS Code workspace name"],
-    branch: ["Git branch", "Current project branch, or — when unknown"],
-    context: ["Content remaining percentage", "Remaining percentage of the Content window; unavailable without usage or window size"],
-    queue: ["Queued messages", "Number of messages waiting to send in this chat"],
-    agent: ["Chat name", "Current chat tab name"],
-    role: ["Agent role", "Main, work, or verification role"],
-    elapsed: ["Elapsed time", "Time observed for the current run in this view; shown only while running"],
-    runtime: ["Runtime connection", "Current runtime connection status"],
-    model: ["Selected model", "Selection for the next message; may differ from the actual server model"],
-    reasoning: ["Selected reasoning effort", "Selection for the next message"],
-    fast: ["Fast setting", "Fast selection for the next message, subject to support"],
-    task: ["Task mode", "Task mode for the next Main Agent message"],
-    execution: ["Execution permissions", "Permission settings reported by the current host"],
-    contextUsed: ["Content tokens used", "Current Content tokens used; input tokens for the latest turn, not cumulative usage"],
-    contextRemainingTokens: ["Content tokens remaining", "Content window size minus current tokens used, with a minimum of 0"],
-    contextUsedPercent: ["Content used percentage", "Current usage as a percentage of the Content window"],
-    contextWindow: ["Content window tokens", "Model Content window size reported by the runtime"],
-    weekly: ["Weekly usage", "Latest reported usage percentage of the 7-day account limit, if available"],
-    weeklyRemaining: ["Weekly remaining", "100% minus Weekly usage; an absolute token count is not provided"],
-    agentsTotal: ["Total agent calls", "Number of work and verification agents called by Main Agent"],
-    goal: ["Goal status", "Main Agent Goal setting and latest reported goal status"],
-    goalTokens: ["Goal tokens used", "Cumulative tokens used as reported by the goal"],
-    goalTime: ["Goal time used", "Cumulative time used as reported by the goal"],
-    goalBudget: ["Goal token budget", "Token budget assigned to the goal, if available"]
-  };
+  const statusCatalog = () => ({
+    status: [t("ui.run.status"), t("ui.current.running.queued.or.decision.status")],
+    agents: [t("ui.active.agents"), t("ui.number.of.main.agent.work.and.verification.agents")],
+    project: [t("ui.project"), t("ui.current.vs.code.workspace.name")],
+    branch: [t("ui.git.branch"), t("ui.current.project.branch.or.when.unknown")],
+    context: [t("ui.content.remaining.percentage"), t("ui.remaining.percentage.of.the.content.window.unavailable.without.usage.or.window.size")],
+    queue: [t("ui.queued.messages"), t("ui.number.of.messages.waiting.to.send.in.this.chat")],
+    agent: [t("ui.chat.name"), t("ui.current.chat.tab.name")],
+    role: [t("ui.agent.role"), t("ui.main.work.or.verification.role")],
+    elapsed: [t("ui.elapsed.time"), t("ui.time.observed.for.the.current.run.in.this.view.shown.only.while.running")],
+    runtime: [t("ui.runtime.connection"), t("ui.current.runtime.connection.status")],
+    model: [t("ui.selected.model"), t("ui.selection.for.the.next.message.may.differ.from.the.actual.server.model")],
+    reasoning: [t("ui.selected.reasoning.effort"), t("ui.selection.for.the.next.message")],
+    fast: [t("ui.fast.setting"), t("ui.fast.selection.for.the.next.message.subject.to.support")],
+    task: [t("ui.task.mode"), t("ui.task.mode.for.the.next.main.agent.message")],
+    execution: [t("ui.execution.permissions"), t("ui.permission.settings.reported.by.the.current.host")],
+    contextUsed: [t("ui.content.tokens.used"), t("ui.current.content.tokens.used.input.tokens.for.the.latest.turn.not.cumulative.usage")],
+    contextRemainingTokens: [t("ui.content.tokens.remaining"), t("ui.content.window.size.minus.current.tokens.used.with.a.minimum.of.0")],
+    contextUsedPercent: [t("ui.content.used.percentage"), t("ui.current.usage.as.a.percentage.of.the.content.window")],
+    contextWindow: [t("ui.content.window.tokens"), t("ui.model.content.window.size.reported.by.the.runtime")],
+    weekly: [t("ui.weekly.usage"), t("ui.latest.reported.usage.percentage.of.the.7.day.account.limit.if.available")],
+    weeklyRemaining: [t("ui.weekly.remaining"), t("ui.100.minus.weekly.usage.an.absolute.token.count.is.not.provided")],
+    agentsTotal: [t("ui.total.agent.calls"), t("ui.number.of.work.and.verification.agents.called.by.main.agent")],
+    goal: [t("ui.goal.status"), t("ui.main.agent.goal.setting.and.latest.reported.goal.status")],
+    goalTokens: [t("ui.goal.tokens.used"), t("ui.cumulative.tokens.used.as.reported.by.the.goal")],
+    goalTime: [t("ui.goal.time.used"), t("ui.cumulative.time.used.as.reported.by.the.goal")],
+    goalBudget: [t("ui.goal.token.budget"), t("ui.token.budget.assigned.to.the.goal.if.available")]
+  });
   const statusSettings = document.getElementById("status-settings");
   const statusSettingsButton = document.getElementById("status-settings-button");
   const statusCatalogList = document.getElementById("status-catalog");
@@ -106,11 +114,13 @@
   const state = {
     panelId: typeof saved?.panelId === "string" ? saved.panelId : undefined,
     agentId: typeof saved?.agentId === "string" ? saved.agentId : undefined,
+    conversationId: typeof saved?.conversationId === "string" ? saved.conversationId : undefined,
     title: typeof saved?.title === "string" ? saved.title : "Main Agent",
     role: ["main", "work", "verification"].includes(saved?.role) ? saved.role : "main",
     verifiedWorkRunId: typeof saved?.verifiedWorkRunId === "string" ? saved.verifiedWorkRunId : undefined,
     draft: typeof saved?.draft === "string" ? saved.draft : "",
     autoScroll: saved?.autoScroll !== false,
+    uiLanguage: ["auto", "ko", "en"].includes(saved?.uiLanguage) ? saved.uiLanguage : "auto",
     botVisible: saved?.botVisible !== false,
     botAnimations: saved?.botAnimations !== false,
     attachments: Array.isArray(saved?.attachments) ? saved.attachments.filter(function (item) {
@@ -122,6 +132,7 @@
     statusItems: normalizeStatusItems(saved?.statusItems),
     projectName: typeof saved?.projectName === "string" ? saved.projectName : "",
     pendingDecisionRunId: undefined,
+    pendingDecisionCanApprove: false,
     decisionSubmitting: false,
     executionMode: saved?.agentId ? undefined : "danger-full-access",
     runtimeAvailable: false,
@@ -141,10 +152,13 @@
     contextWindowTokens: safeCountOrUndefined(saved?.contextWindowTokens),
     weeklyUsedPercent: safePercentOrUndefined(saved?.weeklyUsedPercent),
     runProgress: typeof saved?.runProgress === "string" ? saved.runProgress : "",
+    runProgressLocalization: saved?.runProgressLocalization,
     runStartedAt: Number.isFinite(saved?.runStartedAt) ? saved.runStartedAt : undefined,
-    runPanelExpanded: saved?.running === true && saved?.runPanelExpanded === true,
+    taskFlows: Array.isArray(saved?.taskFlows) ? saved.taskFlows.slice(-100) : [],
+    runPanelExpanded: saved?.runPanelExpanded === true,
     sessions: [],
     sessionsLoading: false,
+    workflows: Array.isArray(saved?.workflows) ? saved.workflows : [],
     childAgents: Array.isArray(saved?.childAgents) ? saved.childAgents : [],
     agentsLoading: false,
     workUnitsKnown: false,
@@ -162,12 +176,20 @@
   let botIdleTimer;
   let botIdleSince;
   let botGestureTimer;
+  const botMenu = document.getElementById("bot-menu");
+  let botReactionTimer;
   let botGestureKey;
+  let botGlanceTimer;
+  let botNextGlanceAt = 0;
+  const botReducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
   let elapsedTimerId;
   let followLatest = true;
   let autoScrollFrame;
+  let timelineViewportHeight;
   const messageRenderKeys = new WeakMap();
 
+  globalThis.AgentFactoryI18n.apply(document, uiLocale());
+  document.documentElement.lang = uiLocale();
   prompt.value = state.draft;
   renderAll();
   resizePrompt();
@@ -200,7 +222,76 @@
     renderTimeline();
   }).observe(document.body, { attributes: true, attributeFilter: ["class"] });
 
+  document.addEventListener("pointermove", maybeGlanceAtPointer, { passive: true });
+  document.documentElement.addEventListener("pointerleave", clearBotGlance);
+  window.addEventListener("blur", clearBotGlance);
+  document.addEventListener("visibilitychange", clearBotGlance);
+  botReducedMotion.addEventListener("change", clearBotGlance);
   factoryBot.addEventListener("pointerenter", wakeFactoryBot);
+
+  function closeBotMenu(restoreFocus = false) {
+    botMenu.hidden = true;
+    factoryBot.setAttribute("aria-expanded", "false");
+    if (restoreFocus) factoryBot.focus();
+  }
+  function positionBotMenu() {
+    if (botMenu.hidden) return;
+    const box = factoryBot.getBoundingClientRect();
+    botMenu.style.left = Math.max(8, Math.min(window.innerWidth - botMenu.offsetWidth - 8, box.right - botMenu.offsetWidth)) + "px";
+    botMenu.style.top = Math.max(8, box.top - botMenu.offsetHeight - 8) + "px";
+  }
+  window.addEventListener("resize", positionBotMenu);
+  document.addEventListener("pointerdown", function (event) {
+    if (!botMenu.contains(event.target) && !factoryBot.contains(event.target)) closeBotMenu();
+  });
+  document.addEventListener("keydown", function (event) {
+    if (event.key === "Escape" && !botMenu.hidden) {
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      closeBotMenu(true);
+    }
+  }, true);
+  botMenu.addEventListener("click", function (event) {
+    const button = event.target.closest("[data-bot-action]");
+    if (!button || button.disabled || factoryBot.dataset.state !== "idle") return;
+    const action = button.dataset.botAction;
+    closeBotMenu(true);
+    clearBotGlance();
+    clearTimeout(botGestureTimer);
+    botGestureTimer = undefined;
+    if (action === "sleep") {
+      botIdleSince = Date.now() - 60000;
+      renderFactoryBot();
+    } else {
+      delete factoryBot.dataset.gesture;
+      factoryBot.getBoundingClientRect();
+      factoryBot.dataset.gesture = action;
+      botGestureTimer = window.setTimeout(function () {
+        botGestureTimer = undefined;
+        renderFactoryBot();
+      }, 8000);
+    }
+  });
+  factoryBot.addEventListener("click", function () {
+    const opening = botMenu.hidden;
+    wakeFactoryBot();
+    clearTimeout(botReactionTimer);
+    delete factoryBot.dataset.reacting;
+    // Restart the short response on repeated clicks without resetting task state.
+    factoryBot.getBoundingClientRect();
+    factoryBot.dataset.reacting = "true";
+    botReactionTimer = window.setTimeout(function () {
+      delete factoryBot.dataset.reacting;
+      botReactionTimer = undefined;
+    }, 700);
+    botMenu.hidden = !opening;
+    factoryBot.setAttribute("aria-expanded", String(opening));
+    if (opening) {
+      positionBotMenu();
+      const first = botMenu.querySelector("button:not(:disabled)");
+      if (first) first.focus();
+    }
+  });
   document.addEventListener("pointerdown", wakeFactoryBot);
   document.addEventListener("keydown", wakeFactoryBot);
   document.addEventListener("input", wakeFactoryBot);
@@ -240,6 +331,7 @@
     openSetting("model");
   });
   submissionButton.addEventListener("click", function () { openSetting("submission"); });
+  goalModeButton.addEventListener("click", function () { toggleMode("goalMode"); });
   fastModeButton.addEventListener("click", function () { toggleMode("fastMode"); });
   prompt.addEventListener("input", function () { inputFeedback.hidden = true; });
   questionButton.addEventListener("click", function () {
@@ -262,13 +354,23 @@
     updateJumpToBottom();
   });
   timeline.addEventListener("scroll", function () {
-    followLatest = timeline.scrollHeight - timeline.clientHeight - timeline.scrollTop <= 24;
+    // Layout changes can emit scroll events before ResizeObserver runs.
+    // Preserve the previous follow intent until the new viewport is handled.
+    if (timelineViewportHeight === timeline.clientHeight) {
+      followLatest = timeline.scrollHeight - timeline.clientHeight - timeline.scrollTop <= 24;
+    }
     updateAutoScrollControl();
     updateJumpToBottom();
   }, { passive: true });
   timeline.addEventListener("toggle", updateJumpToBottom, true);
   timeline.addEventListener("load", updateJumpToBottom, true);
-  new ResizeObserver(updateJumpToBottom).observe(timeline);
+  timelineViewportHeight = timeline.clientHeight;
+  new ResizeObserver(function () {
+    timelineViewportHeight = timeline.clientHeight;
+    if (state.autoScroll && followLatest) timeline.scrollTop = timeline.scrollHeight;
+    updateAutoScrollControl();
+    updateJumpToBottom();
+  }).observe(timeline);
   new MutationObserver(updateJumpToBottom).observe(timeline, { childList: true, subtree: true, characterData: true });
   updateJumpToBottom();
 
@@ -286,8 +388,15 @@
   document.addEventListener("keydown", function (event) {
     if (event.key === "Escape") {
       // Let the native picker consume Escape before closing its settings dialog.
-      if (CSS.supports("selector(select:open)") && modelMenu.querySelector("select:open")) return;
+      if (CSS.supports("selector(select:open)") && document.querySelector("#model-menu select:open, #status-settings select:open")) return;
       if (!statusSettings.hidden) { event.preventDefault(); closeStatusSettings(); return; }
+      const history = document.getElementById("task-history");
+      if (history.open) {
+        event.preventDefault();
+        history.open = false;
+        history.querySelector("summary").focus();
+        return;
+      }
       if (!sessionMenu.hidden) {
         event.preventDefault();
         closeSessionMenu(true);
@@ -314,6 +423,8 @@
   });
 
   document.addEventListener("click", function (event) {
+    const history = document.getElementById("task-history");
+    if (!event.target.closest("#task-history")) history.open = false;
     const link = event.target.closest(".markdown-body a");
     if (link) {
       event.preventDefault();
@@ -407,6 +518,8 @@
     }
     switch (message.type) {
       case "host.initialize":
+        const incomingConversationId = typeof message.conversationId === "string" ? message.conversationId : undefined;
+        const conversationBoundaryChanged = Boolean(incomingConversationId && incomingConversationId !== state.conversationId);
         state.panelId = message.panelId;
         state.title = message.title;
         state.role = ["main", "work", "verification"].includes(message.role) ? message.role : "main";
@@ -414,6 +527,8 @@
         document.body.dataset.agentRole = state.role;
         state.projectName = message.projectName;
         state.runtimeAvailable = message.runtimeAvailable === true;
+        if (message.resetConversation === true || conversationBoundaryChanged) resetConversationState();
+        state.conversationId = incomingConversationId ?? state.conversationId;
         state.capabilities = message.capabilities;
         if (currentCapabilities().diagnostic) appendNotice("warning", currentCapabilities().diagnostic);
         state.running = message.running === true;
@@ -425,9 +540,11 @@
         state.fastMode = message.fastMode === true;
         state.goalMode = false;
         state.workLoopMode = false;
-        state.contextUsedTokens = safeCountOrUndefined(message.contextUsedTokens);
-        state.contextWindowTokens = safeCountOrUndefined(message.contextWindowTokens);
-        state.weeklyUsedPercent = safePercentOrUndefined(message.weeklyUsedPercent);
+        if (!conversationBoundaryChanged && message.resetConversation !== true) {
+          state.contextUsedTokens = safeCountOrUndefined(message.contextUsedTokens);
+          state.contextWindowTokens = safeCountOrUndefined(message.contextWindowTokens);
+          state.weeklyUsedPercent = safePercentOrUndefined(message.weeklyUsedPercent);
+        }
         state.queueCount = safeCount(message.queueCount);
         if (Array.isArray(message.pendingMessageIds)) {
           for (const item of state.pendingRequests || []) {
@@ -438,7 +555,7 @@
           state.runStartedAt = Date.now();
         } else if (!state.running) {
           state.runStartedAt = undefined;
-          state.runPanelExpanded = false;
+          if (currentTaskFlows().length === 0) state.runPanelExpanded = false;
         }
         state.statusItems = normalizeStatusItems(message.statusItems);
         updateModeControls();
@@ -459,6 +576,7 @@
       case "goal.updated":
         nativeGoal = message.goal || null;
         goalError = message.error;
+        goalErrorLocalization = message.localization?.error;
         renderGoal();
         updateModeControls();
         persist();
@@ -509,9 +627,16 @@
         persist();
         break;
       }
+      case "image.resolved":
+        for (const img of document.querySelectorAll("img[data-local-image]")) {
+          if (img.dataset.localImage !== message.href) continue;
+          if (message.src && /^data:image\/(png|jpeg|gif|webp);base64,/.test(message.src)) img.src = message.src;
+          else { img.alt = t("image.unavailable", img.alt || t("image.default")); }
+        }
+        break;
       case "host.notice":
         if (message.level === "error") { botOutcome = "failed"; renderFactoryBot(); }
-        appendNotice(message.level, message.text);
+        appendNotice(message.level, message.text, message.localization?.text);
         break;
       case "status.updated":
         if (Array.isArray(message.items)) {
@@ -533,6 +658,7 @@
         if (typeof message.agentId === "string" && message.agentId) {
           state.agentId = message.agentId;
           if (message.reset === true) {
+            state.conversationId = message.conversationId;
             state.contextUsedTokens = undefined;
             state.contextWindowTokens = undefined;
             state.weeklyUsedPercent = undefined;
@@ -542,11 +668,48 @@
             state.pendingDecisionRunId = undefined;
             state.decisionSubmitting = false;
             state.timeline = [];
+            state.taskFlows = [];
             followLatest = true;
             renderTimeline();
           }
           updateModeControls();
           closeSessionMenu(false);
+          persist();
+        }
+        break;
+      case "conversation.cleared":
+        if (typeof message.conversationId === "string" && message.conversationId) {
+          const pendingRequests = state.pendingRequests;
+          resetConversationState();
+          state.pendingRequests = pendingRequests;
+          state.conversationId = message.conversationId;
+          renderAll();
+          persist();
+        }
+        break;
+      case "conversation.history":
+        if (message.agentId === state.agentId && message.history &&
+            message.history.conversationId === state.conversationId &&
+            Array.isArray(message.history.messages)) {
+          const restored = message.history.messages.filter(function (item) {
+            return item && ["user", "assistant"].includes(item.type) &&
+              typeof item.id === "string" && typeof item.runId === "string" && typeof item.text === "string";
+          });
+          if (!state.timeline.some(function (item) { return ["user", "assistant", "activity"].includes(item.type); })) {
+            state.timeline = restored;
+          } else {
+            // Repair raw or partially separated history only when the exact
+            // captured request matches. Live messages remain untouched.
+            const byId = new Map(restored.map(function (item) { return [item.id, item]; }));
+            state.timeline = state.timeline.map(function (item) {
+              const replacement = byId.get(item.id);
+              return item.type === "user" && item.id?.startsWith("history-user-") &&
+                replacement?.submission && item.text !== replacement.text &&
+                item.text + (item.submission?.guidance || "") === replacement.text + (replacement.submission.guidance || "")
+                ? replacement : item;
+            });
+          }
+          renderTimeline();
           persist();
         }
         break;
@@ -563,6 +726,7 @@
       case "agents.list":
         state.workUnitsKnown = Array.isArray(message.agents);
         state.agentsLoading = false;
+        if (Array.isArray(message.workflows)) state.workflows = message.workflows;
         state.childAgents = Array.isArray(message.agents) ? message.agents.filter(isChildAgent) : [];
         state.workUnits = summarizeChildAgents(state.childAgents);
         renderAgentsList();
@@ -573,11 +737,13 @@
         persist();
         break;
       case "decision.pending":
+        state.pendingDecisionCanApprove = Boolean(message.runId) && message.canApprove === true;
         state.pendingDecisionRunId = typeof message.runId === "string" ? message.runId : undefined;
         state.decisionSubmitting = false;
         renderPendingQueue();
         renderTimeline();
         renderStatusBar();
+        updateConversationClearControl();
         break;
       case "chat.human-decision":
         if (typeof message.text === "string" && message.text) {
@@ -598,8 +764,16 @@
               entry.phase === (message.phase === "commentary" ? "commentary" : "final");
           })) break;
           if (isDuplicateCancellation(state.timeline.at(-1), { ...message, type: "assistant" })) break;
-          state.timeline.push({ type: "assistant", id: createId(), text: message.text, runId: message.runId, phase: message.phase === "commentary" ? "commentary" : "final" });
+          const incomingFlows = extractTaskFlows(message.text).flows;
+          if (incomingFlows.length) {
+            const snapshots = new Map(currentTaskFlows().map(flow => [flow.id, flow]));
+            for (const flow of incomingFlows) snapshots.set(flow.id, flow);
+            state.taskFlows = [...snapshots.values()].slice(-100);
+          }
+          state.timeline.push({ type: "assistant", id: createId(), text: message.text, localization: message.localization?.text, runId: message.runId, phase: message.phase === "commentary" ? "commentary" : "final" });
           renderTimeline();
+          renderRunStatus();
+          renderWorkLoopPanel();
           persist();
         }
         break;
@@ -619,7 +793,8 @@
           botWaveTimer = undefined;
         }
         state.running = message.running === true;
-        state.runProgress = state.running ? (state.runProgress || "Starting Main Agent") : "";
+        state.runProgress = state.running ? (state.runProgress || t("ui.starting.main.agent")) : "";
+        state.runProgressLocalization = globalThis.AgentFactoryI18n.describe(state.runProgress) || state.runProgressLocalization;
         if (state.running && !state.runStartedAt) {
           state.runStartedAt = Date.now();
         } else if (!state.running) {
@@ -641,34 +816,47 @@
       case "chat.started": {
         const pending = (state.pendingRequests || []).find(function (item) { return item.id === message.id; });
         state.pendingRequests = (state.pendingRequests || []).filter(function (item) { return item.id !== message.id; });
+        const revealSubmission = Boolean(pending) && !(state.startedMessageIds || []).includes(message.id) &&
+          !state.timeline.some(item => item.type === "user" && item.id === message.id);
+        if (revealSubmission) followLatest = true;
         if (!(state.startedMessageIds || []).includes(message.id) && !state.timeline.some(function (item) { return item.type === "user" && item.id === message.id; })) {
           state.timeline.push({ type: "user", id: message.id,
-            text: message.text || message.attachments.map(function (item) { return "Attachments: " + item.name; }).join("\n"),
+            text: message.text || message.attachments.map(function (item) { return t("ui.attachments.c53076") + item.name; }).join("\n"),
             submission: message.submission || submissionFromExecution(pending?.execution),
             attachments: pending ? pending.attachments : message.attachments });
           state.pendingDecisionRunId = undefined;
           state.decisionSubmitting = false;
-          state.childAgents = [];
+          // Keep accepted background workflows during a new Main conversation turn.
           state.workUnits = summarizeChildAgents([]);
           state.runStartedAt = Date.now();
-          state.runProgress = "Main Agent running";
+          state.runProgress = t("ui.main.agent.running");
+          state.runProgressLocalization = globalThis.AgentFactoryI18n.describe(state.runProgress);
         }
         const acknowledged = state.timeline.find(function (item) { return item.type === "user" && item.id === message.id; });
         if (acknowledged && message.submission) acknowledged.submission = message.submission;
         state.startedMessageIds = [...new Set([...(state.startedMessageIds || []), message.id])].slice(-400);
         renderAll();
+        // Acceptance inserts the submitted request after the initial send scroll.
+        // Reveal that request once, without changing the automatic-scroll preference.
+        if (revealSubmission) {
+          timeline.scrollTop = timeline.scrollHeight;
+          updateAutoScrollControl();
+          updateJumpToBottom();
+        }
         persist();
         break;
       }
       case "queue.updated":
         renderPendingQueue();
         state.queueCount = safeCount(message.count);
+        updateConversationClearControl();
         renderStatusBar();
         updateSendButton();
         break;
       case "run.progress":
         if (typeof message.text === "string" && message.text) {
           state.runProgress = message.text;
+          state.runProgressLocalization = message.localization?.text;
           renderRunStatus();
           persist();
         }
@@ -709,11 +897,11 @@
     }
   });
 
-  function submit(action = "direct", workflow = "normal", asGoal = false) {
-    if (!Object.hasOwn(taskModeNames, action)) action = "direct";
-    const userText = prompt.value.trim();
+  function submit(action = "direct", workflow = "normal", asGoal = state.goalMode, choiceAnswer = null) {
+    if (!Object.hasOwn(taskModeNames(), action)) action = "direct";
+    const userText = choiceAnswer ?? (prompt.value.trim() || (action !== "direct" && !asGoal ? t("ui.workflow.from.conversation") : ""));
     if (!userText && state.attachments.length === 0) {
-      inputFeedback.textContent = "Enter what you want help with. Include the target and desired result, for example: ‘Fix the login error in this file.’";
+      inputFeedback.textContent = t("ui.enter.what.you.want.help.with.include.the.target.and.desired.result.for.example.fix.the.login.error.in.this.file");
       inputFeedback.hidden = false;
       prompt.focus();
       return;
@@ -722,7 +910,7 @@
     let text = userText;
     const goal = state.role === "main" && action !== "verification" && currentCapabilities().goal === true && asGoal === true;
     if (goal && (!text || text.length > 4000)) {
-      inputFeedback.textContent = text ? "Shorten the goal to 4,000 characters." : "Describe the goal you want to achieve, for example: ‘Make the attached page usable on mobile.’";
+      inputFeedback.textContent = text ? t("ui.shorten.the.goal.to.4.000.characters") : t("ui.describe.the.goal.you.want.to.achieve.for.example.make.the.attached.page.usable.on.mobile");
       inputFeedback.hidden = false;
       prompt.focus();
       return;
@@ -730,14 +918,14 @@
     if ((!text && state.attachments.length === 0) || !state.capabilities || !state.runtimeAvailable) {
       return;
     }
-    if (state.attachments.some(function (attachment) { return attachment.pending; })) {
-      appendNotice("info", "Preparing image attachments. Please send again shortly.");
+    if (choiceAnswer === null && state.attachments.some(function (attachment) { return attachment.pending; })) {
+      appendNotice("info", t("ui.preparing.image.attachments.please.send.again.shortly"));
       return;
     }
     const message = {
       id: createId(),
       text,
-      attachments: state.attachments.map(function (attachment) {
+      attachments: (choiceAnswer === null ? state.attachments : []).map(function (attachment) {
         const { previewUri, pending, ...reference } = attachment;
         return reference;
       }),
@@ -752,16 +940,18 @@
         ...(goal ? { goalObjective: text } : {})
       }
     };
-    const submittedAttachments = state.attachments.map(function (attachment) {
+    const submittedAttachments = (choiceAnswer === null ? state.attachments : []).map(function (attachment) {
       const { pending, ...submitted } = attachment;
       return submitted;
     });
     (state.pendingRequests ??= []).push({ ...message, attachments: submittedAttachments });
-    state.goalMode = false;
-    saveComposerSettings();
-    state.draft = "";
-    state.attachments = [];
-    prompt.value = "";
+    if (choiceAnswer === null) {
+      state.goalMode = false;
+      saveComposerSettings();
+      state.draft = "";
+      state.attachments = [];
+      prompt.value = "";
+    }
     followLatest = true;
     renderAll();
     resizePrompt();
@@ -769,6 +959,41 @@
     if (!state.autoScroll) timeline.scrollTop = timeline.scrollHeight;
     persist();
     vscode.postMessage({ type: "chat.send", ...message });
+    return true;
+  }
+
+  function canAnswerInterview(event) {
+    const latest = state.timeline.filter(item => item.type === "user" || (item.type === "assistant" && item.phase !== "commentary")).at(-1);
+    return latest === event && !event.choiceAnswer && !state.running && !state.pendingRequests?.length && state.runtimeAvailable;
+  }
+
+  function renderInterviewChoices(content, event) {
+    if (event.phase === "commentary") return;
+    for (const table of content.querySelectorAll("table")) {
+      const heading = table.previousElementSibling?.textContent.trim() || "";
+      if (!/^(?:질문|Question)\s*\[\d+\s*\/\s*\d+\]\s*:/i.test(heading)) continue;
+      if (!/^(?:선택지?|Option)$/i.test(table.querySelector("th")?.textContent.trim() || "")) continue;
+      const rows = Array.from(table.querySelectorAll("tbody tr"));
+      if (rows.length < 2 || rows.length > 3 || rows.some((row, index) => row.cells[0]?.textContent.trim() !== String(index + 1))) continue;
+      for (const row of rows) {
+        const number = row.cells[0].textContent.trim();
+        const button = document.createElement("button");
+        button.type = "button";
+        button.className = "interview-choice";
+        button.textContent = number;
+        button.setAttribute("aria-label", number + ": " + row.cells[1].textContent.trim());
+        button.disabled = !canAnswerInterview(event);
+        button.addEventListener("click", function () {
+          if (!canAnswerInterview(event)) return;
+          if (submit("direct", "normal", false, number)) {
+            event.choiceAnswer = number;
+            renderAll();
+            persist();
+          }
+        });
+        row.cells[0].replaceChildren(button);
+      }
+    }
   }
 
   function cancelRun() {
@@ -795,11 +1020,11 @@
     return retained;
   }
 
-  function appendNotice(level, text) {
+  function appendNotice(level, text, localization = globalThis.AgentFactoryI18n.describe(text)) {
     if (typeof text !== "string" || !text) {
       return;
     }
-    state.timeline.push({ type: "notice", id: createId(), level, text });
+    state.timeline.push({ type: "notice", id: createId(), level, text, localization });
     renderTimeline();
     persist();
   }
@@ -949,7 +1174,7 @@
       const imageBytes = state.attachments.filter(function (item) { return item.kind === "image"; })
         .reduce(function (total, item) { return total + (item.size || 0); }, 0);
       if (!accepted.includes(file.type) || file.size < 1 || file.size > 10 * 1024 * 1024 || imageCount >= 8 || imageBytes + file.size > 20 * 1024 * 1024) {
-        appendNotice("error", "Attach up to 8 PNG, JPEG, GIF, or WebP images, with a maximum of 10 MiB each and 20 MiB total.");
+        appendNotice("error", t("ui.attach.up.to.8.png.jpeg.gif.or.webp.images.with.a.maximum.of.10.mib.each.and.20.mib.total"));
         continue;
       }
       const id = createId();
@@ -959,7 +1184,7 @@
         vscode.postMessage({ type: "attachments.createImage", id, name: file.name || "image", mediaType: file.type, size: file.size, data: dataUrl.slice(dataUrl.indexOf(",") + 1) });
       } catch (error) {
         state.attachments = state.attachments.filter(function (item) { return item.id !== id; });
-        appendNotice("error", "Unable to read the image.");
+        appendNotice("error", t("ui.unable.to.read.the.image"));
         renderAttachments();
         persist();
       }
@@ -969,8 +1194,8 @@
   function readDataUrl(file) {
     return new Promise(function (resolvePromise, rejectPromise) {
       const reader = new FileReader();
-      reader.addEventListener("load", function () { typeof reader.result === "string" ? resolvePromise(reader.result) : rejectPromise(new Error("invalid image")); });
-      reader.addEventListener("error", function () { rejectPromise(reader.error || new Error("image read failed")); });
+      reader.addEventListener("load", function () { typeof reader.result === "string" ? resolvePromise(reader.result) : rejectPromise(new Error(t("ui.invalid.image"))); });
+      reader.addEventListener("error", function () { rejectPromise(reader.error || new Error(t("ui.image.read.failed"))); });
       reader.readAsDataURL(file);
     });
   }
@@ -990,26 +1215,22 @@
   }
 
   function renderDecisionActions(content, runId) {
+    if (!state.pendingDecisionCanApprove) return;
     const actions = document.createElement("div");
     actions.className = "decision-actions";
     actions.setAttribute("role", "group");
-    actions.setAttribute("aria-label", "Respond to the proposal above");
+    actions.setAttribute("aria-label", t("ui.respond.to.the.proposal.above"));
     const approve = document.createElement("button");
     approve.type = "button";
-    approve.textContent = "Proceed as proposed";
+    approve.textContent = t("ui.proceed.as.proposed");
     approve.disabled = state.running || state.decisionSubmitting || !state.runtimeAvailable;
     approve.addEventListener("click", function () {
-      if (state.running || state.decisionSubmitting || state.pendingDecisionRunId !== runId) return;
+      if (!state.pendingDecisionCanApprove || state.running || state.decisionSubmitting || state.pendingDecisionRunId !== runId) return;
       state.decisionSubmitting = true;
       approve.disabled = true;
       vscode.postMessage({ type: "decision.approve", runId });
     });
-    const reply = document.createElement("button");
-    reply.type = "button";
-    reply.className = "decision-reply";
-    reply.textContent = "Reply directly";
-    reply.addEventListener("click", function () { prompt.focus(); });
-    actions.append(approve, reply);
+    actions.append(approve);
     content.append(actions);
   }
 
@@ -1050,14 +1271,14 @@
     const row = document.createElement("div");
     row.className = "managed-agent-heading";
     const heading = document.createElement("strong");
-    const labels = { doctor: "Check execution environment", capabilities: "Check supported features", submit: "Submit task", send: "Send follow-up", status: "Check task status", result: "Read task result", start: "Start task" };
+    const labels = { doctor: t("ui.check.execution.environment"), capabilities: t("ui.check.supported.features"), submit: t("ui.submit.task"), send: t("ui.send.follow.up"), status: t("ui.check.task.status"), result: t("ui.read.task.result"), start: t("ui.start.task") };
     heading.textContent = scripts.map(function (script) {
       if (script.skill === "agent" && ["exec.py", "loop.py"].includes(script.script) && labels[script.action]) return labels[script.action];
       return script.script + (script.action ? " · " + script.action : "");
     }).join(" / ");
     const badge = document.createElement("span");
     badge.className = "managed-agent-status";
-    badge.textContent = outcome.label;
+    badge.textContent = outcome.status === "completed" ? t(scripts.some(script => ["start", "submit", "send"].includes(script.action)) ? "activity.request.command.completed" : "activity.command.completed") : activityPhaseAccessibleLabel(outcome.status === "running" ? "started" : outcome.status);
     row.append(heading, badge);
     container.append(row);
     renderCommandError(container, outcome);
@@ -1080,26 +1301,31 @@
     const heading = document.createElement("div");
     heading.className = "managed-agent-heading";
     const label = document.createElement("strong");
-    label.textContent = managed.taskMode === "plan" ? "Plan · Work agent" : managed.kind === "loop" ? taskModeNames[managed.taskMode] || "Work · Verification" : role === "verification" ? "Verification agent" : role === "work" ? "Work agent" : "Agent";
+    label.textContent = managed.taskMode === "plan" ? t("ui.plan.work.agent") : managed.kind === "loop" ? taskModeNames()[managed.taskMode] || t("ui.work.verification") : role === "verification" ? t("ui.verification.agent") : role === "work" ? t("ui.work.agent") : t("ui.agent");
     const badge = document.createElement("span");
     badge.className = "managed-agent-status";
-    badge.textContent = status === "active" ? "In progress" : status === "runtime-error" ? "Runtime error" : childAgentStatusLabel(status);
-    if (["work", "plan-work"].includes(managed.taskMode) && status === "completed") badge.textContent += " · No separate verification requested";
+    badge.textContent = status === "active" ? t("ui.in.progress") : status === "runtime-error" ? t("ui.runtime.error") : childAgentStatusLabel(status);
+    if (["work", "plan-work"].includes(managed.taskMode) && status === "completed") badge.textContent += t("ui.no.separate.verification.requested");
     heading.append(label, badge);
     const identity = document.createElement("div");
     identity.className = "managed-agent-identity";
     identity.textContent = managed.agentId + (managed.runId ? " · " + managed.runId : "");
     const progress = document.createElement("div");
     progress.className = "managed-agent-progress";
-    const actions = { submit: "Submit run", start: "Start work", send: "Send follow-up", status: "Check status", result: "Get result", updates: "Get updates", cancel: "Cancel", resume: "Resume", reconcile: "Reconcile work", "recover-receipt": "Recover run", skip: "Skip verification" };
-    progress.textContent = (actions[managed.action] || "Check run") + (outcome.status === "failed" ? " failed" : outcome.status === "running" ? " in progress" : pendingRequest ? " · Acceptance unconfirmed" : " processed");
+    const actions = { submit: t("ui.submit.run"), start: t("ui.start.work"), send: t("ui.send.follow.up"), status: t("ui.check.status"), result: t("ui.get.result"), updates: t("ui.get.updates"), cancel: t("ui.cancel"), resume: t("ui.resume"), reconcile: t("ui.reconcile.work"), "recover-receipt": t("ui.recover.run"), skip: t("ui.skip.verification") };
+    progress.textContent = (actions[managed.action] || t("ui.check.run")) + (outcome.status === "failed" ? t("ui.failed") : outcome.status === "running" ? t("ui.in.progress.3d921e") : pendingRequest ? t("ui.acceptance.unconfirmed") : t("ui.processed"));
+    if (["submit", "send", "start", "resume"].includes(managed.action)) {
+      progress.textContent = outcome.status === "failed" ? t("activity.request.failed") :
+        outcome.status === "running" ? t("activity.request.pending") :
+        managed.runId && (matchesRun || ["accepted", "queued", "starting", "running", "active", "completed", "failed", "cancelled", "needs-human-decision"].includes(managed.observedStatus)) ? t("activity.request.accepted") : t("activity.request.unconfirmed");
+    }
     container.append(heading, identity, progress);
     renderCommandError(container, outcome);
     if (child && state.role === "main") {
       const open = document.createElement("button");
       open.type = "button";
       open.className = "managed-agent-open setting-button";
-      open.textContent = "Open chat";
+      open.textContent = t("ui.open.chat");
       open.addEventListener("click", function () {
         if (state.childAgents.some(function (agent) { return agent.agentId === managed.agentId; })) vscode.postMessage({ type: "agent.open", agentId: managed.agentId });
       });
@@ -1108,7 +1334,7 @@
     const details = document.createElement("details");
     details.className = "managed-agent-details";
     const summary = document.createElement("summary");
-    summary.textContent = "Command and run history · " + events.length;
+    summary.textContent = t("ui.command.and.run.history") + events.length;
     details.append(summary);
     for (const event of events) {
       const raw = document.createElement("div");
@@ -1149,13 +1375,14 @@
 
   function renderSubmission(content, submission) {
     if (!submission || typeof submission !== "object") return;
-    const actions = { work: "Work", plan: "Plan", verification: "Verification", "plan-work": "Plan → Work", "work-verification": "Work → Verification", "plan-work-verification": "Plan → Work → Verification" };
-    const workflows = { interview: "Interview", planning: "Planning", design: "Design" };
-    const labels = [Object.hasOwn(workflows, submission.businessMode) ? workflows[submission.businessMode] : undefined, Object.hasOwn(actions, submission.taskMode) ? actions[submission.taskMode] : undefined, submission.goal === true ? "Goal" : undefined].filter(Boolean);
+    const actions = { work: t("ui.work"), plan: t("ui.plan"), verification: t("ui.verification"), "plan-work": t("ui.plan.work.f294a9"), "work-verification": t("ui.work.verification.6a0009"), "plan-work-verification": t("ui.plan.work.verification.d02a66") };
+    const workflows = { interview: t("ui.interview"), planning: t("ui.planning"), design: t("ui.design") };
+    const labels = [Object.hasOwn(workflows, submission.businessMode) ? workflows[submission.businessMode] : undefined, Object.hasOwn(actions, submission.taskMode) ? actions[submission.taskMode] : undefined, submission.goal === true ? t("ui.goal") : undefined].filter(Boolean);
+    if (submission.backgroundContinuation === true) labels.unshift(t("ui.background.continuation.label"));
     if (labels.length) {
       const metadata = document.createElement("div");
       metadata.className = "message-submission";
-      metadata.setAttribute("aria-label", "Submission method");
+      metadata.setAttribute("aria-label", t("ui.submission.method"));
       for (const label of labels) {
         const badge = document.createElement("span");
         badge.textContent = label;
@@ -1169,11 +1396,11 @@
       const details = document.createElement("details");
       details.className = "message-guidance";
       const summary = document.createElement("summary");
-      summary.setAttribute("aria-label", "View delivered guidance");
-      summary.title = "View delivered guidance";
-      summary.append(createModeIcon("m9 5 7 7-7 7", "submission-chevron"));
+      summary.setAttribute("aria-label", t("ui.view.delivered.guidance"));
+      summary.title = t("ui.view.delivered.guidance");
+      summary.append(createModeIcon("m8.5 5 7 7-7 7", "submission-chevron"));
       const note = document.createElement("p");
-      note.textContent = "Application-added guidance for this request. This is not the full provider prompt.";
+      note.textContent = t("ui.application.added.guidance.for.this.request.this.is.not.the.full.provider.prompt");
       const guidance = document.createElement("pre");
       guidance.textContent = submission.guidance;
       details.append(summary, note, guidance);
@@ -1206,10 +1433,10 @@
       if (managedGroup && managedGroup.events[0] !== event) continue;
       retainedIds.add(event.id);
       const existing = existingMessages.get(event.id);
-      const renderKey = JSON.stringify([event, syntaxRevision,
-        event.type === "assistant" ? [state.role, state.childAgents.map(agent => [agent.agentId, agent.role])] : null,
+      const renderKey = JSON.stringify([event, syntaxRevision, uiLocale(),
+        event.type === "assistant" ? [state.role, state.childAgents.map(agent => [agent.agentId, agent.role]), canAnswerInterview(event)] : null,
         event.type === "assistant" && event.runId === state.pendingDecisionRunId && event.runId
-          ? [state.pendingDecisionRunId, state.decisionSubmitting, state.running, state.runtimeAvailable] : null,
+          ? [state.pendingDecisionRunId, state.pendingDecisionCanApprove, state.decisionSubmitting, state.running, state.runtimeAvailable] : null,
         event.category === "command" ? [managedGroup, state.childAgents, state.role] : null]);
       if (existing && messageRenderKeys.get(existing) === renderKey) {
         if (previousMessage.nextElementSibling !== existing) previousMessage.after(existing);
@@ -1224,6 +1451,18 @@
       }
       if (event.type === "user") {
         message.tabIndex = -1;
+        if (typeof event.text === "string" && event.text.length) {
+          const copy = document.createElement("button");
+          copy.type = "button";
+          copy.className = "message-copy setting-button";
+          copy.append(createModeIcon("M9 9h12v12H9z M6 15H3V3h12v3", "message-copy-icon"));
+          copy.title = t("ui.copy.question");
+          copy.setAttribute("aria-label", t("ui.copy.question"));
+          copy.addEventListener("click", function () {
+            vscode.postMessage({ type: "message.copy", text: event.text });
+          });
+          message.append(copy);
+        }
       }
       if (event.type === "activity") {
         message.classList.add("message-activity-" + (event.category || "tool"));
@@ -1254,12 +1493,13 @@
         mark.className = "notice-mark";
         mark.textContent = event.level === "error" ? "×" : event.level === "warning" ? "!" : "i";
         const text = document.createElement("span");
-        text.textContent = event.text;
+        text.textContent = localizedText(event.text, event.localization);
         content.append(mark, text);
       } else if (event.type === "assistant") {
+        const taskContent = extractTaskFlows(localizedText(event.text, event.localization));
         const extracted = event.phase !== "commentary" && globalThis.agentFactoryExecutionReferences
-          ? globalThis.agentFactoryExecutionReferences.extract(event.text, markdown)
-          : { text: event.text, references: [] };
+          ? globalThis.agentFactoryExecutionReferences.extract(taskContent.text, markdown)
+          : { text: taskContent.text, references: [] };
         if (extracted.references.length) {
           renderAssistantMarkdown(content, extracted.before);
           renderExecutionReferences(content, extracted.references);
@@ -1267,6 +1507,8 @@
         } else {
           renderAssistantMarkdown(content, extracted.text);
         }
+        for (const flow of taskContent.flows) content.append(createTaskFlow(flow));
+        renderInterviewChoices(content, event);
         if (event.runId && event.runId === state.pendingDecisionRunId && event.phase !== "commentary") {
           renderDecisionActions(content, event.runId);
         }
@@ -1344,10 +1586,10 @@
 
   function updateAutoScrollControl() {
     const following = state.autoScroll && followLatest;
-    const status = following ? "Following latest messages" : "Paused · Jump to the bottom to resume";
+    const status = following ? t("ui.following.latest.messages") : t("ui.paused.jump.to.the.bottom.to.resume");
     const label = state.autoScroll
-      ? "Auto-scroll ON · " + status + " · Click to turn off"
-      : "Auto-scroll OFF · Click to jump to the latest content and turn on";
+      ? t("ui.auto.scroll.on") + status + t("ui.click.to.turn.off")
+      : t("ui.auto.scroll.off.click.to.jump.to.the.latest.content.and.turn.on");
     autoScrollButton.title = label;
     autoScrollButton.setAttribute("aria-label", label);
     autoScrollButton.setAttribute("aria-pressed", String(state.autoScroll));
@@ -1359,8 +1601,8 @@
   }
 
   function activityKindLabel(category) {
-    if (category === "file") return "Git changes";
-    return "Tool execution";
+    if (category === "file") return t("ui.git.changes");
+    return t("ui.tool.execution");
   }
 
   function createTranscriptDot() {
@@ -1385,9 +1627,9 @@
   }
 
   function activityPhaseAccessibleLabel(phase) {
-    if (phase === "completed") return "Succeeded";
-    if (phase === "failed") return "Failed";
-    return "In progress";
+    if (phase === "completed") return t("ui.succeeded");
+    if (phase === "failed") return t("ui.failed.09fef5");
+    return t("ui.in.progress");
   }
 
   function renderTerminalCommand(container, command, phaseValue, title) {
@@ -1396,7 +1638,7 @@
     row.className = "terminal-command-row";
     const prompt = document.createElement("span");
     prompt.className = "terminal-command-prompt";
-    prompt.textContent = phaseValue === "failed" ? "Failed " : phaseValue === "completed" ? "Ran " : "Running ";
+    prompt.textContent = phaseValue === "failed" ? t("ui.failed.0f4f56") : phaseValue === "completed" ? t("ui.ran") : t("ui.running");
     const text = document.createElement("div");
     text.className = "bash-command-text";
     if (title) {
@@ -1417,8 +1659,8 @@
     const toggle = document.createElement("button");
     toggle.type = "button";
     toggle.className = "bash-command-toggle";
-    toggle.setAttribute("aria-label", "Expand full command");
-    toggle.title = "Expand full command";
+    toggle.setAttribute("aria-label", t("ui.expand.full.command"));
+    toggle.title = t("ui.expand.full.command");
     toggle.setAttribute("aria-expanded", "false");
     toggle.hidden = true;
     const toggleIcon = document.createElementNS("http://www.w3.org/2000/svg", "svg");
@@ -1449,8 +1691,8 @@
   function setCommandExpanded(text, toggle, expanded) {
     text.classList.toggle("is-expanded", expanded);
     toggle.classList.toggle("is-expanded", expanded);
-    toggle.setAttribute("aria-label", expanded ? "Collapse command" : "Expand full command");
-    toggle.title = expanded ? "Collapse command" : "Expand full command";
+    toggle.setAttribute("aria-label", expanded ? t("ui.collapse.command") : t("ui.expand.full.command"));
+    toggle.title = expanded ? t("ui.collapse.command") : t("ui.expand.full.command");
     toggle.setAttribute("aria-expanded", String(expanded));
     if (expanded) toggle.hidden = false;
   }
@@ -1469,12 +1711,9 @@
   }
 
   function readActivityDisplayTitle(title, phase) {
-    // Render legacy UI labels in English without rewriting the saved event.
-    if (title.startsWith("Skill 읽기 · ")) title = title.replace("Skill 읽기 · ", "Read Skill · ");
-    if (title === "실행 결과 읽기") title = "Read run result";
-    if (phase !== "started") return title;
-    if (title.startsWith("Read Skill · ")) return title.replace("Read Skill · ", "Reading Skill · ");
-    if (title === "Read run result") return "Reading run result";
+    const skill = /^(?:Read Skill|Skill 읽기) · (.*)$/.exec(title);
+    if (skill) return t(phase === "started" ? "activity.skill.reading" : "activity.skill.read", skill[1]);
+    if (["Read run result", "실행 결과 읽기"].includes(title)) return t(phase === "started" ? "activity.result.reading" : "activity.result.read");
     return title;
   }
 
@@ -1501,13 +1740,13 @@
     const block = document.createElement("div");
     block.className = "terminal-output-block";
     block.classList.toggle("terminal-output-collapsed", collapsed);
-    const preview = createCommandOutput(output || "(no output)");
+    const preview = createCommandOutput(output || t("ui.no.output"));
     preview.classList.add("terminal-output-preview");
     const details = document.createElement("details");
     details.className = "terminal-output-details";
     const summary = document.createElement("summary");
-    summary.textContent = "View run result";
-    details.append(summary, createCommandOutput(output || "(no output)"));
+    summary.textContent = t("ui.view.run.result");
+    details.append(summary, createCommandOutput(output || t("ui.no.output")));
     details.addEventListener("toggle", scheduleCommandOutputMeasurement);
     block.append(preview, details);
     container.append(block);
@@ -1539,7 +1778,7 @@
     overview.className = "git-diff-overview";
     overview.append(createActivityPhase(phaseValue));
     const label = document.createElement("span");
-    label.append(document.createTextNode("Edited " + (files.length === 1 ? files[0].path : (files.length || 1) + " files") + " "));
+    label.append(document.createTextNode(t("ui.edited") + (files.length === 1 ? files[0].path : t("diff.files", files.length || 1)) + " "));
     const stats = document.createElement("span");
     stats.className = "git-diff-stats";
     stats.append("(", createDiffCount("+" + additions, "addition"), " ", createDiffCount("−" + deletions, "deletion"), ")");
@@ -1571,7 +1810,7 @@
     details.className = "git-diff-preview";
     details.open = false;
     const summary = document.createElement("summary");
-    summary.textContent = "View Git diff";
+    summary.textContent = t("ui.view.git.diff");
     const pre = document.createElement("pre");
     const code = document.createElement("code");
     diff.split("\n").forEach(function (line) {
@@ -1643,7 +1882,7 @@
     if (shown > 12) {
       const more = document.createElement("span");
       more.className = "git-diff-more";
-      more.textContent = "… " + (shown - 12) + " more lines";
+      more.textContent = t("diff.more", shown - 12);
       preview.append(more);
     }
     if (shown > 0) {
@@ -1801,7 +2040,7 @@
   function renderExecutionReferences(container, references) {
     const list = document.createElement("ul");
     list.className = "execution-references agents-list";
-    list.setAttribute("aria-label", "Execution identifiers");
+    list.setAttribute("aria-label", t("ui.execution.identifiers"));
     for (const reference of references) {
       const row = document.createElement("li");
       row.className = "execution-reference";
@@ -1813,7 +2052,7 @@
       main.className = "agent-item execution-reference-main";
       if (canOpen) {
         main.type = "button";
-        main.title = reference.id + " · Chat with session";
+        main.title = reference.id + t("ui.chat.with.session");
         main.addEventListener("click", function () {
           if (state.childAgents.some(function (agent) { return agent.agentId === reference.id && agent.role === expectedRole; })) {
             vscode.postMessage({ type: "agent.open", agentId: reference.id });
@@ -1822,7 +2061,7 @@
       }
       const label = document.createElement("span");
       label.className = "agent-role";
-      label.textContent = reference.label === "예약된 Verification Agent" ? "Reserved Verification Agent" : reference.label;
+      label.textContent = ({ "Work Agent": t("reference.work.agent"), "Work Run": t("reference.work.run"), "Work Session": t("reference.work.session"), "Loop": t("reference.loop"), "예약된 Verification Agent": t("ui.reserved.verification.agent") })[reference.label] || reference.label;
       const id = document.createElement("span");
       id.className = "execution-reference-id";
       id.textContent = reference.id;
@@ -1830,8 +2069,8 @@
       const copy = document.createElement("button");
       copy.type = "button";
       copy.className = "execution-reference-copy setting-button";
-      copy.textContent = "Copy";
-      copy.setAttribute("aria-label", label.textContent + " " + reference.id + " · Copy");
+      copy.textContent = t("ui.copy");
+      copy.setAttribute("aria-label", label.textContent + " " + reference.id + t("ui.copy.fafe60"));
       copy.addEventListener("click", function () { vscode.postMessage({ type: "reference.copy", id: reference.id }); });
       row.append(main, copy);
       list.append(row);
@@ -1862,6 +2101,13 @@
   }
 
   function finishAssistantMarkdown(container) {
+    for (const img of container.querySelectorAll("img[src]")) {
+      const href = img.getAttribute("src");
+      if (img.dataset.localImage || !/^(?:file:\/\/|\/|\.\.?\/)/i.test(href)) continue;
+      img.dataset.localImage = href;
+      img.removeAttribute("src");
+      vscode.postMessage({ type: "image.resolve", href });
+    }
     for (const code of container.querySelectorAll("pre > code")) {
       if (code.dataset.highlighted === "true") continue;
       code.dataset.highlighted = "true";
@@ -1875,25 +2121,27 @@
   }
 
   function renderRunStatus() {
-    runStatus.hidden = !state.running;
+    runElapsed.hidden = !state.running;
+    const hasUnfinishedTasks = displayTaskFlows().some(unfinishedFlow);
+    runStatus.hidden = !state.running && !hasUnfinishedTasks;
     if (!state.running) {
       stopElapsedTimer();
-      runStatusLabel.textContent = "";
-      runStatusLabel.title = "";
-      runElapsed.textContent = "0s";
+      runStatusLabel.textContent = t("ui.task.workflow");
+      runStatusLabel.title = t("ui.task.workflow");
+      runElapsed.textContent = t("duration.seconds", 0);
       return;
     }
     if (!state.runStartedAt) {
       state.runStartedAt = Date.now();
     }
     const elapsed = Math.max(0, Date.now() - state.runStartedAt);
-    runStatusLabel.textContent = state.runProgress || "Working";
-    runStatusLabel.title = state.runProgress || "Working";
+    runStatusLabel.textContent = localizedText(state.runProgress, state.runProgressLocalization) || t("ui.working");
+    runStatusLabel.title = localizedText(state.runProgress, state.runProgressLocalization) || t("ui.working");
     runElapsed.textContent = formatElapsed(elapsed);
     const elapsedItem = statusBar.querySelector('[data-item-id="elapsed"]');
     if (elapsedItem) {
       elapsedItem.textContent = statusLabel("elapsed");
-      elapsedItem.setAttribute("aria-label", elapsedItem.textContent + " · Move with Alt+Left/Right");
+      elapsedItem.setAttribute("aria-label", elapsedItem.textContent + t("ui.move.with.alt.left.right"));
     }
     refreshStatusPreview();
     if (!elapsedTimerId) {
@@ -1901,34 +2149,223 @@
     }
   }
 
+  function extractTaskFlows(text) {
+    const flows = [];
+    const rest = text.replace(/^```task-flow\s*\n([\s\S]*?)^```\s*$/gm, function (block, json) {
+      try {
+        const flow = JSON.parse(json);
+        const validId = value => typeof value === "string" && /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(value);
+        const validText = value => typeof value === "string" && value.trim() && value.length <= 300;
+        const statuses = ["pending", "running", "verifying", "completed", "failed", "blocked", "cancelled"];
+        if (!validId(flow.id) || !validText(flow.title) || !Array.isArray(flow.tasks) || !flow.tasks.length || flow.tasks.length > 100) return block;
+        if (!flow.tasks.every(task => task && validId(task.id) && validText(task.title) && statuses.includes(task.status) &&
+          (task.description === undefined || (typeof task.description === "string" && task.description.length <= 8200)) &&
+          (task.agentId === undefined || validId(task.agentId)) && (task.runId === undefined || validId(task.runId)))) return block;
+        if (new Set(flow.tasks.map(task => task.id)).size !== flow.tasks.length) return block;
+        flows.push(flow);
+        return "";
+      } catch { return block; }
+    });
+    return { text: rest, flows };
+  }
+
+  function currentTaskFlows() {
+    const flows = new Map();
+    for (const entry of state.timeline) {
+      if (entry.type !== "assistant") continue;
+      for (const flow of extractTaskFlows(entry.text || "").flows) flows.set(flow.id, flow);
+    }
+    for (const savedFlow of state.taskFlows || []) {
+      for (const flow of extractTaskFlows("```task-flow\n" + JSON.stringify(savedFlow) + "\n```").flows) flows.set(flow.id, flow);
+    }
+    // Runtime-accepted task metadata is authoritative even when commentary is absent.
+    for (const agent of state.childAgents.slice().reverse()) {
+      const binding = agent.taskBinding;
+      if (!acceptedTaskAgent(agent) || !binding) continue;
+      const task = { id: binding.taskId, title: binding.title, description: binding.description,
+        status: agent.status === "completed" ? "pending" : agent.status === "needs-human-decision" ? "blocked" :
+          ["failed", "cancelled"].includes(agent.status) ? agent.status : agent.status === "running" ? (agent.role === "verification" ? "verifying" : "running") : "pending",
+        agentId: agent.agentId, runId: agent.runId };
+      if (typeof binding.completionCriteria === "string") task.description += "\n\n" + binding.completionCriteria;
+      const candidate = { id: binding.workflowId, title: binding.workflowTitle, tasks: [task] };
+      if (!extractTaskFlows("```task-flow\n" + JSON.stringify(candidate) + "\n```").flows.length) continue;
+      const existing = flows.get(candidate.id);
+      const flow = existing ? { ...existing, tasks: [...existing.tasks] } : { ...candidate, tasks: [] };
+      const index = flow.tasks.findIndex(entry => entry.id === task.id);
+      if (index < 0) flow.tasks.push(task);
+      else {
+        const previous = flow.tasks[index];
+        flow.tasks[index] = { ...task, status: previous.status === "completed" && previous.runId === task.runId ? "completed" : task.status };
+      }
+      flows.set(flow.id, flow);
+    }
+    for (const snapshot of state.workflows || []) {
+      const workflow = snapshot.workflow;
+      if (!workflow || !Array.isArray(workflow.tasks)) continue;
+      const verification = ["work-verification", "plan-work-verification"].includes(snapshot.taskMode);
+      const tasks = workflow.tasks.flatMap((task, index) => {
+        const description = [task.description, task.completionCriteria].filter(Boolean).join("\n\n");
+        const stages = [{ id: "stage-" + index + ".work", title: task.title, description, status: task.workStatus, sessionAgentId: task.workAgentId || snapshot.workAgentId, sessionRunId: task.workRunId, sessionRole: "work" }];
+        if (verification) stages.push({ id: "stage-" + index + ".verification", title: String(task.title).slice(0, 280) + " · " + t("ui.verification"), description, status: task.verificationStatus === "running" ? "verifying" : task.verificationStatus, sessionAgentId: task.verificationAgentId || snapshot.verificationAgentId, sessionRunId: task.verificationRunId, sessionRole: "verification" });
+        return stages;
+      });
+      const candidate = { id: workflow.id, title: workflow.title, tasks };
+      if (extractTaskFlows("```task-flow\n" + JSON.stringify(candidate) + "\n```").flows.length) flows.set(workflow.id, { ...candidate, engine: true });
+    }
+    return [...flows.values()];
+  }
+
+  function liveTaskStatus(task) {
+    let status = task.status;
+    const agent = task.agentId && task.runId && state.childAgents.find(agent => agent.agentId === task.agentId && agent.runId === task.runId);
+    if (agent && status !== "completed") {
+      if (["failed", "cancelled"].includes(agent.status)) status = agent.status;
+      else if (agent.status === "needs-human-decision") status = "blocked";
+      else if (agent.status === "running") status = agent.role === "verification" ? "verifying" : "running";
+      // A finished child is not proof that the whole task passed verification.
+      else if (["running", "verifying"].includes(status)) status = "pending";
+    }
+    return status;
+  }
+
+  function createTaskFlow(flow, live = false) {
+    const section = document.createElement("section");
+    section.className = "task-flow";
+    section.dataset.flowId = flow.id;
+    section.setAttribute("aria-label", flow.title);
+    const title = document.createElement("strong");
+    title.textContent = flow.title;
+    section.append(title);
+    const list = document.createElement("ol");
+    list.className = "task-flow-list";
+    flow.tasks.forEach(function (task, index) {
+      const status = live ? liveTaskStatus(task) : task.status;
+      const item = document.createElement("li");
+      item.className = "task-flow-step";
+      item.dataset.status = status;
+      item.dataset.taskId = task.id;
+      if (["running", "verifying"].includes(status)) item.setAttribute("aria-current", "step");
+      const marker = document.createElement("span");
+      marker.className = "task-flow-number";
+      marker.textContent = String(index + 1);
+      const name = document.createElement("span");
+      name.className = "task-flow-name";
+      name.textContent = task.title;
+      const label = document.createElement("span");
+      label.className = "task-flow-state";
+      label.textContent = t("flow.status." + status);
+      item.append(marker, name, label);
+      if (task.description) {
+        const details = document.createElement("details");
+        details.className = "task-flow-description";
+        const summary = document.createElement("summary");
+        summary.textContent = t("flow.request.details");
+        const description = document.createElement("div");
+        description.textContent = task.description;
+        details.append(summary, description);
+        item.append(details);
+      }
+      const agentId = task.sessionAgentId || task.agentId;
+      const runId = task.sessionRunId || task.runId;
+      const validId = value => typeof value === "string" && /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(value);
+      if (validId(agentId) && validId(runId)) {
+        const agent = state.childAgents.find(agent => agent.agentId === agentId && agent.runId === runId && acceptedTaskAgent(agent));
+        if (task.sessionRunId || agent) {
+          const role = task.sessionRole || agent?.role;
+          const open = document.createElement("button");
+          open.type = "button";
+          open.className = "task-flow-open setting-button";
+          open.textContent = t(role === "verification" ? "flow.open.verification.session" : "flow.open.work.session");
+          open.setAttribute("aria-label", task.title + " · " + open.textContent);
+          open.title = agentId;
+          open.addEventListener("click", function () { vscode.postMessage({ type: "agent.open", agentId }); });
+          item.append(open);
+        }
+      }
+      list.append(item);
+    });
+    section.append(list);
+    return section;
+  }
+
+  function acceptedTaskAgent(agent) {
+    return Boolean(agent.runId) && ["accepted", "queued", "starting", "running", "cancelling", "needs-human-decision", "completed", "failed", "cancelled"].includes(agent.status);
+  }
+
+  function displayTaskFlows() {
+    const agents = state.childAgents.filter(acceptedTaskAgent);
+    const flows = currentTaskFlows().filter(flow => {
+      if (flow.engine) return true;
+      const bound = agents.filter(agent => flow.tasks.some(task => task.agentId === agent.agentId && task.runId === agent.runId));
+      if (!bound.length) return false;
+      // A cached plan is not a live workflow after its accepted runs have ended.
+      // Keep explicit terminal flow snapshots; unresolved legacy plans remain in chat.
+      return bound.some(agent => !["completed", "failed", "cancelled"].includes(agent.status)) ||
+        flow.tasks.every(task => ["completed", "failed", "cancelled"].includes(task.status));
+    });
+
+    return flows;
+  }
+
+  function unfinishedFlow(flow) {
+    return flow.tasks.some(task => ["pending", "running", "verifying", "blocked"].includes(liveTaskStatus(task)));
+  }
+
   function renderWorkLoopPanel() {
-    const expandable = state.role === "main";
+    const flows = displayTaskFlows();
+    const active = flows.filter(unfinishedFlow);
+    const history = flows.filter(flow => !unfinishedFlow(flow));
+    const boundRuns = new Set(flows.flatMap(flow => flow.tasks.map(task => task.agentId + "/" + task.runId)));
+    const legacyHistory = state.childAgents.filter(agent => acceptedTaskAgent(agent) &&
+      ["completed", "failed", "cancelled"].includes(agent.status) && !boundRuns.has(agent.agentId + "/" + agent.runId) &&
+      !(state.workflows || []).some(snapshot => snapshot.workflow?.id === agent.taskBinding?.workflowId));
+    const historyPanel = document.getElementById("task-history");
+    const historyList = document.getElementById("task-history-list");
+    historyPanel.hidden = state.role !== "main" || (history.length === 0 && legacyHistory.length === 0);
+    const historySignature = JSON.stringify([history, state.childAgents, t("flow.status.pending")]);
+    if (historyList.dataset.signature !== historySignature) {
+      historyList.dataset.signature = historySignature;
+      historyList.replaceChildren(...history.map(flow => createTaskFlow(flow, true)), ...legacyHistory.map(createRunStage));
+    }
+    const hasActive = active.length > 0;
+    if (hasActive && runDetails.dataset.hasActive !== "true") state.runPanelExpanded = true;
+    runDetails.dataset.hasActive = String(hasActive);
+    if (!hasActive) {
+      state.runPanelExpanded = false;
+      runStageList.replaceChildren();
+      delete runStageList.dataset.flowSignature;
+    }
+    const expandable = state.role === "main" && hasActive;
     const expanded = expandable && state.runPanelExpanded && !runStatus.hidden;
     runStatusToggle.disabled = !expandable;
     runStatusToggle.setAttribute("aria-expanded", String(expanded));
     runStatus.classList.toggle("is-expanded", expanded);
     runStatus.classList.toggle("is-running", state.running);
     runDetails.hidden = !expanded;
-    runStatusAgents.hidden = !expandable;
-    runStatusAgents.textContent = state.workUnits.totalCalled > 0
-      ? "Work " + state.workUnits.workActive + " · Verification " + state.workUnits.verificationActive + " in progress"
-      : "";
+    runStatusAgents.hidden = !expandable || state.workUnits.activeUnits === 0;
+    runStatusAgents.textContent = state.workUnits.activeUnits > 0
+      ? t("status.runningAgents", state.workUnits.workActive, state.workUnits.verificationActive) : "";
     if (!expanded) return;
+    runDetailsSummary.textContent = active.length ? t("flow.task.count", active.reduce((sum, flow) => sum + flow.tasks.length, 0)) : t("ui.preparing");
+    const signature = JSON.stringify([active, state.childAgents, t("flow.status.pending")]);
+    runStopButton.hidden = !state.running;
+    if (runStageList.dataset.flowSignature === signature) return;
+    runStageList.dataset.flowSignature = signature;
+    runStageList.replaceChildren(...active.map(flow => createTaskFlow(flow, true)));
+  }
 
-    runDetailsSummary.textContent = state.workUnits.activeUnits > 0
-      ? state.workUnits.activeUnits + " active"
-      : state.childAgents.length > 0 ? state.childAgents.length + " called" : "Preparing";
-    runStageList.replaceChildren();
-    if (state.childAgents.length === 0) {
-      runStageList.append(emptyAgentItem("No work or verification agents have been called yet."));
-    } else {
-      for (const agent of state.childAgents.slice().sort(function (a, b) {
-        return (a.role === "work" ? 0 : 1) - (b.role === "work" ? 0 : 1);
-      })) {
-        runStageList.append(createRunStage(agent));
+  function childTaskName(agent) {
+    const title = agent.taskBinding?.title;
+    if (typeof title === "string" && title.trim() && title.length <= 300) return title;
+    // Historical Main snapshots are usable only with the exact accepted run binding.
+    if (agent.runId) {
+      const flows = currentTaskFlows();
+      for (const flow of flows) {
+        const task = flow.tasks.find(task => task.agentId === agent.agentId && task.runId === agent.runId);
+        if (task) return task.title;
       }
     }
-    runStopButton.hidden = !state.running;
+    return t("ui.task.name.unavailable");
   }
 
   function createRunStage(agent) {
@@ -1936,7 +2373,7 @@
     item.type = "button";
     item.className = "run-stage";
     item.dataset.status = agent.status;
-    item.title = agent.agentId + " · Open session";
+    item.title = agent.agentId + t("ui.open.session");
     const marker = document.createElement("span");
     marker.className = "run-stage-marker";
     marker.setAttribute("aria-hidden", "true");
@@ -1945,10 +2382,10 @@
     copy.className = "run-stage-copy";
     const name = document.createElement("span");
     name.className = "run-stage-name";
-    name.textContent = agent.role === "work" ? "Work" : "Verification";
+    name.textContent = agent.role === "work" ? t("ui.work") : t("ui.verification");
     const id = document.createElement("span");
     id.className = "run-stage-id";
-    id.textContent = agent.agentId;
+    id.textContent = childTaskName(agent);
     copy.append(name, id);
     const status = document.createElement("span");
     status.className = "run-stage-status";
@@ -1983,11 +2420,11 @@
     const seconds = totalSeconds % 60;
     const totalMinutes = Math.floor(totalSeconds / 60);
     if (totalMinutes === 0) {
-      return seconds + "s";
+      return t("duration.seconds", seconds);
     }
     const minutes = totalMinutes % 60;
     const hours = Math.floor(totalMinutes / 60);
-    return (hours ? hours + "h " : "") + minutes + "m " + seconds + "s";
+    return hours ? t("duration.hours", hours, minutes, seconds) : t("duration.minutes", minutes, seconds);
   }
 
   function renderAttachments() {
@@ -2008,7 +2445,7 @@
         if (attachment.uri && !attachment.pending) {
           preview.tabIndex = 0;
           preview.setAttribute("role", "button");
-          preview.setAttribute("aria-label", attachment.name + " · Open original");
+          preview.setAttribute("aria-label", t("attachment.open", attachment.name));
           preview.addEventListener("click", function () { vscode.postMessage({ type: "attachment.open", id: attachment.id }); });
           preview.addEventListener("keydown", function (event) {
             if (event.key === "Enter" || event.key === " ") { event.preventDefault(); vscode.postMessage({ type: "attachment.open", id: attachment.id }); }
@@ -2027,7 +2464,7 @@
       remove.className = "attachment-remove";
       remove.type = "button";
       remove.textContent = "×";
-      remove.setAttribute("aria-label", attachment.name + " · Remove attachment");
+      remove.setAttribute("aria-label", t("attachment.remove", attachment.name));
       remove.addEventListener("click", function () {
         if (attachment.previewUri?.startsWith("blob:")) {
           URL.revokeObjectURL(attachment.previewUri);
@@ -2065,7 +2502,7 @@
       item.title = attachment.name;
       if (attachment.previewUri) {
         item.type = "button";
-        item.setAttribute("aria-label", attachment.name + " · Open original");
+        item.setAttribute("aria-label", t("attachment.open", attachment.name));
         item.addEventListener("click", function () { vscode.postMessage({ type: "attachment.open", id: attachment.id }); });
         const preview = document.createElement("img");
         preview.src = attachment.previewUri;
@@ -2119,7 +2556,7 @@
       return event.type === "user";
     });
     if (questions.length === 0) {
-      questionList.append(sessionEmpty("No user questions yet."));
+      questionList.append(sessionEmpty(t("ui.no.user.questions.yet")));
       return;
     }
     questions.forEach(function (question, index) {
@@ -2133,7 +2570,7 @@
       text.className = "question-item-text";
       const attachmentNames = (Array.isArray(question.attachments) ? question.attachments : [])
         .map(function (attachment) { return attachment.name; }).filter(Boolean);
-      text.textContent = question.text?.trim() || (attachmentNames.length ? "Attachments: " + attachmentNames.join(", ") : "Message with attachments");
+      text.textContent = question.text?.trim() || (attachmentNames.length ? t("ui.attachments.c53076") + attachmentNames.join(", ") : t("ui.message.with.attachments"));
       item.append(text);
       item.addEventListener("click", function () {
         closeQuestionMenu(false);
@@ -2165,11 +2602,11 @@
   function renderSessionList() {
     sessionList.replaceChildren();
     if (state.sessionsLoading) {
-      sessionList.append(sessionEmpty("Loading sessions…"));
+      sessionList.append(sessionEmpty(t("ui.loading.sessions")));
       return;
     }
     if (state.sessions.length === 0) {
-      sessionList.append(sessionEmpty("No Main Agent sessions to load."));
+      sessionList.append(sessionEmpty(t("ui.no.main.agent.sessions.to.load")));
       return;
     }
     for (const session of state.sessions) {
@@ -2183,7 +2620,7 @@
       name.textContent = session.agentId;
       const meta = document.createElement("span");
       meta.className = "session-item-meta";
-      meta.textContent = [session.model, formatSessionDate(session.updatedAt)].filter(Boolean).join(" · ") || "Main Agent";
+      meta.textContent = [session.model, formatSessionDate(session.updatedAt)].filter(Boolean).join(" · ") || t("ui.main.agent");
       item.append(name, meta);
       item.addEventListener("click", function () {
         vscode.postMessage({ type: "session.select", agentId: session.agentId });
@@ -2205,7 +2642,7 @@
       return "";
     }
     const date = new Date(value);
-    return Number.isNaN(date.getTime()) ? "" : date.toLocaleString("en-US");
+    return Number.isNaN(date.getTime()) ? "" : date.toLocaleString(uiLocale());
   }
 
   function handleSessionListKeydown(event) {
@@ -2223,8 +2660,32 @@
     const count = state.timeline.filter(function (event) {
       return event.type === "user";
     }).length;
-    questionButton.title = "User questions (" + count + ")";
+    questionButton.title = t("toolbar.questions", count);
     questionButton.setAttribute("aria-label", questionButton.title);
+  }
+
+  function clearBotGlance() {
+    clearTimeout(botGlanceTimer);
+    botGlanceTimer = undefined;
+    delete factoryBot.dataset.glance;
+  }
+
+  function maybeGlanceAtPointer(event) {
+    if (event.pointerType !== "mouse" || document.hidden || !state.botVisible ||
+        !state.botAnimations || botReducedMotion.matches || factoryBot.dataset.state !== "idle") return;
+    const now = Date.now();
+    if (now < botNextGlanceAt) return;
+    // Sample once per interval, including misses, so frequent events cannot force a glance.
+    botNextGlanceAt = now + 12000;
+    if (Math.random() >= 0.2) return;
+    const box = factoryBot.getBoundingClientRect();
+    const dx = Math.max(-1, Math.min(1, (event.clientX - box.x - box.width / 2) / 160));
+    const dy = Math.max(-1, Math.min(1, (event.clientY - box.y - box.height / 2) / 160));
+    factoryBot.style.setProperty("--bot-glance-x", (dx * 2.5) + "px");
+    factoryBot.style.setProperty("--bot-glance-y", (dy * 2) + "px");
+    factoryBot.style.setProperty("--bot-glance-tilt", (dx * 6) + "deg");
+    factoryBot.dataset.glance = "true";
+    botGlanceTimer = window.setTimeout(clearBotGlance, 1500);
   }
 
   function wakeFactoryBot() {
@@ -2282,10 +2743,17 @@
     } else {
       botIdleSince = undefined;
     }
-    const labels = { drowsy: "Getting sleepy", sleeping: "Sleeping", idle: "Ready", working: "Working", waiting: "Waiting for your reply", complete: "Completed", error: "Needs attention", offline: "Resting · Runtime offline" };
+    const labels = { drowsy: t("ui.getting.sleepy"), sleeping: t("ui.sleeping"), idle: t("ui.ready"), working: t("ui.working"), waiting: t("ui.waiting.for.your.reply"), complete: t("ui.completed"), error: t("ui.needs.attention"), offline: t("ui.resting.runtime.offline") };
     factoryBot.dataset.state = mode;
+    if (botMenu) {
+      const available = mode === "idle" || mode === "drowsy" || mode === "sleeping";
+      botMenu.querySelectorAll("[data-bot-action]").forEach(button => { button.disabled = !available; });
+      document.getElementById("bot-menu-note").hidden = available;
+      if (!state.botVisible) closeBotMenu();
+    }
+    if (mode !== "idle" || !state.botVisible || !state.botAnimations || botReducedMotion.matches) clearBotGlance();
     updateBotGesture(mode);
-    factoryBot.title = "Factory Bot · " + labels[mode] + (factoryBot.dataset.brain === "luna" ? " · Luna (none)" : factoryBot.dataset.brain === "unavailable" ? " · Local animation (Luna unavailable)" : "");
+    factoryBot.title = t("ui.factory.bot") + labels[mode] + (factoryBot.dataset.brain === "luna" ? t("ui.luna.none") : factoryBot.dataset.brain === "unavailable" ? t("ui.local.animation.luna.unavailable") : "");
     factoryBot.setAttribute("aria-label", factoryBot.title);
     if (mode === "complete" && !botWaveTimer) {
       botWaveTimer = window.setTimeout(function () {
@@ -2301,7 +2769,7 @@
     if (statusDragId) { statusRenderPending = true; return; }
     const focusedId = statusBar.contains(document.activeElement) ? document.activeElement.dataset.itemId : undefined;
     statusBar.replaceChildren();
-    for (const itemId of state.statusItems) {
+    for (const itemId of state.statusItems.filter(statusItemAvailable)) {
       const item = document.createElement("span");
       item.className = "status-item";
       if (itemId === "runtime" && !state.runtimeAvailable) {
@@ -2311,13 +2779,13 @@
       item.tabIndex = 0;
       item.dataset.itemId = itemId;
       item.textContent = statusLabel(itemId);
-      item.title = statusCatalog[itemId][1];
-      item.setAttribute("aria-description", statusCatalog[itemId][1]);
-      item.setAttribute("aria-label", statusCatalog[itemId][0] + ": " + item.textContent + " · Move with Alt+Left/Right");
+      item.title = statusCatalog()[itemId][1];
+      item.setAttribute("aria-description", statusCatalog()[itemId][1]);
+      item.setAttribute("aria-label", statusCatalog()[itemId][0] + ": " + item.textContent + t("ui.move.with.alt.left.right"));
       if (itemId === "agents" && state.role === "main") {
         item.classList.add("work-unit-activity");
         item.dataset.active = String(state.workUnits.activeUnits > 0);
-        item.title = state.workUnitsKnown ? "Active agent tasks " + state.workUnits.activeUnits + " · Total calls " + state.workUnits.totalCalled : "Agent status unavailable · Click to refresh";
+        item.title = state.workUnitsKnown ? t("ui.active.agent.tasks") + state.workUnits.activeUnits + t("ui.total.calls") + state.workUnits.totalCalled : t("ui.agent.status.unavailable.click.to.refresh");
         item.setAttribute("role", "button");
         item.setAttribute("aria-haspopup", "listbox");
         item.setAttribute("aria-expanded", String(!agentsMenu.hidden));
@@ -2376,11 +2844,11 @@
   function renderAgentsList() {
     agentsList.replaceChildren();
     if (state.agentsLoading) {
-      agentsList.append(emptyAgentItem("Loading called agents…"));
+      agentsList.append(emptyAgentItem(t("ui.loading.called.agents")));
       return;
     }
     if (state.childAgents.length === 0) {
-      agentsList.append(emptyAgentItem("No work or verification agents have been called yet."));
+      agentsList.append(emptyAgentItem(t("ui.no.work.or.verification.agents.have.been.called.yet")));
       return;
     }
     for (const agent of state.childAgents) {
@@ -2388,18 +2856,18 @@
       item.type = "button";
       item.className = "agent-item";
       item.setAttribute("role", "option");
-      item.title = agent.agentId + " · Chat with session";
+      item.title = agent.agentId + t("ui.chat.with.session");
       const main = document.createElement("span");
       main.className = "agent-item-main";
       const role = document.createElement("span");
       role.className = "agent-role";
-      role.textContent = agent.role === "work" ? "Work" : "Verification";
+      role.textContent = agent.role === "work" ? t("ui.work") : t("ui.verification");
       const id = document.createElement("span");
       id.className = "agent-id";
-      id.textContent = agent.agentId;
+      id.textContent = childTaskName(agent);
       const status = document.createElement("span");
       status.className = "agent-status";
-      status.textContent = childAgentStatusLabel(agent.status) + " · Click to chat";
+      status.textContent = childAgentStatusLabel(agent.status) + t("ui.click.to.chat");
       main.append(role, id);
       item.append(main, status);
       item.addEventListener("click", function () {
@@ -2434,16 +2902,16 @@
 
   function childAgentStatusLabel(status) {
     const labels = {
-      accepted: "Queued",
-      queued: "Queued",
-      starting: "Starting",
-      running: "Running",
-      cancelling: "Cancelling",
-      completed: "Completed",
-      failed: "Failed",
-      cancelled: "Cancelled",
-      "needs-human-decision": "User decision required",
-      unknown: "Status unknown"
+      accepted: t("ui.queued"),
+      queued: t("ui.queued"),
+      starting: t("ui.starting"),
+      running: t("ui.running.73989d"),
+      cancelling: t("ui.cancelling"),
+      completed: t("ui.completed"),
+      failed: t("ui.failed.09fef5"),
+      cancelled: t("ui.cancelled"),
+      "needs-human-decision": t("ui.user.decision.required"),
+      unknown: t("ui.status.unknown")
     };
     return labels[status] || status;
   }
@@ -2453,7 +2921,7 @@
     renderStatusBar();
     renderStatusCatalog();
     persist();
-    statusAnnouncement.textContent = announcement || "Displayed information updated.";
+    statusAnnouncement.textContent = announcement || t("ui.displayed.information.updated");
     vscode.postMessage({ type: "status.reorder", items: state.statusItems });
   }
 
@@ -2462,12 +2930,13 @@
     if (sourceId === targetId || !items.includes(sourceId) || !items.includes(targetId)) return;
     items.splice(items.indexOf(sourceId), 1);
     items.splice(items.indexOf(targetId) + (after ? 1 : 0), 0, sourceId);
-    setStatusItems(items, statusCatalog[sourceId][0] + " position updated.");
+    setStatusItems(items, statusCatalog()[sourceId][0] + t("ui.position.updated"));
   }
 
   function moveStatus(itemId, offset) {
-    const index = state.statusItems.indexOf(itemId);
-    const target = state.statusItems[index + offset];
+    const visible = state.statusItems.filter(statusItemAvailable);
+    const index = visible.indexOf(itemId);
+    const target = visible[index + offset];
     if (index >= 0 && target) reorderStatus(itemId, target, offset > 0);
   }
 
@@ -2525,14 +2994,16 @@
     if (statusSettings.hidden) return;
     const focusKey = statusCatalogList.contains(document.activeElement) ? document.activeElement.dataset.focusKey : undefined;
     statusCatalogList.replaceChildren();
-    const ids = [...state.statusItems, ...Object.keys(statusCatalog).filter(id => !state.statusItems.includes(id))];
+    const visible = state.statusItems.filter(statusItemAvailable);
+    const ids = [...visible, ...Object.keys(statusCatalog()).filter(id => !state.statusItems.includes(id) && statusItemAvailable(id))];
+    statusCatalogList.dataset.available = Object.keys(statusCatalog()).filter(statusItemAvailable).join(",");
     let previousGroup;
     for (const id of ids) {
       const selected = state.statusItems.includes(id);
       if (previousGroup !== selected) {
         const heading = document.createElement("h3");
         heading.className = "status-catalog-heading";
-        heading.textContent = selected ? "Visible · " + state.statusItems.length : "Available";
+        heading.textContent = selected ? t("ui.visible") + visible.length : t("ui.available");
         statusCatalogList.append(heading);
         previousGroup = selected;
       }
@@ -2549,7 +3020,7 @@
         setStatusItems(checkbox.checked ? [...state.statusItems, id] : state.statusItems.filter(item => item !== id));
       });
       const name = document.createElement("span");
-      name.textContent = statusCatalog[id][0];
+      name.textContent = statusCatalog()[id][0];
       const checkboxControl = document.createElement("span");
       checkboxControl.className = "status-checkbox";
       const check = document.createElementNS("http://www.w3.org/2000/svg", "svg");
@@ -2561,15 +3032,15 @@
       check.append(checkPath);
       checkboxControl.append(checkbox, check);
       label.append(checkboxControl, name);
-      label.title = statusCatalog[id][1];
-      checkbox.setAttribute("aria-description", statusCatalog[id][1]);
+      label.title = statusCatalog()[id][1];
+      checkbox.setAttribute("aria-description", statusCatalog()[id][1]);
       const preview = document.createElement("span");
       preview.className = "status-preview";
       preview.dataset.previewId = id;
       preview.textContent = statusLabel(id);
       const actions = document.createElement("div");
       actions.className = "status-order-actions";
-      for (const [offset, title] of [[-1, "Earlier"], [1, "Later"]]) {
+      for (const [offset, title] of [[-1, t("ui.earlier")], [1, t("ui.later")]]) {
         const button = document.createElement("button");
         button.type = "button";
         const icon = document.createElementNS("http://www.w3.org/2000/svg", "svg");
@@ -2580,11 +3051,11 @@
         path.setAttribute("d", offset < 0 ? "m4 10 4-4 4 4" : "m4 6 4 4 4-4");
         icon.append(path);
         button.append(icon);
-        button.title = title + " · Move";
+        button.title = title + t("ui.move");
         button.dataset.focusKey = id + "-" + offset;
-        button.setAttribute("aria-label", statusCatalog[id][0] + " " + title + " · Move");
-        const index = state.statusItems.indexOf(id);
-        button.disabled = !selected || index + offset < 0 || index + offset >= state.statusItems.length;
+        button.setAttribute("aria-label", statusCatalog()[id][0] + " " + title + t("ui.move"));
+        const index = visible.indexOf(id);
+        button.disabled = !selected || index + offset < 0 || index + offset >= visible.length;
         button.addEventListener("click", function () { moveStatus(id, offset); });
         actions.append(button);
       }
@@ -2600,6 +3071,9 @@
   }
 
   function refreshStatusPreview() {
+    if (!statusSettings.hidden && statusCatalogList.dataset.available !== Object.keys(statusCatalog()).filter(statusItemAvailable).join(",")) {
+      renderStatusCatalog();
+    }
     for (const preview of statusCatalogList.querySelectorAll("[data-preview-id]")) {
       preview.textContent = statusLabel(preview.dataset.previewId);
     }
@@ -2613,6 +3087,7 @@
 
   statusSettingsButton.addEventListener("click", function () {
     if (!statusSettings.hidden) { closeStatusSettings(); return; }
+    renderGeneralSettings();
     statusSettings.hidden = false;
     statusSettingsButton.setAttribute("aria-expanded", "true");
     renderStatusCatalog();
@@ -2654,45 +3129,73 @@
   }
   document.getElementById("status-settings-close").addEventListener("click", closeStatusSettings);
   document.getElementById("status-reset").addEventListener("click", function () {
-    setStatusItems(defaultStatusItems, "Default status items and order restored.");
+    setStatusItems(defaultStatusItems, t("ui.default.status.items.and.order.restored"));
   });
   statusSettings.addEventListener("keydown", function (event) {
-    if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); closeStatusSettings(); }
+    if (event.key === "Escape") {
+      if (CSS.supports("selector(select:open)") && statusSettings.querySelector("select:open")) return;
+      event.preventDefault(); event.stopPropagation(); closeStatusSettings();
+    }
   });
+
+  function statusItemAvailable(id) {
+    const main = state.role === "main";
+    const hasUsage = safeCountOrUndefined(state.contextUsedTokens) !== undefined;
+    const hasWindow = state.contextWindowTokens > 0;
+    const supported = currentCapabilities();
+    switch (id) {
+      case "context": case "contextRemainingTokens": case "contextUsedPercent": return hasUsage && hasWindow;
+      case "contextUsed": return hasUsage;
+      case "contextWindow": return hasWindow;
+      case "weekly": case "weeklyRemaining": return safePercentOrUndefined(state.weeklyUsedPercent) !== undefined;
+      case "agents": case "agentsTotal": return main && state.workUnitsKnown;
+      case "goalTokens": return main && !goalError && safeCountOrUndefined(nativeGoal?.tokensUsed) !== undefined;
+      case "goalTime": return main && !goalError && safeCountOrUndefined(nativeGoal?.timeUsedSeconds) !== undefined;
+      case "goalBudget": return main && !goalError && safeCountOrUndefined(nativeGoal?.tokenBudget) !== undefined;
+      case "goal": return main && !goalError && Boolean(nativeGoal || supported.goal);
+      case "task": return main;
+      case "model": case "reasoning": case "fast": return Boolean(supported[id]);
+      case "elapsed": return Boolean(state.running && state.runStartedAt);
+      case "project": return Boolean(state.projectName);
+      case "branch": return Boolean(state.branch);
+      case "execution": return Boolean(state.executionMode);
+      default: return true;
+    }
+  }
 
   function statusLabel(itemId) {
     const main = state.role === "main";
-    const count = value => safeCountOrUndefined(value) === undefined ? "—" : value.toLocaleString("en-US");
-    const goalLabels = { active: "Active", paused: "Paused", blocked: "Awaiting input", usageLimited: "Usage limit", budgetLimited: "Budget limit", complete: "Done" };
-    const executionLabels = { "cli-default": "CLI default", "workspace-write": "Workspace", "danger-full-access": "Full access", bypass: "Full · Bypass", "read-only": "Read-only" };
+    const count = value => safeCountOrUndefined(value) === undefined ? "—" : value.toLocaleString(uiLocale());
+    const goalLabels = { active: t("ui.active.a733b8"), paused: t("ui.paused"), blocked: t("ui.awaiting.input"), usageLimited: t("ui.usage.limit"), budgetLimited: t("ui.budget.limit"), complete: t("ui.done") };
+    const executionLabels = { "cli-default": t("ui.cli.default"), "workspace-write": t("ui.workspace"), "danger-full-access": t("ui.full.access"), bypass: t("ui.full.bypass"), "read-only": t("ui.read.only") };
     const supported = currentCapabilities();
     const labels = {
       agent: state.title,
-      status: state.pendingDecisionRunId ? "Awaiting input" : state.running ? "Running" : state.runtimeAvailable ? "Idle" : "Offline",
-      role: { main: "Main", work: "Work", verification: "Verify" }[state.role],
-      agents: main ? state.workUnitsKnown ? "Work " + state.workUnits.workActive + " · Verify " + state.workUnits.verificationActive : "Agents —" : "Agents: Main only",
-      agentsTotal: main ? "Calls " + (state.workUnitsKnown ? count(state.workUnits.totalCalled) : "—") : "Calls: Main only",
-      project: state.projectName || "Project —",
+      status: state.pendingDecisionRunId ? t("ui.awaiting.input") : state.running ? t("ui.running.73989d") : state.runtimeAvailable ? t("ui.idle") : t("ui.offline"),
+      role: { main: t("ui.main"), work: t("ui.work"), verification: t("ui.verify") }[state.role],
+      agents: main ? state.workUnitsKnown ? t("status.agents", state.workUnits.workActive, state.workUnits.verificationActive) : t("ui.agents") : t("ui.agents.main.only"),
+      agentsTotal: main ? t("ui.calls") + (state.workUnitsKnown ? count(state.workUnits.totalCalled) : "—") : t("ui.calls.main.only"),
+      project: state.projectName || t("ui.project.f7d911"),
       branch: state.branch || "—",
       context: contextStatusLabel(),
       contextUsed: contextUsedStatusLabel(),
       contextRemainingTokens: contextRemainingTokensLabel(),
       contextUsedPercent: contextUsedPercentLabel(),
-      contextWindow: "Ctx window " + (state.contextWindowTokens > 0 ? count(state.contextWindowTokens) : "—") + " tokens",
-      weekly: "Wk used " + (state.weeklyUsedPercent === undefined ? "—" : formatPercent(state.weeklyUsedPercent)),
-      weeklyRemaining: "Wk left " + (state.weeklyUsedPercent === undefined ? "—" : formatPercent(100 - state.weeklyUsedPercent)),
-      elapsed: state.running && state.runStartedAt ? "Elapsed " + formatElapsed(Math.max(0, Date.now() - state.runStartedAt)) : "Elapsed —",
-      queue: "Queue " + Math.max(state.queueCount, (state.pendingRequests || []).length),
-      runtime: state.runtimeAvailable ? "Runtime online" : "Runtime offline",
-      model: "Model " + (supported.model ? state.model || "Default" : "Unknown"),
-      reasoning: "Reasoning " + (supported.reasoning ? state.reasoning || "Default" : "Unknown"),
-      fast: "Fast " + (supported.fast ? state.fastMode ? "On" : "Off" : "Unknown"),
-      task: main ? "Task " + taskModeNames[state.taskMode]?.replaceAll("Verification", "Verify") : "Task: Main only",
-      execution: "Perms " + (executionLabels[state.executionMode] || "—"),
-      goal: !main ? "Goal: Main only" : goalError ? "Goal —" : nativeGoal ? "Goal " + (goalLabels[nativeGoal.status] || "—") : "Goal " + (state.goalMode ? "On · Unknown" : "Off"),
-      goalTokens: "Goal used " + (main && !goalError ? count(nativeGoal?.tokensUsed) : "—") + " tokens",
-      goalBudget: "Goal budget " + (main && !goalError ? count(nativeGoal?.tokenBudget) : "—") + " tokens",
-      goalTime: "Goal time " + (main && !goalError && safeCountOrUndefined(nativeGoal?.timeUsedSeconds) !== undefined ? formatElapsed(nativeGoal.timeUsedSeconds * 1000) : "—")
+      contextWindow: t("ui.ctx.window") + (state.contextWindowTokens > 0 ? count(state.contextWindowTokens) : "—") + t("ui.tokens"),
+      weekly: t("ui.wk.used") + (state.weeklyUsedPercent === undefined ? "—" : formatPercent(state.weeklyUsedPercent)),
+      weeklyRemaining: t("ui.wk.left") + (state.weeklyUsedPercent === undefined ? "—" : formatPercent(100 - state.weeklyUsedPercent)),
+      elapsed: state.running && state.runStartedAt ? t("ui.elapsed") + formatElapsed(Math.max(0, Date.now() - state.runStartedAt)) : t("ui.elapsed.54e60c"),
+      queue: t("ui.queue") + Math.max(state.queueCount, (state.pendingRequests || []).length),
+      runtime: state.runtimeAvailable ? t("ui.runtime.online") : t("ui.runtime.offline"),
+      model: t("ui.model.b32422") + (supported.model ? state.model || t("ui.default") : t("ui.unknown")),
+      reasoning: t("ui.reasoning.529e9c") + (supported.reasoning ? reasoningDisplayLabel(state.reasoning) : t("ui.unknown")),
+      fast: t("ui.fast.314aef") + (supported.fast ? state.fastMode ? t("ui.on") : t("ui.off") : t("ui.unknown")),
+      task: main ? t("ui.task") + taskModeNames()[state.taskMode]?.replaceAll(t("ui.verification"), t("ui.verify")) : t("ui.task.main.only"),
+      execution: t("ui.perms") + (executionLabels[state.executionMode] || "—"),
+      goal: !main ? t("ui.goal.main.only") : goalError ? t("ui.goal.0c4444") : nativeGoal ? t("ui.goal.8c9d70") + (goalLabels[nativeGoal.status] || "—") : t("ui.goal.8c9d70") + (state.goalMode ? t("ui.on.unknown") : t("ui.off")),
+      goalTokens: t("ui.goal.used") + (main && !goalError ? count(nativeGoal?.tokensUsed) : "—") + t("ui.tokens"),
+      goalBudget: t("ui.goal.budget") + (main && !goalError ? count(nativeGoal?.tokenBudget) : "—") + t("ui.tokens"),
+      goalTime: t("ui.goal.time") + (main && !goalError && safeCountOrUndefined(nativeGoal?.timeUsedSeconds) !== undefined ? formatElapsed(nativeGoal.timeUsedSeconds * 1000) : "—")
     };
     return labels[itemId] || itemId;
   }
@@ -2705,9 +3208,9 @@
     const expanded = pending.length > 0 && toggle.getAttribute("aria-expanded") === "true";
     toggle.hidden = pending.length === 0;
     toggle.setAttribute("aria-expanded", String(expanded));
-    label.textContent = "Queued " + pending.length;
-    toggle.setAttribute("aria-label", "Queued messages " + pending.length + " items");
-    toggle.title = "Queued messages " + pending.length + " items · Expand/collapse list";
+    label.textContent = t("queue.count", pending.length);
+    toggle.setAttribute("aria-label", t("queue.items", pending.length));
+    toggle.title = t("queue.expand", pending.length);
     toggle.onclick = function () {
       const open = toggle.getAttribute("aria-expanded") !== "true";
       toggle.setAttribute("aria-expanded", String(open));
@@ -2717,12 +3220,12 @@
     queue.replaceChildren();
     const description = document.createElement("p");
     description.className = "pending-queue-description";
-    description.textContent = state.pendingDecisionRunId ? "Queued messages will run together after your decision" : "Queued messages retain their execution action. Only matching actions run together.";
+    description.textContent = state.pendingDecisionRunId ? t("ui.queued.messages.will.run.together.after.your.decision") : t("ui.queued.messages.retain.their.execution.action.only.matching.actions.run.together");
     queue.append(description);
     if (pending.some(function (item) { return !item.rejected; }) && !state.running && !state.pendingDecisionRunId) {
       const resume = document.createElement("button");
       resume.type = "button";
-      resume.textContent = "Check run status and resume queue";
+      resume.textContent = t("ui.check.run.status.and.resume.queue");
       resume.addEventListener("click", function () { vscode.postMessage({ type: "queue.resume" }); });
       queue.append(resume);
     }
@@ -2734,7 +3237,7 @@
       if (item.rejected) {
         const recover = document.createElement("button");
         recover.type = "button";
-        recover.textContent = "Submission unconfirmed · Restore to input";
+        recover.textContent = t("ui.submission.unconfirmed.restore.to.input");
         recover.disabled = hasComposerContent();
         recover.addEventListener("click", function () {
           if (hasComposerContent()) return;
@@ -2767,11 +3270,12 @@
     const queuesMessage = (state.running || (state.pendingRequests || []).length > 0) && hasComposerContent();
     updateExecutionControl();
     sendButton.classList.toggle("is-running", state.running && !queuesMessage);
-    sendButton.setAttribute("aria-label", queuesMessage ? "Add message to queue" : state.running ? "Stop current run" : "Send message");
-    sendButton.title = queuesMessage ? "Add to queue (Enter)" : state.running ? "Stop current run (Esc)" : "Send (Enter)";
+    sendButton.setAttribute("aria-label", queuesMessage ? t("ui.add.message.to.queue") : state.running ? t("ui.stop.current.run") : t("ui.send.message"));
+    sendButton.title = queuesMessage ? t("ui.add.to.queue.enter") : state.running ? t("ui.stop.current.run.esc") : t("ui.send.enter");
     sendIcon.hidden = state.running && !queuesMessage;
     stopIcon.hidden = !state.running || queuesMessage;
     renderRunStatus();
+    renderWorkLoopPanel();
     updateSendButton();
     renderGoal();
   }
@@ -2793,8 +3297,15 @@
   }
 
   function updateExecutionControl() {
-    const select = modelMenu.querySelector('[data-setting="permissions"]');
-    if (select) select.disabled = state.running;
+    updateConversationClearControl();
+    const select = document.querySelector('#general-permissions [data-setting="permissions"]');
+    if (select) {
+      select.disabled = state.running;
+      select.value = state.executionMode ?? "cli-default";
+      const help = document.getElementById("agent-permissions-description");
+      help.textContent = executionModeExplanation(select.value);
+      help.hidden = !help.textContent;
+    }
   }
 
   function updateModeControls() {
@@ -2802,14 +3313,19 @@
     const supported = currentCapabilities();
     modelButton.parentElement.hidden = false;
     submissionButton.hidden = state.role !== "main";
+    goalModeButton.hidden = state.role !== "main" || supported.goal !== true;
+    goalModeButton.disabled = !state.runtimeAvailable;
+    goalModeButton.setAttribute("aria-pressed", String(state.goalMode));
+    goalModeButton.title = state.goalMode ? t("ui.goal.on.applies.to.the.next.message") : t("ui.goal.off.enable.for.the.next.message");
+    goalModeButton.setAttribute("aria-label", goalModeButton.title);
     fastModeButton.hidden = supported.fast !== true;
     fastModeButton.setAttribute("aria-pressed", String(state.fastMode));
-    fastModeButton.setAttribute("aria-label", state.fastMode ? "Fast mode on" : "Fast mode off");
-    fastModeButton.title = state.fastMode ? "Fast mode on" : "Fast mode off";
+    fastModeButton.setAttribute("aria-label", state.fastMode ? t("ui.fast.mode.on") : t("ui.fast.mode.off"));
+    fastModeButton.title = state.fastMode ? t("ui.fast.mode.on") : t("ui.fast.mode.off");
     promptSurface.classList.toggle("is-astra", /(?:^|[-/])astra(?:$|-)/i.test(state.model || ""));
-    const modelText = (state.model || "Default") + " · " + (state.reasoning || "Default");
+    const modelText = (state.model || t("ui.default")) + " · " + reasoningDisplayLabel(state.reasoning);
     if (modelLabel.textContent !== modelText) modelLabel.textContent = modelText;
-    modelButton.title = "Models, reasoning and permissions";
+    modelButton.title = t("ui.models.and.reasoning");
     modelButton.setAttribute("aria-label", modelButton.title);
     if (openSettingId === "submission") renderSubmissionMenu(submissionMenu);
     renderGoal();
@@ -2818,9 +3334,9 @@
 
   function renderGoal() {
     goalPanel.hidden = state.role !== "main" || (!nativeGoal && !goalError);
-    const labels = { active: "In progress", paused: "Paused", blocked: "Input required", usageLimited: "Usage limit", budgetLimited: "Goal budget limit", complete: "Goal completed" };
-    goalStatus.textContent = goalError || (nativeGoal
-      ? `${labels[nativeGoal.status] || nativeGoal.status} · ${nativeGoal.tokensUsed.toLocaleString("en-US")} tokens · ${nativeGoal.timeUsedSeconds}s\n${nativeGoal.objective}`
+    const labels = { active: t("ui.in.progress"), paused: t("ui.paused"), blocked: t("ui.input.required"), usageLimited: t("ui.usage.limit"), budgetLimited: t("ui.goal.budget.limit"), complete: t("ui.goal.completed") };
+    goalStatus.textContent = localizedText(goalError, goalErrorLocalization) || (nativeGoal
+      ? t("goal.summary", labels[nativeGoal.status] || nativeGoal.status, nativeGoal.tokensUsed.toLocaleString(uiLocale()), formatElapsed(nativeGoal.timeUsedSeconds * 1000), nativeGoal.objective)
       : "");
     for (const button of goalPanel.querySelectorAll("[data-goal-action]")) {
       const action = button.dataset.goalAction;
@@ -2850,29 +3366,29 @@
   function renderModelSettings(menu) {
     menu.replaceChildren();
     menu.setAttribute("role", "dialog");
-    menu.setAttribute("aria-label", "Models, reasoning and permissions");
+    menu.setAttribute("aria-label", t("ui.models.and.reasoning"));
     const header = document.createElement("div");
     header.className = "agent-settings-heading";
     const title = document.createElement("strong");
-    title.textContent = "Agent settings";
+    title.textContent = t("ui.agent.settings");
     const close = document.createElement("button");
     close.type = "button";
     close.className = "agent-settings-close";
-    close.setAttribute("aria-label", "Close agent settings");
+    close.setAttribute("aria-label", t("ui.close.agent.settings"));
     close.append(createModeIcon("m6 6 12 12M18 6 6 18", "agent-settings-close-icon"));
     close.addEventListener("click", function () { closeSettingMenu(true); });
     header.append(title, close);
     const columns = document.createElement("div");
     columns.className = "agent-settings-columns";
     columns.setAttribute("aria-hidden", "true");
-    for (const text of ["Agent", "Model", "Reasoning"]) {
+    for (const text of [t("ui.agent"), t("ui.model"), t("ui.reasoning")]) {
       const column = document.createElement("span");
       column.textContent = text;
       columns.append(column);
     }
     menu.classList.add("aligned-settings");
     menu.append(header, columns);
-    const roles = state.role === "main" ? [["main", "Main"], ["work", "Work"], ["verification", "Verification"]] : [["main", state.role === "work" ? "Work" : "Verification"]];
+    const roles = state.role === "main" ? [["main", t("ui.main")], ["work", t("ui.work")], ["verification", t("ui.verification")]] : [["main", state.role === "work" ? t("ui.work") : t("ui.verification")]];
     for (const [role, label] of roles) {
       const row = document.createElement("div");
       row.className = "agent-model-row";
@@ -2886,7 +3402,7 @@
       for (const field of ["model", "reasoningEffort"]) {
         const current = role === "main" ? (field === "model" ? state.model : state.reasoning) : state.agentModels?.[role]?.[field];
         const wrapper = document.createElement("label");
-        const fieldLabel = field === "model" ? "Model" : "Reasoning";
+        const fieldLabel = field === "model" ? t("ui.model") : t("ui.reasoning");
         const caption = document.createElement("span");
         caption.className = "agent-model-caption";
         caption.textContent = fieldLabel;
@@ -2919,7 +3435,7 @@
           ticks.setAttribute("aria-hidden", "true");
           for (const value of values) {
             const tick = document.createElement("span");
-            tick.title = value || "Default";
+            tick.title = reasoningDisplayLabel(value);
             ticks.append(tick);
           }
           slider.append(progress, ticks);
@@ -2927,7 +3443,7 @@
           for (const value of values) {
             const option = document.createElement("option");
             option.value = value;
-            option.textContent = value || "Default";
+            option.textContent = value || t("ui.default");
             option.selected = value === (current || "");
             control.append(option);
           }
@@ -2938,9 +3454,9 @@
           const value = selectedValue();
           const ultra = value === "max";
           wrapper.classList.toggle("is-ultra", ultra);
-          output.textContent = ultra ? "ULTRA" : value ? value.toUpperCase() : "Default";
-          output.title = ultra ? "Ultra · max reasoning effort" : value || "Default";
-          control.setAttribute("aria-valuetext", value || "Default");
+          output.textContent = ultra ? "ULTRA" : value && uiLocale() === "en" ? value.toUpperCase() : reasoningDisplayLabel(value);
+          output.title = ultra ? t("ui.ultra.max.reasoning.effort") : reasoningDisplayLabel(value);
+          control.setAttribute("aria-valuetext", reasoningDisplayLabel(value));
           progress.value = Number(control.value);
         };
         showEffort();
@@ -2964,17 +3480,22 @@
       }
       menu.append(row);
     }
+  }
+
+  function renderGeneralSettings() {
+    const menu = document.getElementById("general-permissions");
+    menu.replaceChildren();
     if (state.role === "main") {
       const row = document.createElement("div");
       row.className = "agent-permissions-row";
       const legend = document.createElement("div");
       legend.className = "agent-permissions-heading";
       const name = document.createElement("strong");
-      name.textContent = "Permissions";
+      name.textContent = t("ui.permissions");
       legend.append(name);
       const select = document.createElement("select");
       select.dataset.setting = "permissions";
-      select.setAttribute("aria-label", "Execution permissions");
+      select.setAttribute("aria-label", t("ui.execution.permissions"));
       for (const value of settingOptions.execution) {
         const option = document.createElement("option");
         option.value = value;
@@ -2999,16 +3520,42 @@
     }
   }
 
+  function updateConversationClearControl() {
+    const clear = document.getElementById("conversation-clear-button");
+    clear.hidden = state.role !== "main";
+    clear.disabled = !state.agentId || state.running || state.queueCount > 0 || Boolean(state.pendingDecisionRunId);
+    clear.title = t("ui.clear.conversation") + " · " + t("ui.start.a.fresh.codex.thread.here.agent.settings.and.historical.run.records.are.retained");
+    clear.setAttribute("aria-label", t("ui.clear.conversation"));
+    clear.onclick = function () {
+      if (!clear.disabled) vscode.postMessage({ type: "conversation.clear" });
+    };
+  }
+
+  function resetConversationState() {
+    state.timeline = [];
+    state.taskFlows = [];
+    state.pendingRequests = [];
+    state.startedMessageIds = [];
+    state.pendingDecisionRunId = undefined;
+    state.decisionSubmitting = false;
+    state.queueCount = 0;
+    state.contextUsedTokens = undefined;
+    state.contextWindowTokens = undefined;
+    state.weeklyUsedPercent = undefined;
+    state.childAgents = [];
+    state.workflows = [];
+    state.workUnitsKnown = false;
+    state.workUnits = { activeUnits: 0, workActive: 0, verificationActive: 0, totalCalled: 0 };
+    nativeGoal = null;
+    goalError = undefined;
+    followLatest = true;
+  }
+
   function renderSubmissionMenu(menu) {
     menu.replaceChildren();
-    const hint = document.createElement("p");
-    hint.className = "submission-hint";
-    hint.textContent = "Choose an item to send the current draft immediately.";
-    menu.append(hint);
     const groups = [
-      ["Workflow", settingOptions.business.map(value => [businessModeNames[value], "direct", value, false])],
-      ["Task", settingOptions.task.map(value => [taskModeNames[value], value, "normal", false])],
-      ["Goal", [["Submit as Goal", "direct", "normal", true]]]
+      [t("ui.document.main"), settingOptions.business.map(value => [businessModeNames()[value], "direct", value, false])],
+      [t("ui.task.workflow"), settingOptions.task.map(value => [taskModeNames()[value], value, "normal", false])]
     ];
     for (const [title, entries] of groups) {
       const group = document.createElement("div");
@@ -3020,11 +3567,11 @@
         option.type = "button"; option.className = "setting-option"; option.setAttribute("role", "menuitem");
         option.dataset.action = action; option.dataset.workflow = workflow; option.dataset.goal = String(goal);
         option.disabled = !state.runtimeAvailable || (goal ? currentCapabilities().goal !== true : action !== "direct" && !currentCapabilities().taskModes?.includes(action));
-        option.title = option.disabled ? "Requires a compatible runtime." : "Send draft: " + label;
+        option.title = option.disabled ? t("ui.requires.a.compatible.runtime") : t("submission.send", label);
         const name = document.createElement("span"); name.textContent = label;
         const icon = goal ? createModeIcon("M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18Zm0 5a4 4 0 1 0 0 8 4 4 0 0 0 0-8Z", "task-mode-icon") : workflow !== "normal" ? createBusinessModeIcon(workflow) : createTaskModeIcon(action);
         option.append(icon, name, createModeIcon("M12 19V5m-6 6 6-6 6 6", "submit-icon"));
-        option.addEventListener("click", function () { closeSettingMenu(false); submit(action, workflow, goal); });
+        option.addEventListener("click", function () { closeSettingMenu(false); submit(action, workflow); });
         option.addEventListener("keydown", handleSettingMenuKeydown);
         group.append(option);
       }
@@ -3049,11 +3596,11 @@
 
   function executionModeExplanation(mode) {
     return ({
-      "cli-default": "Inherit the current session or CLI permission policy.",
-      "workspace-write": "Allow writes within the workspace; other actions follow the host approval policy.",
-      "danger-full-access": "Allow filesystem access outside the workspace; approvals still follow the host policy.",
+      "cli-default": t("ui.inherit.the.current.session.or.cli.permission.policy"),
+      "workspace-write": t("ui.allow.writes.within.the.workspace.other.actions.follow.the.host.approval.policy"),
+      "danger-full-access": t("ui.allow.filesystem.access.outside.the.workspace.approvals.still.follow.the.host.policy"),
       bypass: ""
-    })[mode] ?? "Use the host permission policy.";
+    })[mode] ?? t("ui.use.the.host.permission.policy");
   }
 
   function createTaskModeIcon(mode) {
@@ -3119,12 +3666,12 @@
 
   function executionModeName(mode) {
     return ({
-      "read-only": "Read-only",
-      "cli-default": state.agentId ? "Keep current policy" : "CLI default",
-      "workspace-write": "Workspace write",
-      "danger-full-access": "Full access",
-      "bypass": "Bypass"
-    })[mode] || (state.agentId ? "Keep current policy" : "CLI default");
+      "read-only": t("ui.read.only"),
+      "cli-default": state.agentId ? t("ui.keep.current.policy") : t("ui.cli.default"),
+      "workspace-write": t("ui.workspace.write"),
+      "danger-full-access": t("ui.full.access"),
+      "bypass": t("ui.bypass")
+    })[mode] || (state.agentId ? t("ui.keep.current.policy") : t("ui.cli.default"));
   }
 
   function resizePrompt() {
@@ -3138,11 +3685,13 @@
       pendingRequests: state.pendingRequests,
       panelId: state.panelId,
       agentId: state.agentId,
+      conversationId: state.conversationId,
       title: state.title,
       role: state.role,
       verifiedWorkRunId: state.verifiedWorkRunId,
       draft: state.draft,
       autoScroll: state.autoScroll,
+      uiLanguage: state.uiLanguage,
       botVisible: state.botVisible,
       botAnimations: state.botAnimations,
       attachments: state.attachments.filter(function (attachment) {
@@ -3152,6 +3701,7 @@
         const { previewUri, ...persisted } = attachment;
         return persisted;
       }),
+      taskFlows: currentTaskFlows().slice(-100),
       timeline: state.timeline.slice(-200).map(function (event) {
         if (!Array.isArray(event.attachments)) return event;
         return {
@@ -3175,10 +3725,12 @@
       contextWindowTokens: state.contextWindowTokens,
       weeklyUsedPercent: state.weeklyUsedPercent,
       runProgress: state.runProgress,
+      runProgressLocalization: state.runProgressLocalization,
       runStartedAt: state.runStartedAt,
       runPanelExpanded: state.runPanelExpanded,
       workUnits: state.workUnits,
-      childAgents: state.childAgents
+      childAgents: state.childAgents,
+      workflows: state.workflows
     });
   }
 
@@ -3192,7 +3744,7 @@
 
   function normalizeStatusItems(value) {
     if (!Array.isArray(value)) return defaultStatusItems.slice();
-    const items = [...new Set(value.filter(item => typeof item === "string" && Object.hasOwn(statusCatalog, item)))];
+    const items = [...new Set(value.filter(item => typeof item === "string" && Object.hasOwn(statusCatalog(), item)))];
     return value.length === 0 || items.length ? items : defaultStatusItems.slice();
   }
 
@@ -3209,28 +3761,28 @@
   }
 
   function contextStatusLabel() {
-    if (state.contextUsedTokens === undefined || !(state.contextWindowTokens > 0)) return "Ctx left —";
+    if (state.contextUsedTokens === undefined || !(state.contextWindowTokens > 0)) return t("ui.ctx.left");
     const remaining = Math.max(0, state.contextWindowTokens - state.contextUsedTokens);
-    return "Ctx left " + formatPercent(remaining / state.contextWindowTokens * 100);
+    return t("ui.ctx.left.350cbf") + formatPercent(remaining / state.contextWindowTokens * 100);
   }
 
   function contextUsedStatusLabel() {
-    return "Ctx used " + (state.contextUsedTokens === undefined
-      ? "—" : state.contextUsedTokens.toLocaleString("en-US")) + " tokens";
+    return t("ui.ctx.used") + (state.contextUsedTokens === undefined
+      ? "—" : state.contextUsedTokens.toLocaleString(uiLocale())) + t("ui.tokens");
   }
 
   function contextRemainingTokensLabel() {
-    if (state.contextUsedTokens === undefined || !(state.contextWindowTokens > 0)) return "Ctx left — tokens";
-    return "Ctx left " + Math.max(0, state.contextWindowTokens - state.contextUsedTokens).toLocaleString("en-US") + " tokens";
+    if (state.contextUsedTokens === undefined || !(state.contextWindowTokens > 0)) return t("ui.ctx.left.tokens");
+    return t("ui.ctx.left.350cbf") + Math.max(0, state.contextWindowTokens - state.contextUsedTokens).toLocaleString(uiLocale()) + t("ui.tokens");
   }
 
   function contextUsedPercentLabel() {
-    return "Ctx used " + (state.contextUsedTokens === undefined || !(state.contextWindowTokens > 0)
+    return t("ui.ctx.used") + (state.contextUsedTokens === undefined || !(state.contextWindowTokens > 0)
       ? "—" : formatPercent(state.contextUsedTokens / state.contextWindowTokens * 100));
   }
 
   function formatPercent(value) {
-    return value.toLocaleString("en-US", { maximumFractionDigits: 1 }) + "%";
+    return value.toLocaleString(uiLocale(), { maximumFractionDigits: 1 }) + "%";
   }
 
   function renderContextStatus(item) {
@@ -3243,7 +3795,7 @@
     const meter = document.createElement("span");
     meter.className = "context-token-meter";
     meter.setAttribute("role", "progressbar");
-    meter.setAttribute("aria-label", "Content remaining percentage");
+    meter.setAttribute("aria-label", t("ui.content.remaining.percentage"));
     meter.setAttribute("aria-valuemin", "0");
     meter.setAttribute("aria-valuemax", "100");
     meter.setAttribute("aria-valuenow", String(remainingRatio * 100));
@@ -3272,4 +3824,25 @@
   function createId() {
     return globalThis.crypto?.randomUUID?.() || Date.now().toString(36) + Math.random().toString(36).slice(2);
   }
+
+  const languageControl = document.getElementById("ui-language");
+  languageControl.value = state.uiLanguage;
+  languageControl.addEventListener("change", function () {
+    const feedback = globalThis.AgentFactoryI18n.describe(inputFeedback.textContent);
+    state.uiLanguage = languageControl.value;
+    displayLanguage = state.uiLanguage;
+    document.documentElement.lang = uiLocale();
+    globalThis.AgentFactoryI18n.apply(document, uiLocale());
+    inputFeedback.textContent = localizedText(inputFeedback.textContent, feedback);
+    renderAll();
+    renderStatusCatalog();
+    renderModelSettings(modelMenu);
+    renderSubmissionMenu(submissionMenu);
+    renderGeneralSettings();
+    renderQuestionList();
+    renderSessionList();
+    renderAgentsList();
+    renderFactoryBot();
+    persist();
+  });
 })();
