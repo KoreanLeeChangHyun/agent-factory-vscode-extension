@@ -1,108 +1,28 @@
 # Agent Factory Main Chat
 
-Use Agent Factory Main Agent sessions in VS Code editor tabs.
+Turn conversations into defined tasks, delegate them to AI agents, and review
+results in VS Code.
 
-## Features
+## Core features
 
-- Stream conversations, resume sessions, and follow Work and Verification activity.
-- Organize chats into workspace-local groups.
-- Attach files and images; view Markdown, command output, and diffs.
-- Enter/send always runs directly through Main, including after restoring old saved modes.
-- Send the current draft with one of six one-message actions: Work, Plan, Verification,
-  Plan · Work, Work · Verification, or Plan · Work · Verification. Actions do not persist.
-- Plan only returns a plan using actual Work Plan collaboration mode. Standalone
-  Verification dispatches a managed verifier for the explicit target, otherwise prior
-  completed work in this chat; Main asks if no target is available.
-- Workflow choices immediately submit the current draft once; ordinary sends use Normal.
-- Goal is an action in the submission menu that immediately submits the current draft as a goal. It does not affect the next ordinary submission. Fast remains a persistent toggle.
-- Permissions and attachments remain available.
-- **Clear conversation** starts a fresh internal Codex thread in the current chat while
-  retaining the Main Agent identity, settings, and historical run records. It is
-  available only while the current run, queue, decision, and Goal controls are idle.
-- **Plan · Work** runs actual Codex Plan then implementation in the same Work
-  session, followed by Main checks without separate Verification. It requires
-  runtime support; queued inputs retain their action and different actions never merge.
+- **Main, Work, and Verification** — Work directly with Main or delegate tasks
+  to Work with a separate Verification agent to check the results.
+- **Work contracts** — Turn a conversation into a task list with clear scope
+  and completion criteria, then submit it for Work or a Work–Verification loop.
+- **Interviews** — Clarify requirements and decisions through guided questions.
+- **Document migration and lessons learned** — Update project documents to
+  Agent Factory conventions and turn lessons from completed work into reusable rules.
+- **Goals** — Submit an objective and follow its progress in chat.
+- **Conversation worktrees** — Work in a separate Git worktree for each
+  conversation, then merge and return to the original workspace.
+- **Reusable notes** — Save global or workspace notes and insert them into messages.
+- **Conversation and task history** — Revisit earlier conversations and track
+  tasks, agent activity, command output, and code diffs.
+- **Files and images** — Attach context to requests and convert image formats
+  while keeping the original files.
 
-## Setup
+## Get started
 
-1. Install Python 3.10+ and Codex CLI on the workspace extension host. For
-   SSH/container workspaces, install them on the remote host.
-2. Install the extension and run **Agent Factory: Add Main Agent Chat** from the
-   Command Palette. On first activation, the extension checks Codex and installs
-   the matching companion plugin if needed. SSH, WSL and container workspaces use
-   the workspace extension host's Codex installation and home.
-3. If startup fails, follow the error guidance and select **Retry** to rerun setup.
-   If you dismiss the notification, invoke **Agent Factory: Add Main Agent Chat**
-   again to see the retained cause and Retry action.
-   Reload the extension host after updating the VSIX.
-
-For standalone plugin use or manual repair:
-
-```sh
-codex plugin marketplace add KoreanLeeChangHyun/agent-factory-codex-plugin --ref main
-codex plugin marketplace upgrade agent-factory
-codex plugin add agent-factory@agent-factory
-```
-
-### Companion plugin requirement
-
-- The plugin must be installed and enabled with the identical semantic base version.
-  Extension `1.0.14` accepts plugin `1.0.14+codex.<token>`.
-- An already compatible installed plugin requires only a local installed-list check.
-- If the plugin is missing, disabled or mismatched, activation registers the
-  official `agent-factory` marketplace from the source above when absent, then
-  checks the available catalog and will attempt one compatible plugin installation.
-  It prefers the official source and still supports compatible configured alternatives.
-  A different or unconfirmed source under the official name produces a conflict
-  error; existing sources are never overwritten or automatically upgraded.
-- Setup confirms the installed plugin is enabled and matches the extension after
-  installation. If the exact version is unavailable or setup fails, activation blocks
-  and offers **Retry**. No arbitrary latest version is substituted. Retry repeats
-  the checks; concurrent requests share setup and chat bootstrap happens once.
-- The plugin is fully installable and usable without this extension. Both are
-  released together; the extension does not contain or bundle the plugin.
-- Set `agentFactory.mainChat.pythonPath` if Python is not found. Use
-  `agentFactory.mainChat.runtimeExecPath` only as an `exec.py` override in the
-  Extension Development Host; normal windows ignore this setting.
-- Codex CLI discovery runs on the workspace extension host. It uses
-  `agentFactory.mainChat.codexPath` when set (an absolute executable path, without
-  shell arguments), then the existing `PATH`, then `~/.nvm/versions/node`. NVM
-  selection uses the highest stable semantic Node version containing executable
-  `codex` and `node` files. An invalid explicit path blocks startup and Retry
-  repeats discovery after settings or the host environment are corrected. NVM
-  discovery applies to Linux/macOS workspace hosts and does not add native Windows
-  managed-runtime support.
-
-Matching older extension and plugin releases remain usable when newer releases are available. Automatic runtime discovery selects a cached plugin with the extension’s semantic base version; a configured `runtimeExecPath` remains an explicit development override.
-
-## Development
-
-```sh
-npm install
-npm run check
-```
-
-- Press **F5** to launch the Extension Development Host.
-- F5 uses the sibling `../plugin` checkout directly for the runtime, role prompts,
-  and Agent Factory skill/reference bindings. No plugin reinstall is needed.
-  The local plugin must have the same base version as the extension; missing or
-  mismatched sources block activation instead of falling back to an installed copy.
-  Plugin Python changes apply to new runtime processes; already running agents keep
-  their loaded code and instructions. Restart F5 after extension code changes.
-  Normal launches use the installed plugin even if a development path setting or
-  environment variable is inherited. The debug launch sets
-  `AGENT_FACTORY_DEV_PLUGIN_ROOT`, which is honored only in VS Code development mode
-  and explicitly passed to that development client's runtime processes.
-- Use `npm run package` to build a VSIX.
-- Release tooling is in [scripts/release.mjs](scripts/release.mjs). Publish the
-  matching companion plugin first. The default extension release workflow prepares
-  the VSIX and hands off Marketplace upload to Playwright; preparation is not
-  publication success.
-
-### Turn off all companion bots
-
-In chat Settings → Bot, select **Turn off all bots (all chats)**, or set
-`agentFactory.mainChat.botsEnabled` to `false` in VS Code user settings.
-This hides companions across Main, Work and Verification chats, stops their timers,
-and cancels AI expression requests. The preference persists across restarts;
-chat execution continues normally. Clear the checkbox to enable companions again.
+Install Python 3.10+ and Codex CLI in your workspace environment, then run
+**Agent Factory: Add Main Agent Chat** from the VS Code Command Palette.
+The extension installs the matching Agent Factory companion plugin when needed.
