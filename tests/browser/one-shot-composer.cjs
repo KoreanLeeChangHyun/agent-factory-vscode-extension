@@ -38,19 +38,30 @@ async function checkOneShotComposer(page) {
     assert.equal((await last()).execution.goal, goal);
     assert.equal(await page.locator('#prompt').inputValue(), '');
   }
-  assert.equal(await page.locator('#submission-menu [data-goal="true"]').count(), 0);
-  for (const action of ['direct', 'work', 'verification']) {
-    await page.locator('#goal-mode-button').click();
-    assert.equal(await page.locator('#goal-mode-button').getAttribute('aria-pressed'), 'true');
-    await page.locator('#prompt').fill('Goal draft');
-    if (action === 'direct') await page.locator('#prompt').press('Enter');
-    else {
-      await page.locator('#submission-button').click();
-      await page.locator(`#submission-menu [data-action="${action}"]`).click();
-    }
-    assert.equal((await last()).execution.goal, action !== 'verification');
-    assert.equal(await page.locator('#goal-mode-button').getAttribute('aria-pressed'), 'false');
+  assert.equal(await page.locator('#goal-mode-button').count(), 0);
+  const sendGoal = async () => {
+    await page.locator('#submission-button').click();
+    await page.locator('#submission-menu [data-goal="true"]').click();
+  };
+  await page.locator('#prompt').fill('Goal draft');
+  const beforeGoal = await count();
+  await sendGoal();
+  assert.equal(await count(), beforeGoal + 1);
+  assert.equal((await last()).execution.taskMode, 'direct');
+  assert.equal((await last()).execution.goal, true);
+  assert.equal((await last()).execution.goalObjective, 'Goal draft');
+  for (const draft of ['   ', 'x'.repeat(4001)]) {
+    await page.locator('#prompt').fill(draft);
+    const beforeInvalid = await count();
+    await sendGoal();
+    assert.equal(await count(), beforeInvalid);
+    assert.equal(await page.locator('#prompt').inputValue(), draft);
+    assert.equal(await page.locator('#input-feedback').isVisible(), true);
   }
+  await page.locator('#prompt').fill('x'.repeat(4000));
+  await sendGoal();
+  assert.equal((await last()).execution.goal, true);
+  assert.equal((await last()).execution.goalObjective.length, 4000);
   await page.locator('#prompt').fill('Next ordinary input');
   await page.locator('#prompt').press('Enter');
   assert.equal((await last()).execution.taskMode, 'direct');
@@ -62,14 +73,24 @@ async function checkOneShotComposer(page) {
   assert.equal(await page.locator('#submission-menu [role="menuitem"]').nth(1).evaluate(e => e === document.activeElement), true);
   await page.keyboard.press('Escape');
   assert.equal(await page.locator('#submission-button').evaluate(e => e === document.activeElement), true);
-  await page.locator('#prompt').fill('');
-  await page.locator('#submission-button').click();
-  await page.locator('#submission-menu [data-action="work"]').click();
-  assert.equal((await last()).execution.taskMode, 'work');
-  assert.match((await last()).text, /requirements agreed in this conversation/);
+  for (const [action, workflow] of [
+    ...['interview', 'planning', 'design'].map(value => ['direct', value]),
+    ...actions.map(value => [value, 'normal'])
+  ]) {
+    await page.locator('#prompt').fill('   ');
+    const beforeEmpty = await count();
+    await page.locator('#submission-button').click();
+    await page.locator(`#submission-menu [data-action="${action}"][data-workflow="${workflow}"]`).click();
+    assert.equal(await count(), beforeEmpty, `${action}/${workflow} must not submit empty input`);
+    assert.equal(await page.locator('#prompt').inputValue(), '   ');
+    assert.equal(await page.locator('#input-feedback').isVisible(), true);
+  }
   await page.evaluate(() => {
     window.postMessage({ type: 'run.state', running: false }, '*');
-    window.postMessage({ type: 'agents.list', agents: [{ agentId: 'work-background', runId: 'run-background', role: 'work', status: 'running' }] }, '*');
+    window.postMessage({ type: 'agents.list', agents: [{ agentId: 'work-background', runId: 'run-background', role: 'work', status: 'running', taskBinding: {
+      workflowId: 'background-flow', workflowTitle: 'Background workflow',
+      taskId: 'background-task', title: 'Background task', description: 'Continue the accepted task'
+    } }] }, '*');
   });
   await page.waitForFunction(() => !document.querySelector('#run-status').hidden);
   assert.equal(await page.locator('#run-status').isVisible(), true);
@@ -78,7 +99,7 @@ async function checkOneShotComposer(page) {
   assert.equal((await last()).execution.taskMode, 'direct');
   await page.evaluate(capability => window.postMessage({ type: 'capabilities.updated', capabilities: { submit: {...capability, goal:false,taskModes:['direct','work']},send:capability } }, '*'), capability);
   await page.locator('#submission-button').click();
-  assert.equal(await page.locator('#goal-mode-button').isHidden(), true);
+  assert.equal(await page.locator('#submission-menu [data-goal="true"]').isDisabled(), true);
   assert.equal(await page.locator('#submission-menu [data-action="plan"]').isDisabled(), true);
   await page.screenshot({path:'/tmp/af-unified-composer.png'});
 }

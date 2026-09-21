@@ -55,7 +55,7 @@
           <div id="drop-overlay" class="drop-overlay" hidden>
             <strong data-i18n="ui.drop.files.or.folders.to.attach">Drop files or folders to attach</strong>
           </div>
-          <button type="button" id="factory-bot" aria-haspopup="dialog" aria-expanded="false" aria-controls="bot-menu" class="factory-bot" data-state="idle" aria-label="Factory Bot · Ready" title="Factory Bot · Ready" data-i18n-title="ui.factory.bot.ready" data-i18n-aria-label="ui.factory.bot.ready">
+          <button type="button" id="factory-bot" hidden aria-haspopup="dialog" aria-expanded="false" aria-controls="bot-menu" class="factory-bot" data-state="idle" aria-label="Factory Bot · Ready" title="Factory Bot · Ready" data-i18n-title="ui.factory.bot.ready" data-i18n-aria-label="ui.factory.bot.ready">
             <svg viewBox="0 0 40 40" aria-hidden="true" focusable="false">
               <ellipse class="bot-shadow" cx="20" cy="37" rx="10" ry="2"/>
               <g class="bot-body">
@@ -137,7 +137,8 @@
           <p id="input-feedback" class="input-feedback" role="alert" hidden></p>
           <div class="composer-actions">
             <div class="composer-actions-start">
-              <button id="attach-button" class="icon-button" type="button" title="Attach files or folders" aria-label="Attach files or folders" data-i18n-title="ui.attach.files.or.folders" data-i18n-aria-label="ui.attach.files.or.folders">
+              <input id="attachment-file-input" type="file" multiple hidden>
+              <button id="attach-button" class="icon-button" type="button" title="Attach files" aria-label="Attach files" data-i18n-title="ui.attach.local.files" data-i18n-aria-label="ui.attach.local.files">
                 <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M12 5v14M5 12h14"></path></svg>
               </button>
               <div class="setting-control agent-settings-control">
@@ -147,9 +148,6 @@
                 </button>
                 <div id="model-menu" class="setting-menu agent-model-menu" role="dialog" aria-label="Models and reasoning" hidden data-i18n-aria-label="ui.models.and.reasoning"></div>
               </div>
-              <button id="goal-mode-button" class="mode-button toggle-control" type="button" title="Goal off · Enable for the next message" aria-label="Goal off · Enable for the next message" aria-pressed="false" hidden data-i18n-title="ui.goal.off.enable.for.the.next.message" data-i18n-aria-label="ui.goal.off.enable.for.the.next.message">
-                <span data-i18n="ui.goal">Goal</span><svg class="toggle-icon" viewBox="0 0 28 18" aria-hidden="true" focusable="false"><rect x="1" y="1" width="26" height="16" rx="8"></rect><circle class="toggle-thumb" cx="9" cy="9" r="4"></circle></svg>
-              </button>
               <button id="fast-mode-button" class="mode-button toggle-control" type="button" title="Fast mode off" aria-label="Fast mode off" aria-pressed="false" data-i18n-title="ui.fast.mode.off" data-i18n-aria-label="ui.fast.mode.off">
                 <span data-i18n="ui.fast">Fast</span><svg class="toggle-icon" viewBox="0 0 28 18" aria-hidden="true" focusable="false"><rect x="1" y="1" width="26" height="16" rx="8"></rect><circle class="toggle-thumb" cx="9" cy="9" r="4"></circle></svg>
               </button>
@@ -198,16 +196,6 @@
           </div>
         </div>
       </section>
-      <section id="goal-panel" class="goal-panel" aria-label="Ongoing goal" hidden data-i18n-aria-label="ui.ongoing.goal">
-        <p id="goal-status" role="status" aria-live="polite"></p>
-        <div class="goal-actions">
-          <button type="button" data-goal-action="refresh" data-i18n="ui.refresh.status">Refresh status</button>
-          <button type="button" data-goal-action="pause" data-i18n="ui.pause">Pause</button>
-          <button type="button" data-goal-action="reopen" data-i18n="ui.resume">Resume</button>
-          <button type="button" data-goal-action="cancel" data-i18n="ui.cancel.goal">Cancel goal</button>
-          <button type="button" data-goal-action="disable" data-i18n="ui.turn.off.goal">Turn off Goal</button>
-        </div>
-      </section>
       <div id="agents-menu" class="utility-list-menu agents-menu" role="listbox" aria-label="Called work and verification agents" hidden data-i18n-aria-label="ui.called.work.and.verification.agents">
         <div id="agents-list" class="agents-list"></div>
       </div>
@@ -233,6 +221,7 @@
         </div>
         </div>
         <div id="settings-panel-bot" class="settings-panel" role="tabpanel" aria-labelledby="settings-tab-bot" hidden>
+          <label class="settings-option"><input id="bots-disabled" type="checkbox"><span data-i18n="ui.disable.all.bots">Turn off all bots</span></label>
           <label class="settings-option"><input id="bot-visible" type="checkbox" checked><span data-i18n="ui.show.bot">Show bot</span></label>
           <p class="status-settings-hint" data-i18n="ui.show.the.companion.above.the.message.box.this.only.changes.its.visibility">Show the companion above the message box. This only changes its visibility.</p>
           <label class="settings-option"><input id="bot-animations" type="checkbox" checked><span data-i18n="ui.animate.bot">Animate bot</span></label>

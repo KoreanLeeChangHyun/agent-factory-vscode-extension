@@ -6,6 +6,14 @@
 })(globalThis, function () {
   "use strict";
   const messages = {
+  "ui.disable.all.bots": {"en":"Turn off all bots (all chats)","ko":"모든 봇 끄기 (전체 채팅)"},
+  "ui.attach.local.files": {"en":"Attach files from this computer","ko":"내 컴퓨터에서 파일 첨부"},
+  "ui.local.file.limit": {"en":"Attach up to 100 files, 10 MiB per file and 20 MiB per selection.","ko":"파일은 최대 100개, 파일당 10 MiB, 한 번 선택 시 총 20 MiB까지 첨부할 수 있습니다."},
+  "ui.local.file.read.failed": {"en":"Unable to read the selected file.","ko":"선택한 파일을 읽을 수 없습니다."},
+  "ui.the.configured.codex.cli.path.must.be.an.absolute.executable.path.no.shell.arguments.are.allowed.0": {"en":"The configured Codex CLI path must be an absolute executable path without shell arguments: {0}","ko":"설정한 Codex CLI 경로는 셸 인자가 없는 절대 실행 파일 경로여야 합니다: {0}"},
+  "ui.the.configured.codex.cli.path.is.not.an.executable.file.0.correct.agentfactory.mainchat.codexpath.then.retry": {"en":"The configured Codex CLI path is not an executable file: {0}. Correct agentFactory.mainChat.codexPath, then Retry.","ko":"설정한 Codex CLI 경로가 실행 파일이 아닙니다: {0}. agentFactory.mainChat.codexPath를 수정한 뒤 재시도해 주세요."},
+  "ui.codex.cli.was.not.found.on.the.workspace.extension.host.path.or.in.nvm.install.codex.there.or.set.agentfactory.mainchat.codexpath.then.retry": {"en":"Codex CLI was not found on the workspace extension host PATH or in NVM. Install Codex there or set agentFactory.mainChat.codexPath, then Retry.","ko":"workspace 익스텐션 호스트의 PATH 또는 NVM에서 Codex CLI를 찾지 못했습니다. 해당 호스트에 Codex를 설치하거나 agentFactory.mainChat.codexPath를 설정한 뒤 재시도해 주세요."},
+  "ui.agent.factory.is.not.ready.0.correct.the.codex.cli.setting.or.workspace.extension.host.environment.then.retry": {"en":"Agent Factory is not ready. {0} Correct the Codex CLI setting or workspace extension host environment, then Retry.","ko":"Agent Factory가 준비되지 않았습니다. {0} Codex CLI 설정 또는 workspace 익스텐션 호스트 환경을 수정한 뒤 재시도해 주세요."},
   "ui.background.continuation.label": {"en":"Automatic workflow continuation", "ko":"백그라운드 작업 자동 후속 처리"},
   "bot.actions": {"en":"Bot actions", "ko":"봇 행동"},
   "bot.wave": {"en":"Say hello", "ko":"인사하기"},
@@ -29,9 +37,21 @@
   "flow.status.verifying": {"en": "Verifying", "ko": "검증 중"},
   "flow.status.completed": {"en": "Completed", "ko": "완료"},
   "flow.status.failed": {"en": "Failed", "ko": "실패"},
-  "flow.status.blocked": {"en": "Waiting for input", "ko": "응답 대기"},
+  "flow.status.blocked": {"en": "Blocked", "ko": "막힘"},
   "flow.status.cancelled": {"en": "Cancelled", "ko": "취소"},
   "flow.task.count": {"en":"{0} tasks", "ko":"작업 {0}개"},
+  "ui.history.previous": {"en":"Earlier messages", "ko":"이전 메시지"},
+  "ui.history.next": {"en":"Later messages", "ko":"다음 메시지"},
+  "ui.history.pages": {"en":"Conversation pages", "ko":"대화 페이지"},
+  "ui.history.older": {"en":"Load earlier messages", "ko":"이전 대화 불러오기"},
+  "flow.close.failed": {"en":"Close failed workflow", "ko":"실패한 작업 흐름 종료"},
+  "flow.summary.label": {"en":"Task summary", "ko":"업무 항목 요약"},
+  "flow.summary.workers": {"en":"Workers: {0}", "ko":"작업자 {0}명"},
+  "flow.summary.workers.unknown": {"en":"Workers: unconfirmed", "ko":"작업자 미확인"},
+  "flow.summary.count": {"en":"{0}: {1}", "ko":"{0} {1}개"},
+  "flow.summary.current": {"en":"Current task: {0}", "ko":"현재 수행 작업: {0}"},
+  "flow.summary.current.task": {"en":"{0} ({1})", "ko":"{0} ({1})"},
+  "flow.summary.current.none": {"en":"No task currently running", "ko":"현재 수행 중인 작업 없음"},
   "ui.background.continuation.failed": { "en": "Could not confirm background continuation acceptance for {0} / {1}. Automatic retries are paused. Ask Main to inspect this run and resume the existing workflow.", "ko": "{0} / {1}의 백그라운드 후속 요청 수락을 확인하지 못했습니다. 자동 재시도를 멈췄습니다. Main에 해당 실행을 확인하고 기존 작업 흐름을 재개하도록 요청해 주세요." },
   "ui.workflow.from.conversation": { "en": "Execute the selected workflow using the requirements agreed in this conversation.", "ko": "지금까지 대화에서 합의한 요구사항을 정리하여 선택한 작업 흐름을 실행해 주세요." },
   "ui.sidebar.archived.empty": { "en": "Agents are archived. Use Restore Archived Agent to bring them back.", "ko": "에이전트가 보관되어 있습니다. ‘보관한 에이전트 복원’으로 다시 표시할 수 있습니다." },
@@ -140,6 +160,18 @@
   "ui.reasoning": {
     "en": "Reasoning",
     "ko": "추론"
+  },
+  "ui.context.compaction": {
+    "en": "Context compaction",
+    "ko": "컨텍스트 압축"
+  },
+  "ui.context.compaction.started": {
+    "en": "Compacting context",
+    "ko": "컨텍스트 압축 중"
+  },
+  "ui.context.compaction.completed": {
+    "en": "Context compaction completed",
+    "ko": "컨텍스트 압축 완료"
   },
   "ui.main": {
     "en": "Main",

@@ -2,6 +2,19 @@
   "use strict";
 
   const vscode = acquireVsCodeApi();
+  let persistenceScheduled = false;
+  let persistenceTimer;
+  let composerLayoutFrame;
+  let timelineRenderFrame;
+  document.addEventListener("visibilitychange", function () {
+    if (!document.hidden) scheduleTimelineRender();
+    else persist();
+  });
+
+  window.addEventListener("pagehide", function () {
+    persist();
+  });
+
   let displayLanguage = vscode.getState()?.uiLanguage || "auto";
   function uiLocale() { return globalThis.AgentFactoryI18n.locale(displayLanguage, document.documentElement.dataset.hostLanguage || navigator.language); }
   function t(key, ...values) { return globalThis.AgentFactoryI18n.format(key, uiLocale(), ...values); }
@@ -32,19 +45,11 @@
   const submissionMenu = document.getElementById("submission-menu");
   const inputFeedback = document.getElementById("input-feedback");
   const modelMenu = document.getElementById("model-menu");
-  const goalModeButton = document.getElementById("goal-mode-button");
   const fastModeButton = document.getElementById("fast-mode-button");
   const businessModeNames = () => ({ normal: t("ui.normal"), interview: t("ui.interview"), planning: t("ui.planning"), design: t("ui.design") });
   const taskModeNames = () => ({ plan: t("ui.plan"), verification: t("ui.verification"), direct: t("ui.direct"), work: t("ui.work"), "plan-work": t("ui.plan.work"), "work-verification": t("ui.work.verification"), "plan-work-verification": t("ui.plan.work.verification") });
-  const goalPanel = document.getElementById("goal-panel");
-  const goalStatus = document.getElementById("goal-status");
   let nativeGoal = null;
   let goalError;
-  let goalErrorLocalization;
-  goalPanel.addEventListener("click", function (event) {
-    const action = event.target.closest("[data-goal-action]")?.dataset.goalAction;
-    if (action && state.agentId) vscode.postMessage({ type: "goal.control", action });
-  });
   const sessionMenu = document.getElementById("session-menu");
   const sessionList = document.getElementById("session-list");
   const questionButton = document.getElementById("question-button");
@@ -121,6 +126,7 @@
     draft: typeof saved?.draft === "string" ? saved.draft : "",
     autoScroll: saved?.autoScroll !== false,
     uiLanguage: ["auto", "ko", "en"].includes(saved?.uiLanguage) ? saved.uiLanguage : "auto",
+    botsEnabled: false,
     botVisible: saved?.botVisible !== false,
     botAnimations: saved?.botAnimations !== false,
     attachments: Array.isArray(saved?.attachments) ? saved.attachments.filter(function (item) {
@@ -158,6 +164,7 @@
     runPanelExpanded: saved?.runPanelExpanded === true,
     sessions: [],
     sessionsLoading: false,
+    historyNextBefore: saved?.historyNextBefore,
     workflows: Array.isArray(saved?.workflows) ? saved.workflows : [],
     childAgents: Array.isArray(saved?.childAgents) ? saved.childAgents : [],
     agentsLoading: false,
@@ -186,7 +193,13 @@
   let followLatest = true;
   let autoScrollFrame;
   let timelineViewportHeight;
+  const taskFlowParseCache = new WeakMap();
+  let taskFlowSnapshot;
   const messageRenderKeys = new WeakMap();
+  const messageElements = new Map();
+  const messageViewStates = new Map();
+  let timelineEndId;
+
 
   globalThis.AgentFactoryI18n.apply(document, uiLocale());
   document.documentElement.lang = uiLocale();
@@ -225,7 +238,15 @@
   document.addEventListener("pointermove", maybeGlanceAtPointer, { passive: true });
   document.documentElement.addEventListener("pointerleave", clearBotGlance);
   window.addEventListener("blur", clearBotGlance);
-  document.addEventListener("visibilitychange", clearBotGlance);
+  document.addEventListener("visibilitychange", function () {
+    clearBotGlance();
+    document.documentElement.dataset.afHidden = String(document.hidden);
+    if (document.hidden && elapsedTimerId) {
+      clearInterval(elapsedTimerId);
+      elapsedTimerId = undefined;
+    }
+    if (!document.hidden) renderRunStatus();
+  });
   botReducedMotion.addEventListener("change", clearBotGlance);
   factoryBot.addEventListener("pointerenter", wakeFactoryBot);
 
@@ -298,10 +319,15 @@
 
   prompt.addEventListener("input", function () {
     state.draft = prompt.value;
-    persist();
-    resizePrompt();
-    updateRunControls();
+    persist(false, 150);
+    if (composerLayoutFrame !== undefined) return;
+    composerLayoutFrame = requestAnimationFrame(function () {
+      composerLayoutFrame = undefined;
+      resizePrompt();
+      updateRunControls();
+    });
   });
+  prompt.addEventListener("blur", function () { persist(); });
 
   prompt.addEventListener("keydown", function (event) {
     if (
@@ -325,13 +351,43 @@
   attachButton.addEventListener("click", function () {
     // Let the native picker return to the existing draft and selection.
     prompt.focus({ preventScroll: true });
-    vscode.postMessage({ type: "attachments.pick" });
+    document.getElementById("attachment-file-input").click();
+  });
+  document.getElementById("attachment-file-input").addEventListener("change", async function (event) {
+    const files = Array.from(event.target.files || []);
+    event.target.value = "";
+    let bytes = 0;
+    for (const file of files) {
+      if (!file.name || file.name.length > 255 || /[\\/\x00-\x1f]/.test(file.name) || [".", ".."].includes(file.name)) {
+        appendNotice("error", t("ui.local.file.read.failed"));
+        continue;
+      }
+      if (state.attachments.length >= 100 || file.size > 10 * 1024 * 1024 || bytes + file.size > 20 * 1024 * 1024) {
+        appendNotice("error", t("ui.local.file.limit"));
+        continue;
+      }
+      bytes += file.size;
+      if (file.type.startsWith("image/")) {
+        await addBrowserImages([file]);
+        continue;
+      }
+      const id = createId();
+      addAttachments([{ id, name: file.name, kind: "file", size: file.size, pending: true }]);
+      try {
+        const data = await readDataUrl(file);
+        vscode.postMessage({ type: "attachments.createFile", id, name: file.name, size: file.size, data: data.slice(data.indexOf(",") + 1) });
+      } catch {
+        state.attachments = state.attachments.filter(item => item.id !== id);
+        appendNotice("error", t("ui.local.file.read.failed"));
+        renderAttachments();
+        persist();
+      }
+    }
   });
   modelButton.addEventListener("click", function () {
     openSetting("model");
   });
   submissionButton.addEventListener("click", function () { openSetting("submission"); });
-  goalModeButton.addEventListener("click", function () { toggleMode("goalMode"); });
   fastModeButton.addEventListener("click", function () { toggleMode("fastMode"); });
   prompt.addEventListener("input", function () { inputFeedback.hidden = true; });
   questionButton.addEventListener("click", function () {
@@ -538,7 +594,6 @@
         state.businessMode = "normal";
         state.taskMode = "direct";
         state.fastMode = message.fastMode === true;
-        state.goalMode = false;
         state.workLoopMode = false;
         if (!conversationBoundaryChanged && message.resetConversation !== true) {
           state.contextUsedTokens = safeCountOrUndefined(message.contextUsedTokens);
@@ -557,6 +612,7 @@
           state.runStartedAt = undefined;
           if (currentTaskFlows().length === 0) state.runPanelExpanded = false;
         }
+        state.botsEnabled = message.botsEnabled !== false;
         state.statusItems = normalizeStatusItems(message.statusItems);
         updateModeControls();
         if (state.agentId && state.role === "main") vscode.postMessage({ type: "goal.control", action: "get" });
@@ -576,8 +632,6 @@
       case "goal.updated":
         nativeGoal = message.goal || null;
         goalError = message.error;
-        goalErrorLocalization = message.localization?.error;
-        renderGoal();
         updateModeControls();
         persist();
         break;
@@ -667,6 +721,9 @@
             goalError = undefined;
             state.pendingDecisionRunId = undefined;
             state.decisionSubmitting = false;
+            state.historyNextBefore = undefined;
+            timelineEndId = undefined;
+            messageViewStates.clear();
             state.timeline = [];
             state.taskFlows = [];
             followLatest = true;
@@ -691,6 +748,7 @@
         if (message.agentId === state.agentId && message.history &&
             message.history.conversationId === state.conversationId &&
             Array.isArray(message.history.messages)) {
+          state.historyNextBefore = message.history.nextBefore;
           const restored = message.history.messages.filter(function (item) {
             return item && ["user", "assistant"].includes(item.type) &&
               typeof item.id === "string" && typeof item.runId === "string" && typeof item.text === "string";
@@ -698,6 +756,9 @@
           if (!state.timeline.some(function (item) { return ["user", "assistant", "activity"].includes(item.type); })) {
             state.timeline = restored;
           } else {
+            const knownRuns = new Set(state.timeline.map(item => item.runId).filter(Boolean));
+            const knownIds = new Set(state.timeline.map(item => item.id));
+            state.timeline = [...restored.filter(item => !knownIds.has(item.id) && !knownRuns.has(item.runId)), ...state.timeline];
             // Repair raw or partially separated history only when the exact
             // captured request matches. Live messages remain untouched.
             const byId = new Map(restored.map(function (item) { return [item.id, item]; }));
@@ -709,8 +770,13 @@
                 ? replacement : item;
             });
           }
-          renderTimeline();
-          persist();
+          if (state.historyBrowsing && restored.length) {
+            timelineEndId = restored[restored.length - 1].id;
+            followLatest = false;
+          }
+          state.historyBrowsing = false;
+          scheduleTimelineRender();
+          persist(false);
         }
         break;
       case "sessions.open":
@@ -726,30 +792,36 @@
       case "agents.list":
         state.workUnitsKnown = Array.isArray(message.agents);
         state.agentsLoading = false;
-        if (Array.isArray(message.workflows)) state.workflows = message.workflows;
+        if (Array.isArray(message.workflows)) {
+          // A temporarily incomplete session discovery must not erase accepted history.
+          const key = snapshot => snapshot.loopId || snapshot.workflow?.id;
+          const snapshots = new Map((state.workflows || []).map(snapshot => [key(snapshot), snapshot]));
+          for (const snapshot of message.workflows) snapshots.set(key(snapshot), snapshot);
+          state.workflows = [...snapshots.values()].slice(-100);
+        }
         state.childAgents = Array.isArray(message.agents) ? message.agents.filter(isChildAgent) : [];
         state.workUnits = summarizeChildAgents(state.childAgents);
         renderAgentsList();
         renderRunStatus();
         renderWorkLoopPanel();
-        renderTimeline();
+        scheduleTimelineRender();
         renderStatusBar();
-        persist();
+        persist(false);
         break;
       case "decision.pending":
         state.pendingDecisionCanApprove = Boolean(message.runId) && message.canApprove === true;
         state.pendingDecisionRunId = typeof message.runId === "string" ? message.runId : undefined;
         state.decisionSubmitting = false;
         renderPendingQueue();
-        renderTimeline();
+        scheduleTimelineRender();
         renderStatusBar();
         updateConversationClearControl();
         break;
       case "chat.human-decision":
         if (typeof message.text === "string" && message.text) {
           state.timeline.push({ type: "user", id: createId(), text: message.text, submission: message.submission });
-          renderTimeline();
-          persist();
+          scheduleTimelineRender();
+          persist(false);
         }
         break;
       case "execution.updated":
@@ -771,13 +843,18 @@
             state.taskFlows = [...snapshots.values()].slice(-100);
           }
           state.timeline.push({ type: "assistant", id: createId(), text: message.text, localization: message.localization?.text, runId: message.runId, phase: message.phase === "commentary" ? "commentary" : "final" });
-          renderTimeline();
+          scheduleTimelineRender();
           renderRunStatus();
           renderWorkLoopPanel();
-          persist();
+          persist(false);
         }
         break;
+      case "bots.updated":
+        state.botsEnabled = message.enabled === true;
+        renderFactoryBot();
+        break;
       case "bot.mood":
+        if (!state.botsEnabled) break;
         factoryBot.dataset.mood = ["calm", "curious", "cheerful", "focused"].includes(message.mood) ? message.mood : "";
         factoryBot.dataset.brain = factoryBot.dataset.mood ? "luna" : message.unavailable === true ? "unavailable" : "local";
         renderFactoryBot();
@@ -802,15 +879,15 @@
         }
         updateRunControls();
         renderWorkLoopPanel();
-        renderTimeline();
+        scheduleTimelineRender();
         renderStatusBar();
-        persist();
+        persist(false);
         break;
       case "chat.rejected": {
         const pending = (state.pendingRequests || []).find(function (item) { return item.id === message.id; });
         if (pending) pending.rejected = true;
         renderPendingQueue();
-        persist();
+        persist(false);
         break;
       }
       case "chat.started": {
@@ -843,7 +920,7 @@
           updateAutoScrollControl();
           updateJumpToBottom();
         }
-        persist();
+        persist(false);
         break;
       }
       case "queue.updated":
@@ -858,7 +935,7 @@
           state.runProgress = message.text;
           state.runProgressLocalization = message.localization?.text;
           renderRunStatus();
-          persist();
+          persist(false);
         }
         break;
       case "context.usage":
@@ -866,7 +943,7 @@
         state.contextWindowTokens = safeCountOrUndefined(message.contextWindowTokens);
         state.weeklyUsedPercent = safePercentOrUndefined(message.weeklyUsedPercent);
         renderStatusBar();
-        persist();
+        persist(false);
         break;
       case "run.activity":
         if (
@@ -879,7 +956,7 @@
           ["started", "completed", "failed"].includes(message.phase)
         ) {
           upsertActivity(message.id, message.category, message.phase, message.text, message.diff, message.title, message.output);
-          persist();
+          persist(false);
         }
         break;
       case "workUnits.summary":
@@ -892,14 +969,14 @@
         };
         renderStatusBar();
         renderWorkLoopPanel();
-        persist();
+        persist(false);
         break;
     }
   });
 
-  function submit(action = "direct", workflow = "normal", asGoal = state.goalMode, choiceAnswer = null) {
+  function submit(action = "direct", workflow = "normal", asGoal = false, choiceAnswer = null) {
     if (!Object.hasOwn(taskModeNames(), action)) action = "direct";
-    const userText = choiceAnswer ?? (prompt.value.trim() || (action !== "direct" && !asGoal ? t("ui.workflow.from.conversation") : ""));
+    const userText = choiceAnswer ?? prompt.value.trim();
     if (!userText && state.attachments.length === 0) {
       inputFeedback.textContent = t("ui.enter.what.you.want.help.with.include.the.target.and.desired.result.for.example.fix.the.login.error.in.this.file");
       inputFeedback.hidden = false;
@@ -946,7 +1023,6 @@
     });
     (state.pendingRequests ??= []).push({ ...message, attachments: submittedAttachments });
     if (choiceAnswer === null) {
-      state.goalMode = false;
       saveComposerSettings();
       state.draft = "";
       state.attachments = [];
@@ -963,7 +1039,16 @@
   }
 
   function canAnswerInterview(event) {
-    const latest = state.timeline.filter(item => item.type === "user" || (item.type === "assistant" && item.phase !== "commentary")).at(-1);
+    // Only the latest conversational turn matters; do not allocate and scan
+    // the entire retained history for every visible message.
+    let latest;
+    for (let index = state.timeline.length - 1; index >= 0; index--) {
+      const item = state.timeline[index];
+      if (item.type === "user" || (item.type === "assistant" && item.phase !== "commentary")) {
+        latest = item;
+        break;
+      }
+    }
     return latest === event && !event.choiceAnswer && !state.running && !state.pendingRequests?.length && state.runtimeAvailable;
   }
 
@@ -1348,9 +1433,9 @@
     container.append(details);
   }
 
-  function managedActivities() {
+  function managedActivities(events = state.timeline) {
     const groups = new Map(), byEvent = new Map();
-    for (const event of state.timeline) {
+    for (const event of events) {
       if (event.type !== "activity" || event.category !== "command") continue;
       const managed = globalThis.agentFactoryExecutionReferences?.managedCommand(event.text, event.output, state.childAgents);
       if (!managed) continue;
@@ -1408,27 +1493,59 @@
     }
   }
 
+  function scheduleTimelineRender() {
+    if (timelineRenderFrame || document.hidden) return;
+    timelineRenderFrame = requestAnimationFrame(function () {
+      timelineRenderFrame = undefined;
+      renderTimeline();
+    });
+  }
+
   function renderTimeline() {
     cancelAnimationFrame(autoScrollFrame);
     const shouldFollowLatest = state.autoScroll && followLatest;
-    const existingMessages = new Map(Array.from(timeline.querySelectorAll(".message"), element => [element.dataset.id, element]));
+    const existingMessages = messageElements;
+    const endIndex = timelineEndId ? state.timeline.findIndex(item => item.id === timelineEndId) + 1 : state.timeline.length;
+    const end = endIndex > 0 ? endIndex : state.timeline.length;
+    const start = Math.max(0, end - 200);
+    const visibleEvents = state.timeline.slice(start, end);
     const retainedIds = new Set();
     let previousMessage = emptyState;
-    const displayStates = new Map();
+    const displayStates = messageViewStates;
     let focusedControl;
-    for (const element of timeline.querySelectorAll(".message")) {
-      const controls = Array.from(element.querySelectorAll(".bash-command-toggle, summary, .execution-reference button, .managed-agent-open"));
-      const focusIndex = controls.indexOf(document.activeElement);
-      if (focusIndex >= 0) focusedControl = { id: element.dataset.id, index: focusIndex };
-      displayStates.set(element.dataset.id, {
-        expanded: element.querySelector(".bash-command-toggle")?.getAttribute("aria-expanded") === "true",
-        details: Array.from(element.querySelectorAll("details")).map(function (details, index) { return { key: details.dataset.disclosureKey || details.className + ":" + index, open: details.open }; }),
-        scroll: Array.from(element.querySelectorAll("pre")).map(function (pre) { return { top: pre.scrollTop, left: pre.scrollLeft }; })
-      });
-    }
     emptyState.hidden = state.timeline.length > 0;
-    const managedByEvent = managedActivities();
-    for (const event of state.timeline) {
+    let older = timeline.querySelector(".history-older");
+    if (!older) {
+      older = document.createElement("button");
+      older.type = "button";
+      older.className = "history-older";
+      older.addEventListener("click", function () {
+        if (state.historyNextBefore) {
+          state.historyBrowsing = true;
+          vscode.postMessage({ type: "history.request", before: state.historyNextBefore });
+        }
+      });
+      timeline.prepend(older);
+    }
+    older.textContent = t("ui.history.older");
+    older.hidden = !state.historyNextBefore;
+    let pages = timeline.querySelector(".history-pages");
+    if (!pages) { pages = document.createElement("nav"); pages.className = "history-pages"; timeline.prepend(pages); }
+    pages.replaceChildren();
+    for (const [label, enabled, target] of [["ui.history.previous", start > 0, start], ["ui.history.next", end < state.timeline.length, Math.min(state.timeline.length, end + 200)]]) {
+      const button = document.createElement("button"); button.type = "button"; button.textContent = t(label); button.disabled = !enabled;
+      button.addEventListener("click", function () {
+        timelineEndId = target === state.timeline.length ? undefined : state.timeline[target - 1]?.id;
+        followLatest = false;
+        renderTimeline();
+        timeline.scrollTop = 0;
+      });
+      pages.append(button);
+    }
+    pages.hidden = state.timeline.length <= 200;
+    pages.setAttribute("aria-label", t("ui.history.pages"));
+    const managedByEvent = managedActivities(visibleEvents);
+    for (const event of visibleEvents) {
       const managedGroup = managedByEvent.get(event.id);
       if (managedGroup && managedGroup.events[0] !== event) continue;
       retainedIds.add(event.id);
@@ -1442,6 +1559,17 @@
         if (previousMessage.nextElementSibling !== existing) previousMessage.after(existing);
         previousMessage = existing;
         continue;
+      }
+      if (existing) {
+        const element = existing;
+        const controls = Array.from(element.querySelectorAll(".bash-command-toggle, summary, .execution-reference button, .managed-agent-open"));
+        const focusIndex = controls.indexOf(document.activeElement);
+        if (focusIndex >= 0) focusedControl = { id: element.dataset.id, index: focusIndex };
+        displayStates.set(element.dataset.id, {
+          expanded: element.querySelector(".bash-command-toggle")?.getAttribute("aria-expanded") === "true",
+          details: Array.from(element.querySelectorAll("details")).map(function (details, index) { return { key: details.dataset.disclosureKey || details.className + ":" + index, open: details.open }; }),
+          scroll: Array.from(element.querySelectorAll("pre")).map(function (pre) { return { top: pre.scrollTop, left: pre.scrollLeft }; })
+        });
       }
       const message = document.createElement("article");
       message.className = "message message-" + event.type;
@@ -1555,6 +1683,7 @@
       if (previousMessage.nextElementSibling !== message) previousMessage.after(message);
       previousMessage = message;
       messageRenderKeys.set(message, renderKey);
+      messageElements.set(event.id, message);
       if (display) {
         message.querySelectorAll("pre").forEach(function (pre, index) {
           if (display.scroll[index]) {
@@ -1572,8 +1701,16 @@
       }
     }
     for (const [id, element] of existingMessages) {
-      if (!retainedIds.has(id)) element.remove();
+      if (!retainedIds.has(id)) {
+        messageViewStates.set(id, {
+          expanded: element.querySelector(".bash-command-toggle")?.getAttribute("aria-expanded") === "true",
+          details: Array.from(element.querySelectorAll("details")).map((details, index) => ({ key: details.dataset.disclosureKey || details.className + ":" + index, open: details.open })),
+          scroll: Array.from(element.querySelectorAll("pre")).map(pre => ({ top: pre.scrollTop, left: pre.scrollLeft }))
+        });
+        element.remove(); messageElements.delete(id);
+      }
     }
+    while (messageViewStates.size > 2000) messageViewStates.delete(messageViewStates.keys().next().value);
     updateQuestionControl();
     timeline.setAttribute("aria-busy", String(state.running));
     if (shouldFollowLatest) {
@@ -2144,7 +2281,7 @@
       elapsedItem.setAttribute("aria-label", elapsedItem.textContent + t("ui.move.with.alt.left.right"));
     }
     refreshStatusPreview();
-    if (!elapsedTimerId) {
+    if (!elapsedTimerId && !document.hidden) {
       elapsedTimerId = window.setInterval(renderRunStatus, 1000);
     }
   }
@@ -2170,10 +2307,23 @@
   }
 
   function currentTaskFlows() {
+    // Assistant messages are appended or replaced, never edited in place.
+    // User/activity updates do not affect task-flow extraction.
+    const inputs = [state.timeline, state.timeline.length, state.taskFlows,
+      state.childAgents, state.workflows, t("ui.verification")];
+    if (taskFlowSnapshot && inputs.every((value, index) => value === taskFlowSnapshot.inputs[index])) {
+      return taskFlowSnapshot.flows;
+    }
     const flows = new Map();
     for (const entry of state.timeline) {
       if (entry.type !== "assistant") continue;
-      for (const flow of extractTaskFlows(entry.text || "").flows) flows.set(flow.id, flow);
+      const text = entry.text || "";
+      let parsed = taskFlowParseCache.get(entry);
+      if (!parsed || parsed.text !== text) {
+        parsed = { text, flows: extractTaskFlows(text).flows };
+        taskFlowParseCache.set(entry, parsed);
+      }
+      for (const flow of parsed.flows) flows.set(flow.id, flow);
     }
     for (const savedFlow of state.taskFlows || []) {
       for (const flow of extractTaskFlows("```task-flow\n" + JSON.stringify(savedFlow) + "\n```").flows) flows.set(flow.id, flow);
@@ -2185,7 +2335,7 @@
       const task = { id: binding.taskId, title: binding.title, description: binding.description,
         status: agent.status === "completed" ? "pending" : agent.status === "needs-human-decision" ? "blocked" :
           ["failed", "cancelled"].includes(agent.status) ? agent.status : agent.status === "running" ? (agent.role === "verification" ? "verifying" : "running") : "pending",
-        agentId: agent.agentId, runId: agent.runId };
+        agentId: agent.agentId, runId: agent.runId, sessionRole: agent.role };
       if (typeof binding.completionCriteria === "string") task.description += "\n\n" + binding.completionCriteria;
       const candidate = { id: binding.workflowId, title: binding.workflowTitle, tasks: [task] };
       if (!extractTaskFlows("```task-flow\n" + JSON.stringify(candidate) + "\n```").flows.length) continue;
@@ -2205,14 +2355,16 @@
       const verification = ["work-verification", "plan-work-verification"].includes(snapshot.taskMode);
       const tasks = workflow.tasks.flatMap((task, index) => {
         const description = [task.description, task.completionCriteria].filter(Boolean).join("\n\n");
-        const stages = [{ id: "stage-" + index + ".work", title: task.title, description, status: task.workStatus, sessionAgentId: task.workAgentId || snapshot.workAgentId, sessionRunId: task.workRunId, sessionRole: "work" }];
-        if (verification) stages.push({ id: "stage-" + index + ".verification", title: String(task.title).slice(0, 280) + " · " + t("ui.verification"), description, status: task.verificationStatus === "running" ? "verifying" : task.verificationStatus, sessionAgentId: task.verificationAgentId || snapshot.verificationAgentId, sessionRunId: task.verificationRunId, sessionRole: "verification" });
+        const stages = [{ id: verification ? "stage-" + index + ".work" : task.id, taskId: task.id, title: task.title, description, status: task.workStatus, sessionAgentId: task.workAgentId || snapshot.workAgentId, sessionRunId: task.workRunId, sessionRole: "work" }];
+        if (verification) stages.push({ id: "stage-" + index + ".verification", taskId: task.id, title: String(task.title).slice(0, 280) + " · " + t("ui.verification"), description, status: task.verificationStatus === "running" ? "verifying" : task.verificationStatus, sessionAgentId: task.verificationAgentId || snapshot.verificationAgentId, sessionRunId: task.verificationRunId, sessionRole: "verification" });
         return stages;
       });
       const candidate = { id: workflow.id, title: workflow.title, tasks };
-      if (extractTaskFlows("```task-flow\n" + JSON.stringify(candidate) + "\n```").flows.length) flows.set(workflow.id, { ...candidate, engine: true });
+      if (extractTaskFlows("```task-flow\n" + JSON.stringify(candidate) + "\n```").flows.length) flows.set(workflow.id, { ...candidate, engine: true, loopId: snapshot.loopId, workAgentId: snapshot.workAgentId, closable: snapshot.status === "runtime-error" });
     }
-    return [...flows.values()];
+    const result = [...flows.values()];
+    taskFlowSnapshot = { inputs, flows: result };
+    return result;
   }
 
   function liveTaskStatus(task) {
@@ -2228,6 +2380,31 @@
     return status;
   }
 
+  function summarizeTaskFlow(flow, live) {
+    const groups = new Map();
+    const workers = new Set();
+    for (const task of flow.tasks) {
+      const id = task.taskId || task.id;
+      if (!groups.has(id)) groups.set(id, []);
+      groups.get(id).push(task);
+      const worker = task.sessionAgentId || task.agentId;
+      if (worker && task.sessionRole !== "verification") workers.add(worker);
+    }
+    const counts = { pending: 0, running: 0, verifying: 0, completed: 0, blocked: 0, failed: 0, cancelled: 0 };
+    const current = [];
+    const statusOf = task => live ? liveTaskStatus(task) : task.status;
+    for (const stages of groups.values()) {
+      const work = stages.find(task => task.sessionRole !== "verification") || stages[0];
+      const verification = stages.find(task => task.sessionRole === "verification");
+      // A finished Work stage still waits for its selected Verification stage.
+      const selected = statusOf(work) === "completed" && verification ? verification : work;
+      const status = statusOf(selected);
+      if (Object.hasOwn(counts, status)) counts[status] += 1;
+      if (["running", "verifying"].includes(status)) current.push(t("flow.summary.current.task", work.title, t("flow.status." + status)));
+    }
+    return { total: groups.size, workers: workers.size, counts, current };
+  }
+
   function createTaskFlow(flow, live = false) {
     const section = document.createElement("section");
     section.className = "task-flow";
@@ -2236,6 +2413,42 @@
     const title = document.createElement("strong");
     title.textContent = flow.title;
     section.append(title);
+    if (live && flow.closable && state.role === "main") {
+      const close = document.createElement("button");
+      close.type = "button";
+      close.textContent = t("flow.close.failed");
+      close.addEventListener("click", () => {
+        vscode.postMessage({ type: "workflow.close", workAgentId: flow.workAgentId, loopId: flow.loopId });
+      });
+      section.append(close);
+    }
+    const totals = summarizeTaskFlow(flow, live);
+    const summary = document.createElement("div");
+    summary.className = "task-flow-summary";
+    summary.setAttribute("role", "group");
+    summary.setAttribute("aria-label", t("flow.summary.label"));
+    const size = document.createElement("strong");
+    size.className = "task-flow-total";
+    size.textContent = t("flow.task.count", totals.total);
+    const workers = document.createElement("span");
+    workers.className = "task-flow-workers";
+    workers.textContent = totals.workers ? t("flow.summary.workers", totals.workers) : t("flow.summary.workers.unknown");
+    summary.append(size, workers);
+    for (const [status, count] of Object.entries(totals.counts)) {
+      const metric = document.createElement("span");
+      metric.dataset.summaryStatus = status;
+      metric.textContent = t("flow.summary.count", t("flow.status." + status), count);
+      summary.append(metric);
+    }
+    const current = document.createElement("p");
+    current.className = "task-flow-current";
+    current.textContent = totals.current.length ? t("flow.summary.current", totals.current.join(" · ")) : t("flow.summary.current.none");
+    if (live) {
+      current.setAttribute("role", "status");
+      current.setAttribute("aria-live", "polite");
+      current.setAttribute("aria-atomic", "true");
+    }
+    section.append(summary, current);
     const list = document.createElement("ol");
     list.className = "task-flow-list";
     flow.tasks.forEach(function (task, index) {
@@ -2243,7 +2456,8 @@
       const item = document.createElement("li");
       item.className = "task-flow-step";
       item.dataset.status = status;
-      item.dataset.taskId = task.id;
+      item.dataset.taskId = task.taskId || task.id;
+      if (task.sessionRunId || task.runId) item.dataset.runId = task.sessionRunId || task.runId;
       if (["running", "verifying"].includes(status)) item.setAttribute("aria-current", "step");
       const marker = document.createElement("span");
       marker.className = "task-flow-number";
@@ -2346,7 +2560,7 @@
     runStatusAgents.textContent = state.workUnits.activeUnits > 0
       ? t("status.runningAgents", state.workUnits.workActive, state.workUnits.verificationActive) : "";
     if (!expanded) return;
-    runDetailsSummary.textContent = active.length ? t("flow.task.count", active.reduce((sum, flow) => sum + flow.tasks.length, 0)) : t("ui.preparing");
+    runDetailsSummary.textContent = active.length ? t("flow.task.count", active.reduce((sum, flow) => sum + summarizeTaskFlow(flow, true).total, 0)) : t("ui.preparing");
     const signature = JSON.stringify([active, state.childAgents, t("flow.status.pending")]);
     runStopButton.hidden = !state.running;
     if (runStageList.dataset.flowSignature === signature) return;
@@ -2671,7 +2885,7 @@
   }
 
   function maybeGlanceAtPointer(event) {
-    if (event.pointerType !== "mouse" || document.hidden || !state.botVisible ||
+    if (!state.botsEnabled || event.pointerType !== "mouse" || document.hidden || !state.botVisible ||
         !state.botAnimations || botReducedMotion.matches || factoryBot.dataset.state !== "idle") return;
     const now = Date.now();
     if (now < botNextGlanceAt) return;
@@ -2723,7 +2937,25 @@
   }
 
   function renderFactoryBot() {
-    factoryBot.hidden = !state.botVisible;
+    document.getElementById("bots-disabled").checked = !state.botsEnabled;
+    factoryBot.hidden = !state.botsEnabled || !state.botVisible;
+    document.getElementById("bot-visible").disabled = !state.botsEnabled;
+    document.getElementById("bot-animations").disabled = !state.botsEnabled;
+    if (!state.botsEnabled) {
+      clearTimeout(botIdleTimer); botIdleTimer = undefined;
+      clearTimeout(botGestureTimer); botGestureTimer = undefined;
+      clearTimeout(botWaveTimer); botWaveTimer = undefined;
+      clearTimeout(botReactionTimer); botReactionTimer = undefined;
+      botIdleSince = undefined;
+      botGestureKey = undefined;
+      delete factoryBot.dataset.gesture;
+      delete factoryBot.dataset.reacting;
+      delete factoryBot.dataset.mood;
+      delete factoryBot.dataset.brain;
+      clearBotGlance();
+      closeBotMenu();
+      return;
+    }
     factoryBot.dataset.animations = String(state.botAnimations);
     let mode = state.pendingDecisionRunId ? "waiting"
       : !state.runtimeAvailable ? "offline"
@@ -3118,6 +3350,11 @@
       selectSettingsTab(settingsTabs[next]);
     });
   }
+  document.getElementById("bots-disabled").addEventListener("change", function (event) {
+    state.botsEnabled = !event.target.checked;
+    renderFactoryBot();
+    vscode.postMessage({ type: "bots.configure", enabled: state.botsEnabled });
+  });
   for (const [id, key] of [["bot-visible", "botVisible"], ["bot-animations", "botAnimations"]]) {
     const control = document.getElementById(id);
     control.checked = state[key];
@@ -3192,7 +3429,7 @@
       fast: t("ui.fast.314aef") + (supported.fast ? state.fastMode ? t("ui.on") : t("ui.off") : t("ui.unknown")),
       task: main ? t("ui.task") + taskModeNames()[state.taskMode]?.replaceAll(t("ui.verification"), t("ui.verify")) : t("ui.task.main.only"),
       execution: t("ui.perms") + (executionLabels[state.executionMode] || "—"),
-      goal: !main ? t("ui.goal.main.only") : goalError ? t("ui.goal.0c4444") : nativeGoal ? t("ui.goal.8c9d70") + (goalLabels[nativeGoal.status] || "—") : t("ui.goal.8c9d70") + (state.goalMode ? t("ui.on.unknown") : t("ui.off")),
+      goal: !main ? t("ui.goal.main.only") : goalError ? t("ui.goal.0c4444") : nativeGoal ? t("ui.goal.8c9d70") + (goalLabels[nativeGoal.status] || "—") : t("ui.goal.8c9d70") + t("ui.off"),
       goalTokens: t("ui.goal.used") + (main && !goalError ? count(nativeGoal?.tokensUsed) : "—") + t("ui.tokens"),
       goalBudget: t("ui.goal.budget") + (main && !goalError ? count(nativeGoal?.tokenBudget) : "—") + t("ui.tokens"),
       goalTime: t("ui.goal.time") + (main && !goalError && safeCountOrUndefined(nativeGoal?.timeUsedSeconds) !== undefined ? formatElapsed(nativeGoal.timeUsedSeconds * 1000) : "—")
@@ -3251,7 +3488,6 @@
           state.agentModels = item.execution.agentModels || {};
           state.reasoning = item.execution.reasoningEffort;
           state.fastMode = item.execution.fast;
-          state.goalMode = false;
           renderAll();
           resizePrompt();
           persist();
@@ -3277,7 +3513,6 @@
     renderRunStatus();
     renderWorkLoopPanel();
     updateSendButton();
-    renderGoal();
   }
 
   function hasComposerContent() {
@@ -3313,11 +3548,6 @@
     const supported = currentCapabilities();
     modelButton.parentElement.hidden = false;
     submissionButton.hidden = state.role !== "main";
-    goalModeButton.hidden = state.role !== "main" || supported.goal !== true;
-    goalModeButton.disabled = !state.runtimeAvailable;
-    goalModeButton.setAttribute("aria-pressed", String(state.goalMode));
-    goalModeButton.title = state.goalMode ? t("ui.goal.on.applies.to.the.next.message") : t("ui.goal.off.enable.for.the.next.message");
-    goalModeButton.setAttribute("aria-label", goalModeButton.title);
     fastModeButton.hidden = supported.fast !== true;
     fastModeButton.setAttribute("aria-pressed", String(state.fastMode));
     fastModeButton.setAttribute("aria-label", state.fastMode ? t("ui.fast.mode.on") : t("ui.fast.mode.off"));
@@ -3328,20 +3558,7 @@
     modelButton.title = t("ui.models.and.reasoning");
     modelButton.setAttribute("aria-label", modelButton.title);
     if (openSettingId === "submission") renderSubmissionMenu(submissionMenu);
-    renderGoal();
     renderStatusBar();
-  }
-
-  function renderGoal() {
-    goalPanel.hidden = state.role !== "main" || (!nativeGoal && !goalError);
-    const labels = { active: t("ui.in.progress"), paused: t("ui.paused"), blocked: t("ui.input.required"), usageLimited: t("ui.usage.limit"), budgetLimited: t("ui.goal.budget.limit"), complete: t("ui.goal.completed") };
-    goalStatus.textContent = localizedText(goalError, goalErrorLocalization) || (nativeGoal
-      ? t("goal.summary", labels[nativeGoal.status] || nativeGoal.status, nativeGoal.tokensUsed.toLocaleString(uiLocale()), formatElapsed(nativeGoal.timeUsedSeconds * 1000), nativeGoal.objective)
-      : "");
-    for (const button of goalPanel.querySelectorAll("[data-goal-action]")) {
-      const action = button.dataset.goalAction;
-      button.disabled = !state.agentId || (action !== "refresh" && !nativeGoal) || (["reopen"].includes(action) && state.running);
-    }
   }
 
   function openSetting(setting) {
@@ -3532,6 +3749,9 @@
   }
 
   function resetConversationState() {
+    state.historyNextBefore = undefined;
+    timelineEndId = undefined;
+    messageViewStates.clear();
     state.timeline = [];
     state.taskFlows = [];
     state.pendingRequests = [];
@@ -3555,7 +3775,8 @@
     menu.replaceChildren();
     const groups = [
       [t("ui.document.main"), settingOptions.business.map(value => [businessModeNames()[value], "direct", value, false])],
-      [t("ui.task.workflow"), settingOptions.task.map(value => [taskModeNames()[value], value, "normal", false])]
+      [t("ui.task.workflow"), settingOptions.task.map(value => [taskModeNames()[value], value, "normal", false])],
+      [t("ui.goal"), [[t("ui.goal"), "direct", "normal", true]]]
     ];
     for (const [title, entries] of groups) {
       const group = document.createElement("div");
@@ -3571,7 +3792,7 @@
         const name = document.createElement("span"); name.textContent = label;
         const icon = goal ? createModeIcon("M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18Zm0 5a4 4 0 1 0 0 8 4 4 0 0 0 0-8Z", "task-mode-icon") : workflow !== "normal" ? createBusinessModeIcon(workflow) : createTaskModeIcon(action);
         option.append(icon, name, createModeIcon("M12 19V5m-6 6 6-6 6 6", "submit-icon"));
-        option.addEventListener("click", function () { closeSettingMenu(false); submit(action, workflow); });
+        option.addEventListener("click", function () { closeSettingMenu(false); submit(action, workflow, goal); });
         option.addEventListener("keydown", handleSettingMenuKeydown);
         group.append(option);
       }
@@ -3679,13 +3900,31 @@
     prompt.style.height = Math.min(prompt.scrollHeight, 280) + "px";
   }
 
-  function persist() {
+  function persist(immediate = true, delay = 50) {
+    if (immediate) {
+      clearTimeout(persistenceTimer);
+      persistenceTimer = undefined;
+      persistenceScheduled = false;
+      persistNow();
+      return;
+    }
+    if (persistenceScheduled) return;
+    persistenceScheduled = true;
+    persistenceTimer = setTimeout(function () {
+      persistenceTimer = undefined;
+      if (!persistenceScheduled) return;
+      persistenceScheduled = false;
+      persistNow();
+    }, delay);
+  }
+  function persistNow() {
     vscode.setState({
       startedMessageIds: state.startedMessageIds,
       pendingRequests: state.pendingRequests,
       panelId: state.panelId,
       agentId: state.agentId,
       conversationId: state.conversationId,
+      historyNextBefore: state.historyNextBefore,
       title: state.title,
       role: state.role,
       verifiedWorkRunId: state.verifiedWorkRunId,

@@ -66,6 +66,7 @@ async function fixture(t) {
     ViewColumn: { Active: 1 },
     window: { createWebviewPanel: () => panel },
     workspace: {
+      getConfiguration: () => ({ get: (_key, fallback) => fallback }),
       name: "Theme test", workspaceFolders: [],
       createFileSystemWatcher(pattern) { watcher.pattern = pattern; return watcher; }
     }

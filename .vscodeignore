@@ -1,5 +1,5 @@
 **
-!dist/**
+!dist/extension.js
 !static/**
 !templates/**
 !package.json

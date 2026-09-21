@@ -13,6 +13,7 @@ export interface MessageSubmission {
 }
 
 export type ClientMessage =
+  | { readonly type: "bots.configure"; readonly enabled: boolean }
   | { readonly type: "client.ready" }
   | { readonly type: "execution.select"; readonly mode: import("../infrastructure/agent-factory/agent-client").ExecutionMode }
   | { readonly type: "message.copy"; readonly text: string }
@@ -44,11 +45,14 @@ export type ClientMessage =
   | { readonly type: "sessions.request" }
   | { readonly type: "models.request" }
   | { readonly type: "session.select"; readonly agentId: string }
+  | { readonly type: "workflow.close"; readonly workAgentId: string; readonly loopId: string }
+  | { readonly type: "history.request"; readonly before: string }
   | { readonly type: "agents.request" }
   | { readonly type: "agent.open"; readonly agentId: string }
   | { readonly type: "attachments.pick" }
   | { readonly type: "attachments.createText"; readonly text: string }
   | { readonly type: "attachments.createImage"; readonly id: string; readonly name: string; readonly mediaType: string; readonly size: number; readonly data: string }
+  | { readonly type: "attachments.createFile"; readonly id: string; readonly name: string; readonly size: number; readonly data: string }
   | { readonly type: "attachments.restore"; readonly attachments: readonly { readonly id: string; readonly name: string; readonly target: "composer" | "history" }[] }
   | { readonly type: "attachment.open"; readonly id: string }
   | { readonly type: "attachment.remove"; readonly id: string }
@@ -70,6 +74,7 @@ export type ClientMessage =
     };
 
 export type HostMessage =
+  | { readonly type: "bots.updated"; readonly enabled: boolean }
   | { readonly type: "chat.rejected"; readonly id: string }
   | { readonly type: "chat.started"; readonly submission?: MessageSubmission; readonly id: string; readonly text: string; readonly attachments: readonly AttachmentReference[] }
   | { readonly type: "execution.updated"; readonly mode?: import("../infrastructure/agent-factory/agent-client").ExecutionMode | "read-only" }
@@ -88,6 +93,7 @@ export type HostMessage =
       readonly runtimeAvailable: boolean;
       readonly capabilities?: { readonly submit: import("../infrastructure/agent-factory/agent-client").ExecutionCapabilities; readonly send: import("../infrastructure/agent-factory/agent-client").ExecutionCapabilities };
       readonly running: boolean;
+      readonly botsEnabled?: boolean;
       readonly statusItems: readonly StatusItemId[];
       readonly model?: string;
       readonly agentModels?: AgentModels;

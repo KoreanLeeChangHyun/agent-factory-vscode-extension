@@ -194,9 +194,13 @@ test("status bar includes active Work and Verification counts", function () {
   assert.match(template, /id="agents-menu"[^>]*aria-label="Called work and verification agents"/);
   assert.match(chatScript, /type: "agents\.request"/);
   assert.match(chatScript, /type: "agent\.open", agentId: agent\.agentId/);
-  assert.match(panelManager, /listChildSessions\(managed\.state\.agentId\)/);
+  assert.match(panelManager, /sharedAgentRefresh\(connection\.client, agentId\)/);
+  assert.match(panelManager, /listChildSessions\(agentId\)/);
+  assert.match(panelManager, /advanceWorkflows\?\.\(agentId, agents, false\)/);
   assert.match(panelManager, /onStatusObserved:[\s\S]*scheduleAgentList\(managed\)/);
   assert.match(panelManager, /AGENT_REFRESH_INTERVAL_MS = 2_000/);
+  assert.match(panelManager, /AGENT_IDLE_VISIBLE_REFRESH_INTERVAL_MS = 5_000/);
+  assert.match(panelManager, /AGENT_IDLE_HIDDEN_REFRESH_INTERVAL_MS = 15_000/);
   assert.doesNotMatch(panelManager, /catch \(error\) \{\s*await this\.post\(managed\.panel, \{ type: "agents\.list", agents: \[\] \}\)/);
   assert.match(panelManager, /actor: "human" as const/);
   assert.match(panelManager, /verifiedWorkRunId: managed\.state\.verifiedWorkRunId/);

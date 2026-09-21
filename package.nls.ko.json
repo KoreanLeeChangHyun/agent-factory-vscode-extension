@@ -13,6 +13,7 @@
   "agentFactory.sidebar.deleteGroup.title": "그룹 해제",
   "agentFactory.mainChat.statusItems.description": "채팅 아래 상태바 설정에서 표시할 정보와 순서를 선택하세요. 항목을 끌거나 이동 버튼으로 순서를 변경할 수 있습니다. 빈 배열은 모든 항목을 숨깁니다.",
   "agentFactory.mainChat.pythonPath.description": "익스텐션 호스트의 Python 3.10 이상 실행 파일 경로입니다 (셸 인자 제외). 비워 두면 PATH의 python3를 사용합니다. macOS의 시스템 Python이 이전 버전이면 설치한 Python을 선택하세요.",
+  "agentFactory.mainChat.codexPath.description": "workspace 익스텐션 호스트의 Codex CLI 절대 실행 파일 경로입니다 (셸 인자 제외, 선택 사항). 비워 두면 PATH와 지원하는 NVM 설치 순서로 찾습니다. 잘못 지정한 경로는 다른 CLI로 대체하지 않고 시작을 중단합니다.",
   "agentFactory.mainChat.runtimeExecPath.description": "Extension Development Host에서만 사용하는 exec.py 경로 재정의입니다 (선택 사항). 일반 창은 항상 설치된 플러그인 캐시를 사용하며, F5 로컬 플러그인 경로가 우선합니다.",
   "agentFactory.mainChat.executionMode.description": "다음 메인 에이전트 실행의 권한입니다. 기본값은 추가 실행 승인 없이 전체 파일 시스템과 네트워크 접근을 허용합니다. 작업 공간 쓰기 또는 CLI 기본값으로 제한할 수 있습니다. 같은 세션에서도 실행 사이에 권한을 변경할 수 있으며, 현재 실행에는 영향을 주지 않습니다.",
   "agentFactory.mainChat.executionMode.enum.0": "새 세션은 CLI 설정을 사용하며, 기존 세션은 저장된 정책을 유지합니다.",
@@ -22,5 +23,6 @@
   "agentFactory.agents.name": "에이전트",
   "extension.description": "VS Code 편집기 탭의 메인 에이전트 채팅 세션입니다.",
   "agentFactory.sidebar.archive.title": "에이전트 목록에서 제거 (보관)",
-  "agentFactory.sidebar.restore.title": "보관한 에이전트 복원"
+  "agentFactory.sidebar.restore.title": "보관한 에이전트 복원",
+  "agentFactory.mainChat.botsEnabled.description": "모든 채팅에서 봇 캐릭터, 애니메이션과 AI 표정 기능을 사용합니다."
 }

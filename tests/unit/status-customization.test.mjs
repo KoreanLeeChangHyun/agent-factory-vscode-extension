@@ -271,7 +271,7 @@ test("host initialization replaces stale restored selection, including an intent
     businessModeNames: { normal: "Normal" },
     settingOptions: { reasoning: [] }, safePercentOrUndefined: () => undefined,
     safeCount: value => Number.isInteger(value) ? value : 0,
-    updateModeControls() {}, renderTimeline() {}, updateRunControls() {}
+    currentTaskFlows: () => [], updateModeControls() {}, renderTimeline() {}, updateRunControls() {}
   });
   const initialize = section('      case "host.initialize":', '      case "syntax.theme":');
   run('switch (message.type) {\n' + initialize + '\n}');

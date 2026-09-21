@@ -1,0 +1,30 @@
+import assert from 'node:assert/strict';
+import test from 'node:test';
+import { build } from 'esbuild';
+import { createRequire } from 'node:module';
+import { runInNewContext } from 'node:vm';
+const require = createRequire(import.meta.url);
+const output = await build({ entryPoints: [new URL('../../src/infrastructure/vscode/chat-panel-manager.ts', import.meta.url).pathname], bundle: true, platform: 'node', format: 'cjs', write: false, external: ['vscode'] });
+const module = { exports: {} };
+runInNewContext(output.outputFiles[0].text, { module, exports: module.exports, require: name => name === 'vscode' ? {} : require(name), global: { Date }, console, process, Buffer, URL, setTimeout, clearTimeout });
+const { ChatPanelManager } = module.exports;
+const make = () => new ChatPanelManager({}, {}, () => [], async () => ({ available: false }));
+test('manager disposal blocks controller final notifications before accessing Webview', async () => {
+ const manager = make(); let sends = 0, disposed = 0, pending;
+ const panel = { get webview() { sends++; throw new Error('Webview is disposed'); }, dispose() { disposed++; } };
+ manager.panels.set('one', { panel, subscriptions: [{ dispose() { pending = manager.post(panel, { type: 'queue.updated', items: [] }); } }] });
+ manager.dispose(); await pending;
+ assert.equal(sends, 0); assert.equal(disposed, 1); assert.equal(manager.panels.size, 0);
+});
+test('pending post rejection after disposal is handled but live failures remain visible', async () => {
+ const manager = make(); let reject;
+ const panel = { webview: { postMessage: () => new Promise((_, r) => { reject = r; }) }, dispose() {} };
+ manager.panels.set('one', { panel, subscriptions: [] });
+ const pending = manager.post(panel, { type: 'queue.updated', items: [] });
+ manager.dispose(); reject(new Error('Webview is disposed')); await pending;
+ const live = { webview: { postMessage: async () => { throw new Error('transport failed'); } } };
+ await assert.rejects(manager.post(live, { type: 'queue.updated', items: [] }), /transport failed/);
+ let sent = 0;
+ await manager.post({ webview: { postMessage: async () => { sent++; } } }, { type: 'queue.updated', items: [] });
+ assert.equal(sent, 1);
+});

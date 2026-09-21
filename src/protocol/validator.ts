@@ -8,6 +8,7 @@ import type { ClientMessage } from "./messages";
 
 const clientMessageTypes = new Set([
   "client.ready",
+  "bots.configure",
   "execution.select",
   "reference.copy",
   "message.copy",
@@ -22,10 +23,13 @@ const clientMessageTypes = new Set([
   "models.request",
   "session.select",
   "agents.request",
+  "history.request",
+  "workflow.close",
   "agent.open",
   "attachments.pick",
   "attachments.createText",
   "attachments.createImage",
+  "attachments.createFile",
   "attachments.restore",
   "attachment.open",
   "attachment.remove",
@@ -42,6 +46,8 @@ export function parseClientMessage(value: unknown): ClientMessage | undefined {
   }
 
   switch (value.type) {
+    case "bots.configure":
+      return typeof value.enabled === "boolean" ? { type: value.type, enabled: value.enabled } : undefined;
     case "image.resolve":
     case "link.open":
       if (typeof value.href !== "string" || value.href.length < 1 || value.href.length > 8192 || /[\u0000-\u001f]/.test(value.href)) return undefined;
@@ -65,6 +71,15 @@ export function parseClientMessage(value: unknown): ClientMessage | undefined {
     case "attachments.createText":
       if (typeof value.text !== "string" || value.text.length < 8_000 || value.text.length > 1_000_000) return undefined;
       return { type: value.type, text: value.text };
+    case "attachments.createFile": {
+      if (typeof value.id !== "string" || !/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(value.id)
+          || typeof value.name !== "string" || !value.name || value.name.length > 255 || /[\\/\x00-\x1f]/.test(value.name) || [".", ".."].includes(value.name)
+          || !Number.isSafeInteger(value.size) || (value.size as number) < 0 || (value.size as number) > 10 * 1024 * 1024
+          || typeof value.data !== "string" || value.data.length > 14 * 1024 * 1024) return undefined;
+      const content = Buffer.from(value.data, "base64");
+      if (content.byteLength !== value.size || content.toString("base64") !== value.data) return undefined;
+      return { type: value.type, id: value.id, name: value.name, size: value.size as number, data: value.data };
+    }
     case "attachments.createImage": {
       if (typeof value.id !== "string" || !/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(value.id)
           || typeof value.name !== "string" || !value.name || value.name.length > 255
@@ -99,6 +114,12 @@ export function parseClientMessage(value: unknown): ClientMessage | undefined {
     case "agents.request":
     case "attachments.pick":
       return { type: value.type };
+    case "history.request":
+      if (typeof value.before !== "string" || !/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(value.before)) return undefined;
+      return { type: value.type, before: value.before };
+    case "workflow.close":
+      if (![value.workAgentId, value.loopId].every(id => typeof id === "string" && /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(id))) return undefined;
+      return { type: value.type, workAgentId: value.workAgentId as string, loopId: value.loopId as string };
     case "session.select":
     case "agent.open":
       if (typeof value.agentId !== "string" || !/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(value.agentId)) {

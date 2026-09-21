@@ -40,6 +40,7 @@ test('host initialization behavior clears a stale Webview boundary before applyi
     statusItems: []
   };
   const context = {
+    messageViewStates: new Map(), currentTaskFlows: () => [], scheduleTimelineRender() {},
     state, message, document: { body: { dataset: {} } },
     currentCapabilities: () => ({}), appendNotice() {}, safeCount: value => value,
     safeCountOrUndefined: value => value, safePercentOrUndefined: value => value,
@@ -64,7 +65,8 @@ test('matching conversation boundary retains history and accepts current usage',
   const resetHelper = script.slice(script.indexOf('  function resetConversationState()'), script.indexOf('  function renderSubmissionMenu('));
   const state = { conversationId: 'conversation-current', timeline: [{ type: 'assistant', text: 'current' }], pendingRequests: [], startedMessageIds: [], workUnits: {}, childAgents: [] };
   const message = { type: 'host.initialize', panelId: 'panel', title: 'Main', role: 'main', projectName: 'project', runtimeAvailable: true, conversationId: 'conversation-current', resetConversation: false, capabilities: { send: {} }, running: false, fastMode: false, queueCount: 0, contextUsedTokens: 25, contextWindowTokens: 100, weeklyUsedPercent: 10, statusItems: [] };
-  const context = { state, message, document: { body: { dataset: {} } }, currentCapabilities: () => ({}), appendNotice() {}, safeCount: value => value, safeCountOrUndefined: value => value, safePercentOrUndefined: value => value, normalizeModel: value => value, normalizeSettingValue: value => value, normalizeStatusItems: value => value, updateModeControls() {}, renderTimeline() {}, renderStatusBar() {}, renderStatusCatalog() {}, updateRunControls() {}, persist() {}, vscode: { postMessage() {} }, settingOptions: { reasoning: [] }, Date };
+  const context = {
+    messageViewStates: new Map(), currentTaskFlows: () => [], scheduleTimelineRender() {}, state, message, document: { body: { dataset: {} } }, currentCapabilities: () => ({}), appendNotice() {}, safeCount: value => value, safeCountOrUndefined: value => value, safePercentOrUndefined: value => value, normalizeModel: value => value, normalizeSettingValue: value => value, normalizeStatusItems: value => value, updateModeControls() {}, renderTimeline() {}, renderStatusBar() {}, renderStatusCatalog() {}, updateRunControls() {}, persist() {}, vscode: { postMessage() {} }, settingOptions: { reasoning: [] }, Date };
   runInNewContext(`let nativeGoal = null; let goalError; let followLatest = true;\n${resetHelper}\nswitch (message.type) {\n${handler}\n}`, context);
   assert.equal(state.timeline.length, 1);
   assert.equal(state.contextUsedTokens, 25);
@@ -89,6 +91,7 @@ test('clear boundary retains a racing optimistic request for chat.started promot
     workUnits: {}, childAgents: [{ agentId: 'work-old' }]
   };
   const context = {
+    messageViewStates: new Map(), currentTaskFlows: () => [], scheduleTimelineRender() {},
     state, message: { type: 'conversation.cleared', conversationId: 'conversation-new' },
     renderAll() {}, persist() {}
   };

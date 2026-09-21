@@ -8,9 +8,9 @@ const require = createRequire(import.meta.url);
 const output = await build({ entryPoints: [new URL("../../src/infrastructure/vscode/agent-sidebar.ts", import.meta.url).pathname],
   bundle: true, write: false, platform: "node", format: "cjs", external: ["vscode"] });
 
-function harness(storage = new Map()) {
+function harness(storage = new Map(), options = {}) {
   const commands = new Map(), inputs = [], picks = [], opened = [], renamed = [];
-  const agents = [{ state: { panelId: "draft-one", title: "First", role: "main" }, running: false },
+  const agents = options.agents ?? [{ state: { panelId: "draft-one", title: "First", role: "main" }, running: false },
     { state: { panelId: "second", agentId: "main-second", title: "Second" }, running: true }];
   let listener;
   const tree = { onDidChangeVisibility() { return { dispose() {} }; }, dispose() {} };
@@ -34,10 +34,22 @@ function harness(storage = new Map()) {
     async renameSidebarAgent(state, title) { renamed.push(title); agents.find(agent => agent.state.panelId === state.panelId).state.title = title; }
   };
   const sidebar = new module.exports.AgentSidebar({ workspaceState: {
-    get: key => storage.get(key), async update(key, value) { storage.set(key, structuredClone(value)); }
+    get: key => storage.get(key), async update(key, value) {
+      const snapshot = structuredClone(value);
+      if (options.update) await options.update(key, snapshot, storage);
+      else storage.set(key, snapshot);
+    }
   } }, panels);
   return { sidebar, agents, inputs, picks, opened, renamed, storage, tree, notify: () => listener?.(),
     run: (name, node) => commands.get(`agentFactory.sidebar.${name}`)(node) };
+}
+
+function agent(panelId) {
+  return { state: { panelId, agentId: `main-${panelId}`, title: panelId }, running: false };
+}
+
+function agentIds(nodes) {
+  return Array.from(nodes).filter(node => node.kind === "agent").map(node => node.agent.state.panelId);
 }
 
 test("sidebar opens agents, renames them and displays running status", async () => {
@@ -117,6 +129,81 @@ test("drag and drop moves multiple agents, supports agent targets, persists and 
   h.sidebar.dispose();
 });
 
+test("agent targets insert before the row and multi-selection keeps displayed order", async () => {
+  const h = harness(new Map(), { agents: [agent("a"), agent("b"), agent("c"), agent("d")] });
+  await h.sidebar.refresh();
+  const token = { isCancellationRequested: false };
+  const transfer = new Map();
+  let nodes = h.sidebar.getChildren();
+  h.sidebar.handleDrag([nodes[3]], transfer, token);
+  await h.sidebar.handleDrop(nodes[1], transfer, token);
+  assert.deepEqual(agentIds(h.sidebar.getChildren()), ["a", "d", "b", "c"], "a later row can move upward");
+
+  nodes = h.sidebar.getChildren();
+  h.sidebar.handleDrag([nodes[0]], transfer, token);
+  await h.sidebar.handleDrop(nodes[3], transfer, token);
+  assert.deepEqual(agentIds(h.sidebar.getChildren()), ["d", "b", "a", "c"], "an earlier row can move downward before its target");
+
+  nodes = h.sidebar.getChildren();
+  h.sidebar.handleDrag([nodes[2], nodes[0]], transfer, token);
+  await h.sidebar.handleDrop(nodes[1], transfer, token);
+  assert.deepEqual(agentIds(h.sidebar.getChildren()), ["d", "a", "b", "c"], "payload order does not replace displayed order");
+  h.sidebar.handleDrag(h.sidebar.getChildren().slice(0, 2), transfer, token);
+  await h.sidebar.handleDrop(h.sidebar.getChildren()[1], transfer, token);
+  assert.deepEqual(agentIds(h.sidebar.getChildren()), ["d", "a", "b", "c"], "a selected target is a no-op");
+
+  h.sidebar.handleDrag([h.sidebar.getChildren()[0]], transfer, token);
+  await h.sidebar.handleDrop(undefined, transfer, token);
+  assert.deepEqual(agentIds(h.sidebar.getChildren()), ["a", "b", "c", "d"], "empty space appends to the root list");
+  h.sidebar.dispose();
+});
+
+test("group drops and menu moves append while deleting a group moves its block to root end", async () => {
+  const h = harness(new Map(), { agents: [agent("a"), agent("b"), agent("c"), agent("d")] });
+  await h.sidebar.refresh();
+  h.inputs.push("Group");
+  await h.run("newGroup");
+  const group = h.sidebar.getChildren()[0];
+  const token = { isCancellationRequested: false }, transfer = new Map();
+  let roots = h.sidebar.getChildren().filter(node => node.kind === "agent");
+  h.sidebar.handleDrag([roots[1], roots[0]], transfer, token);
+  await h.sidebar.handleDrop(group, transfer, token);
+  assert.deepEqual(agentIds(h.sidebar.getChildren(group)), ["a", "b"]);
+  roots = h.sidebar.getChildren().filter(node => node.kind === "agent");
+  h.sidebar.handleDrag([roots[0]], transfer, token);
+  await h.sidebar.handleDrop(group, transfer, token);
+  assert.deepEqual(agentIds(h.sidebar.getChildren(group)), ["a", "b", "c"], "dropping on a group appends");
+
+  h.picks.push(1);
+  await h.run("move", h.sidebar.getChildren(group)[0]);
+  assert.deepEqual(agentIds(h.sidebar.getChildren(group)), ["b", "c", "a"], "menu moves use the same destination-last rule");
+  await h.run("deleteGroup", group);
+  assert.deepEqual(agentIds(h.sidebar.getChildren()), ["d", "b", "c", "a"]);
+  h.sidebar.dispose();
+});
+
+test("legacy layouts adopt catalog order, retain unknown entries and append new sessions", async () => {
+  const storage = new Map([["agentFactory.sidebar.groups", {
+    groups: [], assignments: {}
+  }]]);
+  const h = harness(storage, { agents: [agent("a"), agent("b")] });
+  await h.sidebar.refresh();
+  assert.deepEqual(storage.get("agentFactory.sidebar.groups").order, ["a", "b"]);
+  h.agents.unshift(agent("new"));
+  await h.sidebar.refresh();
+  assert.deepEqual(agentIds(h.sidebar.getChildren()), ["a", "b", "new"]);
+  h.sidebar.dispose();
+
+  const saved = storage.get("agentFactory.sidebar.groups");
+  saved.order.splice(1, 0, "temporarily-missing");
+  storage.set("agentFactory.sidebar.groups", saved);
+  const restored = harness(storage, { agents: [agent("a"), agent("b"), agent("new"), agent("later")] });
+  await restored.sidebar.refresh();
+  assert.deepEqual(agentIds(restored.sidebar.getChildren()), ["a", "b", "new", "later"]);
+  assert.deepEqual(storage.get("agentFactory.sidebar.groups").order, ["a", "temporarily-missing", "b", "new", "later"]);
+  restored.sidebar.dispose();
+});
+
 test("drag and drop ignores cancellation, group drags, foreign payloads and stale targets", async () => {
   const h = harness(), other = harness();
   await h.sidebar.refresh();
@@ -133,6 +220,13 @@ test("drag and drop ignores cancellation, group drags, foreign payloads and stal
   h.sidebar.handleDrag([agent], transfer, token);
   await h.sidebar.handleDrop(group, transfer, { isCancellationRequested: true });
   assert.equal(h.sidebar.getChildren(group).length, 0);
+  h.sidebar.handleDrag([agent], transfer, token);
+  const [removed] = h.agents.splice(h.agents.findIndex(entry => entry.state.panelId === agent.agent.state.panelId), 1);
+  await h.sidebar.refresh();
+  await h.sidebar.handleDrop(group, transfer, token);
+  assert.equal(h.sidebar.getChildren(group).length, 0);
+  h.agents.push(removed);
+  await h.sidebar.refresh();
   await h.run("deleteGroup", group);
   await h.sidebar.handleDrop(group, transfer, token);
   assert.equal(h.sidebar.getChildren().length, 2);
@@ -168,6 +262,20 @@ test("archiving hides agents across refresh and reload while preserving records 
   restored.sidebar.dispose();
 });
 
+test("archive restore keeps the saved position while visible agents are reordered", async () => {
+  const h = harness(new Map(), { agents: [agent("a"), agent("b"), agent("c")] });
+  await h.sidebar.refresh();
+  await h.run("archive", h.sidebar.getChildren()[1]);
+  const transfer = new Map(), token = { isCancellationRequested: false };
+  h.sidebar.handleDrag([h.sidebar.getChildren()[1]], transfer, token);
+  await h.sidebar.handleDrop(h.sidebar.getChildren()[0], transfer, token);
+  assert.deepEqual(agentIds(h.sidebar.getChildren()), ["c", "a"]);
+  h.picks.push(0);
+  await h.run("restore");
+  assert.deepEqual(agentIds(h.sidebar.getChildren()), ["c", "a", "b"]);
+  h.sidebar.dispose();
+});
+
 test("archiving a running agent does not stop it and matches its runtime identity", async () => {
   const h = harness();
   await h.sidebar.refresh();
@@ -196,5 +304,53 @@ test("archive storage failures leave the agent visible and allow retry", async (
   h.storage.set = set;
   await h.run('archive', agent);
   assert.equal(h.sidebar.getChildren().length, 1);
+  h.sidebar.dispose();
+});
+
+test("layout writes are serialized and preserve the newest snapshot", async () => {
+  let active = 0, maximum = 0;
+  const snapshots = [];
+  const h = harness(new Map(), { update: async (key, value, storage) => {
+    if (key !== "agentFactory.sidebar.groups") {
+      storage.set(key, value);
+      return;
+    }
+    active += 1;
+    maximum = Math.max(maximum, active);
+    await new Promise(resolve => setImmediate(resolve));
+    snapshots.push(value);
+    storage.set(key, value);
+    active -= 1;
+  } });
+  await h.sidebar.refresh();
+  snapshots.length = 0;
+  h.inputs.push("One", "Two");
+  await Promise.all([h.run("newGroup"), h.run("newGroup")]);
+  assert.equal(maximum, 1);
+  assert.deepEqual(snapshots.map(snapshot => snapshot.groups.map(group => group.name)), [["One"], ["One", "Two"]]);
+  assert.deepEqual(h.storage.get("agentFactory.sidebar.groups").groups.map(group => group.name), ["One", "Two"]);
+  h.sidebar.dispose();
+});
+
+test("layout storage failures keep the in-memory order and a later mutation retries it", async () => {
+  let fail = false;
+  const h = harness(new Map(), { agents: [agent("a"), agent("b"), agent("c")], update: async (key, value, storage) => {
+    if (key === "agentFactory.sidebar.groups" && fail) {
+      fail = false;
+      throw new Error("layout unavailable");
+    }
+    storage.set(key, value);
+  } });
+  await h.sidebar.refresh();
+  const transfer = new Map(), token = { isCancellationRequested: false };
+  fail = true;
+  h.sidebar.handleDrag([h.sidebar.getChildren()[2]], transfer, token);
+  await assert.rejects(h.sidebar.handleDrop(h.sidebar.getChildren()[0], transfer, token), /layout unavailable/);
+  assert.deepEqual(agentIds(h.sidebar.getChildren()), ["c", "a", "b"], "failed persistence does not roll back the screen");
+
+  h.sidebar.handleDrag([h.sidebar.getChildren()[1]], transfer, token);
+  await h.sidebar.handleDrop(undefined, transfer, token);
+  assert.deepEqual(agentIds(h.sidebar.getChildren()), ["c", "b", "a"]);
+  assert.deepEqual(h.storage.get("agentFactory.sidebar.groups").order, ["c", "b", "a"]);
   h.sidebar.dispose();
 });

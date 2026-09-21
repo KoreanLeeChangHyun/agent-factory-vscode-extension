@@ -14,7 +14,7 @@ Use Agent Factory Main Agent sessions in VS Code editor tabs.
   Verification dispatches a managed verifier for the explicit target, otherwise prior
   completed work in this chat; Main asks if no target is available.
 - Workflow choices immediately submit the current draft once; ordinary sends use Normal.
-- Goal immediately submits the current draft as a goal and sits before Fast. Fast remains a persistent toggle.
+- Goal is an action in the submission menu that immediately submits the current draft as a goal. It does not affect the next ordinary submission. Fast remains a persistent toggle.
 - Permissions and attachments remain available.
 - **Clear conversation** starts a fresh internal Codex thread in the current chat while
   retaining the Main Agent identity, settings, and historical run records. It is
@@ -32,7 +32,8 @@ Use Agent Factory Main Agent sessions in VS Code editor tabs.
    the matching companion plugin if needed. SSH, WSL and container workspaces use
    the workspace extension host's Codex installation and home.
 3. If startup fails, follow the error guidance and select **Retry** to rerun setup.
-   If you dismiss the notification, reload the extension host to try again.
+   If you dismiss the notification, invoke **Agent Factory: Add Main Agent Chat**
+   again to see the retained cause and Retry action.
    Reload the extension host after updating the VSIX.
 
 For standalone plugin use or manual repair:
@@ -46,7 +47,7 @@ codex plugin add agent-factory@agent-factory
 ### Companion plugin requirement
 
 - The plugin must be installed and enabled with the identical semantic base version.
-  Extension `1.0.11` accepts plugin `1.0.11+codex.<token>`.
+  Extension `1.0.12` accepts plugin `1.0.12+codex.<token>`.
 - An already compatible installed plugin requires only a local installed-list check.
 - If the plugin is missing, disabled or mismatched, activation registers the
   official `agent-factory` marketplace from the source above when absent, then
@@ -63,6 +64,14 @@ codex plugin add agent-factory@agent-factory
 - Set `agentFactory.mainChat.pythonPath` if Python is not found. Use
   `agentFactory.mainChat.runtimeExecPath` only as an `exec.py` override in the
   Extension Development Host; normal windows ignore this setting.
+- Codex CLI discovery runs on the workspace extension host. It uses
+  `agentFactory.mainChat.codexPath` when set (an absolute executable path, without
+  shell arguments), then the existing `PATH`, then `~/.nvm/versions/node`. NVM
+  selection uses the highest stable semantic Node version containing executable
+  `codex` and `node` files. An invalid explicit path blocks startup and Retry
+  repeats discovery after settings or the host environment are corrected. NVM
+  discovery applies to Linux/macOS workspace hosts and does not add native Windows
+  managed-runtime support.
 
 Matching older extension and plugin releases remain usable when newer releases are available. Automatic runtime discovery selects a cached plugin with the extension’s semantic base version; a configured `runtimeExecPath` remains an explicit development override.
 
@@ -89,3 +98,11 @@ npm run check
   matching companion plugin first. The default extension release workflow prepares
   the VSIX and hands off Marketplace upload to Playwright; preparation is not
   publication success.
+
+### Turn off all companion bots
+
+In chat Settings → Bot, select **Turn off all bots (all chats)**, or set
+`agentFactory.mainChat.botsEnabled` to `false` in VS Code user settings.
+This hides companions across Main, Work and Verification chats, stops their timers,
+and cancels AI expression requests. The preference persists across restarts;
+chat execution continues normally. Clear the checkbox to enable companions again.

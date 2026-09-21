@@ -444,6 +444,39 @@ test("dismissing dependency error leaves activation retryable without bootstrap"
   assert.equal(bootstraps, 1);
 });
 
+test("dismissed startup failure leaves the open command registered with recovery guidance and Retry", async () => {
+  const { activate } = await importTypeScript("src/extension.ts", true);
+  const context = { extension: { packageJSON: { version: "1.0.2" } } };
+  const commands = new Map();
+  let attempts = 0;
+  let notifications = 0;
+  let bootstraps = 0;
+  const services = {
+    ensurePlugin: async () => { if (++attempts === 1) throw new Error("Codex CLI missing from host PATH"); },
+    bootstrap: () => { bootstraps++; },
+    withProgress: async (_, task) => task(),
+    showErrorMessage: async (message, action) => {
+      notifications++;
+      if (notifications === 1) return undefined;
+      assert.match(message, /not ready/);
+      assert.match(message, /Codex CLI missing/);
+      assert.equal(action, "Retry");
+      return "Retry";
+    },
+    registerCommand: (name, handler) => {
+      commands.set(name, handler);
+      return { dispose() { commands.delete(name); } };
+    }
+  };
+  await activate(context, services);
+  assert.equal(bootstraps, 0);
+  assert.ok(commands.has("agentFactory.mainChat.open"));
+  await commands.get("agentFactory.mainChat.open")();
+  assert.equal(attempts, 2);
+  assert.equal(bootstraps, 1);
+  assert.ok(!commands.has("agentFactory.mainChat.open"));
+});
+
 test("a newer catalog version is never installed as an exact-version fallback", async () => {
   const process = queuedRunner([
     json(currentList()), marketplaceList(officialMarketplace),

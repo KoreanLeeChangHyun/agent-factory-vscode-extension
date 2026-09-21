@@ -133,7 +133,7 @@ test("action menu sends supported drafts without persisting a selection during e
   const renderer = script.slice(script.indexOf("  function renderSubmissionMenu("), script.indexOf("  function handleSettingMenuKeydown("));
   runInNewContext(renderer + '\nrenderSettingMenu("task", menu);', context);
   const actionOptions = () => menu.children.flatMap(group => group.children.filter(item => item.dataset.action));
-  const options = actionOptions();
+  const options = actionOptions().filter(item => item.dataset.goal !== "true");
   assert.deepEqual(options.map(item => item.dataset.action), Object.keys(names));
   assert.equal(options.length, 6);
   assert.equal(options[0].disabled, false);
@@ -190,7 +190,6 @@ test("Goal snapshots the current composer, replaces an existing objective and re
     assert.equal(sent[0].execution.goal, true);
     assert.equal(sent[0].execution.goalObjective, text);
     assert.equal(context.state.pendingRequests[0].execution.goalObjective, text);
-    assert.equal(context.state.goalMode, false);
     context.prompt.value = "Follow-up";
     run("submit()");
     assert.equal(sent[1].execution.goal, false);
@@ -224,20 +223,17 @@ test("Goal is excluded for child roles, Verification and unsupported runtimes", 
   }
 });
 
-test("Goal click submits immediately and native updates do not re-enable it", () => {
-  const { context, sent, run } = harness();
-  const handler = 'submit("direct", "normal", true);';
-  context.toggleMode = key => { context.state[key] = !context.state[key]; };
-  run(handler);
-  assert.equal(context.state.goalMode, false);
-  assert.equal(sent.length, 1);
-  assert.equal(sent[0].execution.goal, true);
-  assert.equal(context.prompt.value, "");
+test("ordinary submission ignores stale Goal selection and native Goal updates", () => {
+  const { context, sent, run } = harness({ goalMode: true });
+  run('submit()');
+  assert.equal(sent[0].execution.goal, false);
   context.message = { goal: { objective: "Current goal" } };
   context.renderGoal = () => {};
   context.updateModeControls = () => {};
   run(script.slice(script.indexOf('      case "goal.updated":') + '      case "goal.updated":'.length, script.indexOf('      case "capabilities.updated":')).replace(/break;\s*$/, ""));
-  assert.equal(context.state.goalMode, false);
+  context.prompt.value = "Follow-up";
+  run('submit()');
+  assert.equal(sent[1].execution.goal, false);
 });
 
 test("host derives the objective from chat text and rejects invalid goals before dispatch", async () => {
@@ -247,7 +243,7 @@ test("host derives the objective from chat text and rejects invalid goals before
   const { code } = await transform(method.replace("private async sendChat(", "async function sendChat("), { loader: "ts" });
   const sendChat = runInNewContext(code + "\nsendChat;", { taskExecution: () => ({}) });
   const calls = [];
-  const host = { async ensureController() {}, async post() {} };
+  const host = { context: {}, async ensureController() {}, async post() {} };
   const managed = {
     state: { role: "main", panelId: "panel" },
     controller: { async send(text, attachments, execution, onStarted) { calls.push(execution); onStarted(); } }

@@ -1572,14 +1572,6 @@ select:focus-visible,
   }
 }
 
-.goal-panel { padding: 8px 12px; border-top: 1px solid var(--vscode-panel-border); font-size: 12px; }
-.goal-panel[hidden] { display: none; }
-.goal-panel p { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 130px; overflow: auto; }
-.goal-actions { display: flex; flex-wrap: wrap; gap: 6px; }
-.goal-actions button { color: var(--vscode-button-secondaryForeground); background: var(--vscode-button-secondaryBackground); border: 0; padding: 4px 8px; cursor: pointer; }
-.goal-actions button:disabled { opacity: .5; cursor: default; }
-.goal-panel :focus-visible { outline: 1px solid var(--af-color-accent); outline-offset: 2px; }
-
 .terminal-command-output {
   position: relative;
   margin: 0 0 0 2ch;
@@ -2274,7 +2266,8 @@ select:focus-visible,
 .factory-bot[data-state="drowsy"] .bot-eyes { animation: none; transform: scaleY(.45); }
 .factory-bot[data-state="drowsy"] .bot-body { animation: bot-doze 3s ease-in-out infinite; }
 .factory-bot[data-state="sleeping"] .bot-eyes { animation: none; transform: scaleY(.08); }
-.factory-bot[data-state="sleeping"] .bot-body { transform: rotate(12deg) translateY(2px); animation: bot-sleep 4s ease-in-out infinite; }
+/* The one-pixel sleep motion needs only 15 updates/second per half-cycle. */
+.factory-bot[data-state="sleeping"] .bot-body { transform: rotate(12deg) translateY(2px); animation: bot-sleep 4s steps(30, end) infinite; }
 .factory-bot[data-state="sleeping"] .bot-signal { opacity: .3; }
 @keyframes bot-doze { 0%, 100% { transform: rotate(0); } 65%, 85% { transform: rotate(10deg) translateY(2px); } }
 @keyframes bot-sleep { 0%, 100% { transform: rotate(12deg) translateY(2px); } 50% { transform: rotate(12deg) translateY(1px); } }
@@ -2307,7 +2300,7 @@ select:focus-visible,
 /* Gesture cycles divide the 8s rotation interval and return to a neutral pose. */
 .bot-prop, .bot-sleep-marks, .bot-celebration { display: none; }
 .bot-prop-line, .bot-steam, .bot-sleep-marks, .bot-celebration { fill: none; stroke: currentColor; stroke-width: 1.2; stroke-linecap: round; stroke-linejoin: round; }
-.factory-bot[data-state="sleeping"] .bot-sleep-marks { display: inline; animation: bot-dream 4s ease-in-out infinite; }
+.factory-bot[data-state="sleeping"] .bot-sleep-marks { display: inline; animation: bot-dream 4s steps(30, end) infinite; }
 .factory-bot[data-state="complete"] .bot-celebration { display: inline; animation: bot-dream .8s ease-in-out 3; }
 .factory-bot[data-state="idle"][data-gesture] .bot-body { animation: bot-breathe 4s ease-in-out infinite; transform: none; }
 .factory-bot[data-state="idle"][data-gesture] .bot-eyes { animation: bot-idle-look 8s ease-in-out infinite; }
@@ -2468,6 +2461,9 @@ select:focus-visible,
 /* Ordered task snapshots shared by the conversation and task-status panel. */
 .task-flow { margin: 10px 0; padding: 12px; border: 1px solid var(--vscode-widget-border, #555); border-radius: 8px; min-width: 0; }
 .task-flow > strong { display: block; margin-bottom: 12px; overflow-wrap: anywhere; }
+.task-flow-summary { display: flex; flex-wrap: wrap; gap: 6px 14px; margin-bottom: 8px; min-width: 0; font-size: 11px; }
+.task-flow-summary > * { overflow-wrap: anywhere; min-width: 0; }
+.task-flow-current { margin: 0 0 12px; overflow-wrap: anywhere; font-size: 12px; }
 .task-flow-list { list-style: none; margin: 0; padding: 2px 2px 8px; display: grid; grid-auto-flow: column; grid-auto-columns: minmax(150px, 1fr); gap: 22px; overflow-x: auto; }
 .task-flow-step { position: relative; display: grid; grid-template-columns: 24px minmax(0, 1fr); align-content: center; align-items: center; gap: 8px; padding: 8px; border-radius: 6px; background: var(--vscode-editor-background); }
 .task-flow-step + .task-flow-step::before { content: ""; position: absolute; left: -22px; top: calc(50% - 1px); width: 22px; height: 2px; background: var(--vscode-descriptionForeground); opacity: .5; }
@@ -2579,3 +2575,10 @@ select:focus-visible,
 .interview-choice:hover:not(:disabled) { background: var(--vscode-button-hoverBackground); }
 .interview-choice:focus-visible { outline: 2px solid var(--vscode-focusBorder); outline-offset: 2px; }
 .interview-choice:disabled { opacity: 0.5; cursor: default; }
+
+/* Retained hidden webviews keep their state without running decorative motion. */
+html[data-af-hidden="true"] *,
+html[data-af-hidden="true"] *::before,
+html[data-af-hidden="true"] *::after {
+  animation-play-state: paused !important;
+}

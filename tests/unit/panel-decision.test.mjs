@@ -584,9 +584,11 @@ test("background completion wakes Main once, waits for conversation, and survive
   await manager.continueBackgroundWork(managed, [child]);
   await new Promise(resolve => setImmediate(resolve));
   assert.equal(calls.length, 1);
-  assert.equal(calls[0].execution.taskMode, "work-verification");
+  assert.equal(calls[0].execution.taskMode, "direct");
+  assert.match(calls[0].text, /"taskMode":"work-verification"/);
   assert.match(calls[0].text, /run-one/);
-  assert.match(calls[0].text, /Do not duplicate dispatch/);
+  assert.match(calls[0].text, /do not reconcile or advance the loop/);
+  assert.match(calls[0].text, /review implementation or rerun tests/);
   const restored = new module.exports.ChatPanelManager(context, {}, () => [], async () => ({ available: false }));
   await restored.continueBackgroundWork(managed, [child]);
   assert.equal(calls.length, 1);
@@ -663,17 +665,206 @@ test("task-assigned workers stay under the engine instead of legacy continuation
   const workflows = [{ workAgentId: 'loop-owner', verificationAgentId: 'default-verifier', workflow: {
     tasks: [{ workAgentId: 'second-worker', verificationAgentId: 'second-verifier' }]
   } }];
-  const manager = new module.exports.ChatPanelManager({}, {}, () => [], async () => ({ available: true, client: {
-    async listChildSessions() { return agents; }, async advanceWorkflows() { return workflows; }
-  } }));
+  let listCalls = 0, workflowCalls = 0, observedDrive;
+  const sharedClient = {
+    async listChildSessions() { listCalls++; await new Promise(resolve => setImmediate(resolve)); return agents; },
+    async advanceWorkflows(_agentId, _agents, drive) { workflowCalls++; observedDrive = drive; return workflows; }
+  };
+  const manager = new module.exports.ChatPanelManager({}, {}, () => [], async () => ({ available: true, client: sharedClient }));
   let legacy;
   manager.scheduleAgentList = () => {};
   manager.reportWorkflowResults = async () => {};
   manager.continueBackgroundWork = async (_managed, children) => { legacy = children; };
   const messages = [];
-  await manager.sendAgentList({ state: { agentId: 'main-test' }, panel: { webview: {
+  const panels = [1, 2].map(() => ({ state: { agentId: 'main-test' }, panel: { visible: true, webview: {
     async postMessage(message) { messages.push(message); return true; }
-  } } });
+  } } }));
+  await Promise.all(panels.map(panel => manager.sendAgentList(panel)));
+  assert.equal(listCalls, 1, 'Equivalent panel refreshes must share one child lookup');
+  assert.equal(workflowCalls, 1, 'Equivalent panel refreshes must share one workflow observation');
+  assert.equal(observedDrive, false, 'UI refresh observes workflows without driving the engine');
   assert.deepEqual(legacy.map(agent => agent.agentId), ['legacy-worker']);
-  assert.equal(messages[0].type, 'agents.list');
+  assert.deepEqual(messages.map(message => message.type), ['agents.list', 'agents.list']);
+
+  let isolatedCalls = 0;
+  const clients = [1, 2].map(() => ({
+    async listChildSessions() { isolatedCalls++; await new Promise(resolve => setImmediate(resolve)); return []; },
+    async advanceWorkflows() { return []; }
+  }));
+  let connection = 0;
+  const isolated = new module.exports.ChatPanelManager({}, {}, () => [], async () => ({ available: true, client: clients[connection++] }));
+  isolated.scheduleAgentList = () => {};
+  await Promise.all([1, 2].map(() => isolated.sendAgentList({ state: { agentId: 'main-test' }, panel: { webview: {
+    async postMessage() { return true; }
+  } } })));
+  assert.equal(isolatedCalls, 2, 'Distinct runtime clients/projects must not share a lookup');
+});
+
+test("agent refresh waits from completion and backs off for idle or hidden panels", async t => {
+  const manager = new module.exports.ChatPanelManager({}, {}, () => [], async () => ({ available: true, client: {
+    async listChildSessions() { await new Promise(resolve => setTimeout(resolve, 20)); return []; },
+    async advanceWorkflows() { return []; }
+  } }));
+  const managed = { state: { agentId: 'main-refresh', role: 'main' }, panel: { visible: true, webview: {
+    async postMessage() { return true; }
+  } } };
+  let ageAfterSlowRefresh;
+  manager.scheduleAgentList = panel => { ageAfterSlowRefresh = Date.now() - panel.lastAgentRefreshAt; };
+  await manager.sendAgentList(managed);
+  assert.ok(ageAfterSlowRefresh < 25, 'A slow refresh must anchor its next delay at completion');
+
+  delete manager.scheduleAgentList;
+  t.after(() => { if (managed.agentRefreshTimer) clearTimeout(managed.agentRefreshTimer); });
+  managed.lastAgentRefreshAt = Date.now();
+  manager.scheduleAgentList(managed);
+  assert.ok(managed.agentRefreshTimer._idleTimeout >= 4990 && managed.agentRefreshTimer._idleTimeout <= 5000);
+  clearTimeout(managed.agentRefreshTimer);
+  managed.agentRefreshTimer = undefined;
+  managed.panel.visible = false;
+  manager.scheduleAgentList(managed);
+  assert.ok(managed.agentRefreshTimer._idleTimeout >= 14990 && managed.agentRefreshTimer._idleTimeout <= 15000);
+  clearTimeout(managed.agentRefreshTimer);
+  managed.agentRefreshTimer = undefined;
+  managed.controller = { running: true };
+  manager.scheduleAgentList(managed);
+  assert.ok(managed.agentRefreshTimer._idleTimeout >= 1990 && managed.agentRefreshTimer._idleTimeout <= 2000);
+  clearTimeout(managed.agentRefreshTimer);
+});
+
+test("concurrent panels claim each terminal workflow delivery once and retry recorded errors", async () => {
+  const storage = new Map(), sends = [];
+  const context = { workspaceState: {
+    get: key => storage.get(key), async update(key, value) { storage.set(key, structuredClone(value)); }
+  } };
+  const workflow = { loopId: 'loop-terminal', status: 'completed', workAgentId: 'work-terminal' };
+  const client = { async listChildSessions() { await new Promise(resolve => setImmediate(resolve)); return []; },
+    async advanceWorkflows() { return [workflow]; } };
+  const manager = new module.exports.ChatPanelManager(context, {}, () => [], async () => ({ available: true, client }));
+  manager.scheduleAgentList = () => {};
+  manager.continueBackgroundWork = async () => {};
+  let fail = true;
+  const panels = [1, 2].map(index => ({ state: { agentId: 'main-terminal' }, panel: { webview: {
+    async postMessage() { return true; }
+  } }, controller: { async send(_text, _attachments, _execution, accepted) {
+    sends.push(index);
+    if (fail) throw new Error('delivery failed');
+    accepted();
+  } } }));
+  await Promise.all(panels.map(panel => manager.sendAgentList(panel)));
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(sends.length, 1, 'Concurrent panels must make one terminal workflow delivery attempt');
+  assert.equal(storage.get('agentFactory.workflowResults.main-terminal')['loop-terminal'], 'delivery-error:completed');
+
+  fail = false;
+  await manager.sendAgentList(panels[1]);
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(sends.length, 2, 'A recorded delivery error must remain retryable');
+  assert.equal(storage.get('agentFactory.workflowResults.main-terminal')['loop-terminal'], 'completed');
+});
+
+test("concurrent panels claim a legacy terminal child delivery once", async () => {
+  const storage = new Map([['agentFactory.background.main-child', { 'work-child/run-child': 'running' }]]), sends = [];
+  const context = { workspaceState: {
+    get: key => storage.get(key), async update(key, value) { storage.set(key, structuredClone(value)); }
+  } };
+  const child = { agentId: 'work-child', runId: 'run-child', role: 'work', status: 'completed', taskMode: 'work' };
+  const client = { async listChildSessions() { await new Promise(resolve => setImmediate(resolve)); return [child]; } };
+  const manager = new module.exports.ChatPanelManager(context, {}, () => [], async () => ({ available: true, client }));
+  manager.scheduleAgentList = () => {};
+  const panels = [1, 2].map(index => ({ state: { agentId: 'main-child' }, panel: { webview: {
+    async postMessage() { return true; }
+  } }, controller: { conversationResetBlockedReason: undefined, async send(_text, _attachments, _execution, accepted) {
+    sends.push(index); accepted();
+  } } }));
+  await Promise.all(panels.map(panel => manager.sendAgentList(panel)));
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(sends.length, 1, 'Concurrent panels must make one legacy child delivery attempt');
+  assert.equal(storage.get('agentFactory.background.main-child')['work-child/run-child'], 'completed');
+});
+
+
+test('six same-worker tasks reach the panel intact without legacy redispatch after reconnect', async () => {
+  const workflow = { loopId: 'loop-six', workAgentId: 'shared-worker', taskMode: 'work', status: 'runtime-error',
+    workflow: { id: 'six', title: 'Six tasks', index: 1, tasks: Array.from({ length: 6 }, (_, index) => ({
+      id: `task-${index + 1}`, title: `Task ${index + 1}`, workAgentId: 'shared-worker',
+      workStatus: index === 0 ? 'completed' : index === 1 ? 'failed' : 'pending',
+      ...(index < 2 ? { workRunId: `run-${index + 1}` } : {}) })) } };
+  const agents = [{ agentId: 'shared-worker', runId: 'run-2', role: 'work', status: 'failed' }];
+  const messages = [], legacy = [];
+  for (let reconnect = 0; reconnect < 2; reconnect += 1) {
+    const manager = new module.exports.ChatPanelManager({}, {}, () => [], async () => ({ available: true, client: {
+      async listChildSessions() { return agents; }, async advanceWorkflows() { return [structuredClone(workflow)]; }
+    } }));
+    manager.scheduleAgentList = () => {};
+    manager.reportWorkflowResults = async () => {};
+    manager.continueBackgroundWork = async (_managed, children) => { legacy.push(...children); };
+    await manager.sendAgentList({ state: { agentId: 'main-six' }, panel: { webview: {
+      async postMessage(message) { messages.push(message); return true; }
+    } } });
+  }
+  assert.equal(messages.length, 2);
+  for (const message of messages) {
+    assert.equal(message.type, 'agents.list');
+    assert.deepEqual(message.workflows, [workflow]);
+    assert.equal(message.workflows[0].workflow.tasks.length, 6);
+  }
+  assert.deepEqual(legacy, [], 'Failed loop tasks must not become legacy follow-up work');
+});
+
+test("engine terminal notification reports the bound outcome once without re-executing work", async () => {
+  for (const [status, code] of [["completed", "work-completed"], ["completed", "pass"],
+    ["runtime-error", "needs-human-decision"], ["runtime-error", "failed"], ["runtime-error", "cancelled"]]) {
+    const storage = new Map(), calls = [];
+    const manager = new module.exports.ChatPanelManager({ workspaceState: {
+      get: key => storage.get(key), async update(key, value) { storage.set(key, structuredClone(value)); }
+    } }, {}, () => [], async () => ({ available: false }));
+    const managed = { state: { agentId: "main-report" }, controller: {
+      async send(text, attachments, execution, accepted) { calls.push({ text, execution }); accepted(); }
+    } };
+    const flow = { loopId: "bound-loop", status, terminalReason: { code }, latestWorkRunId: "exact-work" };
+    await manager.reportWorkflowResults(managed, [flow]);
+    await new Promise(resolve => setImmediate(resolve));
+    await manager.reportWorkflowResults(managed, [flow]);
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].execution.taskMode, "direct");
+    assert.match(calls[0].text, /exact-work/);
+    assert.match(calls[0].text, /Do not review implementation or rerun tests/);
+    assert.match(calls[0].text, /Goal completion alone is not a pass/);
+    assert.equal(JSON.parse(calls[0].text.split("\n")[1]).terminalReason.code, code);
+  }
+});
+
+test('global bot setting disposes every companion and prevents inference while preserving chat controllers', async () => {
+  const manager = new module.exports.ChatPanelManager({}, {}, () => [], async () => { throw new Error('not used'); });
+  let disposed = 0, inferred = 0;
+  const messages = [];
+  const controller = { running: true };
+  for (const id of ['main', 'work', 'verification']) {
+    manager.panels.set(id, { controller, panel: { webview: { async postMessage(m) { messages.push(m); return true; } } },
+      lunaBot: { dispose() { disposed++; }, react() { inferred++; } } });
+  }
+  configuredMode = false;
+  try {
+    for (const panel of manager.panels.values()) manager.reactBot(panel);
+    assert.equal(inferred, 0);
+    await manager.refreshBots();
+    assert.equal(disposed, 3);
+    assert.equal(messages.filter(m => m.type === 'bots.updated' && m.enabled === false).length, 3);
+    for (const panel of manager.panels.values()) {
+      assert.equal(panel.lunaBot, undefined);
+      assert.equal(panel.controller, controller);
+    }
+    configuredMode = true;
+    await manager.refreshBots();
+    const panel = manager.panels.get('main');
+    let lateReply;
+    panel.lunaBot = { react(_context, publish) { inferred++; lateReply = publish; }, dispose() {} };
+    manager.reactBot(panel);
+    assert.equal(inferred, 1);
+    configuredMode = false;
+    lateReply('cheerful');
+    assert.equal(messages.some(m => m.type === 'bot.mood'), false);
+    await manager.handleMessage(panel, { type: 'bots.configure', enabled: false });
+    assert.deepEqual(configUpdates.at(-1), ['botsEnabled', false, vscode.ConfigurationTarget.Global]);
+  } finally { configuredMode = undefined; }
 });

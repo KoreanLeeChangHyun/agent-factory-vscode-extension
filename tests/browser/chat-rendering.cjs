@@ -85,9 +85,88 @@ async function main() {
     await page.addInitScript(events => {
       window.saved = JSON.parse(sessionStorage.getItem("submission-restoration-fixture") || "null") || { timeline: events };
       window.sentMessages = [];
-      window.acquireVsCodeApi = () => ({ getState: () => window.saved, setState: value => { window.saved = value; }, postMessage(message) { window.sentMessages.push(message); } });
+      window.acquireVsCodeApi = () => ({ getState: () => window.saved, setState: value => {
+        window.saved = value;
+        if (window.measurePersistence) {
+          window.persistenceBytes = JSON.stringify(value).length;
+          window.persistenceCalls = (window.persistenceCalls || 0) + 1;
+        }
+      }, postMessage(message) { window.sentMessages.push(message); } });
     }, fixture);
     await page.goto('http://127.0.0.1:' + server.address().port);
+    if (process.argv.includes('--local-file-picker-only')) {
+      await require('./local-file-picker.cjs').checkLocalFilePicker(page);
+      assert.deepEqual(errors, []);
+      return;
+    }
+    if (process.argv.includes('--long-history-only')) {
+      await require('./long-history.cjs').checkLongHistory(page);
+      assert.deepEqual(errors, []);
+      return;
+    }
+    if (process.argv.includes('--input-performance-only')) {
+      await require('./input-performance.cjs').checkInputPerformance(page);
+      assert.deepEqual(errors, []);
+      return;
+    }
+    if (process.argv.includes('--resource-only')) {
+      await page.evaluate(() => {
+        for (let i = 0; i < 120; i++) window.postMessage({ type: 'chat.assistant', phase: 'final', text: 'Resource message ' + i }, '*');
+      });
+      await page.waitForFunction(() => document.querySelectorAll('.message-assistant').length >= 120);
+      await page.evaluate(() => {
+        window.resourceInspections = 0;
+        const original = Element.prototype.querySelectorAll;
+        Element.prototype.querySelectorAll = function (selector) {
+          if (this.classList.contains('message') && selector.includes('.bash-command-toggle')) window.resourceInspections++;
+          return original.call(this, selector);
+        };
+        window.postMessage({ type: 'chat.assistant', phase: 'final', text: 'Resource final marker' }, '*');
+      });
+      await page.waitForFunction(() => document.querySelector('.message-assistant:last-child')?.textContent.includes('Resource final marker'));
+      assert.equal(await page.evaluate(() => window.resourceInspections), 0, 'Unchanged message controls must not be rescanned');
+      await page.evaluate(() => {
+        Object.defineProperty(document, 'hidden', { configurable: true, value: true });
+        document.dispatchEvent(new Event('visibilitychange'));
+      });
+      assert.equal(await page.locator('html').getAttribute('data-af-hidden'), 'true');
+      assert.equal(await page.locator('.message-assistant').first().evaluate(el => getComputedStyle(el).animationPlayState), 'paused');
+      await page.evaluate(() => {
+        delete document.hidden;
+        document.dispatchEvent(new Event('visibilitychange'));
+      });
+      assert.equal(await page.locator('html').getAttribute('data-af-hidden'), 'false');
+      assert.deepEqual(errors, []);
+      await page.evaluate(() => {
+        for (let i = 0; i < 500; i++) window.postMessage({ type: 'chat.assistant', phase: 'final', text: 'Paged resource ' + i }, '*');
+      });
+      await page.waitForFunction(() => document.querySelector('.message-assistant:last-child')?.textContent.includes('Paged resource 499'));
+      assert.equal(await page.locator('#timeline .message').count(), 200, 'Long history has a bounded DOM');
+      await page.locator('.history-pages button').first().click();
+      assert.equal(await page.locator('#timeline .message').count(), 200);
+      assert.equal(await page.locator('#timeline').textContent().then(text => text.includes('Paged resource 499')), false);
+      await page.locator('.history-pages button').last().click();
+      assert.equal(await page.locator('.message-assistant:last-child').textContent().then(text => text.includes('Paged resource 499')), true);
+      if (process.env.AF_RESOURCE_REPORT) {
+        const session = await page.context().newCDPSession(page);
+        await session.send('Performance.enable');
+        const before = await session.send('Performance.getMetrics');
+        await page.waitForTimeout(1000);
+        const after = await session.send('Performance.getMetrics');
+        const metrics = value => Object.fromEntries(value.metrics.map(item => [item.name, item.value]));
+        const a = metrics(before), b = metrics(after);
+        fs.writeFileSync(process.env.AF_RESOURCE_REPORT, JSON.stringify({
+          scenario: 'Chromium fixture, 621 retained messages, 200 mounted messages, one second idle',
+          mountedMessages: await page.locator('#timeline .message').count(),
+          heapUsedBytes: b.JSHeapUsedSize, idleTaskSeconds: b.TaskDuration - a.TaskDuration,
+          idleLayoutCount: b.LayoutCount - a.LayoutCount,
+          gpuUtilizationMeasured: false, vscodeHostMeasured: false
+        }, null, 2));
+        await session.detach();
+      }
+      console.log('Resource rendering and hidden lifecycle checks passed');
+      return;
+    }
     if (process.argv.includes('--history-guidance-only')) {
       const { build } = require('esbuild');
       const compiled = await build({ entryPoints: [path.join(root, 'src/infrastructure/agent-factory/history-presentation.ts')], bundle: true, write: false, platform: 'node', format: 'esm' });
@@ -242,6 +321,23 @@ async function main() {
       await checkFactoryRendering(page);
       assert.deepEqual(errors, []);
       console.log('Factory script and Skill rendering checks passed.');
+      return;
+    }
+    if (process.argv.includes('--compaction-only')) {
+      for (const phase of ['started', 'completed']) {
+        const text = phase === 'started' ? 'Compacting context' : 'Context compaction completed';
+        await page.evaluate(({ phase, text }) => window.postMessage({
+          type: 'run.activity', id: 'compaction-render-check', category: 'tool', phase,
+          text, title: 'Context compaction'
+        }, '*'), { phase, text });
+        const card = page.locator('[data-id="compaction-render-check"]');
+        await card.waitFor();
+        await page.waitForFunction(text => document.querySelector('[data-id="compaction-render-check"]')?.textContent.includes(text), text);
+        assert.equal(await card.count(), 1);
+        assert.equal(await card.isVisible(), true);
+      }
+      assert.deepEqual(errors, []);
+      console.log('Context compaction start/completion render in one activity card.');
       return;
     }
     if (process.argv.includes('--image-composer-only')) {
@@ -510,16 +606,18 @@ async function main() {
     await emit({ type: 'run.state', running: true });
     await emit({ type: 'run.progress', text: '작업 결과를 검증하고 있습니다' });
     await emit({ type: 'agents.list', agents: [
-      { agentId: 'work-loop-1', role: 'work', status: 'completed' },
-      { agentId: 'verification-loop-1', role: 'verification', status: 'running' }
-    ] });
+      { agentId: 'work-loop-1', role: 'work', status: 'completed', runId: 'work-run-1' },
+      { agentId: 'verification-loop-1', role: 'verification', status: 'running', runId: 'verification-run-1' }
+    ], workflows: [{ kind: 'work-verification-loop', loopId: 'loop-status', status: 'active', taskMode: 'work-verification',
+      workAgentId: 'work-loop-1', verificationAgentId: 'verification-loop-1', workflow: { id: 'status-flow', title: 'Status fixture', index: 0,
+        tasks: [{ id: 'status-task', title: 'Status task', description: 'Bound accepted stages', completionCriteria: 'Open exact child',
+          workStatus: 'completed', verificationStatus: 'running', workRunId: 'work-run-1', verificationRunId: 'verification-run-1' }] } }] });
     assert.match(await page.locator('#run-status-agents').textContent(), /Work 0 · Verification 1/);
-    await page.locator('#run-status-toggle').click();
+    if (await page.locator('#run-status-toggle').getAttribute('aria-expanded') !== 'true') await page.locator('#run-status-toggle').click();
     assert.equal(await page.locator('#run-status-toggle').getAttribute('aria-expanded'), 'true');
     assert.equal(await page.locator('#run-details').isVisible(), true);
-    assert.deepEqual(await page.locator('.run-stage-name').allTextContents(), ['Work', 'Verification']);
-    assert.deepEqual(await page.locator('.run-stage-marker').allTextContents(), ['✓', '●']);
-    await page.locator('.run-stage').last().click();
+    assert.deepEqual(await page.locator('#run-stage-list [data-flow-id="status-flow"] .task-flow-step').evaluateAll(items => items.map(item => item.dataset.status)), ['completed', 'verifying']);
+    await page.locator('#run-stage-list [data-flow-id="status-flow"] .task-flow-open').last().click();
     assert.deepEqual(await page.evaluate(() => window.sentMessages.at(-1)), { type: 'agent.open', agentId: 'verification-loop-1' });
     await page.locator('#run-status-toggle').click();
     assert.equal(await page.locator('#run-details').isHidden(), true);
@@ -664,6 +762,10 @@ async function main() {
     assert.deepEqual(reducedStyle, { animation: 'none', color: statusStyle.labelColor, fill: statusStyle.labelColor, background: 'none' });
     await page.locator('.composer-region').screenshot({ path: path.join(artifactDir, 'run-status-dark-reduced-motion.png') });
     fs.writeFileSync(path.join(artifactDir, 'run-status-visibility.json'), JSON.stringify({ statusStyle, positions, reducedStyle, minimumGradientContrast: Math.min(...gradientColors.map(contrast)), metaContrast: contrast(statusStyle.metaColor) }, null, 2));
+    await emit({ type: 'agents.list', agents: [], workflows: [{ kind: 'work-verification-loop', loopId: 'loop-status', status: 'completed', taskMode: 'work-verification',
+      workAgentId: 'work-loop-1', verificationAgentId: 'verification-loop-1', workflow: { id: 'status-flow', title: 'Status fixture', index: 0,
+        tasks: [{ id: 'status-task', title: 'Status task', description: 'Bound accepted stages', completionCriteria: 'Open exact child',
+          workStatus: 'completed', verificationStatus: 'completed', workRunId: 'work-run-1', verificationRunId: 'verification-run-1' }] } }] });
     await emit({ type: 'run.state', running: false });
     assert.equal(await page.locator('#run-status').isHidden(), true);
     assert.equal(await page.locator('#run-status-toggle').getAttribute('aria-expanded'), 'false');

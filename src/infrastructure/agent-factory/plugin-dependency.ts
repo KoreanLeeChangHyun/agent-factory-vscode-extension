@@ -1,9 +1,8 @@
 import { localize } from "../../common/localization";
 import { execFile } from "node:child_process";
 import { homedir } from "node:os";
-import { runtimeEnvironment } from "./process-environment";
+import { codexExecutable, runtimeEnvironment } from "./process-environment";
 
-const CODEX_COMMAND = "codex";
 const LIST_INSTALLED_ARGUMENTS = ["plugin", "list", "--json"] as const;
 const LIST_AVAILABLE_ARGUMENTS = ["plugin", "list", "--available", "--json"] as const;
 const MAX_OUTPUT_BYTES = 256 * 1024;
@@ -164,7 +163,7 @@ async function invoke(
   maxOutputBytes = MAX_OUTPUT_BYTES
 ): Promise<ProcessResult> {
   try {
-    const result = await runner(CODEX_COMMAND, arguments_, { timeout, maxBuffer: maxOutputBytes });
+    const result = await runner(codexExecutable(), arguments_, { timeout, maxBuffer: maxOutputBytes });
     if (typeof result?.stdout !== "string") {
       throw new PluginDependencyError(localize("ui.0.returned.a.non.string.result", operation));
     }

@@ -65,6 +65,8 @@ interface ManagedPanel {
 
 const COMPOSER_PREFERENCES_KEY = "agentFactory.mainChat.composerPreferences";
 const AGENT_REFRESH_INTERVAL_MS = 2_000;
+const AGENT_IDLE_VISIBLE_REFRESH_INTERVAL_MS = 5_000;
+const AGENT_IDLE_HIDDEN_REFRESH_INTERVAL_MS = 15_000;
 const SIDEBAR_AGENTS_KEY = "agentFactory.sidebar.agents";
 
 export interface SidebarAgent {
@@ -74,10 +76,16 @@ export interface SidebarAgent {
 
 export class ChatPanelManager implements vscode.Disposable {
   public readonly viewType = "agentFactory.mainChat";
+  private readonly disposedPanels = new WeakSet<vscode.WebviewPanel>();
   private readonly panels = new Map<string, ManagedPanel>();
   private activePanelId: string | undefined;
   private readonly sidebarListeners = new Set<() => void>();
   private sidebarAgentWrite: Promise<void> = Promise.resolve();
+  private readonly agentRefreshes = new WeakMap<AgentRuntimeClient, Map<string, Promise<{
+    readonly agents: readonly import("../agent-factory/agent-client").ChildAgentSession[];
+    readonly workflows: readonly Record<string, unknown>[] | undefined;
+  }>>>();
+  private readonly terminalDeliveryClaims = new WeakMap<object, Set<string>>();
 
   public onAgentsChanged(listener: () => void): vscode.Disposable {
     this.sidebarListeners.add(listener);
@@ -244,6 +252,10 @@ export class ChatPanelManager implements vscode.Disposable {
 
   public dispose(): void {
     for (const managed of this.panels.values()) {
+      managed.disposed = true;
+      this.disposedPanels.add(managed.panel);
+      if (managed.agentRefreshTimer) clearTimeout(managed.agentRefreshTimer);
+      managed.lunaBot?.dispose();
       for (const subscription of managed.subscriptions) {
         subscription.dispose();
       }
@@ -274,6 +286,7 @@ export class ChatPanelManager implements vscode.Disposable {
     subscriptions.push(managed.runningTitle);
     subscriptions.push(new vscode.Disposable(() => {
       managed.disposed = true;
+      this.disposedPanels.add(panel);
       managed.controller?.dispose();
       managed.branchRefreshStarted = false;
       managed.themeReady = false;
@@ -298,6 +311,8 @@ export class ChatPanelManager implements vscode.Disposable {
 
     subscriptions.push(
       panel.onDidDispose(() => {
+        managed.disposed = true;
+        this.disposedPanels.add(panel);
         managed.lunaBot?.dispose();
         if (managed.agentRefreshTimer) clearTimeout(managed.agentRefreshTimer);
         this.panels.delete(state.panelId);
@@ -314,6 +329,7 @@ export class ChatPanelManager implements vscode.Disposable {
           this.activePanelId = state.panelId;
           void this.refreshTheme(managed);
         }
+        if (event.webviewPanel.visible) this.scheduleAgentList(managed, true);
       }),
       panel.webview.onDidReceiveMessage(async (rawMessage: unknown) => {
         await this.handleMessage(managed, rawMessage);
@@ -407,6 +423,7 @@ export class ChatPanelManager implements vscode.Disposable {
           capabilities,
           running: managed.controller?.running ?? Boolean(managed.state.agentId && connection.available),
           statusItems: this.statusItems(),
+          botsEnabled: this.botsEnabled(),
           model: managed.state.model,
           agentModels: managed.state.agentModels,
           agentPermissions: managed.state.agentPermissions,
@@ -539,6 +556,23 @@ export class ChatPanelManager implements vscode.Disposable {
       case "models.request":
         await this.sendModelList(managed);
         return;
+      case "workflow.close": {
+        if (!managed.state.agentId || (managed.state.role ?? "main") !== "main") return;
+        try {
+          const connection = await this.connectRuntime();
+          if (!connection.available || !connection.client.closeWorkflow) throw new Error("Workflow closure is unavailable in this runtime");
+          const snapshot = await connection.client.closeWorkflow(managed.state.agentId, message.workAgentId, message.loopId);
+          await this.post(managed.panel, { type: "agents.list", agents: await connection.client.listChildSessions(managed.state.agentId), workflows: [snapshot] });
+        } catch (error) {
+          await this.post(managed.panel, { type: "host.notice", level: "error", text: String(error) });
+        }
+        return;
+      }
+      case "history.request": {
+        const connection = await this.connectRuntime();
+        if (connection.available) await this.restoreConversationHistory(managed, connection.client, message.before);
+        return;
+      }
       case "agents.request":
         await this.sendAgentList(managed);
         return;
@@ -567,6 +601,9 @@ export class ChatPanelManager implements vscode.Disposable {
       case "attachments.createImage":
         await this.mutateImages(managed, () => this.createImageAttachment(managed, message));
         return;
+      case "attachments.createFile":
+        await this.mutateImages(managed, () => this.createFileAttachment(managed, message));
+        return;
       case "attachments.restore":
         await this.mutateImages(managed, () => this.restoreImageAttachments(managed, message.attachments));
         return;
@@ -575,6 +612,9 @@ export class ChatPanelManager implements vscode.Disposable {
         return;
       case "attachment.remove":
         await this.mutateImages(managed, () => this.removeImageAttachment(managed, message.id));
+        return;
+      case "bots.configure":
+        await this.saveBots(message.enabled);
         return;
       case "status.reorder":
         await this.saveStatusItems(managed.panel, message.items);
@@ -678,16 +718,14 @@ export class ChatPanelManager implements vscode.Disposable {
     try {
       const connection = await this.connectRuntime();
       if (!connection.available) return;
-      let agents = await connection.client.listChildSessions(agentId);
-      const workflows = await connection.client.advanceWorkflows?.(agentId, agents);
-      if (workflows?.length) agents = await connection.client.listChildSessions(agentId);
+      const { agents, workflows } = await this.sharedAgentRefresh(connection.client, agentId);
       if (managed.disposed || managed.state.agentId !== agentId) return;
       await this.post(managed.panel, { type: "agents.list", agents, workflows });
-      if (workflows) await this.reportWorkflowResults(managed, workflows);
+      if (workflows) await this.reportWorkflowResults(managed, workflows, connection.client);
       await this.continueBackgroundWork(managed, agents.filter(agent => !workflows?.some(flow => flow.workAgentId === agent.agentId || flow.verificationAgentId === agent.agentId ||
         (Array.isArray((flow.workflow as { tasks?: unknown[] } | undefined)?.tasks) &&
           ((flow.workflow as { tasks: { workAgentId?: string; verificationAgentId?: string }[] }).tasks).some(task =>
-            task.workAgentId === agent.agentId || task.verificationAgentId === agent.agentId)))));
+            task.workAgentId === agent.agentId || task.verificationAgentId === agent.agentId)))), connection.client);
     } catch (error) {
       await this.post(managed.panel, {
         type: "host.notice",
@@ -696,37 +734,76 @@ export class ChatPanelManager implements vscode.Disposable {
       });
     } finally {
       managed.agentRefreshInFlight = false;
+      managed.lastAgentRefreshAt = Date.now();
       if (!managed.disposed && managed.state.agentId === agentId) this.scheduleAgentList(managed);
     }
   }
 
-  private async reportWorkflowResults(managed: ManagedPanel, workflows: readonly Record<string, unknown>[]): Promise<void> {
+  private sharedAgentRefresh(client: AgentRuntimeClient, agentId: string): Promise<{
+    readonly agents: readonly import("../agent-factory/agent-client").ChildAgentSession[];
+    readonly workflows: readonly Record<string, unknown>[] | undefined;
+  }> {
+    let byAgent = this.agentRefreshes.get(client);
+    if (!byAgent) {
+      byAgent = new Map();
+      this.agentRefreshes.set(client, byAgent);
+    }
+    const existing = byAgent.get(agentId);
+    if (existing) return existing;
+    const refresh = (async () => {
+      const agents = await client.listChildSessions(agentId);
+      // The runtime loop driver owns progression. UI refresh observes status only.
+      const workflows = await client.advanceWorkflows?.(agentId, agents, false);
+      return { agents, workflows };
+    })();
+    byAgent.set(agentId, refresh);
+    void refresh.finally(() => {
+      if (byAgent?.get(agentId) === refresh) byAgent.delete(agentId);
+    }).catch(() => {});
+    return refresh;
+  }
+
+  private claimTerminalDelivery(owner: object, key: string): (() => void) | undefined {
+    let claims = this.terminalDeliveryClaims.get(owner);
+    if (!claims) {
+      claims = new Set();
+      this.terminalDeliveryClaims.set(owner, claims);
+    }
+    if (claims.has(key)) return undefined;
+    claims.add(key);
+    return () => { claims?.delete(key); };
+  }
+
+  private async reportWorkflowResults(managed: ManagedPanel, workflows: readonly Record<string, unknown>[], owner: object = this): Promise<void> {
     const key = `agentFactory.workflowResults.${managed.state.agentId}`;
     const states = { ...this.context.workspaceState?.get<Record<string, string>>(key) };
+    let dirty = false;
     for (const flow of workflows) {
       if (typeof flow.loopId !== "string" || typeof flow.status !== "string") continue;
-      if (flow.status === "active") { states[flow.loopId] = "active"; continue; }
-      if (states[flow.loopId] === flow.status || states[flow.loopId] === `delivery-error:${flow.status}`) continue;
+      if (flow.status === "active") { states[flow.loopId] = "active"; dirty = true; continue; }
+      if (states[flow.loopId] === flow.status) continue;
       if (managed.disposed || managed.backgroundContinuation || managed.controller?.running ||
           managed.pendingMessageIds?.size || !managed.controller || managed.controller.conversationResetBlockedReason) continue;
+      const releaseClaim = this.claimTerminalDelivery(owner, `${managed.state.agentId}:workflow:${flow.loopId}:${flow.status}`);
+      if (!releaseClaim) continue;
       managed.backgroundContinuation = true;
       const id = flow.loopId;
       const status = flow.status;
       void managed.controller.send(`[Engine workflow result — not a new Human request]
 ${JSON.stringify(flow)}
-The engine owns execution and has stopped at this recorded state. Report the complete result or the exact exception to the Human. Do not dispatch a next task, restart this workflow, or grant missing approval.`, [], { taskMode: "direct" }, () => {
+The engine owns execution and has stopped at this recorded state. Acknowledge the exact result/receipt identity and report the complete result or exception to the Human. Do not review implementation or rerun tests. Distinguish Work completion, independent Verification pass, failure, cancellation and required Human input; Goal completion alone is not a pass. Do not dispatch a next task, restart this workflow, or grant missing approval.`, [], { taskMode: "direct" }, () => {
         states[id] = status;
         void this.context.workspaceState?.update(key, states);
       }).catch(error => {
         states[id] = `delivery-error:${status}`;
         void this.context.workspaceState?.update(key, states);
         return this.post(managed.panel, { type: "host.notice", level: "error", text: String(error) });
-      }).finally(() => { managed.backgroundContinuation = false; });
+      }).finally(() => { managed.backgroundContinuation = false; releaseClaim(); });
     }
-    await this.context.workspaceState?.update(key, states);
+    if (dirty) await this.context.workspaceState?.update(key, states);
   }
 
-  private async continueBackgroundWork(managed: ManagedPanel, agents: readonly import("../agent-factory/agent-client").ChildAgentSession[]): Promise<void> {
+  private async continueBackgroundWork(managed: ManagedPanel, agents: readonly import("../agent-factory/agent-client").ChildAgentSession[], owner: object = this): Promise<void> {
     const key = `agentFactory.background.${managed.state.agentId}`;
     const saved = this.context.workspaceState?.get<Record<string, string>>(key);
     const states = { ...saved };
@@ -736,7 +813,8 @@ The engine owns execution and has stopped at this recorded state. Report the com
       if (!agent.runId) continue;
       const id = `${agent.agentId}/${agent.runId}`;
       if (!saved) states[id] = agent.status;
-      else if (terminal.has(agent.status) && states[id] !== agent.status && states[id] !== `delivery-error:${agent.status}`) pending.push(agent);
+      else if (terminal.has(agent.status) && states[id] !== agent.status
+          && states[id] !== `delivery-error:${agent.status}`) pending.push(agent);
       else if (!terminal.has(agent.status)) states[id] = agent.status;
     }
     await this.context.workspaceState?.update(key, states);
@@ -745,12 +823,15 @@ The engine owns execution and has stopped at this recorded state. Report the com
     // Keep distinct workflow routes separate; later polls deliver the remaining events.
     const child = pending.find(child => child.taskMode && child.taskMode !== "direct");
     if (!child) return;
+    const releaseClaim = this.claimTerminalDelivery(owner,
+      `${managed.state.agentId}:child:${child.agentId}:${child.runId}:${child.status}`);
+    if (!releaseClaim) return;
     managed.backgroundContinuation = true;
     const notification = `[Background workflow continuation — not a new Human request]
 ${JSON.stringify(child)}
-Inspect this exact child result and the existing workflow from conversation context. Reconcile its existing loop and continue only the captured, already-authorized route. Do not duplicate dispatch. If the child needs a Human decision or failed, report it; do not automatically grant approval or retry failed work. Return promptly after any next child is accepted. Answer any pending Human questions while preserving this workflow.`;
+Read the exact stored child result/receipt and existing workflow status for reporting. The engine owns loop transitions; do not reconcile or advance the loop, redispatch completed Work, review implementation or rerun tests. Goal completion is not a Verification pass. Preserve the accepted identities and captured route. If the child needs a Human decision or failed, report it; do not automatically grant approval or retry failed work. Report completion only when the captured route has completed; otherwise report the current stage and return promptly. Answer any pending Human questions while preserving this workflow.`;
     let accepted = false;
-    void managed.controller.send(notification, [], { taskMode: child.taskMode }, () => {
+    void managed.controller.send(notification, [], { taskMode: "direct" }, () => {
       accepted = true;
       states[`${child.agentId}/${child.runId}`] = child.status;
       void Promise.resolve(this.context.workspaceState?.update(key, states)).catch(error => this.post(managed.panel, { type: "host.notice", level: "error", text: String(error) }));
@@ -762,21 +843,23 @@ Inspect this exact child result and the existing workflow from conversation cont
             await this.context.workspaceState?.update(key, states);
             if (!managed.disposed) await this.post(managed.panel, { type: "host.notice", level: "error", text: localize("ui.background.continuation.failed", child.agentId, child.runId!) });
           }
-        } finally { managed.backgroundContinuation = false; }
+        } finally { managed.backgroundContinuation = false; releaseClaim(); }
       }).catch(error => this.post(managed.panel, { type: "host.notice", level: "error", text: String(error) }));
   }
 
   private scheduleAgentList(managed: ManagedPanel, immediate = false): void {
     if (managed.disposed || !managed.state.agentId || (managed.state.role ?? "main") !== "main") return;
     const elapsed = Date.now() - (managed.lastAgentRefreshAt ?? 0);
-    const delay = immediate ? 0 : Math.max(0, AGENT_REFRESH_INTERVAL_MS - elapsed);
+    const interval = managed.controller?.running
+      ? AGENT_REFRESH_INTERVAL_MS
+      : managed.panel.visible ? AGENT_IDLE_VISIBLE_REFRESH_INTERVAL_MS : AGENT_IDLE_HIDDEN_REFRESH_INTERVAL_MS;
+    const delay = immediate ? 0 : Math.max(0, interval - elapsed);
     if (managed.agentRefreshTimer) {
       if (!immediate) return;
       clearTimeout(managed.agentRefreshTimer);
     }
     managed.agentRefreshTimer = setTimeout(() => {
       managed.agentRefreshTimer = undefined;
-      managed.lastAgentRefreshAt = Date.now();
       void this.sendAgentList(managed);
     }, delay);
   }
@@ -985,10 +1068,7 @@ Inspect this exact child result and the existing workflow from conversation cont
           this.notifyAgents();
           if (running) managed.botContext = "working";
           else if (managed.botContext === "working") managed.botContext = "idle";
-          managed.lunaBot ??= new LunaBot();
-          void managed.lunaBot.react(managed.botContext ?? "idle", (mood, unavailable) => {
-            if (!managed.disposed) void this.post(managed.panel, { type: "bot.mood", mood, unavailable });
-          });
+          this.reactBot(managed);
           managed.runningTitle?.setRunning(running);
           void this.post(managed.panel, { type: "run.state", running });
           this.scheduleAgentList(managed, !running);
@@ -1129,11 +1209,11 @@ Inspect this exact child result and the existing workflow from conversation cont
     }
   }
 
-  private async restoreConversationHistory(managed: ManagedPanel, client: import("../agent-factory/agent-client").AgentRuntimeClient): Promise<void> {
+  private async restoreConversationHistory(managed: ManagedPanel, client: import("../agent-factory/agent-client").AgentRuntimeClient, before?: string): Promise<void> {
     const agentId = managed.state.agentId;
     if (!agentId || !client.history) return;
     try {
-      const history = await client.history(agentId);
+      const history = await client.history(agentId, { limit: 50, ...(before ? { before } : {}) });
       if (managed.disposed || managed.state.agentId !== agentId ||
           history.conversationId !== managed.state.conversationId) return;
       await this.post(managed.panel, { type: "conversation.history", agentId, history });
@@ -1292,6 +1372,21 @@ Inspect this exact child result and the existing workflow from conversation cont
     if (rejectedImages) await this.post(panel, { type: "host.notice", level: "warning", text: localize("ui.excluded.0.images.due.to.attachment.limits.up.to.8.images.10.mib.each.20.mib.total", rejectedImages) });
   }
 
+  private async createFileAttachment(managed: ManagedPanel, message: Extract<import("../../protocol/messages").ClientMessage, { type: "attachments.createFile" }>): Promise<void> {
+    try {
+      const directory = vscode.Uri.joinPath(this.context.globalStorageUri, "uploaded-files", managed.state.panelId, randomUUID());
+      const uri = vscode.Uri.joinPath(directory, message.name);
+      await vscode.workspace.fs.createDirectory(directory);
+      await vscode.workspace.fs.writeFile(uri, Buffer.from(message.data, "base64"));
+      await this.post(managed.panel, { type: "attachments.add", attachments: [{
+        id: message.id, name: message.name, kind: "file", uri: uri.toString(), size: message.size
+      }] });
+    } catch (error) {
+      await this.post(managed.panel, { type: "attachment.rejected", id: message.id });
+      await this.post(managed.panel, { type: "host.notice", level: "error", text: localize("ui.unable.to.prepare.attachments.0", error instanceof Error ? error.message : String(error)) });
+    }
+  }
+
   private async createTextAttachment(managed: ManagedPanel, text: string): Promise<void> {
     try {
       const directory = vscode.Uri.joinPath(
@@ -1402,6 +1497,43 @@ Inspect this exact child result and the existing workflow from conversation cont
     }
   }
 
+  private reactBot(managed: ManagedPanel): void {
+    if (managed.disposed || !this.botsEnabled()) return;
+    managed.lunaBot ??= new LunaBot();
+    void managed.lunaBot.react(managed.botContext ?? "idle", (mood, unavailable) => {
+      if (!managed.disposed && this.botsEnabled()) void this.post(managed.panel, { type: "bot.mood", mood, unavailable });
+    });
+  }
+
+  private botsWrite: Promise<void> = Promise.resolve();
+
+  private saveBots(enabled: boolean): Promise<void> {
+    const write = this.botsWrite.then(async () => {
+      try {
+        await vscode.workspace.getConfiguration("agentFactory.mainChat").update("botsEnabled", enabled, vscode.ConfigurationTarget.Global);
+      } finally {
+        await this.refreshBots();
+      }
+    });
+    this.botsWrite = write.catch(() => {});
+    return write;
+  }
+
+  private botsEnabled(): boolean {
+    return vscode.workspace.getConfiguration("agentFactory.mainChat").get<boolean>("botsEnabled", true);
+  }
+
+  public async refreshBots(): Promise<void> {
+    const enabled = this.botsEnabled();
+    await Promise.all([...this.panels.values()].map(managed => {
+      if (!enabled) {
+        managed.lunaBot?.dispose();
+        managed.lunaBot = undefined;
+      }
+      return this.post(managed.panel, { type: "bots.updated", enabled });
+    }));
+  }
+
   private statusItemsWrite: Promise<void> = Promise.resolve();
   private pendingStatusWrites = 0;
 
@@ -1449,13 +1581,19 @@ Inspect this exact child result and the existing workflow from conversation cont
   }
 
   private async post(panel: vscode.WebviewPanel, message: HostMessage): Promise<void> {
+    if (this.disposedPanels.has(panel)) return;
     const text = (message.type === "host.notice" || message.type === "run.progress")
       ? describeLocalizedMessage(message.text) : message.type === "chat.assistant" ? message.localization?.text : undefined;
     const error = message.type === "goal.updated" && message.error ? describeLocalizedMessage(message.error) : undefined;
     const localized: import("../../protocol/messages").LocalizedHostMessage = text || error
       ? { ...message, localization: { ...(text ? { text } : {}), ...(error ? { error } : {}) } }
       : message;
-    await panel.webview.postMessage(localized);
+    try {
+      await panel.webview.postMessage(localized);
+    } catch (error) {
+      // A pending send may reject after the panel disposal callback has run.
+      if (!this.disposedPanels.has(panel)) throw error;
+    }
   }
 
   private findActivePanel(): ManagedPanel | undefined {

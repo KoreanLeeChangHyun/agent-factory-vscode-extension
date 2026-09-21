@@ -51,6 +51,14 @@ test("conversation history restores ordered durable messages and honors reset bo
   assert.deepEqual((await client.history("main-history")).messages.map(item => item.text), [
     "question run-001", "answer run-001", "question run-002", "answer run-002"
   ]);
+  const firstPage = await client.history("main-history", { limit: 2 });
+  assert.equal(firstPage.nextBefore, "run-002");
+  assert.deepEqual(firstPage.messages.map(item => item.runId), ["run-002", "run-002"]);
+  const older = await client.history("main-history", { limit: 2, before: firstPage.nextBefore });
+  assert.equal(older.nextBefore, undefined);
+  assert.deepEqual(older.messages.map(item => item.runId), ["run-001", "run-001"]);
+  await assert.rejects(client.history("main-history", { limit: 0 }));
+  await assert.rejects(client.history("main-history", { limit: 10, before: "../escape" }));
   await writeFile(sessionPath, JSON.stringify({ agentId: "main-history", conversationId: "conversation-new" }));
   assert.deepEqual((await client.history("main-history")).messages, []);
   await run("run-004", { conversationId: "conversation-new" });
@@ -329,11 +337,12 @@ test("chat panel restoration preserves composer settings and context usage", asy
 test("webview persistence carries weekly usage through chat state restoration", async function () {
   const script = await readFile(new URL("../../static/js/chat.js", import.meta.url), "utf8");
   const persist = script.slice(
-    script.indexOf("  function persist()"),
+    script.indexOf("  function persist("),
     script.indexOf("  function safeCount(value)")
   );
   let serialized;
-  runInNewContext(persist + "\npersist();", {
+  runInNewContext("let persistenceScheduled = false; let persistenceTimer;\n" + persist + "\npersist(false); persist(false);", {
+    setTimeout,
     currentTaskFlows: () => [],
     state: {
       panelId: "panel-one",
@@ -361,6 +370,7 @@ test("webview persistence carries weekly usage through chat state restoration", 
     }
   });
 
+  await new Promise(resolve => setTimeout(resolve, 70));
   assert.equal(serialized.weeklyUsedPercent, 12.5);
   const { restoreChatState } = await importTypeScript("src/modules/chat/chat-state.ts");
   assert.equal(restoreChatState(serialized).weeklyUsedPercent, 12.5);
@@ -632,6 +642,18 @@ test("runtime client invokes official commands and reads the bounded managed res
   assert.deepEqual(commentaryUpdates.filter((update) => update.kind === "commentary"), [{ kind: "commentary", text: commentary }]);
   assert.equal(commentaryUpdates[1].text, "Working");
 
+  await writeFile(eventsPath, [
+    { type: "item.started", item: { id: "compact-1", type: "contextCompaction" } },
+    { type: "item.completed", item: { id: "compact-1", type: "contextCompaction" } }
+  ].map(JSON.stringify).join("\n") + "\n");
+  const compactionUpdates = (await client.updates("main-test", "run-fake", 0)).updates;
+  assert.deepEqual(compactionUpdates.filter(update => update.kind !== "usage"), [
+    { kind: "activity", id: "compact-1", category: "tool", phase: "started", text: "Compacting context", title: "Context compaction" },
+    { kind: "status", text: "Compacting context" },
+    { kind: "activity", id: "compact-1", category: "tool", phase: "completed", text: "Context compaction completed", title: "Context compaction" },
+    { kind: "status", text: "Context compaction completed" }
+  ]);
+
   assert.deepEqual(await client.result("main-test", "run-fake"), {
     status: "completed",
     text: "Main result text\n"
@@ -661,7 +683,8 @@ test("runtime client invokes official commands and reads the bounded managed res
 
   const invocations = (await readFile(join(projectRoot, "fake-invocations.jsonl"), "utf8"))
     .trim().split("\n").map(JSON.parse);
-  assert.deepEqual(invocations.map((arguments_) => arguments_[0]), ["list", "submit", "status", "result", "cancel", "list"]);
+  assert.deepEqual(invocations.map((arguments_) => arguments_[0]), ["list", "submit", "status", "result", "cancel"],
+    "Session and child lookups share the equivalent project list snapshot");
   assert.ok(invocations[1].includes("--role"));
   assert.ok(invocations[1].includes("main"));
   assert.ok(invocations[1].includes("gpt-5.6-sol"));
@@ -997,35 +1020,6 @@ test("Goal controls use the bound session and report backend errors", async () =
   assert.deepEqual(calls, [["main-exact", "get"], ["main-exact", "reopen"]]);
   assert.deepEqual(observed, [goal]);
   assert.deepEqual(errors, ["native goal unavailable"]);
-});
-
-test("Goal UI shows native completion separately and keeps reopen unavailable during execution", async () => {
-  const script = await readFile(new URL("../../static/js/chat.js", import.meta.url), "utf8");
-  const render = script.slice(script.indexOf("  function renderGoal()"), script.indexOf("  function openSetting(setting)"));
-  const buttons = ["refresh", "pause", "reopen", "cancel", "disable"].map(action => ({ dataset: { goalAction: action } }));
-  const context = {
-    state: { role: "main", agentId: "main-exact", goalMode: true, running: true },
-    goalPanel: { querySelectorAll() { return buttons; } }, goalStatus: {}, goalError: undefined,
-    nativeGoal: { objective: "finish", status: "active", tokensUsed: 20, timeUsedSeconds: 3 }
-  };
-  runInNewContext(render + "\nrenderGoal();", context);
-  assert.match(context.goalStatus.textContent, /In progress/);
-  assert.equal(buttons[2].disabled, true);
-  context.nativeGoal.status = "complete";
-  context.state.running = false;
-  runInNewContext("renderGoal();", context);
-  assert.match(context.goalStatus.textContent, /Goal completed/);
-  assert.equal(buttons[2].disabled, false);
-  context.nativeGoal = null;
-  runInNewContext("renderGoal();", context);
-  assert.equal(context.goalPanel.hidden, true);
-  context.goalError = "Unable to fetch Goal status";
-  runInNewContext("renderGoal();", context);
-  assert.equal(context.goalPanel.hidden, false);
-  assert.equal(context.goalStatus.textContent, context.goalError);
-  context.state.role = "work";
-  runInNewContext("renderGoal();", context);
-  assert.equal(context.goalPanel.hidden, true);
 });
 
 test("authoritative terminal failures cannot be hidden by nonempty completion text", async () => {
@@ -1417,6 +1411,29 @@ test("current run child lookup excludes agents called by earlier turns", async t
   await assert.rejects(client.listChildSessions("main-parent", "../run-old"));
 });
 
+test("child discovery retries an event log appended between read and metadata validation", async t => {
+  const { AgentFactoryClient } = await importTypeScript("src/infrastructure/agent-factory/agent-client.ts");
+  const root = await mkdtemp(join(tmpdir(), "af-child-append-race-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const events = join(agentsRoot(root), "main-parent/runs/run-current/events.jsonl");
+  const childState = join(agentsRoot(root), "work-hidden/runs/run-child/state.json");
+  await mkdir(dirname(events), { recursive: true });
+  await mkdir(dirname(childState), { recursive: true });
+  await writeFile(events, "");
+  await writeFile(childState, JSON.stringify({ status: "completed", parentAgentId: "main-parent", parentRunId: "run-current" }));
+  const appended = JSON.stringify({ type: "item.completed", item: { type: "command_execution",
+    command: "python3 loop.py start --work-agent work-hidden" } }) + "\n";
+  let appendOnce = true;
+  const client = new AgentFactoryClient(new URL("../fixtures/fake-exec.py", import.meta.url).pathname, root,
+    undefined, undefined, undefined, Date.now, undefined, async path => {
+      if (appendOnce && path === events) { appendOnce = false; await appendFile(events, appended); }
+    });
+  assert.equal((await client.listChildSessions("main-parent", "run-current")).length, 1,
+    "The retry must include a child appended after the first EOF");
+  assert.equal((await client.listChildSessions("main-parent", "run-current")).length, 1,
+    "The stable retry result may be cached without hiding the appended child");
+});
+
 test("child progress counts queued work and excludes completed verification", async () => {
   const script = await readFile(new URL("../../static/js/chat.js", import.meta.url), "utf8");
   const source = script.slice(script.indexOf("  function summarizeChildAgents("), script.indexOf("  function childAgentStatusLabel("));
@@ -1640,7 +1657,7 @@ test("cancellation summaries are shown once on restore and live delivery without
   Object.assign(context, {
     state: { timeline: [{ ...notice, text: summary + "\nprovider: diagnostic" }] },
     message: { ...final, type: "chat.assistant" },
-    createId: () => "new", renderTimeline() {}, renderRunStatus() {}, renderWorkLoopPanel() {},
+    createId: () => "new", renderTimeline() {}, scheduleTimelineRender() {}, renderRunStatus() {}, renderWorkLoopPanel() {},
     extractTaskFlows: () => ({ flows: [] }), persist() {}
   });
   runInNewContext('switch (message.type) {\n' + handler + '\n}', context);
@@ -1695,12 +1712,23 @@ test('workflow monitor reconciles only owned loops with the captured parent bind
     const policy = { schemaVersion: 1, sandboxPolicy: { type: 'workspace-write', writable_roots: [root] }, approvalPolicy: 'never' };
     await writeFile(parent, JSON.stringify({ executionPolicy: policy }));
     const loopRoot = join(directory, 'work-one', 'loops', 'loop-one');
+    const operations = join(root, 'loop-operations.txt');
     await mkdir(loopRoot, { recursive: true });
     await writeFile(join(loopRoot, 'state.json'), JSON.stringify({ workflow: { id: 'flow' }, status: 'active', parentStatePath: parent }));
-    await writeFile(join(root, 'loop.py'), `import json, os, sys\nprint(json.dumps({'kind':'work-verification-loop','loopId':'loop-one','status':'active','parent':os.environ.get('AGENT_FACTORY_PARENT_STATE'),'policy':json.loads(os.environ['AGENT_FACTORY_EXECUTION_POLICY']),'operation':sys.argv[1]}))\n`);
+    await writeFile(join(root, 'loop.py'), `import json, os, pathlib, sys\npathlib.Path(${JSON.stringify(operations)}).open('a').write(sys.argv[1] + '\\n')\nprint(json.dumps({'kind':'work-verification-loop','loopId':'loop-one','status':'active','parent':os.environ.get('AGENT_FACTORY_PARENT_STATE'),'policy':json.loads(os.environ['AGENT_FACTORY_EXECUTION_POLICY']),'operation':sys.argv[1]}))\n`);
     const client = new AgentFactoryClient(join(root, 'exec.py'), root);
     client.location = async () => ({ home: runtimeTestHome, projectId: 'project-test', agentsRoot: directory });
     const children = [{ agentId: 'work-one', role: 'work', status: 'running', runId: 'run-one' }];
+    await client.advanceWorkflows('main-owner', children, false);
+    await client.advanceWorkflows('main-owner', children, false);
+    assert.deepEqual((await readFile(operations, 'utf8')).trim().split('\n'), ['status']);
+    [...client.workflowSnapshots.values()][0].observedAt -= 1001;
+    await client.advanceWorkflows('main-owner', children, false);
+    assert.deepEqual((await readFile(operations, 'utf8')).trim().split('\n'), ['status', 'status']);
+    await writeFile(parent, JSON.stringify({ executionPolicy: policy, changed: true }));
+    await client.advanceWorkflows('main-owner', children, false);
+    assert.deepEqual((await readFile(operations, 'utf8')).trim().split('\n'), ['status', 'status', 'status']);
+    await writeFile(operations, '');
     const snapshots = await client.advanceWorkflows('main-owner', children);
     assert.equal(snapshots.length, 1);
     assert.equal(snapshots[0].parent, parent);
@@ -1711,9 +1739,360 @@ test('workflow monitor reconciles only owned loops with the captured parent bind
     const completed = (await client.advanceWorkflows('main-owner', children))[0];
     assert.equal(completed.operation, 'status');
     assert.deepEqual(completed.policy, policy);
+    assert.equal((await client.advanceWorkflows('main-owner', children))[0].operation, 'status');
+    assert.deepEqual((await readFile(operations, 'utf8')).trim().split('\n'), ['reconcile', 'status'],
+      'An unchanged completed loop must reuse its observed snapshot without another command');
+    await assert.rejects(client.closeWorkflow('main-other', 'work-one', 'loop-one'), /does not belong/);
+    assert.deepEqual((await readFile(operations, 'utf8')).trim().split('\n'), ['reconcile', 'status']);
+    const closed = await client.closeWorkflow('main-owner', 'work-one', 'loop-one');
+    assert.equal(closed.operation, 'close');
+    assert.equal(closed.parent, parent);
+    assert.deepEqual(closed.policy, policy);
     await writeFile(parent, '{}');
     await assert.rejects(client.advanceWorkflows('main-owner', children), /workflow parent execution policy/);
     await writeFile(parent, JSON.stringify({ executionPolicy: [] }));
     await assert.rejects(client.advanceWorkflows('main-owner', children), /workflow parent execution policy/);
   } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+test('workflow monitor preserves six task bindings across same-worker runs and reconnects', async t => {
+  const { AgentFactoryClient } = await importTypeScript('src/infrastructure/agent-factory/agent-client.ts');
+  const root = await mkdtemp(join(tmpdir(), 'af-six-task-monitor-'));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const directory = agentsRoot(root);
+  const parent = join(directory, 'main-six', 'runs', 'run-parent', 'state.json');
+  await mkdir(dirname(parent), { recursive: true });
+  await writeFile(parent, JSON.stringify({ executionPolicy: { schemaVersion: 1,
+    sandboxPolicy: { type: 'danger-full-access', network_access: true }, approvalPolicy: 'never' } }));
+  const path = join(directory, 'shared-worker', 'loops', 'loop-six', 'state.json');
+  await mkdir(dirname(path), { recursive: true });
+  const tasks = Array.from({ length: 6 }, (_, index) => ({ id: `task-${index + 1}`, title: `Task ${index + 1}`,
+    description: `Request ${index + 1}`, completionCriteria: `Criterion ${index + 1}`, workAgentId: 'shared-worker',
+    workStatus: index === 0 ? 'completed' : index === 1 ? 'running' : 'pending',
+    ...(index < 2 ? { workRunId: `run-${index + 1}` } : {}) }));
+  const state = { kind: 'work-verification-loop', loopId: 'loop-six', status: 'active', taskMode: 'work',
+    workAgentId: 'shared-worker', parentStatePath: parent, workflow: { id: 'six', title: 'Six tasks', index: 1, tasks } };
+  await writeFile(path, JSON.stringify(state));
+  // The fake command returns the exact persisted runtime snapshot and records its operation.
+  await writeFile(join(root, 'loop.py'), `import json, pathlib, sys
+state = json.loads(pathlib.Path(${JSON.stringify(path)}).read_text())
+state['operation'] = sys.argv[1]
+print(json.dumps(state))
+`);
+  const connect = () => {
+    const client = new AgentFactoryClient(join(root, 'exec.py'), root);
+    client.location = async () => ({ home: runtimeTestHome, projectId: 'project-test', agentsRoot: directory });
+    return client;
+  };
+  const children = [1, 2].map(index => ({ agentId: 'shared-worker', role: 'work', runId: `run-${index}`,
+    status: index === 1 ? 'completed' : 'running' }));
+  const first = await connect().advanceWorkflows('main-six', children);
+  assert.equal(first.length, 1, 'Same worker referenced by two runs must not duplicate its loop');
+  assert.deepEqual(first[0].workflow.tasks, tasks);
+  assert.equal(first[0].operation, 'reconcile');
+  assert.deepEqual(await connect().advanceWorkflows('other-main', children), []);
+  state.status = 'runtime-error';
+  tasks[1].workStatus = 'failed';
+  await writeFile(path, JSON.stringify(state));
+  const restored = await connect().advanceWorkflows('main-six', children);
+  assert.equal(restored[0].operation, 'status', 'Reconnect must not redispatch a stopped loop');
+  assert.deepEqual(restored[0].workflow.tasks.map(task => task.workStatus), ['completed', 'failed', 'pending', 'pending', 'pending', 'pending']);
+  assert.deepEqual(restored[0].workflow.tasks.map(task => task.workRunId), ['run-1', 'run-2', undefined, undefined, undefined, undefined]);
+  assert.equal(await readFile(path, 'utf8'), JSON.stringify(state), 'Host must not rewrite runtime state');
+});
+
+test("runtime launch forwards a custom CLI filename and preserves existing session selection", async (t) => {
+  const output = await build({
+    stdin: {
+      contents: 'export { AgentFactoryClient } from "./src/infrastructure/agent-factory/agent-client"; export { configureCodexCli } from "./src/infrastructure/agent-factory/process-environment";',
+      resolveDir: new URL("../../", import.meta.url).pathname,
+      loader: "ts"
+    },
+    bundle: true, format: "esm", platform: "node", target: "node18", write: false
+  });
+  const { AgentFactoryClient, configureCodexCli } = await import(`data:text/javascript;base64,${Buffer.from(output.outputFiles[0].text).toString("base64")}`);
+  const root = await mkdtemp(join(tmpdir(), "af-custom-cli-"));
+  t.after(() => { configureCodexCli(undefined); return rm(root, { recursive: true, force: true }); });
+  const script = join(root, "exec.py");
+  await writeFile(script, 'import json, os, sys\nprint(json.dumps({"args": sys.argv[1:], "path": os.environ["PATH"]}))\n');
+  const executable = join(root, "custom-codex");
+  configureCodexCli({ executable, source: "configured", binDirectory: root });
+  const client = new AgentFactoryClient(script, root);
+  for (const command of ["submit", "capabilities"]) {
+    const result = await client.runRuntimeProcess([command], 5000, 65536);
+    assert.equal(result.exitCode, 0);
+    const received = JSON.parse(result.stdout);
+    assert.deepEqual(received.args, [command, "--codex", executable]);
+    assert.equal(received.path.split(":")[0], root);
+  }
+  const sent = await client.runRuntimeProcess(["send"], 5000, 65536);
+  assert.deepEqual(JSON.parse(sent.stdout).args, ["send"]);
+});
+
+
+test("incremental logs retain split UTF-8 tails and use bounded per-run buffers", async (t) => {
+  const { AgentFactoryClient } = await importTypeScript("src/infrastructure/agent-factory/agent-client.ts");
+  const root = await mkdtemp(join(tmpdir(), "af-incremental-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const client = new AgentFactoryClient(new URL("../fixtures/fake-exec.py", import.meta.url).pathname, root);
+  const path = join(agentsRoot(root), "main-test/runs/run-log/events.jsonl");
+  await mkdir(dirname(path), { recursive: true });
+  const first = JSON.stringify({ type: "turn.started" }) + "\n";
+  await writeFile(path, first.repeat(2000));
+  const initial = await client.updates("main-test", "run-log", 0);
+  const next = Buffer.from(JSON.stringify({ type: "native.commentary", text: "한글 완료" }) + "\n");
+  const split = next.indexOf(Buffer.from("한")) + 1;
+  await appendFile(path, next.subarray(0, split));
+  const allocations = [];
+  const allocate = Buffer.alloc;
+  Buffer.alloc = function (size, ...rest) { allocations.push(size); return allocate(size, ...rest); };
+  try {
+    assert.equal((await client.updates("main-test", "run-log", initial.cursor)).cursor, initial.cursor);
+    await appendFile(path, next.subarray(split));
+    const result = await client.updates("main-test", "run-log", initial.cursor);
+    assert.equal(result.cursor, 2001);
+    assert.ok(result.updates.some(update => update.text === "한글 완료"));
+  } finally { Buffer.alloc = allocate; }
+  assert.ok(Math.max(...allocations) < 4096, "append must not allocate or reread the full log");
+  for (let i = 0; i < 18; i++) {
+    const other = join(agentsRoot(root), `main-test/runs/run-${i}/events.jsonl`);
+    await mkdir(dirname(other), { recursive: true });
+    await writeFile(other, first);
+    await client.updates("main-test", `run-${i}`, 0);
+  }
+  assert.equal(client.eventSnapshots.size, 16);
+  await writeFile(path, first);
+  assert.equal((await client.updates("main-test", "run-log", 0)).cursor, 1);
+});
+
+
+test("cached run discovery observes new runs and changed state", async (t) => {
+  const { AgentFactoryClient } = await importTypeScript("src/infrastructure/agent-factory/agent-client.ts");
+  const root = await mkdtemp(join(tmpdir(), "af-run-cache-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const client = new AgentFactoryClient(new URL("../fixtures/fake-exec.py", import.meta.url).pathname, root);
+  const runs = join(agentsRoot(root), "main-test/runs");
+  await mkdir(join(runs, "run-a"), { recursive: true });
+  await writeFile(join(runs, "run-a/state.json"), JSON.stringify({ status: "running" }));
+  assert.equal((await client.latestRunInfo("main-test")).runId, "run-a");
+  assert.equal((await client.latestRunInfo("main-test")).status, "running");
+  await writeFile(join(runs, "run-a/state.json"), JSON.stringify({ status: "completed" }));
+  assert.equal((await client.latestRunInfo("main-test")).status, "completed");
+  await mkdir(join(runs, "run-z"));
+  await writeFile(join(runs, "run-z/state.json"), JSON.stringify({ status: "accepted" }));
+  assert.equal((await client.latestRunInfo("main-test")).runId, "run-z");
+  assert.equal((await client.latestRunInfo("main-test", "run-a")).status, "completed");
+  await rm(join(runs, "run-z"), { recursive: true });
+  assert.equal((await client.latestRunInfo("main-test")).runId, "run-a");
+});
+
+ test("workflow close protocol requires bounded identities", async () => {
+  const { parseClientMessage } = await importTypeScript("src/protocol/validator.ts");
+  const request = { type: "workflow.close", workAgentId: "worker", loopId: "loop-one" };
+  assert.deepEqual(parseClientMessage(request), request);
+  assert.equal(parseClientMessage({ ...request, loopId: "../other" }), undefined);
+  assert.equal(parseClientMessage({ ...request, workAgentId: undefined }), undefined);
+});
+
+test("status snapshots avoid process starts until file changes or liveness expires", async t => {
+  const { AgentFactoryClient } = await importTypeScript("src/infrastructure/agent-factory/agent-client.ts");
+  const root = await mkdtemp(join(tmpdir(), "af-status-cache-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const path = join(agentsRoot(root), "main-status", "runs", "run-one", "state.json");
+  await mkdir(dirname(path), { recursive: true });
+  await writeFile(path, JSON.stringify({ status: "running" }));
+  const client = new AgentFactoryClient("/unused/exec.py", root);
+  client.location = async () => ({ agentsRoot: agentsRoot(root) });
+  let calls = 0;
+  client.command = async () => { calls++; return { run: JSON.parse(await readFile(path, "utf8")) }; };
+  assert.equal((await client.status("main-status", "run-one")).status, "running");
+  await client.status("main-status", "run-one");
+  assert.equal(calls, 1);
+  await writeFile(path, JSON.stringify({ status: "completed" }));
+  assert.equal((await client.status("main-status", "run-one")).status, "completed");
+  assert.equal(calls, 2);
+  const snapshot = [...client.statusSnapshots.values()][0]; snapshot.observedAt -= 1001;
+  await client.status("main-status", "run-one");
+  assert.equal(calls, 3);
+});
+
+test("structured child references work without parent logs or a project-wide list", async t => {
+  const { AgentFactoryClient } = await importTypeScript("src/infrastructure/agent-factory/agent-client.ts");
+  const root = await mkdtemp(join(tmpdir(), "af-child-index-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const directory = agentsRoot(root);
+  const parent = join(directory, "main-index", "runs", "run-parent");
+  const child = join(directory, "work-index", "runs", "run-child");
+  await mkdir(join(parent, "children"), { recursive: true });
+  await mkdir(child, { recursive: true });
+  await writeFile(join(parent, "state.json"), JSON.stringify({ taskMode: "work" }));
+  await writeFile(join(parent, "children/work-index.json"), JSON.stringify({ parentAgentId: "main-index", parentRunId: "run-parent", agentId: "work-index", runId: "run-child" }));
+  await writeFile(join(directory, "work-index/session.json"), JSON.stringify({ agentId: "work-index", role: "work" }));
+  await writeFile(join(child, "state.json"), JSON.stringify({ agentId: "work-index", runId: "run-child", status: "completed", parentAgentId: "main-index", parentRunId: "run-parent" }));
+  const client = new AgentFactoryClient("/unused", root);
+  client.location = async () => ({ agentsRoot: directory });
+  client.listAgentsDocument = async () => { throw new Error("Unexpected global scan"); };
+  const children = await client.listChildSessions("main-index");
+  assert.equal(children.length, 1);
+  assert.equal(children[0].runId, "run-child");
+  assert.equal(children[0].taskMode, "work");
+});
+
+
+test("cached legacy directory discovers a new child index and rejects later symlink replacement", async t => {
+  const { AgentFactoryClient } = await importTypeScript("src/infrastructure/agent-factory/agent-client.ts");
+  const root = await mkdtemp(join(tmpdir(), "af-index-refresh-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const directory = agentsRoot(root), parent = join(directory, "main-index", "runs", "run-parent");
+  await mkdir(parent, { recursive: true });
+  const client = new AgentFactoryClient("/unused", root);
+  client.location = async () => ({ agentsRoot: directory });
+  assert.equal((await client.discoverChildAgents("main-index")).size, 0);
+  await mkdir(join(parent, "children"));
+  await writeFile(join(parent, "children/work-one.json"), JSON.stringify({ parentAgentId: "main-index", parentRunId: "run-parent", agentId: "work-one", runId: "run-child" }));
+  assert.equal((await client.discoverChildAgents("main-index")).get("work-one").runId, "run-child");
+  assert.equal((await client.discoverChildAgents("main-index", "run-missing")).size, 0);
+  await rm(join(parent, "children"), { recursive: true });
+  const outside = join(root, "outside"); await mkdir(outside);
+  await symlink(outside, join(parent, "children"), "dir");
+  await assert.rejects(client.discoverChildAgents("main-index"), /[Uu]nsafe/);
+});
+
+
+test("workflow discovery invalidates missing loops on creation, deletion and symlink replacement", async t => {
+  const { AgentFactoryClient } = await importTypeScript("src/infrastructure/agent-factory/agent-client.ts");
+  const root = await mkdtemp(join(tmpdir(), "af-loop-discovery-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const directory = agentsRoot(root), agent = join(directory, "work-one");
+  const parent = join(directory, "main-owner", "runs", "run-parent", "state.json");
+  await mkdir(agent, { recursive: true }); await mkdir(dirname(parent), { recursive: true });
+  await writeFile(parent, JSON.stringify({ executionPolicy: { schemaVersion: 1 } }));
+  await writeFile(join(root, "loop.py"), "import json\nprint(json.dumps({'kind':'work-verification-loop','loopId':'loop-one','status':'completed'}))\n");
+  const client = new AgentFactoryClient(join(root, "exec.py"), root);
+  client.location = async () => ({ home: runtimeTestHome, projectId: "project-test", agentsRoot: directory });
+  const children = [{ agentId: "work-one", role: "work" }];
+  const refresh = () => client.refreshWorkflows("main-owner", children, false);
+  assert.deepEqual(await refresh(), []);
+  assert.deepEqual(await refresh(), []);
+  const loop = join(agent, "loops", "loop-one");
+  await mkdir(loop, { recursive: true });
+  await writeFile(join(loop, "state.json"), JSON.stringify({ workflow: { id: "one" }, status: "completed", parentStatePath: parent }));
+  assert.equal((await refresh())[0].loopId, "loop-one");
+  await rm(join(agent, "loops"), { recursive: true });
+  assert.deepEqual(await refresh(), []);
+  await mkdir(loop, { recursive: true });
+  await writeFile(join(loop, "state.json"), JSON.stringify({ workflow: { id: "one" }, status: "completed", parentStatePath: parent }));
+  assert.equal((await refresh()).length, 1);
+  await rm(join(agent, "loops"), { recursive: true });
+  const outside = join(root, "outside"); await mkdir(outside);
+  await symlink(outside, join(agent, "loops"), "dir");
+  await assert.rejects(refresh(), /[Uu]nsafe/);
+});
+
+test("missing legacy event logs are rediscovered on creation and reject symlink replacement", async t => {
+  const { AgentFactoryClient } = await importTypeScript("src/infrastructure/agent-factory/agent-client.ts");
+  const root = await mkdtemp(join(tmpdir(), "af-event-discovery-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const directory = agentsRoot(root), parent = join(directory, "main-index", "runs", "run-parent");
+  await mkdir(parent, { recursive: true });
+  const client = new AgentFactoryClient("/unused", root);
+  client.location = async () => ({ agentsRoot: directory });
+  assert.equal((await client.discoverChildAgents("main-index")).size, 0);
+  const log = join(parent, "events.jsonl");
+  await writeFile(log, '{}\n');
+  await client.discoverChildAgents("main-index");
+  assert.ok(client.childEventSnapshots.has(log), "new log must be read despite cached missing state");
+  await rm(log);
+  await client.discoverChildAgents("main-index");
+  await symlink(join(root, "outside"), log);
+  await assert.rejects(client.discoverChildAgents("main-index"), /[Uu]nsafe/);
+});
+
+test('observed relationship cache rereads only changed runs and survives watcher loss', async t => {
+  const { AgentFactoryClient } = await importTypeScript('src/infrastructure/agent-factory/agent-client.ts');
+  const root = await mkdtemp(join(tmpdir(), 'af-observed-relations-'));
+  const directory = agentsRoot(root), client = new AgentFactoryClient('/unused', root);
+  client.location = async () => ({ agentsRoot: directory });
+  t.after(async () => { client.observedChildRuns.dispose(); await rm(root, { recursive: true, force: true }); });
+  const files = [];
+  for (let i = 0; i < 3; i++) {
+    const path = join(directory, 'main-one', 'runs', 'run-' + i, 'children', 'child.json');
+    await mkdir(dirname(path), { recursive: true });
+    await writeFile(path, JSON.stringify({ parentAgentId: 'main-one', parentRunId: 'run-' + i, agentId: 'work-' + i, runId: 'child-before' }));
+    files.push(path);
+  }
+  assert.equal((await client.discoverChildAgents('main-one')).size, 3);
+  const original = client.cachedRunState.bind(client); let reads = [];
+  client.cachedRunState = async path => { reads.push(path); return original(path); };
+  await client.discoverChildAgents('main-one'); assert.equal(reads.length, 0);
+  await writeFile(files[1], JSON.stringify({ parentAgentId: 'main-one', parentRunId: 'run-1', agentId: 'work-1', runId: 'child-after' }));
+  const deadline = Date.now() + 2000;
+  let result;
+  do { result = await client.discoverChildAgents('main-one'); if (result.get('work-1')?.runId === 'child-after') break; await new Promise(r => setTimeout(r, 5)); } while (Date.now() < deadline);
+  assert.equal(result.get('work-1').runId, 'child-after');
+  assert.deepEqual([...new Set(reads)], [files[1]]);
+  client.observedChildRuns.dispose(); reads = [];
+  assert.equal((await client.discoverChildAgents('main-one')).size, 3);
+  assert.equal(reads.length, 3, 'lost watchers must fall back to fresh inspection');
+});
+
+test('child run status stays fresh and rejects invalid state files through the shared reader', async t => {
+  const { AgentFactoryClient } = await importTypeScript('src/infrastructure/agent-factory/agent-client.ts');
+  const root = await mkdtemp(join(tmpdir(), 'af-child-state-'));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const directory = agentsRoot(root), run = join(directory, 'work-one', 'runs', 'run-one');
+  await mkdir(run, { recursive: true });
+  const path = join(run, 'state.json');
+  const client = new AgentFactoryClient('/unused', root);
+  client.location = async () => ({ agentsRoot: directory });
+  const read = () => client.latestRunInfo('work-one', 'run-one');
+  await writeFile(path, JSON.stringify({ status: 'running' }));
+  assert.equal((await read()).status, 'running');
+  await writeFile(path, JSON.stringify({ status: 'completed' }));
+  assert.equal((await read()).status, 'completed');
+  await writeFile(path, JSON.stringify({ status: 'completed', padding: 'x'.repeat(256 * 1024) }));
+  assert.equal((await read()).status, 'unknown');
+  await writeFile(path, '{broken');
+  assert.equal((await read()).status, 'unknown');
+  await rm(path);
+  await mkdir(path);
+  assert.equal((await read()).status, 'unknown');
+  await rm(path, { recursive: true });
+  await writeFile(join(root, 'outside.json'), JSON.stringify({ status: 'completed' }));
+  await symlink(join(root, 'outside.json'), path);
+  await assert.rejects(read(), /[Uu]nsafe/);
+});
+
+test('state snapshots bound both record count and source bytes across replacement and eviction', async t => {
+  const { AgentFactoryClient } = await importTypeScript('src/infrastructure/agent-factory/agent-client.ts');
+  const root = await mkdtemp(join(tmpdir(), 'af-state-budget-'));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const client = new AgentFactoryClient('/unused', root);
+  const verifyBudget = () => {
+    assert.ok(client.runStateSnapshots.size <= 2048);
+    assert.ok(client.runStateSnapshotBytes <= 8 * 1024 * 1024);
+    assert.equal(client.runStateSnapshotBytes, [...client.runStateSnapshots.values()].reduce((sum, entry) => sum + entry.bytes, 0));
+  };
+  for (let i = 0; i < 2050; i++) {
+    const path = join(root, `state-${i}.json`);
+    await writeFile(path, JSON.stringify({ status: 'running', index: i }));
+    assert.equal((await client.cachedRunState(path)).index, i);
+  }
+  verifyBudget();
+  assert.equal(client.runStateSnapshots.size, 2048);
+  assert.equal(client.runStateSnapshots.has(join(root, 'state-0.json')), false);
+  for (let i = 0; i < 40; i++) {
+    const path = join(root, `large-${i}.json`);
+    await writeFile(path, JSON.stringify({ status: 'running', padding: '가'.repeat(80000) }));
+    await client.cachedRunState(path);
+    verifyBudget();
+  }
+  const path = join(root, 'large-39.json');
+  await writeFile(path, JSON.stringify({ status: 'completed' }));
+  assert.equal((await client.cachedRunState(path)).status, 'completed');
+  verifyBudget();
+  await writeFile(path, 'x'.repeat(256 * 1024 + 1));
+  assert.equal(await client.cachedRunState(path), undefined);
+  assert.equal(client.runStateSnapshots.has(path), false);
+  verifyBudget();
 });

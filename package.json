@@ -2,7 +2,7 @@
   "name": "agent-factory-main-chat",
   "displayName": "Agent Factory Main Chat",
   "description": "%extension.description%",
-  "version": "1.0.11",
+  "version": "1.0.12",
   "publisher": "agent-factory",
   "icon": "static/images/agent-factory.png",
   "license": "UNLICENSED",
@@ -237,6 +237,12 @@
           "default": "",
           "description": "%agentFactory.mainChat.pythonPath.description%"
         },
+        "agentFactory.mainChat.codexPath": {
+          "type": "string",
+          "scope": "machine-overridable",
+          "default": "",
+          "description": "%agentFactory.mainChat.codexPath.description%"
+        },
         "agentFactory.mainChat.runtimeExecPath": {
           "type": "string",
           "scope": "machine-overridable",
@@ -260,6 +266,12 @@
             "%agentFactory.mainChat.executionMode.enum.3%"
           ],
           "description": "%agentFactory.mainChat.executionMode.description%"
+        },
+        "agentFactory.mainChat.botsEnabled": {
+          "type": "boolean",
+          "default": true,
+          "scope": "application",
+          "description": "%agentFactory.mainChat.botsEnabled.description%"
         }
       }
     },

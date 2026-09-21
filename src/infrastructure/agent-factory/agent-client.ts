@@ -1,11 +1,12 @@
+import { ObservedRunCache } from "./observed-run-cache";
 import { localize } from "../../common/localization";
 import { submissionContext } from "./submission-context";
 import { historyPresentation } from "./history-presentation";
 import type { AgentPermissions } from "../../common/types/agent-permissions";
 import type { AgentModels } from "../../common/types/agent-models";
-import { constants as fsConstants } from "node:fs";
+import { constants as fsConstants, type Dirent } from "node:fs";
 import { spawn } from "node:child_process";
-import { runtimeEnvironment } from "./process-environment";
+import { codexExecutable, runtimeEnvironment } from "./process-environment";
 import { pluginRuntimeEnvironment } from "./development-plugin";
 import { lstat, mkdtemp, open as openFile, readFile, readdir, realpath, rm, writeFile } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
@@ -28,6 +29,8 @@ interface ContextUsage {
 interface ContextUsageSnapshot {
   readonly checkedAt: number;
   readonly rolloutPath?: string;
+  readonly signature?: string;
+  readonly nextLookupAt?: number;
   readonly usage?: ContextUsage;
 }
 
@@ -133,6 +136,7 @@ export interface MainAgentSession {
 
 export interface ConversationHistory {
   readonly conversationId?: string;
+  readonly nextBefore?: string;
   readonly messages: readonly {
     readonly type: "user" | "assistant";
     readonly id: string;
@@ -156,7 +160,7 @@ export interface ChildAgentSession {
 }
 
 export interface AgentRuntimeClient {
-  history?(agentId: string): Promise<ConversationHistory>;
+  history?(agentId: string, options?: { before?: string; limit: number }): Promise<ConversationHistory>;
   capabilities(agentId?: string): Promise<{ readonly submit: ExecutionCapabilities; readonly send: ExecutionCapabilities; readonly executionMode?: "read-only" | "workspace-write" | "danger-full-access" | "bypass" }>;
   submit(agentId: string, message: string, execution: ExecutionOptions, images?: readonly RuntimeImageInput[]): Promise<RunAcceptance>;
   send(agentId: string, message: string, execution: ExecutionOptions, images?: readonly RuntimeImageInput[]): Promise<RunAcceptance>;
@@ -169,19 +173,31 @@ export interface AgentRuntimeClient {
   resetConversation(agentId: string): Promise<{ readonly conversationId: string; readonly startedAt: string }>;
   listSessions(): Promise<readonly MainAgentSession[]>;
   listChildSessions(mainAgentId: string, runId?: string): Promise<readonly ChildAgentSession[]>;
-  advanceWorkflows?(mainAgentId: string, agents: readonly ChildAgentSession[]): Promise<readonly Record<string, unknown>[]>;
+  closeWorkflow?(mainAgentId: string, workAgentId: string, loopId: string): Promise<Record<string, unknown>>;
+  advanceWorkflows?(mainAgentId: string, agents: readonly ChildAgentSession[], drive?: boolean): Promise<readonly Record<string, unknown>[]>;
 }
 
 export class AgentFactoryClient implements AgentRuntimeClient {
   private readonly capabilityCache = new AsyncCache<Awaited<ReturnType<AgentRuntimeClient["capabilities"]>>>(30_000);
+  private readonly statusSnapshots = new Map<string, { signature: string; observedAt: number; value: RunStatus }>();
+  private readonly statusCache = new AsyncCache<RunStatus>(0, 64);
+  private readonly agentListCache = new AsyncCache<Record<string, unknown>>(1_000, 1);
+  private readonly childSessionCache = new AsyncCache<readonly ChildAgentSession[]>(0, 64);
+  private readonly workflowRefreshCache = new AsyncCache<readonly Record<string, unknown>[]>(0, 32);
   private readonly contextUsageSnapshots = new Map<string, ContextUsageSnapshot>();
+  private readonly observedChildRuns = new ObservedRunCache<ReadonlyMap<string, ChildAgentReference>>(() => this.now());
+  private readonly childEventSnapshots = new Map<string, { readonly signature: string; readonly references: readonly ChildAgentReference[] }>();
+  private readonly directorySnapshots = new Map<string, { signature: string; entries: Dirent[]; checkedAt: number }>();
+  private readonly runStateSnapshots = new Map<string, { signature: string; value: Record<string, unknown>; bytes: number }>();
+  private runStateSnapshotBytes = 0;
+  private readonly workflowSnapshots = new Map<string, { readonly signature: string; readonly observedAt: number; readonly state: Record<string, unknown>; readonly snapshot: Record<string, unknown> }>();
   private locationPromise?: Promise<{ home: string; projectId: string; agentsRoot: string }>;
 
   private async location(): Promise<{ home: string; projectId: string; agentsRoot: string }> {
     if (!this.locationPromise) {
       this.locationPromise = this.loadLocation().catch((error) => {
         this.locationPromise = undefined;
-        this.eventSnapshot = undefined;
+        this.eventSnapshots.clear();
         this.contextUsageSnapshots.clear();
         throw error;
       });
@@ -203,7 +219,7 @@ export class AgentFactoryClient implements AgentRuntimeClient {
     const expectedHome = resolve(process.env.AGENT_FACTORY_HOME ?? join(homedir(), ".agent-factory"));
     if (value.home !== expectedHome) throw new Error(localize("ui.agent.factory.storage.home.binding.does.not.match"));
     await checkManagedComponents(value.agentsRoot as string);
-    this.eventSnapshot = undefined;
+    this.eventSnapshots.clear();
     this.contextUsageSnapshots.clear();
     return { home: value.home, projectId: value.projectId, agentsRoot: value.agentsRoot as string };
   }
@@ -218,7 +234,7 @@ export class AgentFactoryClient implements AgentRuntimeClient {
     return path;
   }
 
-  private eventSnapshot?: { readonly path: string; readonly signature: string; readonly lines: readonly string[] };
+  private readonly eventSnapshots = new Map<string, { readonly signature: string; readonly lines: readonly string[]; readonly bytes: number; readonly offset: number; readonly identity: string }>();
 
   public async capabilities(agentId?: string): ReturnType<AgentRuntimeClient["capabilities"]> {
     return this.capabilityCache.get(JSON.stringify([this.execPath, agentId ?? ""]), () => this.readCapabilities(agentId));
@@ -268,7 +284,7 @@ export class AgentFactoryClient implements AgentRuntimeClient {
       throw new Error(localize("ui.the.agent.factory.runtime.returned.an.invalid.conversation.reset.response"));
     }
     this.contextUsageSnapshots.clear();
-    this.eventSnapshot = undefined;
+    this.eventSnapshots.clear();
     return { conversationId: document.conversationId, startedAt: document.startedAt };
   }
 
@@ -300,7 +316,8 @@ export class AgentFactoryClient implements AgentRuntimeClient {
     private readonly codexHome = process.env.CODEX_HOME ?? join(homedir(), ".codex"),
     private readonly rediscoverExecPath?: () => Promise<string>,
     private readonly now = Date.now,
-    private readonly developmentRoot?: string
+    private readonly developmentRoot?: string,
+    private readonly afterChildEventRead?: (path: string) => Promise<void>
   ) {}
 
   public async diagnose(): Promise<{ readonly available: true } | { readonly available: false; readonly diagnostic: string }> {
@@ -397,6 +414,20 @@ export class AgentFactoryClient implements AgentRuntimeClient {
   }
 
   public async status(agentId: string, runId: string): Promise<RunStatus> {
+    return this.statusCache.get(JSON.stringify([agentId, runId]), () => this.readStatus(agentId, runId));
+  }
+
+  private async readStatus(agentId: string, runId: string): Promise<RunStatus> {
+    const key = JSON.stringify([agentId, runId]);
+    const path = await this.managedPath(agentId, "runs", runId, "state.json");
+    const signatureOf = async () => {
+      try { const info = await lstat(path); return `${info.dev}:${info.ino}:${info.size}:${info.mtimeMs}:${info.ctimeMs}`; }
+      catch (error) { if (isMissingFile(error)) return undefined; throw error; }
+    };
+    const signature = await signatureOf();
+    const cached = this.statusSnapshots.get(key);
+    // Refresh active liveness at least once per second even without state writes.
+    if (signature && cached?.signature === signature && Date.now() - cached.observedAt < 1000) return cached.value;
     const document = await this.command([
       "status",
       "--project-root",
@@ -407,21 +438,27 @@ export class AgentFactoryClient implements AgentRuntimeClient {
       runId
     ]);
     const run = readRecord(document.run, "status run");
-    return { status: readRunStatus(document), ...runDiagnostics(run),
+    const value = { status: readRunStatus(document), ...runDiagnostics(run),
       ...(TASK_MODES.includes(run.taskMode as TaskMode) ? { taskMode: run.taskMode as TaskMode } : {}) };
+    if (signature && await signatureOf() === signature) {
+      this.statusSnapshots.delete(key);
+      this.statusSnapshots.set(key, { signature, observedAt: Date.now(), value });
+      while (this.statusSnapshots.size > 64) this.statusSnapshots.delete(this.statusSnapshots.keys().next().value!);
+    } else this.statusSnapshots.delete(key);
+    return value;
   }
 
   public async activeRun(agentId: string): Promise<RunAcceptance | undefined> {
     const path = await this.managedPath(agentId, "runs");
     let entries;
-    try { entries = await readdir(path, { withFileTypes: true }); }
+    try { entries = await this.managedDirectoryEntries(path); }
     catch (error) { if (isMissingFile(error)) return undefined; throw error; }
     const active = new Set(["accepted", "queued", "starting", "running", "cancelling"]);
     for (const entry of entries.filter(entry => entry.isDirectory() && MANAGED_ID.test(entry.name))
       .sort((a, b) => b.name.localeCompare(a.name))) {
       const statePath = await this.managedPath(agentId, "runs", entry.name, "state.json");
       let state: Record<string, unknown> | undefined;
-      try { state = readRecordOrUndefined(JSON.parse((await readManagedBytes(statePath, 256 * 1024)).toString("utf8"))); }
+      try { state = await this.cachedRunState(statePath); }
       catch (error) { if (isMissingFile(error)) continue; throw error; }
       if (state?.agentId === agentId && state.runId === entry.name && typeof state.status === "string" && active.has(state.status)) {
         return { agentId, runId: entry.name };
@@ -430,21 +467,26 @@ export class AgentFactoryClient implements AgentRuntimeClient {
     return undefined;
   }
 
-  public async history(agentId: string): Promise<ConversationHistory> {
+  public async history(agentId: string, options?: { before?: string; limit: number }): Promise<ConversationHistory> {
+    if (options && (!Number.isInteger(options.limit) || options.limit < 1 || options.limit > 100 ||
+        (options.before !== undefined && !MANAGED_ID.test(options.before)))) throw new Error("Invalid history page");
     const sessionPath = await this.managedPath(agentId, "session.json");
     const readSession = async () => readRecord(JSON.parse((await readManagedBytes(sessionPath, 256 * 1024)).toString("utf8")), "history session");
     const session = await readSession();
     if (session.agentId !== agentId) throw new Error("Invalid conversation history binding.");
     const conversationId = typeof session.conversationId === "string" ? session.conversationId : undefined;
     const runsPath = await this.managedPath(agentId, "runs");
-    const entries = await readdir(runsPath, { withFileTypes: true }).catch(error => {
+    const entries = await this.managedDirectoryEntries(runsPath).catch(error => {
       if (isMissingFile(error)) return [];
       throw error;
     });
     const messages: ConversationHistory["messages"][number][] = [];
     let bytes = 0;
-    for (const entry of entries.filter(entry => entry.isDirectory() && !entry.isSymbolicLink() && MANAGED_ID.test(entry.name))
-      .sort((a, b) => a.name.localeCompare(b.name))) {
+    const ordered = entries.filter(entry => entry.isDirectory() && !entry.isSymbolicLink() && MANAGED_ID.test(entry.name) &&
+      (!options?.before || entry.name < options.before)).sort((a, b) => a.name.localeCompare(b.name));
+    const page = options ? ordered.slice(-options.limit) : ordered;
+    const nextBefore = options && page.length < ordered.length ? page[0]?.name : undefined;
+    for (const entry of page) {
       const statePath = await this.managedPath(agentId, "runs", entry.name, "state.json");
       let state: Record<string, unknown>;
       try { state = readRecord(JSON.parse((await readManagedBytes(statePath, 256 * 1024)).toString("utf8")), "history run"); }
@@ -474,7 +516,7 @@ export class AgentFactoryClient implements AgentRuntimeClient {
     if (((await readSession()).conversationId ?? undefined) !== conversationId) {
       throw new Error("The conversation changed while history was loading. Reopen the conversation.");
     }
-    return { conversationId, messages };
+    return { conversationId, messages, ...(nextBefore ? { nextBefore } : {}) };
   }
 
   public async updates(agentId: string, runId: string, cursor: number): Promise<RunUpdates> {
@@ -489,20 +531,37 @@ export class AgentFactoryClient implements AgentRuntimeClient {
         throw new Error(localize("ui.the.agent.factory.event.file.is.missing.or.exceeds.the.size.limit"));
       }
       const signature = `${info.dev}:${info.ino}:${info.size}:${info.mtimeMs}:${info.ctimeMs}`;
-      if (this.eventSnapshot?.path === path && this.eventSnapshot.signature === signature) {
-        lines = this.eventSnapshot.lines;
+      const cached = this.eventSnapshots.get(path);
+      if (cached?.signature === signature) {
+        this.eventSnapshots.delete(path);
+        this.eventSnapshots.set(path, cached);
+        lines = cached.lines;
       } else {
-        const bytes = await readManagedBytes(path, MAX_EVENTS_BYTES);
-        if (bytes.length > MAX_EVENTS_BYTES) throw new Error(localize("ui.the.agent.factory.event.file.exceeds.the.size.limit"));
-        const content = bytes.toString("utf8");
-        const splitLines = content.split("\n");
-        if (!content.endsWith("\n")) splitLines.pop();
-        lines = splitLines.filter((line) => line.trim().length > 0);
-        this.eventSnapshot = { path, signature, lines };
+        // Runtime event logs are append-only. Re-read the unfinished byte tail so
+        // split UTF-8 characters are decoded only after their newline arrives.
+        const identity = `${info.dev}:${info.ino}`;
+        const incremental = cached && cursor > 0 && cursor >= cached.lines.length
+          && cached.identity === identity && info.size > cached.bytes;
+        const offset = incremental ? cached.offset : 0;
+        const bytes = await readManagedBytes(path, MAX_EVENTS_BYTES, offset, identity);
+        const end = bytes.lastIndexOf(10) + 1;
+        const parsed = bytes.subarray(0, end).toString("utf8").split("\n").filter(line => line.trim().length > 0);
+        lines = incremental ? [...cached.lines, ...parsed] : parsed;
+        // A changed read must never be cached under a newer file signature.
+        const after = await lstat(path);
+        const observed = `${after.dev}:${after.ino}:${after.size}:${after.mtimeMs}:${after.ctimeMs}`;
+        this.eventSnapshots.delete(path);
+        if (observed === signature) this.eventSnapshots.set(path, { signature, lines, bytes: info.size, offset: offset + end, identity });
+        let retained = [...this.eventSnapshots.values()].reduce((sum, item) => sum + item.bytes, 0);
+        while (this.eventSnapshots.size > 16 || retained > 16 * 1024 * 1024) {
+          const oldest = this.eventSnapshots.keys().next().value!;
+          retained -= this.eventSnapshots.get(oldest)!.bytes;
+          this.eventSnapshots.delete(oldest);
+        }
       }
     } catch (error) {
       if (isMissingFile(error)) {
-        this.eventSnapshot = undefined;
+        this.eventSnapshots.clear();
         return { cursor, updates: [] };
       }
       throw error;
@@ -529,14 +588,28 @@ export class AgentFactoryClient implements AgentRuntimeClient {
     if (!force && previous && checkedAt - previous.checkedAt < CONTEXT_USAGE_REFRESH_INTERVAL_MS) return undefined;
 
     let rolloutPath = previous?.rolloutPath;
-    if (!rolloutPath) rolloutPath = await this.findCurrentRolloutPath(agentId, runId);
-    const usage = rolloutPath ? await readLatestTokenCount(rolloutPath).catch(() => undefined) : undefined;
+    if (!rolloutPath && (force || checkedAt >= (previous?.nextLookupAt ?? 0))) {
+      rolloutPath = await this.findCurrentRolloutPath(agentId, runId);
+    }
+    let signature: string | undefined;
+    if (rolloutPath) {
+      try {
+        const info = await lstat(rolloutPath);
+        signature = `${info.dev}:${info.ino}:${info.size}:${info.mtimeMs}:${info.ctimeMs}`;
+      } catch { rolloutPath = undefined; }
+    }
+    const usage = rolloutPath && (force || signature !== previous?.signature)
+      ? await readLatestTokenCount(rolloutPath).catch(() => undefined) : undefined;
     const latestUsage = usage ?? previous?.usage;
     this.contextUsageSnapshots.set(key, {
       checkedAt,
+      nextLookupAt: rolloutPath ? 0 : (previous?.nextLookupAt && previous.nextLookupAt > checkedAt
+        ? previous.nextLookupAt : checkedAt + 10_000),
+      ...(signature ? { signature } : {}),
       ...(rolloutPath ? { rolloutPath } : {}),
       ...(latestUsage ? { usage: latestUsage } : {})
     });
+    while (this.contextUsageSnapshots.size > 128) this.contextUsageSnapshots.delete(this.contextUsageSnapshots.keys().next().value!);
     if (!usage || (previous?.usage?.usedTokens === usage.usedTokens &&
         previous.usage.contextWindowTokens === usage.contextWindowTokens &&
         previous.usage.weeklyUsedPercent === usage.weeklyUsedPercent)) return undefined;
@@ -630,7 +703,7 @@ export class AgentFactoryClient implements AgentRuntimeClient {
   }
 
   public async listSessions(): Promise<readonly MainAgentSession[]> {
-    const document = await this.command(["list", "--project-root", this.projectRoot]);
+    const document = await this.listAgentsDocument();
     if (!Array.isArray(document.agents) || document.agents.length > 1_000) {
       throw new Error(localize("ui.invalid.agent.factory.session.list.response"));
     }
@@ -656,12 +729,53 @@ export class AgentFactoryClient implements AgentRuntimeClient {
     }).sort((left, right) => (right.updatedAt ?? "").localeCompare(left.updatedAt ?? ""));
   }
 
-  public async advanceWorkflows(mainAgentId: string, agents: readonly ChildAgentSession[]): Promise<readonly Record<string, unknown>[]> {
+  private listAgentsDocument(): Promise<Record<string, unknown>> {
+    return this.agentListCache.get(this.projectRoot, () => this.command(["list", "--project-root", this.projectRoot]));
+  }
+
+  public async closeWorkflow(mainAgentId: string, workAgentId: string, loopId: string): Promise<Record<string, unknown>> {
+    const location = await this.location();
+    const path = await this.managedPath(workAgentId, "loops", loopId, "state.json");
+    const state = readRecord(JSON.parse((await readManagedBytes(path, MAX_RESULT_BYTES)).toString("utf8")), "workflow");
+    const parentPath = typeof state.parentStatePath === "string" ? state.parentStatePath : "";
+    const parentRun = parentPath.split(sep).at(-2);
+    if (!parentRun || !MANAGED_ID.test(parentRun) || parentPath !== await this.managedPath(mainAgentId, "runs", parentRun, "state.json")) {
+      throw new Error("Workflow does not belong to this Main conversation");
+    }
+    const parent = readRecord(JSON.parse((await readManagedBytes(parentPath, MAX_RESULT_BYTES)).toString("utf8")), "workflow parent");
+    const output = await runBoundedProcess(this.pythonCommand, [join(dirname(this.execPath), "loop.py"), "close",
+      "--project-root", this.projectRoot, "--runtime-home", location.home, "--project-id", location.projectId,
+      "--work-agent", workAgentId, "--loop-id", loopId, "--actor", "human",
+      "--authorization-reference", `chat:${mainAgentId}:workflow:${loopId}`,
+      "--decision-evidence", "Human selected Close failed workflow"], COMMAND_TIMEOUT_MS, MAX_PROCESS_OUTPUT_BYTES,
+      { ...pluginRuntimeEnvironment(this.developmentRoot), AGENT_FACTORY_PARENT_STATE: parentPath,
+        AGENT_FACTORY_EXECUTION_POLICY: JSON.stringify(parent.executionPolicy) });
+    const snapshot = JSON.parse(output.stdout);
+    if (output.exitCode !== 0 || snapshot.kind === "error") throw new Error(snapshot.error?.message || "Workflow close failed");
+    this.workflowSnapshots.delete(path);
+    return snapshot;
+  }
+
+  public async advanceWorkflows(mainAgentId: string, agents: readonly ChildAgentSession[], drive = true): Promise<readonly Record<string, unknown>[]> {
+    const identity = [...new Set(agents.filter(agent => agent.role === "work").map(agent => agent.agentId))].sort();
+    return this.workflowRefreshCache.get(JSON.stringify([mainAgentId, identity, drive]), () => this.refreshWorkflows(mainAgentId, agents, drive));
+  }
+
+  private async refreshWorkflows(mainAgentId: string, agents: readonly ChildAgentSession[], drive: boolean): Promise<readonly Record<string, unknown>[]> {
     const location = await this.location();
     const snapshots: Record<string, unknown>[] = [];
     for (const agentId of new Set(agents.filter(agent => agent.role === "work").map(agent => agent.agentId))) {
+      // Reuse the parent listing while its identity/timestamps are unchanged.
+      // Creating or removing loops changes this signature, so absence is not
+      // cached on a timer and newly accepted workflows remain discoverable.
+      const agentDirectory = await this.managedPath(agentId);
+      const agentEntries = await this.managedDirectoryEntries(agentDirectory).catch(error => {
+        if (isMissingFile(error)) return [];
+        throw error;
+      });
+      if (!agentEntries.some(entry => entry.name === "loops")) continue;
       const directory = await this.managedPath(agentId, "loops");
-      const entries = await readdir(directory, { withFileTypes: true }).catch(error => {
+      const entries = await this.managedDirectoryEntries(directory).catch(error => {
         if ((error as NodeJS.ErrnoException).code === "ENOENT") return [];
         throw error;
       });
@@ -670,16 +784,26 @@ export class AgentFactoryClient implements AgentRuntimeClient {
         const path = await this.managedPath(agentId, "loops", entry.name, "state.json");
         const info = await lstat(path);
         if (info.size > MAX_RESULT_BYTES) throw new Error("Workflow state exceeds limit");
-        const state = JSON.parse(await readFile(path, "utf8"));
+        const fileSignature = `${info.dev}:${info.ino}:${info.size}:${info.mtimeMs}:${info.ctimeMs}`;
+        const cached = this.workflowSnapshots.get(path);
+        const state = cached?.signature.startsWith(fileSignature + "|")
+          ? cached.state : JSON.parse(await readFile(path, "utf8"));
         if (!state.workflow || typeof state.parentStatePath !== "string") continue;
         const parentRun = state.parentStatePath.split(sep).at(-2);
         if (!parentRun || !MANAGED_ID.test(parentRun) || state.parentStatePath !== await this.managedPath(mainAgentId, "runs", parentRun, "state.json")) continue;
+        const parentInfo = await lstat(state.parentStatePath);
+        const signature = `${info.dev}:${info.ino}:${info.size}:${info.mtimeMs}:${info.ctimeMs}|${parentInfo.dev}:${parentInfo.ino}:${parentInfo.size}:${parentInfo.mtimeMs}:${parentInfo.ctimeMs}`;
+        if (cached?.signature === signature && (state.status !== "active" ||
+          (!drive && Date.now() - cached.observedAt < 1000))) {
+          snapshots.push(cached.snapshot);
+          continue;
+        }
         const parent = readRecord(JSON.parse((await readManagedBytes(state.parentStatePath, MAX_RESULT_BYTES)).toString("utf8")), "workflow parent run");
         const policy = readRecord(parent.executionPolicy, "workflow parent execution policy");
         // Bind both values to the same captured run. The runtime validates the
         // snapshot against that run and its session before advancing any work.
         const output = await runBoundedProcess(this.pythonCommand, [join(dirname(this.execPath), "loop.py"),
-          state.status === "active" ? "reconcile" : "status", "--project-root", this.projectRoot,
+          drive && state.status === "active" ? "reconcile" : "status", "--project-root", this.projectRoot,
           "--runtime-home", location.home, "--project-id", location.projectId,
           "--work-agent", agentId, "--loop-id", entry.name], COMMAND_TIMEOUT_MS, MAX_PROCESS_OUTPUT_BYTES,
           { ...pluginRuntimeEnvironment(this.developmentRoot),
@@ -687,6 +811,8 @@ export class AgentFactoryClient implements AgentRuntimeClient {
             AGENT_FACTORY_EXECUTION_POLICY: JSON.stringify(policy) });
         const snapshot = JSON.parse(output.stdout);
         if (output.exitCode !== 0 || snapshot.kind === "error") throw new Error(snapshot.error?.message || "Workflow reconciliation failed");
+        this.workflowSnapshots.set(path, { signature, observedAt: Date.now(), state, snapshot });
+        while (this.workflowSnapshots.size > 256) this.workflowSnapshots.delete(this.workflowSnapshots.keys().next().value!);
         snapshots.push(snapshot);
       }
     }
@@ -698,9 +824,17 @@ export class AgentFactoryClient implements AgentRuntimeClient {
       throw new Error(localize("ui.invalid.main.agent.identifier"));
     }
     if (runId !== undefined && !MANAGED_ID.test(runId)) throw new Error(localize("ui.invalid.main.agent.run.identifier"));
+    return this.childSessionCache.get(JSON.stringify([mainAgentId, runId ?? ""]), () => this.readChildSessions(mainAgentId, runId));
+  }
+
+  private async readChildSessions(mainAgentId: string, runId?: string): Promise<readonly ChildAgentSession[]> {
     const referenced = await this.discoverChildAgents(mainAgentId, runId);
     if (referenced.size === 0) return [];
-    const document = await this.command(["list", "--project-root", this.projectRoot]);
+    const sessions = await Promise.all([...referenced.keys()].map(async agentId => {
+      try { return await this.cachedRunState(await this.managedPath(agentId, "session.json")); }
+      catch (error) { if (isMissingFile(error)) return undefined; throw error; }
+    }));
+    const document = sessions.every(Boolean) ? { agents: sessions } : await this.listAgentsDocument();
     if (!Array.isArray(document.agents) || document.agents.length > 1_000) {
       throw new Error(localize("ui.invalid.agent.factory.session.list.response"));
     }
@@ -725,7 +859,7 @@ export class AgentFactoryClient implements AgentRuntimeClient {
       if (parentRunId && !parentModes.has(parentRunId)) {
         const path = await this.managedPath(mainAgentId, "runs", parentRunId, "state.json");
         try {
-          const parent = readRecord(JSON.parse((await readManagedBytes(path, 256 * 1024)).toString("utf8")), "parent run");
+          const parent = readRecord(await this.cachedRunState(path), "parent run");
           parentModes.set(parentRunId, TASK_MODES.includes(parent.taskMode as TaskMode) ? parent.taskMode as TaskMode : undefined);
         } catch (error) {
           if (!isMissingFile(error)) throw error;
@@ -752,7 +886,7 @@ export class AgentFactoryClient implements AgentRuntimeClient {
     const childIds = new Map<string, ChildAgentReference>();
     let runs;
     try {
-      runs = (await readdir(runsDirectory, { withFileTypes: true }))
+      runs = (runId ? [{ name: runId, isDirectory: () => true }] : await this.managedDirectoryEntries(runsDirectory))
         .filter((entry) => entry.isDirectory() && MANAGED_ID.test(entry.name) && (runId === undefined || entry.name === runId))
         .sort((left, right) => right.name.localeCompare(left.name))
         .slice(0, 500);
@@ -761,17 +895,74 @@ export class AgentFactoryClient implements AgentRuntimeClient {
       throw error;
     }
     for (const run of runs) {
-      const eventsPath = await this.managedPath(mainAgentId, "runs", run.name, "events.jsonl");
+      const references = await this.discoverRunChildren(mainAgentId, run.name);
+      for (const [agentId, reference] of references) if (!childIds.has(agentId)) childIds.set(agentId, reference);
+    }
+    return childIds;
+  }
+
+  private async discoverRunChildren(mainAgentId: string, runName: string): Promise<ReadonlyMap<string, ChildAgentReference>> {
+    const childIds = new Map<string, ChildAgentReference>();
+      // A missing children directory is common in legacy histories. Check the
+      // containing directory signature, so a newly published index is discovered.
+      const runDirectory = await this.managedPath(mainAgentId, "runs", runName);
+      let runEntries: Dirent[];
+      try { runEntries = await this.managedDirectoryEntries(runDirectory); }
+      catch (error) { if (isMissingFile(error)) return childIds; throw error; }
+      const cachedRun = this.observedChildRuns.get(runDirectory, runEntries);
+      if (cachedRun) return cachedRun;
+      const hasReferences = runEntries.some(entry => entry.name === "children");
+      const referencesPath = hasReferences ? await this.managedPath(mainAgentId, "runs", runName, "children") : undefined;
+      const publish = this.observedChildRuns.observe(runDirectory, runEntries,
+        referencesPath ? [runDirectory, referencesPath] : [runDirectory]);
+      let references: import("node:fs").Dirent[] = [];
+      try { if (referencesPath) references = await this.managedDirectoryEntries(referencesPath); }
+      catch (error) { if (!isMissingFile(error)) throw error; }
+      for (const entry of references) {
+        if (!entry.isFile() || !entry.name.endsWith(".json") || !MANAGED_ID.test(entry.name)) continue;
+        const reference = await this.cachedRunState(await this.managedPath(mainAgentId, "runs", runName, "children", entry.name));
+        if (reference && reference.parentAgentId === mainAgentId && reference.parentRunId === runName &&
+            typeof reference.agentId === "string" && MANAGED_ID.test(reference.agentId) &&
+            typeof reference.runId === "string" && MANAGED_ID.test(reference.runId) && !childIds.has(reference.agentId)) {
+          childIds.set(reference.agentId, { agentId: reference.agentId, runId: reference.runId, parentRunId: runName, pending: false });
+        }
+      }
+      // The fresh directory signature also detects a newly created legacy log.
+      if (!runEntries.some(entry => entry.name === "events.jsonl")) { publish(childIds); return childIds; }
+      const eventsPath = await this.managedPath(mainAgentId, "runs", runName, "events.jsonl");
       let content: string;
+      let observedSignature = "";
+      const runChildren = new Map<string, ChildAgentReference>();
       try {
-        const info = await lstat(eventsPath);
-        if (!info.isFile() || info.size > MAX_EVENTS_BYTES) continue;
-        content = (await readManagedBytes(eventsPath, MAX_EVENTS_BYTES)).toString("utf8");
+        let info = await lstat(eventsPath);
+        if (!info.isFile() || info.size > MAX_EVENTS_BYTES) return childIds;
+        let signature = `${info.dev}:${info.ino}:${info.size}:${info.mtimeMs}:${info.ctimeMs}`;
+        const cached = this.childEventSnapshots.get(eventsPath);
+        if (cached?.signature === signature) {
+          for (const reference of cached.references) runChildren.set(reference.agentId, { ...reference, parentRunId: runName });
+          for (const [agentId, reference] of runChildren) if (!childIds.has(agentId)) childIds.set(agentId, reference);
+          publish(childIds);
+          return childIds;
+        }
+        content = "";
+        for (let attempt = 0; attempt < 2; attempt += 1) {
+          content = (await readManagedBytes(eventsPath, MAX_EVENTS_BYTES)).toString("utf8");
+          await this.afterChildEventRead?.(eventsPath);
+          const after = await lstat(eventsPath);
+          observedSignature = `${after.dev}:${after.ino}:${after.size}:${after.mtimeMs}:${after.ctimeMs}`;
+          if (signature === observedSignature) break;
+          observedSignature = "";
+          if (attempt === 0) {
+            info = after;
+            if (!info.isFile() || info.size > MAX_EVENTS_BYTES) break;
+            signature = `${info.dev}:${info.ino}:${info.size}:${info.mtimeMs}:${info.ctimeMs}`;
+          }
+        }
+        this.childEventSnapshots.delete(eventsPath);
       } catch (error) {
-        if (isMissingFile(error)) continue;
+        if (isMissingFile(error)) { this.childEventSnapshots.delete(eventsPath); return childIds; }
         throw error;
       }
-      const runChildren = new Map<string, ChildAgentReference>();
       for (const line of content.split("\n")) {
         let event: unknown;
         try {
@@ -794,29 +985,90 @@ export class AgentFactoryClient implements AgentRuntimeClient {
               } catch { /* Command output may also contain ordinary log lines. */ }
             }
           }
-          reference.parentRunId = run.name;
+          reference.parentRunId = runName;
           runChildren.set(reference.agentId, reference);
         }
       }
+      if (observedSignature) {
+        this.childEventSnapshots.set(eventsPath, {
+          signature: observedSignature,
+          references: [...runChildren.values()].map(reference => ({ ...reference, parentRunId: undefined }))
+        });
+      }
+      while (this.childEventSnapshots.size > 1_000) this.childEventSnapshots.delete(this.childEventSnapshots.keys().next().value!);
       for (const [agentId, reference] of runChildren) {
         if (!childIds.has(agentId)) childIds.set(agentId, reference);
       }
-    }
+    publish(childIds);
     return childIds;
+  }
+
+  private async managedDirectoryEntries(path: string): Promise<Dirent[]> {
+    const before = await lstat(path);
+    if (!before.isDirectory() || before.isSymbolicLink()) throw new Error("Unsafe managed directory");
+    const signature = `${before.dev}:${before.ino}:${before.mtimeMs}:${before.ctimeMs}`;
+    const cached = this.directorySnapshots.get(path);
+    if (cached?.signature === signature && this.now() - cached.checkedAt < 10_000) return cached.entries;
+    const entries = await readdir(path, { withFileTypes: true });
+    const after = await lstat(path);
+    this.directorySnapshots.delete(path);
+    if (signature === `${after.dev}:${after.ino}:${after.mtimeMs}:${after.ctimeMs}`) {
+      this.directorySnapshots.set(path, { signature, entries, checkedAt: this.now() });
+      // Bound retained directory entries as well as the number of directories.
+      let retained = [...this.directorySnapshots.values()].reduce((total, item) => total + item.entries.length, 0);
+      while (this.directorySnapshots.size > 1_024 || retained > 10_000) {
+        const oldest = this.directorySnapshots.keys().next().value!;
+        retained -= this.directorySnapshots.get(oldest)!.entries.length;
+        this.directorySnapshots.delete(oldest);
+      }
+    }
+    return entries;
+  }
+
+  private async cachedRunState(path: string): Promise<Record<string, unknown> | undefined> {
+    const before = await lstat(path);
+    if (!before.isFile() || before.size > 256 * 1024) {
+      this.deleteRunStateSnapshot(path);
+      return undefined;
+    }
+    const signature = `${before.dev}:${before.ino}:${before.size}:${before.mtimeMs}:${before.ctimeMs}`;
+    const cached = this.runStateSnapshots.get(path);
+    if (cached?.signature === signature) return cached.value;
+    const content = await readManagedBytes(path, 256 * 1024);
+    const value = readRecordOrUndefined(JSON.parse(content.toString("utf8")));
+    const after = await lstat(path);
+    this.deleteRunStateSnapshot(path);
+    if (value && signature === `${after.dev}:${after.ino}:${after.size}:${after.mtimeMs}:${after.ctimeMs}`) {
+      this.runStateSnapshots.set(path, { signature, value, bytes: content.length });
+      this.runStateSnapshotBytes += content.length;
+      // A 500-run scan can use four records per run (reference, session,
+      // child state, parent state). Bound source bytes separately so larger
+      // records cannot consume the old entry-only budget of up to 256 MiB.
+      while (this.runStateSnapshots.size > 2_048 || this.runStateSnapshotBytes > 8 * 1024 * 1024) {
+        this.deleteRunStateSnapshot(this.runStateSnapshots.keys().next().value!);
+      }
+    }
+    return value;
+  }
+
+  private deleteRunStateSnapshot(path: string): void {
+    const previous = this.runStateSnapshots.get(path);
+    if (previous) this.runStateSnapshotBytes -= previous.bytes;
+    this.runStateSnapshots.delete(path);
   }
 
   private async latestRunInfo(agentId: string, runId?: string): Promise<{ readonly status: string; readonly runId?: string; readonly verifiedWorkRunId?: string; readonly parentAgentId?: string; readonly parentRunId?: string; readonly taskBinding?: Record<string, unknown> }> {
     const runsDirectory = await this.managedPath(agentId, "runs");
     try {
-      const runs = (await readdir(runsDirectory, { withFileTypes: true }))
+      const runs = runId ? [{ name: runId }] : (await this.managedDirectoryEntries(runsDirectory))
         .filter((entry) => entry.isDirectory() && MANAGED_ID.test(entry.name) && (runId === undefined || entry.name === runId))
         .sort((left, right) => right.name.localeCompare(left.name));
       for (const run of runs.slice(0, 100)) {
         const statePath = await this.managedPath(agentId, "runs", run.name, "state.json");
         try {
-          const info = await lstat(statePath);
-          if (!info.isFile() || info.size > 256 * 1024) continue;
-          const state = readRecordOrUndefined(JSON.parse((await readManagedBytes(statePath, 256 * 1024)).toString("utf8")));
+          // cachedRunState already checks file type, size and freshness before
+          // returning a value. Avoid a second metadata read for every child.
+          const state = await this.cachedRunState(statePath);
           if (typeof state?.status === "string" && state.status) {
             return {
               ...(readRecordOrUndefined(state.taskBinding) ? { taskBinding: readRecordOrUndefined(state.taskBinding) } : {}),
@@ -870,6 +1122,11 @@ export class AgentFactoryClient implements AgentRuntimeClient {
     timeoutMs: number,
     maxOutputBytes: number
   ): Promise<ProcessOutput> {
+    // New sessions and capability probes must use the same exact CLI as setup.
+    // Sends retain the executable captured by the existing runtime session.
+    if (codexExecutable() !== "codex" && ["submit", "capabilities"].includes(arguments_[0] ?? "") && !arguments_.includes("--codex")) {
+      arguments_ = [...arguments_, "--codex", codexExecutable()];
+    }
     try {
       const info = await lstat(this.execPath);
       if (!info.isFile()) throw new Error(localize("ui.agent.factory.exec.py.is.not.a.regular.file"));
@@ -893,7 +1150,7 @@ export class AgentFactoryClient implements AgentRuntimeClient {
     if (refreshed === previous) throw originalError;
     this.execPath = refreshed;
     this.locationPromise = undefined;
-    this.eventSnapshot = undefined;
+    this.eventSnapshots.clear();
     this.contextUsageSnapshots.clear();
   }
 
@@ -1056,6 +1313,13 @@ async function progressUpdates(line: string, projectRoot: string, ownResultPath:
   if (!item || (event.type !== "item.started" && event.type !== "item.completed")) return [];
   const completed = event.type === "item.completed";
   const itemId = typeof item.id === "string" && item.id ? item.id : undefined;
+  if (item.type === "contextCompaction") {
+    const text = localize(completed ? "ui.context.compaction.completed" : "ui.context.compaction.started");
+    return compactUpdates(
+      itemId ? activityUpdate(itemId, "tool", completed ? "completed" : "started", text, undefined, localize("ui.context.compaction")) : undefined,
+      statusUpdate(text)
+    );
+  }
   if (item.type === "command_execution") {
     if (typeof item.command === "string" && (!completed || item.exit_code === 0)) {
       const commands = shellCommandWords(item.command);
@@ -1492,6 +1756,17 @@ async function realProjectRoot(path: string): Promise<string> {
 
 async function checkManagedComponents(path: string): Promise<void> {
   const absolute = resolve(path);
+  // realpath validates the full existing chain in one native operation. Do not
+  // retain the result across calls: ancestor replacements must remain visible.
+  try {
+    if (await realpath(absolute) !== absolute) {
+      throw new Error(localize("ui.unsafe.link.or.file.type.in.an.agent.factory.managed.path"));
+    }
+    return;
+  } catch (error) {
+    if (!isMissingFile(error)) throw error;
+  }
+  // Missing/dangling paths still require checking every existing component.
   const parts = absolute.split(sep).filter(Boolean);
   let cursor: string = sep;
   for (const part of parts) {
@@ -1508,23 +1783,30 @@ async function checkManagedComponents(path: string): Promise<void> {
   }
 }
 
-async function readManagedBytes(path: string, limit: number): Promise<Buffer> {
+async function readManagedBytes(path: string, limit: number, start = 0, identity?: string): Promise<Buffer> {
   await checkManagedComponents(path);
   const file = await openFile(path, fsConstants.O_RDONLY | fsConstants.O_NOFOLLOW | fsConstants.O_NONBLOCK);
   try {
     const before = await file.stat();
-    if (!before.isFile() || before.size > limit || await realpath(path) !== resolve(path)) {
+    if (!before.isFile() || before.size > limit || start > before.size
+        || (identity !== undefined && identity !== `${before.dev}:${before.ino}`) || await realpath(path) !== resolve(path)) {
       throw new Error(localize("ui.unsafe.agent.factory.file.path.or.size"));
     }
-    const bytes = Buffer.alloc(limit + 1);
+    // Grow only when a concurrent append requires it, retaining the limit sentinel.
+    let bytes = Buffer.alloc(Math.min(limit - start + 1, before.size - start + 1));
     let offset = 0;
-    while (offset < bytes.length) {
-      const part = await file.read(bytes, offset, bytes.length - offset, offset);
+    while (offset < limit - start + 1) {
+      if (offset === bytes.length) {
+        const grown = Buffer.alloc(Math.min(limit - start + 1, Math.max(bytes.length * 2, 4096)));
+        bytes.copy(grown);
+        bytes = grown;
+      }
+      const part = await file.read(bytes, offset, bytes.length - offset, start + offset);
       if (part.bytesRead === 0) break;
       offset += part.bytesRead;
     }
     const after = await lstat(path);
-    if (offset > limit || after.isSymbolicLink() || before.dev !== after.dev || before.ino !== after.ino
+    if (start + offset > limit || after.size > limit || after.isSymbolicLink() || before.dev !== after.dev || before.ino !== after.ino
         || await realpath(path) !== resolve(path)) {
       throw new Error(localize("ui.the.agent.factory.file.was.replaced.while.being.read"));
     }

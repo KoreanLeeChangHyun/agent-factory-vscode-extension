@@ -5,7 +5,7 @@ import type { ChatPanelManager, SidebarAgent } from "./chat-panel-manager";
 
 type ArchivedAgent = Pick<SidebarAgent["state"], "panelId" | "agentId" | "title">;
 interface Group { id: string; name: string }
-interface Layout { groups: Group[]; assignments: Record<string, string> }
+interface Layout { groups: Group[]; assignments: Record<string, string>; order: string[] }
 type Node = { kind: "group"; group: Group } | { kind: "agent"; agent: SidebarAgent };
 const VIEW = "agentFactory.agents";
 const STORAGE = "agentFactory.sidebar.groups";
@@ -23,6 +23,9 @@ export class AgentSidebar implements vscode.TreeDataProvider<Node>, vscode.TreeD
   private archived: ArchivedAgent[];
   private archiveWrite: Promise<void> = Promise.resolve();
   private layout: Layout;
+  private layoutWrite: Promise<void> = Promise.resolve();
+  private layoutVersion = 0;
+  private persistedLayoutVersion = 0;
   private revision = 0;
   private disposed = false;
   private timer: ReturnType<typeof setTimeout> | undefined;
@@ -33,10 +36,16 @@ export class AgentSidebar implements vscode.TreeDataProvider<Node>, vscode.TreeD
     this.archived = Array.isArray(archived) ? archived.filter(entry =>
       typeof entry?.panelId === "string" && typeof entry.title === "string" &&
       (entry.agentId === undefined || typeof entry.agentId === "string")) : [];
-    const saved = context.workspaceState.get<Layout>(STORAGE);
+    const saved = context.workspaceState.get<Partial<Layout>>(STORAGE);
+    const assignments = saved?.assignments && typeof saved.assignments === "object"
+      ? Object.fromEntries(Object.entries(saved.assignments).filter((entry): entry is [string, string] => typeof entry[1] === "string"))
+      : {};
+    const order = Array.isArray(saved?.order) ? saved.order.filter((id, index, values): id is string =>
+      typeof id === "string" && values.indexOf(id) === index) : [];
     this.layout = {
       groups: Array.isArray(saved?.groups) ? saved.groups.filter(group => typeof group?.id === "string" && typeof group.name === "string") : [],
-      assignments: saved?.assignments && typeof saved.assignments === "object" ? { ...saved.assignments } : {}
+      assignments,
+      order
     };
     this.view = vscode.window.createTreeView(VIEW, {
       treeDataProvider: this, dragAndDropController: this, canSelectMany: true, showCollapseAll: true
@@ -115,8 +124,15 @@ export class AgentSidebar implements vscode.TreeDataProvider<Node>, vscode.TreeD
       const agents = await this.panels.sidebarAgents();
       if (this.disposed || revision !== this.revision) return;
       this.agents = agents;
+      const known = new Set(this.layout.order);
+      const additions = agents.map(agent => agent.state.panelId).filter(id => !known.has(id));
+      if (additions.length) {
+        this.layout.order.push(...additions);
+        this.layoutVersion += 1;
+      }
       this.updateMessage();
       this.changed.fire(undefined);
+      if (this.persistedLayoutVersion < this.layoutVersion) await this.save(false);
     } catch (error) {
       if (this.disposed || revision !== this.revision) return;
       this.view.message = localize("ui.unable.to.load.the.list.refresh.to.try.again.0", error instanceof Error ? error.message : String(error));
@@ -125,7 +141,11 @@ export class AgentSidebar implements vscode.TreeDataProvider<Node>, vscode.TreeD
 
   public getChildren(node?: Node): Node[] {
     if (node?.kind === "agent") return [];
-    const agents = this.agents.filter(agent => {
+    const byId = new Map(this.agents.map(agent => [agent.state.panelId, agent]));
+    const agents = this.layout.order.flatMap(id => {
+      const agent = byId.get(id);
+      return agent ? [agent] : [];
+    }).filter(agent => {
       if (this.isArchived(agent.state)) return false;
       const groupId = this.layout.assignments[agent.state.panelId];
       return node ? groupId === node.group.id : !this.layout.groups.some(group => group.id === groupId);
@@ -164,19 +184,17 @@ export class AgentSidebar implements vscode.TreeDataProvider<Node>, vscode.TreeD
     const payload = transfer.get(DRAG_MIME)?.value;
     if (!payload || payload.source !== this.dragSource || !Array.isArray(payload.ids)) return;
     const groupId = target?.kind === "group" ? target.group.id
-      : target?.kind === "agent" ? this.layout.assignments[target.agent.state.panelId] : undefined;
+      : target?.kind === "agent" ? this.groupFor(target.agent.state.panelId) : undefined;
     if (groupId && !this.layout.groups.some(group => group.id === groupId)) return;
-    if (target?.kind === "agent" && !this.agents.some(agent => agent.state.panelId === target.agent.state.panelId)) return;
-    const ids = new Set<string>(payload.ids.filter((id: unknown): id is string => typeof id === "string"));
-    let changed = false;
-    for (const agent of this.agents) {
-      const id = agent.state.panelId;
-      if (!ids.has(id) || this.layout.assignments[id] === groupId) continue;
-      if (groupId) this.layout.assignments[id] = groupId;
-      else delete this.layout.assignments[id];
-      changed = true;
-    }
-    if (changed) await this.save();
+    const visibleIds = this.visibleAgentIds();
+    const visible = new Set(visibleIds);
+    const requested = [...new Set<unknown>(payload.ids)];
+    if (!requested.length || requested.some(id => typeof id !== "string" || !visible.has(id))) return;
+    const requestedIds = new Set(requested as string[]);
+    const ids = visibleIds.filter(id => requestedIds.has(id));
+    const targetId = target?.kind === "agent" ? target.agent.state.panelId : undefined;
+    if (targetId && (!visible.has(targetId) || ids.includes(targetId))) return;
+    if (this.moveAgents(ids, groupId, targetId)) await this.save();
   }
 
   private async name(title: string, value = ""): Promise<string | undefined> {
@@ -185,9 +203,67 @@ export class AgentSidebar implements vscode.TreeDataProvider<Node>, vscode.TreeD
     return name?.trim() || undefined;
   }
 
-  private async save(): Promise<void> {
-    await this.context.workspaceState.update(STORAGE, this.layout);
-    this.changed.fire(undefined);
+  private groupFor(panelId: string): string | undefined {
+    const groupId = this.layout.assignments[panelId];
+    return this.layout.groups.some(group => group.id === groupId) ? groupId : undefined;
+  }
+
+  private visibleAgentIds(): string[] {
+    const visible = new Set(this.agents.filter(agent => !this.isArchived(agent.state)).map(agent => agent.state.panelId));
+    const ids: string[] = [];
+    for (const group of this.layout.groups) {
+      ids.push(...this.layout.order.filter(id => visible.has(id) && this.groupFor(id) === group.id));
+    }
+    ids.push(...this.layout.order.filter(id => visible.has(id) && this.groupFor(id) === undefined));
+    return ids;
+  }
+
+  private moveAgents(ids: readonly string[], groupId: string | undefined, targetId?: string): boolean {
+    if (!ids.length) return false;
+    const selected = new Set(ids);
+    const remaining = this.layout.order.filter(id => !selected.has(id));
+    let insertion = remaining.length;
+    if (targetId) {
+      insertion = remaining.indexOf(targetId);
+      if (insertion < 0) return false;
+    } else {
+      let lastDestination = -1;
+      for (let index = remaining.length - 1; index >= 0; index -= 1) {
+        if (this.groupFor(remaining[index]!) === groupId) {
+          lastDestination = index;
+          break;
+        }
+      }
+      if (lastDestination >= 0) insertion = lastDestination + 1;
+    }
+    const order = [...remaining.slice(0, insertion), ...ids, ...remaining.slice(insertion)];
+    const assignmentChanged = ids.some(id => this.groupFor(id) !== groupId);
+    const orderChanged = order.some((id, index) => id !== this.layout.order[index]);
+    if (!assignmentChanged && !orderChanged) return false;
+    for (const id of ids) {
+      if (groupId) this.layout.assignments[id] = groupId;
+      else delete this.layout.assignments[id];
+    }
+    this.layout.order = order;
+    this.layoutVersion += 1;
+    return true;
+  }
+
+  private async save(refresh = true): Promise<void> {
+    const version = this.layoutVersion;
+    const snapshot: Layout = {
+      groups: this.layout.groups.map(group => ({ ...group })),
+      assignments: { ...this.layout.assignments },
+      order: [...this.layout.order]
+    };
+    if (refresh) this.changed.fire(undefined);
+    const write = this.layoutWrite.then(async () => {
+      await this.context.workspaceState.update(STORAGE, snapshot);
+      this.persistedLayoutVersion = Math.max(this.persistedLayoutVersion, version);
+      this.updateMessage();
+    });
+    this.layoutWrite = write.catch(() => undefined);
+    return write;
   }
 
   private async rename(node?: Node): Promise<void> {
@@ -202,6 +278,7 @@ export class AgentSidebar implements vscode.TreeDataProvider<Node>, vscode.TreeD
     const name = await this.name(localize("ui.new.agent.group"));
     if (!name) return;
     this.layout.groups.push({ id: randomUUID(), name });
+    this.layoutVersion += 1;
     await this.save();
   }
 
@@ -212,27 +289,31 @@ export class AgentSidebar implements vscode.TreeDataProvider<Node>, vscode.TreeD
     const name = await this.name(localize("ui.rename.group"), group.name);
     if (!name) return;
     group.name = name;
+    this.layoutVersion += 1;
     await this.save();
   }
 
   private async move(node?: Node): Promise<void> {
     if (node?.kind !== "agent") return;
+    if (!this.visibleAgentIds().includes(node.agent.state.panelId)) return;
     const selected = await vscode.window.showQuickPick([
       { label: localize("ui.no.group"), id: "" },
       ...this.layout.groups.map(group => ({ label: group.name, id: group.id }))
     ], { title: localize("ui.select.agent.group"), placeHolder: node.agent.state.title });
     if (!selected) return;
-    if (selected.id) this.layout.assignments[node.agent.state.panelId] = selected.id;
-    else delete this.layout.assignments[node.agent.state.panelId];
-    await this.save();
+    if (this.moveAgents([node.agent.state.panelId], selected.id || undefined)) await this.save();
   }
 
   private async deleteGroup(node?: Node): Promise<void> {
     if (node?.kind !== "group") return;
+    if (!this.layout.groups.some(group => group.id === node.group.id)) return;
+    const moved = this.layout.order.filter(id => this.layout.assignments[id] === node.group.id);
+    this.moveAgents(moved, undefined);
     this.layout.groups = this.layout.groups.filter(group => group.id !== node.group.id);
     for (const [agent, group] of Object.entries(this.layout.assignments)) {
       if (group === node.group.id) delete this.layout.assignments[agent];
     }
+    this.layoutVersion += 1;
     await this.save();
   }
 

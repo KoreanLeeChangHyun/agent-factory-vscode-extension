@@ -56,7 +56,7 @@ test("Git snapshots distinguish clean, non-Git and failed lookup and omit ignore
   assert.ok(Date.parse(snapshot.collectedAt) >= Date.parse(snapshot.collectionStartedAt));
 });
 
-test("dispatch instructions are supplied while detailed references stay unloaded", async t => {
+test("dispatch instructions have a recoverable content identity instead of a repeated body", async t => {
   const root = await directory(t);
   const agent = join(root, "skills", "agent");
   await mkdir(join(agent, "scripts"), { recursive: true });
@@ -70,7 +70,10 @@ test("dispatch instructions are supplied while detailed references stay unloaded
     assert.equal(supplied.references.length, 2);
     assert.ok(supplied.references.every(ref => ref.availability === "not-loaded"));
     assert.equal(supplied.instructions[0].source, join(agent, "SKILL.md"));
-    assert.equal(supplied.instructions[0].text, skill);
+    assert.equal(supplied.instructions[0].text, undefined);
+    assert.equal(supplied.instructions[0].availability, "not-loaded");
+    assert.match(supplied.instructions[0].sha256, /^[a-f0-9]{64}$/);
+    assert.ok(!guidance.includes(skill));
     assert.equal(supplied.references[0].source, join(agent, "references", "execution-modes.md"));
     const restored = historyPresentation("원문\n" + guidance, "work", false);
     assert.equal(restored.text, "원문\n");
@@ -150,5 +153,24 @@ test("preparation does not probe hash capabilities or read detailed reference bo
   const accepted = await client.inputCommand(["send", "--agent", "main-context", "--task-mode", "work"], "work", []);
   assert.ok(!accepted.preparationGuidance.includes("Unneeded runtime detail"));
   assert.ok(accepted.preparationGuidance.length < 2500);
-  assert.equal(context(accepted.preparationGuidance).instructions[0].availability, "available");
+  assert.equal(context(accepted.preparationGuidance).instructions[0].availability, "not-loaded");
+});
+
+test("large Skill bodies stay out of requests and edits change their identity", async t => {
+  const root = await directory(t);
+  const agent = join(root, "skills", "agent");
+  await mkdir(join(agent, "scripts"), { recursive: true });
+  const path = join(agent, "SKILL.md");
+  await writeFile(path, "Long instruction. ".repeat(4000));
+  const first = await submissionContext(root, join(agent, "scripts", "exec.py"));
+  const second = await submissionContext(root, join(agent, "scripts", "exec.py"));
+  assert.ok(Buffer.byteLength(first) < 2500);
+  assert.equal(context(first).instructions[0].sha256, context(second).instructions[0].sha256);
+  await writeFile(path, "New authoritative instructions");
+  const changed = await submissionContext(root, join(agent, "scripts", "exec.py"));
+  assert.notEqual(context(first).instructions[0].sha256, context(changed).instructions[0].sha256);
+  await rm(path);
+  const missing = context(await submissionContext(root, join(agent, "scripts", "exec.py"))).instructions[0];
+  assert.equal(missing.availability, "unavailable");
+  assert.equal(missing.sha256, undefined);
 });

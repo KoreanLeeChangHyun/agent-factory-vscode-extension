@@ -7,13 +7,17 @@ async function checkFactoryBot(page) {
   };
   // Sample actual rendered transforms at the gesture handoff, not just CSS names.
   const motion = await page.evaluate(() => {
-    const probe = document.querySelector('#factory-bot').cloneNode(true);
-    probe.removeAttribute('id');
-    probe.removeAttribute('hidden');
-    probe.dataset.state = 'idle';
-    probe.dataset.animations = 'true';
-    probe.style.opacity = '0';
-    document.body.append(probe);
+    let probe;
+    function freshProbe() {
+      probe?.remove();
+      probe = document.querySelector('#factory-bot').cloneNode(true);
+      probe.removeAttribute('id');
+      probe.removeAttribute('hidden');
+      probe.dataset.state = 'idle';
+      probe.dataset.animations = 'true';
+      probe.style.opacity = '0';
+      document.body.append(probe);
+    }
     const parts = ['.bot-body', '.bot-arm-left', '.bot-arm-right', '.bot-eyes'];
     function offset(time) {
       for (const animation of probe.getAnimations({ subtree: true })) {
@@ -28,9 +32,12 @@ async function checkFactoryBot(page) {
     }
     const samples = [];
     for (const gesture of ['breathe', 'stretch', 'coffee', 'read', 'bow', 'look', 'balance', 'wave', 'shy', 'dance']) {
+      // Script-paused CSS animations can outlive a selector change. Isolate each pose.
+      freshProbe();
       probe.dataset.gesture = gesture;
       samples.push({ gesture, start: offset(0), end: offset(7999) });
     }
+    freshProbe();
     delete probe.dataset.gesture;
     probe.dataset.state = 'complete';
     samples.push({ gesture: 'complete', start: offset(0), end: offset(2399) });
@@ -43,6 +50,32 @@ async function checkFactoryBot(page) {
   for (const sample of motion) {
     assert.ok(sample.start < .01 && sample.end < .01, `${sample.gesture} should enter and leave near neutral: ${JSON.stringify(sample)}`);
   }
+  // The one-pixel sleeping movement remains animated, but changes at most
+  // 30 times per two-second half-cycle instead of every display frame.
+  const sleepMotion = await page.evaluate(() => {
+    const probe = document.querySelector('#factory-bot').cloneNode(true);
+    probe.removeAttribute('id'); probe.removeAttribute('hidden');
+    probe.dataset.state = 'sleeping'; probe.dataset.animations = 'true';
+    probe.style.opacity = '0'; document.body.append(probe);
+    const body = probe.querySelector('.bot-body');
+    const marks = probe.querySelector('.bot-sleep-marks');
+    const animations = probe.getAnimations({ subtree: true });
+    animations.forEach(a => a.pause());
+    const positions = new Set();
+    for (let time = 0; time <= 2000; time += 10) {
+      animations.forEach(a => { a.currentTime = time; });
+      positions.add(getComputedStyle(body).transform);
+    }
+    const result = { positions: positions.size,
+      bodyTiming: getComputedStyle(body).animationTimingFunction,
+      marksTiming: getComputedStyle(marks).animationTimingFunction,
+      duration: getComputedStyle(body).animationDuration };
+    probe.remove(); return result;
+  });
+  assert.ok(sleepMotion.positions > 1 && sleepMotion.positions <= 31, JSON.stringify(sleepMotion));
+  assert.match(sleepMotion.bodyTiming, /steps\(30(?:, end)?\)/);
+  assert.match(sleepMotion.marksTiming, /steps\(30(?:, end)?\)/);
+  assert.equal(sleepMotion.duration, '4s');
   const bot = page.locator('#factory-bot');
   const state = () => bot.getAttribute('data-state');
   await emit({ type: 'host.initialize', runtimeAvailable: true, capabilities: { submit: {}, send: {} } });
@@ -236,5 +269,24 @@ async function checkFactoryBot(page) {
   await emit({ type: 'decision.pending', runId: null });
   await emit({ type: 'host.initialize', runtimeAvailable: false, capabilities: { submit: {}, send: {} } });
   assert.equal(await state(), 'offline');
+  await emit({ type: 'bots.updated', enabled: false });
+  assert.equal(await bot.isVisible(), false);
+  assert.equal(await page.locator('#bots-disabled').isChecked(), true);
+  assert.equal(await page.locator('#bot-visible').isDisabled(), true);
+  await emit({ type: 'bot.mood', mood: 'cheerful' });
+  await emit({ type: 'run.state', running: true });
+  await page.clock.fastForward(120000);
+  assert.equal(await bot.isVisible(), false);
+  assert.equal(await bot.getAttribute('data-mood'), null);
+  assert.equal(await bot.evaluate(el => el.getAnimations({subtree:true}).length), 0);
+  await emit({ type: 'bots.updated', enabled: true });
+  assert.equal(await bot.isVisible(), true);
+  assert.equal(await page.locator('#bot-visible').isDisabled(), false);
+  await page.locator('#bots-disabled').evaluate(el => { el.checked = true; el.dispatchEvent(new Event('change')); });
+  assert.equal(await bot.isVisible(), false);
+  assert.equal(await page.evaluate(() => window.sentMessages.some(m => m.type === 'bots.configure' && m.enabled === false)), true);
+  await emit({ type: 'host.initialize', botsEnabled: false, runtimeAvailable: true, capabilities: { submit: {}, send: {} } });
+  assert.equal(await bot.isVisible(), false, 'host preference survives initialization');
+
 }
 module.exports = { checkFactoryBot };

@@ -39,6 +39,30 @@ test('composer has exactly six send actions and action choices send immediately'
   const values = script.match(/task: (\[[^\n]+\]),/)[1];
   assert.deepEqual(JSON.parse(values), actions);
   assert.match(script, /closeSettingMenu\(false\);\s+submit\(action, workflow\);/);
-  const persistence = script.slice(script.indexOf('  function persist()'));
+  const persistence = script.slice(script.indexOf('  function persist('));
   assert.doesNotMatch(persistence, /taskMode: state.taskMode/);
 });
+
+for (const action of ['direct', ...actions]) {
+  test(`${action} rejects blank input but preserves attachment-only requests`, () => {
+    const sent = [];
+    const context = {
+      state: { role: 'main', attachments: [], capabilities: {}, runtimeAvailable: true, goalMode: false },
+      taskModeNames: Object.fromEntries(['direct', ...actions].map(value => [value, value])),
+      inputFeedback: {}, prompt: { value: '   ', focus() {} }, timeline: {}, followLatest: false,
+      currentCapabilities: () => ({ goal: true }), createId: () => 'attachment-only',
+      appendNotice() { throw Error('Unexpected notice'); }, saveComposerSettings() {}, renderAll() {}, resizePrompt() {}, persist() {},
+      vscode: { postMessage(message) { sent.push(message); } }
+    };
+    runInNewContext(submitSource + `\nsubmit(${JSON.stringify(action)});`, context);
+    assert.equal(sent.length, 0);
+    assert.equal(context.prompt.value, '   ');
+    assert.equal(context.inputFeedback.hidden, false);
+    context.state.attachments = [{ id: 'image', kind: 'image', name: 'example.png', uri: 'file:///project/example.png' }];
+    runInNewContext(`submit(${JSON.stringify(action)});`, context);
+    assert.equal(sent.length, 1);
+    assert.equal(sent[0].text, '');
+    assert.equal(sent[0].execution.taskMode, action);
+    assert.equal(sent[0].attachments[0].id, 'image');
+  });
+}

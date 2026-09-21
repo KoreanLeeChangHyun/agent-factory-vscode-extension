@@ -24,8 +24,10 @@ async function checkTaskFlow(page) {
     { id: 'test', title: '테스트', status: 'pending' }
   ] };
   const send = async (snapshot, runId) => {
+    const before = await page.locator("#timeline .message-assistant").count();
     await page.evaluate(({ snapshot, runId }) => window.postMessage({ type: 'chat.assistant', phase: 'commentary', runId,
       text: '정리한 작업입니다.\n```task-flow\n' + JSON.stringify(snapshot) + '\n```' }, '*'), { snapshot, runId });
+    await page.waitForFunction(count => document.querySelectorAll("#timeline .message-assistant").length > count, before);
     await page.waitForFunction(id => document.querySelector('#timeline .task-flow[data-flow-id="' + id + '"]'), snapshot.id);
   };
   await send(flow, 'main-one');
@@ -87,7 +89,7 @@ async function checkTaskFlow(page) {
   assert.equal(await page.locator('[data-flow-id="broken"]').count(), 0);
   await page.setViewportSize({ width: 320, height: 800 });
   assert.ok(await page.locator('#run-stage-list .task-flow').first().evaluate(el => el.scrollWidth <= el.clientWidth + 1));
-  await page.evaluate(() => sessionStorage.setItem('submission-restoration-fixture', JSON.stringify(window.saved)));
+  await page.evaluate(() => { window.dispatchEvent(new Event('pagehide')); sessionStorage.setItem('submission-restoration-fixture', JSON.stringify(window.saved)); });
   await page.reload();
   await page.waitForFunction(() => document.querySelector('#task-history-list [data-flow-id="flow-one"]'));
   assert.equal(await page.locator('#task-history-list [data-flow-id="flow-one"] .task-flow-step').count(), 3);
@@ -98,7 +100,7 @@ async function checkTaskFlow(page) {
   await page.waitForFunction(() => document.querySelector('#run-status').hidden);
   assert.equal(await page.locator('#run-details').isVisible(), false);
   assert.ok(await page.locator('#timeline .task-flow').count() > 0, 'Completed history remains available in chat');
-  await page.evaluate(() => sessionStorage.setItem('submission-restoration-fixture', JSON.stringify(window.saved)));
+  await page.evaluate(() => { window.dispatchEvent(new Event('pagehide')); sessionStorage.setItem('submission-restoration-fixture', JSON.stringify(window.saved)); });
   await page.reload();
   await page.waitForFunction(() => document.querySelector('#timeline .task-flow'));
   assert.equal(await page.locator('#run-status').isVisible(), false, 'Restoring completed history must not reopen status');
@@ -147,10 +149,15 @@ async function checkTaskFlow(page) {
   assert.equal(await page.locator('#run-status-toggle').getAttribute('aria-expanded'), 'false');
   assert.equal(await page.locator('#run-stage-list .task-flow').count(), 0, 'Completed child must not resurrect a cached pending plan');
   assert.equal(await page.locator('#task-history-list .run-stage-id').textContent(), '하단 스크롤 수정');
-  await page.evaluate(() => sessionStorage.setItem('submission-restoration-fixture', JSON.stringify(window.saved)));
+  await page.evaluate(() => { window.dispatchEvent(new Event('pagehide')); sessionStorage.setItem('submission-restoration-fixture', JSON.stringify(window.saved)); });
   await page.reload();
   await page.waitForFunction(() => document.querySelector('#task-history-list .run-stage-id'));
   assert.equal(await page.locator('#run-status').isVisible(), false, 'Restored legacy pending metadata must not reopen an ended run');
+  // Select the locale explicitly before checking translated summaries.
+  if (!await page.locator('#status-settings').isVisible()) await page.locator('#status-settings-button').click();
+  await page.locator('#settings-tab-general').click();
+  await page.locator('#ui-language').selectOption('ko');
+  await page.locator('#status-settings-button').click();
   const engine = { kind: 'work-verification-loop', loopId: 'loop-engine', workAgentId: 'engine-worker', verificationAgentId: 'engine-verifier', taskMode: 'work-verification', status: 'active',
     workflow: { id: 'engine-flow', title: '전체 작업 흐름', tasks: [
       { id: 'first', workRunId: 'work-first', title: '첫 번째 수정', description: '첫 요청', completionCriteria: '검사 통과', workStatus: 'running', verificationStatus: 'pending' },
@@ -160,6 +167,11 @@ async function checkTaskFlow(page) {
   const graph = page.locator('#run-stage-list [data-flow-id="engine-flow"]');
   await graph.waitFor();
   assert.equal(await graph.locator('.task-flow-step').count(), 4, 'All work and verification phases appear immediately');
+  assert.equal(await graph.locator('.task-flow-total').textContent(), '작업 2개', 'Verification stages do not increase the task count');
+  assert.equal(await page.locator('#run-details-summary').textContent(), '작업 2개');
+  assert.equal(await graph.locator('.task-flow-workers').textContent(), '작업자 1명', 'Verifier sessions are not Work workers');
+  assert.equal(await graph.locator('[data-summary-status="running"]').textContent(), '진행 중 1개');
+  assert.equal(await graph.locator('[data-summary-status="pending"]').textContent(), '대기 1개');
   assert.deepEqual(await graph.locator('.task-flow-step').evaluateAll(items => items.map(item => item.dataset.status)), ['running', 'pending', 'pending', 'pending']);
   const firstStage = graph.locator('.task-flow-step').first();
   assert.equal(await graph.locator('.task-flow-open').count(), 1, 'Unstarted stages have no session link');
@@ -186,6 +198,9 @@ async function checkTaskFlow(page) {
   engine.workflow.tasks[0].verificationRunId = 'verify-first';
   await page.evaluate(engine => window.postMessage({ type: 'agents.list', agents: [], workflows: [engine] }, '*'), engine);
   await page.waitForFunction(() => document.querySelector('[data-flow-id="engine-flow"] [data-status="verifying"]'));
+  assert.equal(await graph.locator('[data-summary-status="verifying"]').textContent(), '검증 중 1개');
+  assert.equal(await graph.locator('[data-summary-status="completed"]').textContent(), '완료 0개', 'Work completion alone is not whole-task completion');
+  assert.equal(await graph.locator('.task-flow-current').textContent(), '현재 수행 작업: 첫 번째 수정 (검증 중)');
   assert.equal(await graph.locator('[aria-current="step"]').count(), 1);
   await graph.locator('[data-status="verifying"] .task-flow-open').click();
   assert.deepEqual(await page.evaluate(() => window.sentMessages.at(-1)), { type: 'agent.open', agentId: 'engine-verifier' });
@@ -221,6 +236,94 @@ async function checkTaskFlow(page) {
   assert.deepEqual(await page.locator('#task-history-list .run-stage-id').allTextContents(), ['링크 검사 JSON 출력 추가', '링크 검사 JSON 출력 추가']);
   assert.deepEqual(await page.locator('#agents-list .agent-id').allTextContents(), ['링크 검사 JSON 출력 추가', '링크 검사 JSON 출력 추가']);
   assert.match(await page.locator('#task-history-list .run-stage').first().getAttribute('title'), /named-work/);
+  const six = { kind: 'work-verification-loop', loopId: 'loop-six', workAgentId: 'shared-worker',
+    taskMode: 'work', status: 'active', workflow: { id: 'six-flow', title: '같은 작업자의 여섯 작업', index: 1,
+      tasks: Array.from({ length: 6 }, (_, index) => ({ id: 'task-' + (index + 1), title: '작업 ' + (index + 1),
+        description: '작업별 요청', completionCriteria: '작업별 완료 기준', workAgentId: 'shared-worker',
+        workStatus: index === 0 ? 'completed' : index === 1 ? 'running' : 'pending',
+        ...(index < 2 ? { workRunId: 'shared-run-' + (index + 1) } : {}) })) } };
+  await page.evaluate(six => window.postMessage({ type: 'agents.list', agents: [], workflows: [six] }, '*'), six);
+  const sixSteps = page.locator('[data-flow-id="six-flow"] .task-flow-step');
+  await page.waitForFunction(() => document.querySelectorAll('[data-flow-id="six-flow"] .task-flow-step').length === 6);
+  assert.deepEqual(await sixSteps.evaluateAll(items => items.map(item => item.dataset.taskId)),
+    ['task-1', 'task-2', 'task-3', 'task-4', 'task-5', 'task-6']);
+  assert.deepEqual(await sixSteps.evaluateAll(items => items.map(item => item.dataset.runId || null)),
+    ['shared-run-1', 'shared-run-2', null, null, null, null]);
+  assert.equal(await page.locator('[data-flow-id="six-flow"] [aria-current="step"]').count(), 1);
+  const sixFlow = page.locator('[data-flow-id="six-flow"]');
+  assert.equal(await sixFlow.locator('.task-flow-total').textContent(), '작업 6개');
+  assert.equal(await sixFlow.locator('.task-flow-workers').textContent(), '작업자 1명');
+  assert.equal(await sixFlow.locator('[data-summary-status="pending"]').textContent(), '대기 4개');
+  assert.equal(await sixFlow.locator('[data-summary-status="completed"]').textContent(), '완료 1개');
+  assert.equal(await sixFlow.locator('.task-flow-current').textContent(), '현재 수행 작업: 작업 2 (진행 중)');
+  assert.equal(await sixFlow.locator('.task-flow-current').getAttribute('aria-live'), 'polite');
+  six.status = 'runtime-error';
+  six.workflow.tasks[1].workStatus = 'failed';
+  await page.evaluate(six => window.postMessage({ type: 'agents.list', agents: [], workflows: [six] }, '*'), six);
+  await page.waitForFunction(() => document.querySelector('[data-flow-id="six-flow"] [data-task-id="task-2"]').dataset.status === 'failed');
+  await page.locator('[data-flow-id="six-flow"]').getByRole('button', { name: '실패한 작업 흐름 종료', exact: true }).click();
+  assert.deepEqual(await page.evaluate(() => window.sentMessages.at(-1)), {
+    type: 'workflow.close', workAgentId: 'shared-worker', loopId: 'loop-six'
+  });
+  await page.evaluate(() => window.postMessage({ type: 'agents.list', agents: [], workflows: [] }, '*'));
+  await page.evaluate(() => { window.dispatchEvent(new Event('pagehide')); sessionStorage.setItem('submission-restoration-fixture', JSON.stringify(window.saved)); });
+  await page.reload();
+  await page.waitForFunction(() => document.querySelectorAll('[data-flow-id="six-flow"] .task-flow-step').length === 6);
+  assert.deepEqual(await sixSteps.evaluateAll(items => items.map(item => item.dataset.status)),
+    ['completed', 'failed', 'pending', 'pending', 'pending', 'pending']);
+  assert.equal(await page.locator('[data-flow-id="six-flow"] [aria-current="step"]').count(), 0);
+  assert.equal(await sixFlow.locator('[data-summary-status="failed"]').textContent(), '실패 1개');
+  assert.equal(await sixFlow.locator('.task-flow-current').textContent(), '현재 수행 중인 작업 없음');
+  assert.equal(await page.locator('#task-history-list [data-flow-id="engine-flow"]').count(), 1,
+    'Accepted completed history survives empty discovery and reload');
+  assert.deepEqual(await sixSteps.evaluateAll(items => items.map(item => item.dataset.runId || null)),
+    ['shared-run-1', 'shared-run-2', null, null, null, null]);
+  await page.locator('#status-settings-button').click();
+  await page.locator('#settings-tab-general').click();
+  await page.locator('#ui-language').selectOption('en');
+  assert.equal(await sixFlow.locator('.task-flow-total').textContent(), '6 tasks');
+  assert.equal(await sixFlow.locator('.task-flow-workers').textContent(), 'Workers: 1');
+  assert.equal(await sixFlow.locator('[data-summary-status="failed"]').textContent(), 'Failed: 1');
+  assert.equal(await sixFlow.locator('.task-flow-current').textContent(), 'No task currently running');
+  six.workflow.tasks[1].workStatus = 'blocked';
+  await page.evaluate(six => window.postMessage({ type: 'agents.list', agents: [], workflows: [six] }, '*'), six);
+  await page.waitForFunction(() => document.querySelector('[data-flow-id="six-flow"] [data-summary-status="blocked"]').textContent === 'Blocked: 1');
+  assert.equal(await sixFlow.locator('[data-summary-status="failed"]').textContent(), 'Failed: 0');
+  const viewport = page.viewportSize();
+  await page.setViewportSize({ width: 360, height: 800 });
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  assert.equal(await sixFlow.locator('.task-flow-summary').evaluate(el => el.scrollWidth <= el.clientWidth), true);
+  assert.equal(await sixSteps.count(), 6);
+  await page.setViewportSize(viewport);
+  await page.emulateMedia({ reducedMotion: 'no-preference' });
+  six.status = 'completed';
+  six.workflow.index = 5;
+  for (let index = 0; index < six.workflow.tasks.length; index += 1) {
+    six.workflow.tasks[index].workStatus = 'completed';
+    six.workflow.tasks[index].workRunId = 'shared-run-' + (index + 1);
+  }
+  await page.evaluate(six => window.postMessage({ type: 'agents.list', agents: [], workflows: [six] }, '*'), six);
+  await page.waitForFunction(() => document.querySelector('#task-history-list [data-flow-id="six-flow"]'));
+  await page.evaluate(() => { window.dispatchEvent(new Event('pagehide')); sessionStorage.setItem('submission-restoration-fixture', JSON.stringify(window.saved)); });
+  await page.reload();
+  await page.waitForFunction(() => document.querySelector('#task-history-list [data-flow-id="six-flow"]'));
+  const completedSix = page.locator('#task-history-list [data-flow-id="six-flow"]');
+  assert.equal(await completedSix.locator('.task-flow-total').textContent(), '6 tasks');
+  assert.equal(await completedSix.locator('.task-flow-workers').textContent(), 'Workers: 1');
+  assert.equal(await completedSix.locator('[data-summary-status="completed"]').textContent(), 'Completed: 6');
+  assert.equal(await completedSix.locator('[data-summary-status="pending"]').textContent(), 'Pending: 0');
+  assert.equal(await completedSix.locator('.task-flow-open').count(), 6);
+  assert.deepEqual(await completedSix.locator('.task-flow-step').evaluateAll(items => items.map(item => item.dataset.runId)),
+    Array.from({ length: 6 }, (_, index) => 'shared-run-' + (index + 1)));
+  assert.equal(await page.locator('#run-stage-list [data-flow-id="six-flow"]').count(), 0,
+    'Restoring completed history must not resume the workflow');
+  six.status = 'cancelled';
+  six.workflow.tasks[1].workStatus = 'failed';
+  six.workflow.tasks.slice(2).forEach(task => { task.workStatus = 'cancelled'; });
+  await page.evaluate(six => window.postMessage({ type: 'agents.list', agents: [], workflows: [six] }, '*'), six);
+  await page.waitForFunction(() => document.querySelector('#task-history-list [data-flow-id="six-flow"] [data-summary-status="failed"]').textContent === 'Failed: 1');
+  assert.equal(await completedSix.getByRole('button', { name: 'Close failed workflow', exact: true }).count(), 0);
+  assert.equal(await completedSix.locator('[data-summary-status="cancelled"]').textContent(), 'Cancelled: 4');
   await page.screenshot({ path: '/tmp/af-task-flow.png' });
 }
 module.exports = { checkTaskFlow };
