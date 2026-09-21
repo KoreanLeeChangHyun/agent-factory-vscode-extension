@@ -2,7 +2,7 @@
   "name": "agent-factory-main-chat",
   "displayName": "Agent Factory Main Chat",
   "description": "%extension.description%",
-  "version": "1.0.13",
+  "version": "1.0.14",
   "publisher": "agent-factory",
   "icon": "static/images/agent-factory.png",
   "license": "UNLICENSED",
