@@ -258,7 +258,7 @@ test("running state appears above the composer as an expandable work loop panel"
 test("runtime status stays in the loader while concrete activity updates the timeline", function () {
   assert.match(chatScript, /case "run\.progress":[\s\S]*state\.runProgress = message\.text/);
   assert.match(chatScript, /case "run\.activity":[\s\S]*upsertActivity\(message\.id, message\.category, message\.phase, message\.text, message\.diff, message\.title, message\.output\)/);
-  assert.match(chatScript, /event\.type === "activity" && event\.id === id/);
+  assert.match(chatScript, /indexedTimeline\(\)\.activities\.get\(id\)/);
   assert.match(chatStyles, /\.message-activity/);
   assert.match(chatScript, /runStatusLabel\.textContent = localizedText\(state\.runProgress, state\.runProgressLocalization\) \|\| t\("ui\.working"\)/);
 });
@@ -329,8 +329,8 @@ test("terminal commands show three lines before offering an accessible command e
   assert.match(chatScript, /renderTerminalCommand\(content, event\.text, event\.phase, event\.title\)/);
   assert.match(chatScript, /prompt\.textContent = phaseValue === "failed" \? t\("ui\.failed\.0f4f56"\) : phaseValue === "completed" \? t\("ui\.ran"\) : t\("ui\.running"\)/);
   assert.match(chatScript, /row\.append\(createActivityPhase\(phaseValue\), text\)/);
-  assert.match(chatScript, /toggle\.hidden = text\.scrollHeight <= text\.clientHeight \+ 1/);
-  assert.match(chatScript, /new ResizeObserver\(scheduleCommandDisclosureMeasurement\)/);
+  assert.match(chatScript, /updates\.push\(\[toggle, text\.scrollHeight <= text\.clientHeight \+ 1\]\)/);
+  assert.match(chatScript, /commandDisclosureObserver = new ResizeObserver\(function \(\) \{[\s\S]*?scheduleCommandDisclosureMeasurement\(\)/);
   assert.match(chatScript, /toggle\.setAttribute\("aria-label", t\("ui\.expand\.full\.command"\)\)/);
   assert.match(chatScript, /toggle\.setAttribute\("aria-expanded", String\(expanded\)\)/);
   assert.match(chatScript, /togglePath\.setAttribute\("d", "m4 6 4 4 4-4"\)/);

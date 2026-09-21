@@ -4,7 +4,7 @@ import { homedir } from "node:os";
 import { delimiter, dirname, isAbsolute, join } from "node:path";
 import { localize } from "../../common/localization";
 
-export type CodexCliSource = "configured" | "path" | "nvm";
+export type CodexCliSource = "configured" | "path" | "nvm" | "local";
 
 export interface CodexCliSelection {
   readonly executable: string;
@@ -22,6 +22,8 @@ export interface CodexCliResolutionOptions {
 
 let selectedCodexCli: CodexCliSelection | undefined;
 
+export class CodexCliNotFoundError extends Error {}
+
 /** Apply one selection to dependency setup and every subsequently spawned runtime process. */
 export function configureCodexCli(selection: CodexCliSelection | undefined): void {
   selectedCodexCli = selection;
@@ -31,7 +33,7 @@ export function codexExecutable(): string {
   return selectedCodexCli?.executable ?? "codex";
 }
 
-/** Resolve without a shell: explicit absolute path, current PATH, then stable highest NVM Node version. */
+/** Resolve without a shell: explicit path, PATH, stable NVM, then the user-local installation. */
 export async function resolveCodexCli(options: CodexCliResolutionOptions = {}): Promise<CodexCliSelection> {
   const environment = options.environment ?? process.env;
   const platform = options.platform ?? process.platform;
@@ -58,8 +60,14 @@ export async function resolveCodexCli(options: CodexCliResolutionOptions = {}): 
       : join(homeDirectory, ".nvm");
     const nvm = await findInNvm(nvmDirectory);
     if (nvm) return nvm;
+    // Remote/GUI hosts need not inherit the shell's ~/.local/bin PATH entry.
+    const binDirectory = join(homeDirectory, ".local", "bin");
+    const executable = join(binDirectory, "codex");
+    if (await isExecutableFile(executable)) {
+      return { executable, source: "local", binDirectory };
+    }
   }
-  throw new Error(localize("ui.codex.cli.was.not.found.on.the.workspace.extension.host.path.or.in.nvm.install.codex.there.or.set.agentfactory.mainchat.codexpath.then.retry"));
+  throw new CodexCliNotFoundError(localize("ui.codex.cli.was.not.found.on.the.workspace.extension.host.path.or.in.nvm.install.codex.there.or.set.agentfactory.mainchat.codexpath.then.retry"));
 }
 
 /** GUI hosts may omit package-manager paths; preserve caller order except for the selected CLI bin. */

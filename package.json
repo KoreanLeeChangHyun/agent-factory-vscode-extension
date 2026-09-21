@@ -267,6 +267,13 @@
           ],
           "description": "%agentFactory.mainChat.executionMode.description%"
         },
+        "agentFactory.mainChat.botPrompt": {
+          "type": "string",
+          "default": "",
+          "scope": "application",
+          "editPresentation": "multilineText",
+          "description": "%agentFactory.mainChat.botPrompt.description%"
+        },
         "agentFactory.mainChat.botsEnabled": {
           "type": "boolean",
           "default": true,

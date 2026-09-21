@@ -1,4 +1,5 @@
 {
+  "agentFactory.mainChat.botPrompt.description": "Prompt for Luna companion conversations. Leave empty to use the default. Applies to the next bot message.",
   "agentFactory.mainChat.open.title": "Add Main Agent Chat",
   "agentFactory.mainChat.resume.title": "Agent Factory: Resume Main Agent",
   "agentFactory.mainChat.rename.title": "Rename Main Agent",

@@ -2,8 +2,10 @@ const assert = require('node:assert/strict');
 
 async function checkLocalization(page) {
   const emit = async value => {
-    await page.evaluate(value => window.postMessage(value, '*'), value);
-    await page.evaluate(() => new Promise(requestAnimationFrame));
+    await page.evaluate(value => {
+      window.dispatchEvent(new MessageEvent('message', { data: value }));
+      return new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+    }, value);
   };
   const capability = { model: true, reasoning: true, fast: true, goal: true, taskModes: ['direct', 'work', 'plan', 'verification', 'plan-work', 'work-verification', 'plan-work-verification'] };
   const initialize = { type: 'host.initialize', panelId: 'localized', title: 'Default', projectName: 'Work', role: 'main', runtimeAvailable: true, capabilities: { submit: capability, send: capability }, executionMode: 'danger-full-access', statusItems: ['status', 'project', 'runtime', 'model', 'reasoning', 'fast', 'queue', 'context', 'weekly', 'execution'] };

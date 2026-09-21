@@ -22,7 +22,7 @@ export class RunningTitle {
     this.timer = setInterval(() => {
       this.frame = (this.frame + 1) % FRAME_COUNT;
       this.refresh();
-    }, 160);
+    }, 160 / 1.5);
   }
 
   public refresh(): void {

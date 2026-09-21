@@ -2,12 +2,24 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { runInNewContext } from 'node:vm';
 import test from 'node:test';
+import { importTypeScript } from '../support/import-typescript.mjs';
 
 const root = new URL('../../', import.meta.url);
 const packageJson = JSON.parse(await readFile(new URL('package.json', root), 'utf8'));
 const script = await readFile(new URL('static/js/chat.js', root), 'utf8');
 const protocol = await readFile(new URL('src/protocol/messages.ts', root), 'utf8');
 const validator = await readFile(new URL('src/protocol/validator.ts', root), 'utf8');
+
+test('archived conversation requests accept legacy boundaries and reject invalid identifiers', async () => {
+  const { parseClientMessage } = await importTypeScript('src/protocol/validator.ts');
+  assert.deepEqual(parseClientMessage({ type: 'conversations.request' }), { type: 'conversations.request' });
+  const request = { type: 'conversation.read', conversationId: null, requestId: 'read-1' };
+  assert.deepEqual(parseClientMessage(request), request);
+  assert.deepEqual(parseClientMessage({ ...request, conversationId: 'conversation-old', before: 'run-2' }), { ...request, conversationId: 'conversation-old', before: 'run-2' });
+  for (const change of [{ conversationId: '../escape' }, { conversationId: undefined }, { before: '../run' }, { requestId: '' }]) {
+    assert.equal(parseClientMessage({ ...request, ...change }), undefined);
+  }
+});
 
 test('clear conversation is exposed through command and validated webview protocol', () => {
   assert.ok(packageJson.activationEvents.includes('onCommand:agentFactory.mainChat.clearConversation'));

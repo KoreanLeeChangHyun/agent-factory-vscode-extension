@@ -140,6 +140,16 @@ const aliases: Record<string, string> = {
 let selectedTheme: string | undefined;
 let themeRevision = 0;
 const themeColors = new Map<string, Map<string, string>>();
+// Bound both token-heavy entries and many tiny snippets; weight is an estimate,
+// not a claim about the JavaScript engine's exact heap allocation.
+const tokenCache = new Map<string, { tokens: readonly (readonly HighlightToken[])[]; weight: number }>();
+const cacheBudget = 4 * 1024 * 1024;
+let cacheWeight = 0;
+function clearTokenCache(): void {
+  tokenCache.clear();
+  cacheWeight = 0;
+}
+
 
 function normalizeLanguage(language: string, code: string): string {
   const label = language.trim().toLowerCase().split(/\s+/)[0] ?? "";
@@ -172,9 +182,12 @@ globalThis.agentFactorySyntaxHighlighter = {
     if (source && name) {
       const normalized = normalizeCliTheme(source);
       instance.loadThemeSync({ ...normalized.theme, name });
+      // A reloaded name may still be Shiki's active theme; apply its new object.
+      instance.setTheme(instance.getTheme(name));
       themeColors.set(name, normalized.colors);
     }
     selectedTheme = name;
+    clearTokenCache();
   },
   async highlight(code, language, dark, highContrast = false) {
     const instance = await highlighter;
@@ -184,6 +197,13 @@ globalThis.agentFactorySyntaxHighlighter = {
     const theme = highContrast
       ? (dark ? "github-dark-high-contrast" : "github-light-high-contrast")
       : selectedTheme ?? (dark ? "catppuccin-mocha" : "catppuccin-latte");
+    const key = JSON.stringify([language, theme, code]);
+    const cached = tokenCache.get(key);
+    if (cached) {
+      tokenCache.delete(key);
+      tokenCache.set(key, cached);
+      return cached.tokens;
+    }
     const colors = themeColors.get(theme);
     const result = instance.codeToTokens(code, {
       lang: language,
@@ -191,10 +211,23 @@ globalThis.agentFactorySyntaxHighlighter = {
       tokenizeMaxLineLength: 20_000,
       tokenizeTimeLimit: 100
     });
-    return result.tokens.map((line) => line.map(({ content, color, fontStyle }) => ({
+    const tokens = result.tokens.map((line) => line.map(({ content, color, fontStyle }) => ({
       content,
       ...(color ? { color: colors?.get(color.toLowerCase()) ?? color } : {}),
       ...(fontStyle ? { fontStyle } : {})
     })));
+    const weight = key.length * 2 + tokens.reduce((total, line) =>
+      total + 32 + line.reduce((size, token) => size + 96 + token.content.length * 2, 0), 0);
+    if (weight <= cacheBudget) {
+      while (tokenCache.size >= 128 || cacheWeight + weight > cacheBudget) {
+        const oldest = tokenCache.keys().next().value;
+        if (oldest === undefined) break;
+        cacheWeight -= tokenCache.get(oldest)!.weight;
+        tokenCache.delete(oldest);
+      }
+      tokenCache.set(key, { tokens, weight });
+      cacheWeight += weight;
+    }
+    return tokens;
   }
 };

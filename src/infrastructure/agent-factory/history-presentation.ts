@@ -14,7 +14,8 @@ export function historyPresentation(request: string, taskMode: TaskMode, goal: b
     ["Conversation-based background workflow", "End background workflow"],
     ["Delegated agent model settings for this request", "End delegated agent model settings"],
     ["Delegated agent permissions for this request", "End delegated agent permissions"],
-    ...["interview", "planning", "design"].map(mode => [`Workflow guidance for this message only: ${mode}`, "End workflow guidance"]),
+    ["Work contract execution for this message only", "End work contract execution"],
+    ...["interview", "planning", "design", "contract", "migration", "lessons"].map(mode => [`Workflow guidance for this message only: ${mode}`, "End workflow guidance"]),
     ["Verification selection: standalone inspection by Main, for this request only", "End inspection guidance"]
   ];
   while (true) {

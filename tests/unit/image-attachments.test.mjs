@@ -1,19 +1,17 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
-import { build } from "esbuild";
+import { importTypeScript } from "../support/import-typescript.mjs";
 
-async function importTypeScript(relativePath) {
-  const sourcePath = new URL(`../../${relativePath}`, import.meta.url).pathname;
-  const output = await build({ entryPoints: [sourcePath], bundle: true, format: "esm", platform: "node", target: "node18", write: false });
-  return import(`data:text/javascript;base64,${Buffer.from(output.outputFiles[0].text).toString("base64")}`);
-}
 
-test("webview image messages validate exact bounded content", async function () {
+test("webview image messages validate content without a size ceiling", async function () {
   const { parseClientMessage } = await importTypeScript("src/protocol/validator.ts");
   const data = Buffer.from("small-image").toString("base64");
   const valid = { type: "attachments.createImage", id: "image-one", name: "one.png", mediaType: "image/png", size: 11, data };
   assert.deepEqual(parseClientMessage(valid), valid);
+  const large = Buffer.alloc(11 * 1024 * 1024, 1);
+  const largeMessage = { ...valid, size: large.length, data: large.toString("base64") };
+  assert.deepEqual(parseClientMessage(largeMessage), largeMessage);
   assert.equal(parseClientMessage({ ...valid, size: 12 }), undefined);
   assert.equal(parseClientMessage({ ...valid, mediaType: "image/svg+xml" }), undefined);
   assert.equal(parseClientMessage({ type: "attachment.open", id: "../escape" }), undefined);
@@ -52,11 +50,11 @@ test("sent image history retains host files while releasing only the composer bu
   assert.match(webview, /case "attachments\.restored"/);
 });
 
-test("host image budget includes already staged images", async function () {
-  const { canStageImage, MAX_IMAGE_COUNT, MAX_TOTAL_IMAGE_BYTES } = await importTypeScript("src/common/image-input.ts");
-  assert.equal(canStageImage(MAX_IMAGE_COUNT - 1, MAX_TOTAL_IMAGE_BYTES - 1, 1), true);
-  assert.equal(canStageImage(MAX_IMAGE_COUNT, 0, 1), false);
-  assert.equal(canStageImage(0, MAX_TOTAL_IMAGE_BYTES - 1, 2), false);
+test("image staging accepts counts and sizes above the former ceilings", async function () {
+  const { canStageImage } = await importTypeScript("src/common/image-input.ts");
+  assert.equal(canStageImage(8, 20 * 1024 * 1024, 1), true);
+  assert.equal(canStageImage(100, 0, 1), true);
+  assert.equal(canStageImage(0, 20 * 1024 * 1024, 11 * 1024 * 1024), true);
   const panel = await readFile(new URL("../../src/infrastructure/vscode/chat-panel-manager.ts", import.meta.url), "utf8");
   assert.match(panel, /let imageCount = managed\.imageAttachments\.size/);
   assert.match(panel, /if \(!canStageImage\(imageCount, imageBytes, content\.byteLength\)\)/);

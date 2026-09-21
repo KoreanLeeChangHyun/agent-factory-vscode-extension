@@ -34,6 +34,7 @@ async function checkFactoryRendering(page) {
   ]) {
     await page.evaluate(event => window.dispatchEvent(new MessageEvent('message', { data: { type: 'run.activity', ...event } })), event);
     const content = page.locator(`[data-id="${event.id}"] > .message-content`);
+    await content.waitFor({ state: 'attached' });
     assert.equal(await content.evaluate(el => getComputedStyle(el).borderTopStyle), 'none');
     assert.equal(await content.evaluate(el => getComputedStyle(el).backgroundColor), 'rgba(0, 0, 0, 0)');
     assert.equal(await content.locator('.managed-agent-card').count(), 0);

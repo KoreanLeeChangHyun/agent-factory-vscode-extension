@@ -16,7 +16,7 @@ export async function readMarkdownImage(href: string, roots: readonly string[]):
     const file = await open(path, "r");
     try {
       const info = await file.stat();
-      if (!info.isFile() || info.size < 1 || info.size > 10 * 1024 * 1024) return undefined;
+      if (!info.isFile() || info.size < 1) return undefined;
       const data = Buffer.alloc(info.size);
       let offset = 0;
       while (offset < data.length) {

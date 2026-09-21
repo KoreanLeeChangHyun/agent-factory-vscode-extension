@@ -94,6 +94,51 @@ async function main() {
       }, postMessage(message) { window.sentMessages.push(message); } });
     }, fixture);
     await page.goto('http://127.0.0.1:' + server.address().port);
+    if (process.argv.includes('--worktree-only')) {
+      await require('./worktrees.cjs').checkWorktrees(page);
+      assert.deepEqual(errors, []);
+      return;
+    }
+    if (process.argv.includes('--image-conversion-only')) {
+      await require('./image-conversion.cjs').checkImageConversion(page);
+      assert.deepEqual(errors, []);
+      return;
+    }
+    if (process.argv.includes('--notes-only')) {
+      await require('./notes.cjs').checkNotes(page);
+      assert.deepEqual(errors, []);
+      return;
+    }
+    if (process.argv.includes('--conversation-history-only')) {
+      await require('./conversation-history.cjs').checkConversationHistory(page);
+      assert.deepEqual(errors, []);
+      return;
+    }
+    if (process.argv.includes('--composer-rendering-only')) {
+      await require('./composer-rendering.cjs').checkComposerRendering(page);
+      assert.deepEqual(errors, []);
+      return;
+    }
+    if (process.argv.includes('--question-navigation-only')) {
+      await require('./question-navigation.cjs').checkQuestionNavigation(page);
+      assert.deepEqual(errors, []);
+      return;
+    }
+    if (process.argv.includes('--history-index-only')) {
+      await require('./history-index.cjs').checkHistoryIndex(page);
+      assert.deepEqual(errors, []);
+      return;
+    }
+    if (process.argv.includes('--rendering-throughput-only')) {
+      await require('./rendering-throughput.cjs').checkRenderingThroughput(page);
+      assert.deepEqual(errors, []);
+      return;
+    }
+    if (process.argv.includes('--rendering-performance-only')) {
+      await require('./rendering-performance.cjs').checkRenderingPerformance(page);
+      assert.deepEqual(errors, []);
+      return;
+    }
     if (process.argv.includes('--local-file-picker-only')) {
       await require('./local-file-picker.cjs').checkLocalFilePicker(page);
       assert.deepEqual(errors, []);
@@ -238,6 +283,18 @@ async function main() {
       console.log('Factory Bot states, completion, failure, reduced motion and layout checks passed.');
       return;
     }
+    if (process.argv.includes('--bot-talk-only')) {
+      await require('./bot-talk.cjs').checkBotTalk(page);
+      assert.deepEqual(errors, []);
+      console.log('Bot talk routing, draft preservation, reply safety and responsive bubble passed.');
+      return;
+    }
+    if (process.argv.includes('--bot-prompt-only')) {
+      await require('./bot-talk.cjs').checkBotPrompt(page);
+      assert.deepEqual(errors, []);
+      console.log('Bot prompt editing, save failure, reset and settings synchronization passed.');
+      return;
+    }
     if (process.argv.includes('--document-attachments-only')) {
       const attachments = [
         { id: 'doc', kind: 'file', name: 'communication.md', uri: 'vscode-remote://ssh-remote+host/home/docs/communication.md' },
@@ -324,20 +381,38 @@ async function main() {
       return;
     }
     if (process.argv.includes('--compaction-only')) {
-      for (const phase of ['started', 'completed']) {
-        const text = phase === 'started' ? 'Compacting context' : 'Context compaction completed';
-        await page.evaluate(({ phase, text }) => window.postMessage({
+      await page.emulateMedia({ reducedMotion: 'no-preference' });
+      for (const [phase, title, text] of [
+        ['started', 'Context compaction', 'Compacting context'],
+        ['completed', 'Context compaction', 'Context compaction completed'],
+        ['started', '컨텍스트 압축', '컨텍스트 압축 중'],
+        ['completed', '컨텍스트 압축', '컨텍스트 압축 완료']
+      ]) {
+        await page.evaluate(({ phase, text, title }) => window.postMessage({
           type: 'run.activity', id: 'compaction-render-check', category: 'tool', phase,
-          text, title: 'Context compaction'
-        }, '*'), { phase, text });
+          text, title
+        }, '*'), { phase, text, title });
         const card = page.locator('[data-id="compaction-render-check"]');
         await card.waitFor();
         await page.waitForFunction(text => document.querySelector('[data-id="compaction-render-check"]')?.textContent.includes(text), text);
         assert.equal(await card.count(), 1);
         assert.equal(await card.isVisible(), true);
+        assert.equal(await card.locator('.message-heading').count(), 0, 'Compaction uses one status row without a duplicate heading');
+        assert.equal(await card.locator('[role="status"]').textContent(), (phase === 'completed' ? '✓' : '') + text);
+        assert.ok((await card.boundingBox()).height <= 24, 'Compaction occupies a single compact row');
+        const indicator = card.locator('.compaction-indicator');
+        assert.equal(await indicator.evaluate(el => getComputedStyle(el).animationName), phase === 'started' ? 'compaction-spin' : 'none');
+        if (phase === 'started') {
+          const before = await indicator.evaluate(el => getComputedStyle(el).transform);
+          await page.waitForTimeout(150);
+          assert.notEqual(await indicator.evaluate(el => getComputedStyle(el).transform), before, 'The progress indicator rotates');
+          await page.emulateMedia({ reducedMotion: 'reduce' });
+          assert.equal(await indicator.evaluate(el => getComputedStyle(el).animationName), 'none');
+          await page.emulateMedia({ reducedMotion: 'no-preference' });
+        }
       }
       assert.deepEqual(errors, []);
-      console.log('Context compaction start/completion render in one activity card.');
+      console.log('Compact context status, animation, completion and reduced motion checks passed.');
       return;
     }
     if (process.argv.includes('--image-composer-only')) {

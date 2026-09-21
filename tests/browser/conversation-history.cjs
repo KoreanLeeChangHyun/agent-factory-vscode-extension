@@ -1,0 +1,38 @@
+const assert = require('node:assert/strict');
+async function checkConversationHistory(page) {
+  const emit = data => page.evaluate(data => window.dispatchEvent(new MessageEvent('message', { data })), data);
+  await emit({ type: 'host.initialize', panelId: 'history-test', agentId: 'main-test', role: 'main', runtimeAvailable: true, capabilities: { submit: {}, send: {} } });
+  await page.locator('#prompt').fill('Keep this draft');
+  const before = await page.locator('#timeline').textContent();
+  await page.locator('#submission-button').click();
+  await page.locator('#task-history > summary').click();
+  assert.equal(await page.locator('#task-history-list .history-empty').textContent(), 'No task history.');
+  const taskHeight = await page.locator('#task-history-list .history-empty').evaluate(el => el.getBoundingClientRect().height);
+  await page.locator('#conversation-history > summary').click();
+  await page.waitForFunction(() => window.sentMessages.some(m => m.type === 'conversations.request'));
+  await emit({ type: 'conversations.list', conversations: [] });
+  assert.equal(await page.locator('#conversation-history-list .history-empty').textContent(), 'No conversation history.');
+  assert.equal(await page.locator('#conversation-history-list .history-empty').evaluate(el => el.getBoundingClientRect().height), taskHeight);
+  await emit({ type: 'conversations.list', conversations: [{ conversationId: null, startedAt: '2026-09-01T12:00:00Z', runCount: 2 }] });
+  await page.locator('.conversation-history-entry').click();
+  assert.equal(await page.locator('#conversation-reader').isVisible(), true);
+  const lastRead = () => page.evaluate(() => window.sentMessages.filter(m => m.type === 'conversation.read').at(-1));
+  const request = await lastRead();
+  assert.equal(request.conversationId, null);
+  await emit({ type: 'conversation.read.result', requestId: 'stale', history: { messages: [{ type: 'user', text: 'STALE' }] } });
+  assert.doesNotMatch(await page.locator('#conversation-reader-messages').textContent(), /STALE/);
+  await emit({ type: 'conversation.read.result', requestId: request.requestId, history: { nextBefore: 'run-2', messages: [{ type: 'user', text: 'Previous question' }, { type: 'assistant', text: '**Previous answer**' }] } });
+  assert.match(await page.locator('#conversation-reader-messages').textContent(), /Previous question.*Previous answer/);
+  await page.locator('#conversation-reader-older').click();
+  const older = await lastRead();
+  assert.equal(older.before, 'run-2');
+  await emit({ type: 'conversation.read.result', requestId: older.requestId, history: { messages: [{ type: 'user', text: 'First question' }] } });
+  assert.match(await page.locator('#conversation-reader-messages').textContent(), /First question.*Previous question/);
+  await page.keyboard.press('Escape');
+  assert.equal(await page.locator('#conversation-reader').isVisible(), false);
+  assert.equal(await page.locator('#prompt').inputValue(), 'Keep this draft');
+  assert.equal(await page.locator('#timeline').textContent(), before);
+  assert.equal(await page.evaluate(() => window.sentMessages.some(m => ['chat.send', 'run.cancel', 'conversation.clear'].includes(m.type))), false);
+  console.log('Conversation history: equal empty heights, archived read, pagination, stale response and current draft preservation passed.');
+}
+module.exports = { checkConversationHistory };

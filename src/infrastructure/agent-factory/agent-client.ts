@@ -13,10 +13,10 @@ import { homedir, tmpdir } from "node:os";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { AsyncCache } from "../../common/async-cache";
 
-const MAX_PROCESS_OUTPUT_BYTES = 1024 * 1024;
-const MAX_RESULT_BYTES = 1024 * 1024;
-const MAX_EVENTS_BYTES = 8 * 1024 * 1024;
-const COMMAND_TIMEOUT_MS = 20_000;
+const MAX_PROCESS_OUTPUT_BYTES = Infinity;
+const MAX_RESULT_BYTES = Infinity;
+const MAX_EVENTS_BYTES = Infinity;
+const COMMAND_TIMEOUT_MS = 0;
 const CONTEXT_USAGE_REFRESH_INTERVAL_MS = 1_000;
 const MANAGED_ID = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
 
@@ -41,6 +41,7 @@ export interface ExecutionCapabilities {
   readonly goal: boolean;
   readonly images?: boolean;
   readonly automaticRequestHash?: boolean;
+  readonly worktrees?: boolean;
   readonly taskModes?: readonly TaskMode[];
   readonly diagnostic?: string;
 }
@@ -134,6 +135,12 @@ export interface MainAgentSession {
   readonly model?: string;
 }
 
+export interface SavedConversation {
+  readonly conversationId: string | null;
+  readonly startedAt: string;
+  readonly runCount: number;
+}
+
 export interface ConversationHistory {
   readonly conversationId?: string;
   readonly nextBefore?: string;
@@ -159,8 +166,27 @@ export interface ChildAgentSession {
   readonly verifiedWorkRunId?: string;
 }
 
+export interface ConversationWorktree {
+  readonly agentId: string;
+  readonly workspaceRoot: string;
+  readonly workingDirectory: string;
+  readonly branch: string | null;
+  readonly dirty: boolean;
+  readonly available: boolean;
+  readonly conflicts: readonly string[];
+  readonly worktree: { readonly id: string; readonly path: string; readonly branch: string; readonly targetBranch: string; readonly phase: "creating" | "active" | "merging" | "conflict" | "merged" } | null;
+}
+
+export interface WorktreeOptions {
+  readonly changes?: "keep" | "copy";
+  readonly path?: string;
+  readonly executionMode?: ExecutionMode;
+}
+
 export interface AgentRuntimeClient {
-  history?(agentId: string, options?: { before?: string; limit: number }): Promise<ConversationHistory>;
+  worktree?(agentId: string, action: "status" | "create" | "merge", options?: WorktreeOptions): Promise<ConversationWorktree>;
+  conversations?(agentId: string): Promise<readonly SavedConversation[]>;
+  history?(agentId: string, options?: { before?: string; limit: number; conversationId?: string | null }): Promise<ConversationHistory>;
   capabilities(agentId?: string): Promise<{ readonly submit: ExecutionCapabilities; readonly send: ExecutionCapabilities; readonly executionMode?: "read-only" | "workspace-write" | "danger-full-access" | "bypass" }>;
   submit(agentId: string, message: string, execution: ExecutionOptions, images?: readonly RuntimeImageInput[]): Promise<RunAcceptance>;
   send(agentId: string, message: string, execution: ExecutionOptions, images?: readonly RuntimeImageInput[]): Promise<RunAcceptance>;
@@ -178,6 +204,7 @@ export interface AgentRuntimeClient {
 }
 
 export class AgentFactoryClient implements AgentRuntimeClient {
+  private readonly worktreeAgents = new Set<string>();
   private readonly capabilityCache = new AsyncCache<Awaited<ReturnType<AgentRuntimeClient["capabilities"]>>>(30_000);
   private readonly statusSnapshots = new Map<string, { signature: string; observedAt: number; value: RunStatus }>();
   private readonly statusCache = new AsyncCache<RunStatus>(0, 64);
@@ -188,6 +215,7 @@ export class AgentFactoryClient implements AgentRuntimeClient {
   private readonly observedChildRuns = new ObservedRunCache<ReadonlyMap<string, ChildAgentReference>>(() => this.now());
   private readonly childEventSnapshots = new Map<string, { readonly signature: string; readonly references: readonly ChildAgentReference[] }>();
   private readonly directorySnapshots = new Map<string, { signature: string; entries: Dirent[]; checkedAt: number }>();
+  private directorySnapshotEntries = 0;
   private readonly runStateSnapshots = new Map<string, { signature: string; value: Record<string, unknown>; bytes: number }>();
   private runStateSnapshotBytes = 0;
   private readonly workflowSnapshots = new Map<string, { readonly signature: string; readonly observedAt: number; readonly state: Record<string, unknown>; readonly snapshot: Record<string, unknown> }>();
@@ -274,6 +302,31 @@ export class AgentFactoryClient implements AgentRuntimeClient {
     return { goal: readNativeGoal(document.goal), ...(typeof document.error === "string" ? { error: document.error } : {}) };
   }
 
+  public async worktree(agentId: string, action: "status" | "create" | "merge", options: WorktreeOptions = {}): Promise<ConversationWorktree> {
+    const value = await this.command(["worktree", "--project-root", this.projectRoot, "--agent", agentId, action,
+      ...(options.changes ? ["--changes", options.changes] : []),
+      ...(options.path ? ["--path", options.path] : []),
+      ...executionPolicyArguments(options.executionMode)]);
+    if (value.kind !== "worktree" || value.schemaVersion !== 1 || value.agentId !== agentId ||
+        typeof value.workspaceRoot !== "string" || typeof value.workingDirectory !== "string" ||
+        !isAbsolute(value.workingDirectory) || typeof value.available !== "boolean" || typeof value.dirty !== "boolean" ||
+        !(value.branch === null || typeof value.branch === "string") || !Array.isArray(value.conflicts) ||
+        !value.conflicts.every(item => typeof item === "string")) throw new Error(localize("worktree.invalid"));
+    const tree = readRecordOrUndefined(value.worktree);
+    if (value.worktree !== null && (!tree || !["creating", "active", "merging", "conflict", "merged"].includes(String(tree.phase)) ||
+        !["id", "path", "branch", "targetBranch"].every(key => typeof tree[key] === "string"))) throw new Error(localize("worktree.invalid"));
+    return value as unknown as ConversationWorktree;
+  }
+
+  private async workingDirectory(agentId: string): Promise<string> {
+    const path = await this.managedPath(agentId, "session.json");
+    let session: Record<string, unknown>;
+    try { session = readRecord(JSON.parse((await readManagedBytes(path, MAX_RESULT_BYTES)).toString("utf8")), "session"); }
+    catch (error) { if (isMissingFile(error)) return this.projectRoot; throw error; }
+    const tree = readRecordOrUndefined(session.worktree);
+    return tree && tree.phase !== "merged" && typeof tree.path === "string" ? tree.path : this.projectRoot;
+  }
+
   public async resetConversation(agentId: string): Promise<{ conversationId: string; startedAt: string }> {
     const document = await this.command([
       "reset-conversation", "--project-root", this.projectRoot, "--agent", agentId
@@ -290,6 +343,8 @@ export class AgentFactoryClient implements AgentRuntimeClient {
 
   private async checkedExecution(command: "submit" | "send", execution: ExecutionOptions, agentId?: string, hasImages = false): Promise<string[]> {
     const supported = (await this.capabilities(agentId))[command];
+    if (agentId && supported.worktrees === true) this.worktreeAgents.add(agentId);
+    else if (agentId) this.worktreeAgents.delete(agentId);
     if (execution.taskMode && !supported.taskModes?.includes(execution.taskMode)) {
       throw new Error(localize("ui.update.the.agent.factory.plugin.and.codex.to.versions.that.support.the.selected.task.mode"));
     }
@@ -371,7 +426,10 @@ export class AgentFactoryClient implements AgentRuntimeClient {
     let preparationGuidance: string | undefined;
     const modeIndex = arguments_.indexOf("--task-mode");
     if (modeIndex >= 0 && arguments_[modeIndex + 1] !== "direct") {
-      preparationGuidance = await submissionContext(this.projectRoot, this.execPath);
+      const agentIndex = arguments_.indexOf("--agent");
+      const agent = arguments_[agentIndex + 1]!;
+      const directory = arguments_[0] === "send" && this.worktreeAgents.has(agent) ? await this.workingDirectory(agent) : this.projectRoot;
+      preparationGuidance = await submissionContext(directory, this.execPath);
     }
     return { document: await this.rawInputCommand(arguments_, message + (preparationGuidance ?? ""), images), preparationGuidance };
   }
@@ -394,13 +452,13 @@ export class AgentFactoryClient implements AgentRuntimeClient {
         let content: Buffer;
         try {
           const before = await source.stat();
-          if (!before.isFile() || before.size < 1 || before.size > 10 * 1024 * 1024) throw new Error(localize("ui.image.file.size.is.outside.the.allowed.range"));
+          if (!before.isFile() || before.size < 1) throw new Error(localize("ui.image.file.size.is.outside.the.allowed.range"));
           content = await source.readFile();
           const after = await source.stat();
           if (before.dev !== after.dev || before.ino !== after.ino || before.size !== after.size || before.mtimeMs !== after.mtimeMs) throw new Error(localize("ui.the.image.file.changed.while.being.read"));
         } finally { await source.close(); }
         total += content.byteLength;
-        if (total > 20 * 1024 * 1024) throw new Error(localize("ui.total.image.size.must.not.exceed.20.mib"));
+
         const name = `${String(index).padStart(2, "0")}${suffix}`;
         await writeFile(join(directory, name), content, { mode: 0o600, flag: "wx" });
         contractImages.push({ path: name, mediaType: image.mediaType });
@@ -467,14 +525,44 @@ export class AgentFactoryClient implements AgentRuntimeClient {
     return undefined;
   }
 
-  public async history(agentId: string, options?: { before?: string; limit: number }): Promise<ConversationHistory> {
+  public async conversations(agentId: string): Promise<readonly SavedConversation[]> {
+    const sessionPath = await this.managedPath(agentId, "session.json");
+    const session = readRecord(JSON.parse((await readManagedBytes(sessionPath, 256 * 1024)).toString("utf8")), "history session");
+    if (session.agentId !== agentId) throw new Error("Invalid conversation history binding.");
+    const current = session.conversationId ?? null;
+    const groups = new Map<string | null, SavedConversation>();
+    const runsPath = await this.managedPath(agentId, "runs");
+    const entries = await this.managedDirectoryEntries(runsPath).catch(error => {
+      if (isMissingFile(error)) return [];
+      throw error;
+    });
+    for (const entry of entries) {
+      if (!entry.isDirectory() || entry.isSymbolicLink() || !MANAGED_ID.test(entry.name)) continue;
+      const path = await this.managedPath(agentId, "runs", entry.name, "state.json");
+      let state: Record<string, unknown>;
+      try { state = readRecord(JSON.parse((await readManagedBytes(path, 256 * 1024)).toString("utf8")), "history run"); }
+      catch (error) { if (isMissingFile(error)) continue; throw error; }
+      if (state.agentId !== agentId || state.runId !== entry.name) throw new Error("Invalid conversation history run binding.");
+      const id = typeof state.conversationId === "string" ? state.conversationId : null;
+      if (id === current || (id !== null && !MANAGED_ID.test(id))) continue;
+      if (!["completed", "failed", "cancelled", "needs-human-decision"].includes(String(state.status))) continue;
+      const startedAt = typeof state.acceptedAt === "string" ? state.acceptedAt : entry.name;
+      const previous = groups.get(id);
+      groups.set(id, { conversationId: id, startedAt: previous && previous.startedAt < startedAt ? previous.startedAt : startedAt, runCount: (previous?.runCount ?? 0) + 1 });
+    }
+    return [...groups.values()].sort((a, b) => b.startedAt.localeCompare(a.startedAt));
+  }
+
+  public async history(agentId: string, options?: { before?: string; limit: number; conversationId?: string | null }): Promise<ConversationHistory> {
     if (options && (!Number.isInteger(options.limit) || options.limit < 1 || options.limit > 100 ||
         (options.before !== undefined && !MANAGED_ID.test(options.before)))) throw new Error("Invalid history page");
+    if (options?.conversationId != null && !MANAGED_ID.test(options.conversationId)) throw new Error("Invalid conversation ID");
     const sessionPath = await this.managedPath(agentId, "session.json");
     const readSession = async () => readRecord(JSON.parse((await readManagedBytes(sessionPath, 256 * 1024)).toString("utf8")), "history session");
     const session = await readSession();
     if (session.agentId !== agentId) throw new Error("Invalid conversation history binding.");
-    const conversationId = typeof session.conversationId === "string" ? session.conversationId : undefined;
+    const currentConversationId = typeof session.conversationId === "string" ? session.conversationId : undefined;
+    const conversationId = options?.conversationId !== undefined ? options.conversationId ?? undefined : currentConversationId;
     const runsPath = await this.managedPath(agentId, "runs");
     const entries = await this.managedDirectoryEntries(runsPath).catch(error => {
       if (isMissingFile(error)) return [];
@@ -484,8 +572,20 @@ export class AgentFactoryClient implements AgentRuntimeClient {
     let bytes = 0;
     const ordered = entries.filter(entry => entry.isDirectory() && !entry.isSymbolicLink() && MANAGED_ID.test(entry.name) &&
       (!options?.before || entry.name < options.before)).sort((a, b) => a.name.localeCompare(b.name));
-    const page = options ? ordered.slice(-options.limit) : ordered;
-    const nextBefore = options && page.length < ordered.length ? page[0]?.name : undefined;
+    // Archived pagination counts only runs from the selected conversation.
+    const selected = [];
+    if (options?.conversationId !== undefined) {
+      for (const entry of ordered) {
+        const path = await this.managedPath(agentId, "runs", entry.name, "state.json");
+        let state: Record<string, unknown>;
+        try { state = readRecord(JSON.parse((await readManagedBytes(path, 256 * 1024)).toString("utf8")), "history run"); }
+        catch (error) { if (isMissingFile(error)) continue; throw error; }
+        if (state.agentId !== agentId || state.runId !== entry.name) throw new Error("Invalid conversation history run binding.");
+        if ((state.conversationId ?? undefined) === conversationId && ["completed", "failed", "cancelled", "needs-human-decision"].includes(String(state.status))) selected.push(entry);
+      }
+    } else selected.push(...ordered);
+    const page = options ? selected.slice(-options.limit) : selected;
+    const nextBefore = options && page.length < selected.length ? page[0]?.name : undefined;
     for (const entry of page) {
       const statePath = await this.managedPath(agentId, "runs", entry.name, "state.json");
       let state: Record<string, unknown>;
@@ -498,7 +598,7 @@ export class AgentFactoryClient implements AgentRuntimeClient {
       const requestPath = await this.managedPath(agentId, "runs", entry.name, "request.md");
       const request = (await readManagedBytes(requestPath, 8 * 1024 * 1024)).toString("utf8");
       bytes += Buffer.byteLength(request);
-      if (bytes > 32 * 1024 * 1024) throw new Error("Conversation history exceeds the loading limit.");
+
       const taskMode = TASK_MODES.includes(state.taskMode as TaskMode) ? state.taskMode as TaskMode : "direct";
       const options = readRecordOrUndefined(state.executionOptions);
       messages.push({ type: "user", id: `history-user-${entry.name}`, runId: entry.name,
@@ -509,11 +609,11 @@ export class AgentFactoryClient implements AgentRuntimeClient {
         try { response = await this.readManagedResult(resultPath, agentId, entry.name); }
         catch (error) { if (!isMissingFile(error)) throw error; }
         bytes += Buffer.byteLength(response);
-        if (bytes > 32 * 1024 * 1024) throw new Error("Conversation history exceeds the loading limit.");
+
         if (response) messages.push({ type: "assistant", id: `history-assistant-${entry.name}`, runId: entry.name, text: response, phase: "final" });
       }
     }
-    if (((await readSession()).conversationId ?? undefined) !== conversationId) {
+    if (((await readSession()).conversationId ?? undefined) !== currentConversationId) {
       throw new Error("The conversation changed while history was loading. Reopen the conversation.");
     }
     return { conversationId, messages, ...(nextBefore ? { nextBefore } : {}) };
@@ -569,8 +669,13 @@ export class AgentFactoryClient implements AgentRuntimeClient {
     const start = Math.min(cursor, lines.length);
     const updates: RunUpdate[] = [];
     const newLines = lines.slice(start);
+    let runWorkingDirectory: unknown;
+    if (newLines.length) {
+      try { runWorkingDirectory = (await this.cachedRunState(join(dirname(path), "state.json")))?.workingDirectory; }
+      catch (error) { if (!isMissingFile(error)) throw error; }
+    }
     for (const line of newLines) {
-      updates.push(...await progressUpdates(line, this.projectRoot, join(dirname(path), "result.md")));
+      updates.push(...await progressUpdates(line, typeof runWorkingDirectory === "string" ? runWorkingDirectory : this.projectRoot, join(dirname(path), "result.md")));
     }
     const usage = await this.readContextUsageUpdate(agentId, runId, newLines.some(isTurnCompletedLine));
     if (usage) updates.push({ kind: "usage", ...usage });
@@ -1011,14 +1116,15 @@ export class AgentFactoryClient implements AgentRuntimeClient {
     if (cached?.signature === signature && this.now() - cached.checkedAt < 10_000) return cached.entries;
     const entries = await readdir(path, { withFileTypes: true });
     const after = await lstat(path);
+    this.directorySnapshotEntries -= this.directorySnapshots.get(path)?.entries.length ?? 0;
     this.directorySnapshots.delete(path);
     if (signature === `${after.dev}:${after.ino}:${after.mtimeMs}:${after.ctimeMs}`) {
       this.directorySnapshots.set(path, { signature, entries, checkedAt: this.now() });
       // Bound retained directory entries as well as the number of directories.
-      let retained = [...this.directorySnapshots.values()].reduce((total, item) => total + item.entries.length, 0);
-      while (this.directorySnapshots.size > 1_024 || retained > 10_000) {
+      this.directorySnapshotEntries += entries.length;
+      while (this.directorySnapshots.size > 1_024 || this.directorySnapshotEntries > 10_000) {
         const oldest = this.directorySnapshots.keys().next().value!;
-        retained -= this.directorySnapshots.get(oldest)!.entries.length;
+        this.directorySnapshotEntries -= this.directorySnapshots.get(oldest)!.entries.length;
         this.directorySnapshots.delete(oldest);
       }
     }
@@ -1124,7 +1230,7 @@ export class AgentFactoryClient implements AgentRuntimeClient {
   ): Promise<ProcessOutput> {
     // New sessions and capability probes must use the same exact CLI as setup.
     // Sends retain the executable captured by the existing runtime session.
-    if (codexExecutable() !== "codex" && ["submit", "capabilities"].includes(arguments_[0] ?? "") && !arguments_.includes("--codex")) {
+    if (codexExecutable() !== "codex" && ["submit", "capabilities", "worktree"].includes(arguments_[0] ?? "") && !arguments_.includes("--codex")) {
       arguments_ = [...arguments_, "--codex", codexExecutable()];
     }
     try {
@@ -1355,15 +1461,18 @@ async function progressUpdates(line: string, projectRoot: string, ownResultPath:
   if (item.type === "webSearch" || item.type === "web_search") {
     const action = readRecordOrUndefined(item.action);
     const queries = Array.isArray(action?.queries) ? action.queries.filter((query): query is string => typeof query === "string") : [];
+    const opensPage = action?.type === "openPage" || action?.type === "open_page" ||
+      (action?.type == null && typeof action?.url === "string" && !queries.length && typeof action?.query !== "string" && typeof item.query !== "string");
+    const title = localize(opensPage ? "ui.web.page.open" : "ui.web.search");
     const detail = queries.length ? queries.join("\n")
       : typeof action?.query === "string" ? action.query
       : typeof item.query === "string" ? item.query
       : typeof action?.url === "string" ? action.url
-      : localize("ui.web.search");
+      : title;
     const failed = item.status === "failed" || (completed && item.error != null);
     return compactUpdates(
-      itemId ? activityUpdate(itemId, "tool", failed ? "failed" : completed ? "completed" : "started", truncate(detail, 32768), undefined, localize("ui.web.search")) : undefined,
-      statusUpdate(failed ? localize("ui.web.search.failed") : completed ? localize("ui.analyzing.results") : localize("ui.searching.the.web"))
+      itemId ? activityUpdate(itemId, "tool", failed ? "failed" : completed ? "completed" : "started", truncate(detail, 32768), undefined, title) : undefined,
+      statusUpdate(failed ? localize(opensPage ? "ui.web.page.open.failed" : "ui.web.search.failed") : completed ? localize("ui.analyzing.results") : localize(opensPage ? "ui.web.page.opening" : "ui.searching.the.web"))
     );
   }
   if (item.type === "mcp_tool_call") {
@@ -1382,7 +1491,7 @@ async function progressUpdates(line: string, projectRoot: string, ownResultPath:
 function readNativeGoal(value: unknown): NativeGoal | null {
   if (value === null || value === undefined) return null;
   const goal = readRecord(value, "native goal");
-  if (typeof goal.threadId !== "string" || typeof goal.objective !== "string" || goal.objective.length > 4000 ||
+  if (typeof goal.threadId !== "string" || typeof goal.objective !== "string" ||
       !["active", "paused", "blocked", "usageLimited", "budgetLimited", "complete"].includes(String(goal.status)) ||
       readTokenCount(goal.tokensUsed) === undefined || readTokenCount(goal.timeUsedSeconds) === undefined) {
     throw new Error(localize("ui.invalid.native.goal.state"));
@@ -1700,7 +1809,7 @@ export function runBoundedProcess(
         stderr: Buffer.concat(stderr).toString("utf8")
       });
     });
-    timer = setTimeout(
+    if (timeoutMs > 0) timer = setTimeout(
       () => finishWithError(new Error(localize("ui.the.agent.factory.runtime.command.timed.out"))),
       timeoutMs
     );

@@ -1,9 +1,17 @@
-export const BUSINESS_MODES = ["normal", "interview", "planning", "design"] as const;
+export const BUSINESS_MODES = ["normal", "interview", "planning", "design", "contract", "migration", "lessons"] as const;
 export type BusinessMode = typeof BUSINESS_MODES[number];
 
 /** Workflow guidance belongs to this message, independently of its execution route. */
 export function withBusinessMode(text: string, mode: BusinessMode = "normal"): string {
   if (mode === "normal") return text;
+  if (mode === "contract") return `${text}\n\n[Workflow guidance for this message only: contract]\nCreate or revise a work contract from the current conversation, attachments and existing artifacts. Apply Convention's work-contract rules. Include its ID and version, stable task IDs, outcomes, scope, constraints, completion criteria and exact file operations after relevant inspection. Reuse the existing contract when present. If there is no prior task context, begin by asking the minimum questions needed to establish the intended work; do not invent a target. Ask about material gaps and Human-owned decisions. This request authorizes contract preparation only, not implementation, delegation, publication or Specification promotion.\n[End workflow guidance]`;
+  if (mode === "migration" || mode === "lessons") {
+    const guidance = mode === "migration"
+      ? "Migrate the requested documents to the latest applicable Agent Factory plugin document rules. Identify and read the target rule version from authoritative plugin sources; do not assume the installed version is latest or silently substitute an older version. If the latest rules cannot be established, report that limitation. Inspect the requested documents, preserve their meaning, language, provenance and authority, and update their structure, metadata, classification, links and derived exposure as required. Report the rule version used, changed documents and unresolved conflicts."
+      : "Collect lessons learned from the requested conversation, work results and existing records, retaining concrete evidence and provenance. Turn supported, reusable lessons into actionable rules with scope and conditions; distinguish observations and hypotheses from established lessons. Consolidate with existing rules without duplication. Do not invent lessons or silently resolve conflicts with accepted rules; ask only for genuinely unresolved Human-owned semantic decisions. Report the collected lessons and resulting rule changes.";
+    return `${text}\n\n[Workflow guidance for this message only: ${mode}]\n${guidance}
+Apply the Document skill's current document contract and applicable synchronization procedure. Resolve the target from the Human request and available conversation; ask for the missing target only when it cannot be established. Preserve source material and unrelated changes. This workflow applies only to this message and does not change the captured execution route, approval policy or scope of authority.\n[End workflow guidance]`;
+  }
   const guidance = {
     interview: "Elicit requirements and unresolved decisions from the Human. Separate evidence, assumptions, and accepted answers.",
     planning: "Develop planning intent, scope, dependencies, and acceptance criteria with the Human.",

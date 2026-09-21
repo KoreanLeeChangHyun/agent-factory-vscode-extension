@@ -6,18 +6,18 @@ async function checkMessageSubmission(page) {
   await page.waitForFunction(() => window.saved?.panelId === 'submission');
   assert.equal(await page.locator('[data-id="user"] .message-submission').count(), 0);
   assert.equal(await page.locator('[data-id="user"] details').count(), 0);
-  await page.locator('#prompt').fill('Original design request');
+  await page.locator('#prompt').fill('Original contract request');
   await page.locator('#submission-button').click();
-  await page.locator('#submission-menu [data-workflow="design"]').click();
+  await page.locator('#submission-menu [data-workflow="contract"]').click();
   const sent = await page.evaluate(() => window.sentMessages.filter(m => m.type === 'chat.send').at(-1));
   await page.locator('#pending-queue-toggle').click();
-  assert.match(await page.locator('#pending-message-queue').innerText(), /Design/);
-  const submission = { taskMode: 'direct', businessMode: 'design', goal: false, guidance: '\n\nExact app-added guidance <script>unsafe()</script>' };
+  assert.match(await page.locator('#pending-message-queue').innerText(), /Contract/);
+  const submission = { taskMode: 'direct', businessMode: 'contract', goal: false, guidance: '\n\nExact app-added guidance <script>unsafe()</script>' };
   await page.evaluate(({ sent, submission }) => window.postMessage({ type: 'chat.started', id: sent.id, text: sent.text, attachments: [], submission }, '*'), { sent, submission });
   const message = page.locator(`[data-id="${sent.id}"]`);
   await message.waitFor();
-  assert.equal(await message.locator('.message-submission').innerText(), 'Design');
-  assert.match(await message.innerText(), /Original design request/);
+  assert.equal(await message.locator('.message-submission').innerText(), 'Contract');
+  assert.match(await message.innerText(), /Original contract request/);
   assert.equal(await message.locator('details').getAttribute('open'), null);
   await message.locator('summary').focus();
   await page.keyboard.press('Enter');
@@ -36,6 +36,7 @@ async function checkMessageSubmission(page) {
     assert.equal(expected ? await row.locator('.message-submission').innerText() : await row.locator('.message-submission').count(), expected || 0);
     assert.equal(await row.locator('details').count(), 0);
   }
+  await page.waitForFunction(() => window.saved.timeline.some(item => item.id === "legacy-submission"));
   const saved = await page.evaluate(() => window.saved);
   await page.evaluate(() => window.postMessage({ type: 'chat.started', id: 'compact-guidance', text: 'ordinary-submission', attachments: [], submission: { taskMode: 'direct', businessMode: 'normal', guidance: 'Delivered instructions' } }, '*'));
   const compact = page.locator('[data-id="compact-guidance"]');
@@ -57,7 +58,7 @@ async function checkMessageSubmission(page) {
   await page.evaluate(saved => sessionStorage.setItem("submission-restoration-fixture", JSON.stringify(saved)), saved);
   await page.reload();
   await message.waitFor();
-  assert.equal(await message.locator('.message-submission').innerText(), 'Design');
+  assert.equal(await message.locator('.message-submission').innerText(), 'Contract');
   assert.equal(await message.locator('pre').textContent(), submission.guidance);
   assert.equal(await message.locator('details').getAttribute('open'), null);
   assert.equal(await page.locator('[data-id="legacy-submission"] .message-submission').count(), 0);

@@ -1,4 +1,5 @@
 {
+  "agentFactory.mainChat.botPrompt.description": "루나 봇 대화 프롬프트입니다. 비워두면 기본값을 사용하며 다음 봇 대화부터 적용됩니다.",
   "agentFactory.mainChat.open.title": "메인 에이전트 채팅 추가",
   "agentFactory.mainChat.resume.title": "Agent Factory: 메인 에이전트 재개",
   "agentFactory.mainChat.rename.title": "메인 에이전트 이름 변경",

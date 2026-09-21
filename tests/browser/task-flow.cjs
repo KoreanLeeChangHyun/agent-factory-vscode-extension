@@ -199,7 +199,7 @@ async function checkTaskFlow(page) {
   await page.evaluate(engine => window.postMessage({ type: 'agents.list', agents: [], workflows: [engine] }, '*'), engine);
   await page.waitForFunction(() => document.querySelector('[data-flow-id="engine-flow"] [data-status="verifying"]'));
   assert.equal(await graph.locator('[data-summary-status="verifying"]').textContent(), '검증 중 1개');
-  assert.equal(await graph.locator('[data-summary-status="completed"]').textContent(), '완료 0개', 'Work completion alone is not whole-task completion');
+  assert.equal(await graph.locator('[data-summary-status="completed"]').count(), 0, 'Work completion alone is not whole-task completion; hide zero counts');
   assert.equal(await graph.locator('.task-flow-current').textContent(), '현재 수행 작업: 첫 번째 수정 (검증 중)');
   assert.equal(await graph.locator('[aria-current="step"]').count(), 1);
   await graph.locator('[data-status="verifying"] .task-flow-open').click();
@@ -218,7 +218,50 @@ async function checkTaskFlow(page) {
   await page.evaluate(engine => window.postMessage({ type: 'agents.list', agents: [], workflows: [engine] }, '*'), engine);
   await page.waitForFunction(() => document.querySelector('#task-history-list [data-flow-id="engine-flow"]'));
   assert.equal(await graph.count(), 0, 'Whole graph moves to history only after completion');
+  assert.equal(await page.locator('#task-history > summary').isVisible(), false);
+  await page.setViewportSize({ width: 900, height: 800 });
+  const sentBeforeHistory = await page.evaluate(() => window.sentMessages.filter(message => message.type === 'chat.send').length);
+  await page.locator('#submission-button').click();
+  await page.keyboard.press('End');
+  assert.equal(await page.locator('#task-history > summary').evaluate(el => el === document.activeElement), true);
+  await page.keyboard.press('Enter');
+  assert.equal(await page.locator('#task-history-list').isVisible(), true);
+  await page.waitForFunction(() => document.querySelector('#task-history-list').classList.contains('is-flyout'));
+  const menuBounds = await page.locator('#submission-menu').boundingBox();
+  const historyBounds = await page.locator('#task-history-list').boundingBox();
+  assert.ok(historyBounds.x + historyBounds.width < menuBounds.x, 'History opens beside the submission menu');
+  assert.ok(historyBounds.x >= 0 && historyBounds.y >= 0);
+  assert.ok(Math.abs(historyBounds.y - menuBounds.y) < 1, 'History and submission menu share the top edge');
+  assert.ok(Math.abs(historyBounds.height - menuBounds.height) < 1, 'History matches the submission menu height');
+  const historyViewport = page.viewportSize();
+  await page.setViewportSize({ width: 320, height: 600 });
+  await page.waitForFunction(() => !document.querySelector('#task-history-list').classList.contains('is-flyout'));
+  const narrowBounds = await page.locator('#task-history-list').boundingBox();
+  assert.ok(narrowBounds.x >= 0 && narrowBounds.x + narrowBounds.width <= 320, 'Narrow layout stays within the viewport: ' + JSON.stringify(narrowBounds));
+  await page.setViewportSize(historyViewport);
+  await page.waitForFunction(() => document.querySelector('#task-history-list').classList.contains('is-flyout'));
+
+  const restoredMenuBounds = await page.locator('#submission-menu').boundingBox();
+  const restoredHistoryBounds = await page.locator('#task-history-list').boundingBox();
+  assert.ok(Math.abs(restoredHistoryBounds.y - restoredMenuBounds.y) < 1);
+  assert.ok(Math.abs(restoredHistoryBounds.height - restoredMenuBounds.height) < 1, 'Matching height survives viewport changes');
+
+  await page.keyboard.press('Escape');
+  assert.equal(await page.locator('#task-history-list').isVisible(), false);
+  assert.equal(await page.locator('#submission-menu').isVisible(), true);
+  await page.keyboard.press('Escape');
+  assert.equal(await page.locator('#submission-menu').isVisible(), false);
+  await page.locator('#submission-button').click();
   await page.locator('#task-history > summary').click();
+  assert.equal(await page.evaluate(() => window.sentMessages.filter(message => message.type === 'chat.send').length), sentBeforeHistory);
+  const historyEntry = page.locator('.task-history-disclosure[data-history-id="engine-flow"]');
+  assert.equal(await historyEntry.count(), 1, 'One history row represents the whole workflow');
+  assert.equal(await historyEntry.locator('.task-history-disclosure').count(), 0, 'Individual stages are not history entries');
+  assert.equal(await historyEntry.locator('.task-flow').isVisible(), false, 'History details start collapsed');
+  await historyEntry.locator(':scope > summary').focus();
+  await page.keyboard.press('Enter');
+  assert.equal(await historyEntry.locator('.task-flow').isVisible(), true);
+  assert.equal(await historyEntry.locator('.task-flow-list').evaluate(el => getComputedStyle(el).gridAutoFlow), 'column', 'Expanded history keeps the task flow layout');
   await page.locator('#task-history-list [data-flow-id="engine-flow"] .task-flow-open').first().click();
   assert.deepEqual(await page.evaluate(() => window.sentMessages.at(-1)), { type: 'agent.open', agentId: 'engine-worker' });
 
@@ -227,6 +270,8 @@ async function checkTaskFlow(page) {
   assert.deepEqual(await page.evaluate(() => window.sentMessages.at(-1)), { type: 'agent.open', agentId: 'second-worker' });
   await historyButtons.nth(3).click();
   assert.deepEqual(await page.evaluate(() => window.sentMessages.at(-1)), { type: 'agent.open', agentId: 'second-verifier' });
+  await page.locator('#submission-button').click();
+  assert.equal(await page.locator('#submission-menu').isVisible(), false);
 
   await page.evaluate(() => window.postMessage({ type: 'agents.list', agents: [
     { agentId: 'named-work', runId: 'named-run', role: 'work', status: 'completed', taskBinding: { title: '링크 검사 JSON 출력 추가' } },
@@ -288,7 +333,7 @@ async function checkTaskFlow(page) {
   six.workflow.tasks[1].workStatus = 'blocked';
   await page.evaluate(six => window.postMessage({ type: 'agents.list', agents: [], workflows: [six] }, '*'), six);
   await page.waitForFunction(() => document.querySelector('[data-flow-id="six-flow"] [data-summary-status="blocked"]').textContent === 'Blocked: 1');
-  assert.equal(await sixFlow.locator('[data-summary-status="failed"]').textContent(), 'Failed: 0');
+  assert.equal(await sixFlow.locator('[data-summary-status="failed"]').count(), 0);
   const viewport = page.viewportSize();
   await page.setViewportSize({ width: 360, height: 800 });
   await page.emulateMedia({ reducedMotion: 'reduce' });
@@ -308,10 +353,13 @@ async function checkTaskFlow(page) {
   await page.reload();
   await page.waitForFunction(() => document.querySelector('#task-history-list [data-flow-id="six-flow"]'));
   const completedSix = page.locator('#task-history-list [data-flow-id="six-flow"]');
+  assert.equal(await page.locator('.task-history-entries > li > [data-history-id="six-flow"]').count(), 1,
+    'A workflow with six tasks occupies exactly one top-level history row');
+  assert.equal(await page.locator('[data-history-id="six-flow"] > summary .task-history-name').textContent(), six.workflow.title);
   assert.equal(await completedSix.locator('.task-flow-total').textContent(), '6 tasks');
   assert.equal(await completedSix.locator('.task-flow-workers').textContent(), 'Workers: 1');
   assert.equal(await completedSix.locator('[data-summary-status="completed"]').textContent(), 'Completed: 6');
-  assert.equal(await completedSix.locator('[data-summary-status="pending"]').textContent(), 'Pending: 0');
+  assert.equal(await completedSix.locator('[data-summary-status="pending"]').count(), 0);
   assert.equal(await completedSix.locator('.task-flow-open').count(), 6);
   assert.deepEqual(await completedSix.locator('.task-flow-step').evaluateAll(items => items.map(item => item.dataset.runId)),
     Array.from({ length: 6 }, (_, index) => 'shared-run-' + (index + 1)));

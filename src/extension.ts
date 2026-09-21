@@ -3,14 +3,16 @@ import * as vscode from "vscode";
 import { bootstrap } from "./core/bootstrap";
 import { ensureAgentFactoryPlugin } from "./infrastructure/agent-factory/plugin-dependency";
 import { developmentPluginRoot, validateDevelopmentPlugin } from "./infrastructure/agent-factory/development-plugin";
-import { configureCodexCli, resolveCodexCli } from "./infrastructure/agent-factory/process-environment";
+import { CodexCliNotFoundError, configureCodexCli, resolveCodexCli } from "./infrastructure/agent-factory/process-environment";
+import { openWslWorkspace } from "./infrastructure/vscode/wsl-workspace";
 
 export interface ActivationServices {
-  readonly prepareCodex?: (configuredPath?: string) => Promise<void>;
+  readonly prepareCodex?: (configuredPath?: string) => Promise<void | "redirected">;
   readonly ensurePlugin: (requiredVersion: string) => Promise<void>;
   readonly bootstrap: (context: vscode.ExtensionContext) => void;
   readonly withProgress: typeof vscode.window.withProgress;
   readonly showErrorMessage: typeof vscode.window.showErrorMessage;
+  readonly showInformationMessage?: typeof vscode.window.showInformationMessage;
   readonly registerCommand?: typeof vscode.commands.registerCommand;
 }
 
@@ -43,7 +45,17 @@ async function start(context: vscode.ExtensionContext, services: ActivationServi
       }
       const developmentRoot = developmentPluginRoot(context.extensionMode === vscode.ExtensionMode.Development);
       const configuredCodexPath = vscode.workspace?.getConfiguration("agentFactory.mainChat").get<string>("codexPath")?.trim();
-      await services.prepareCodex?.(configuredCodexPath);
+      if (await services.prepareCodex?.(configuredCodexPath) === "redirected") {
+        recoveryCommands.get(context)?.dispose();
+        recoveryCommands.delete(context);
+        // The command that triggered activation must still exist in the original window.
+        if (services.registerCommand) {
+          const disposable = services.registerCommand("agentFactory.mainChat.open", () =>
+            services.showInformationMessage?.(localize("ui.wsl.project.opened")));
+          context.subscriptions.push(disposable);
+        }
+        return true;
+      }
       await services.withProgress({
         location: vscode.ProgressLocation.Notification,
         title: localize("ui.checking.agent.factory.plugin.dependencies"),
@@ -76,12 +88,18 @@ function defaultActivationServices(): ActivationServices {
   return {
     prepareCodex: async (configuredPath) => {
       configureCodexCli(undefined);
-      configureCodexCli(await resolveCodexCli({ configuredPath }));
+      try {
+        configureCodexCli(await resolveCodexCli({ configuredPath }));
+      } catch (error) {
+        if (error instanceof CodexCliNotFoundError && await openWslWorkspace()) return "redirected";
+        throw error;
+      }
     },
     ensurePlugin: ensureAgentFactoryPlugin,
     bootstrap,
     withProgress: vscode.window.withProgress.bind(vscode.window),
     showErrorMessage: vscode.window.showErrorMessage.bind(vscode.window),
+    showInformationMessage: vscode.window.showInformationMessage.bind(vscode.window),
     registerCommand: vscode.commands.registerCommand.bind(vscode.commands)
   };
 }

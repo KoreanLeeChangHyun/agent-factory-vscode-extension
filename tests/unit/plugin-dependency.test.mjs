@@ -504,3 +504,25 @@ test("malformed marketplace list blocks registration", async () => {
     assert.equal(process.calls.length, 2);
   }
 });
+
+test("WSL handoff is deduplicated and never starts the Windows plugin or chat runtime", async () => {
+  const { activate } = await importTypeScript("src/extension.ts", true);
+  const context = { extension: { packageJSON: { version: "1.0.13" } }, subscriptions: [] };
+  let opens = 0;
+  let handler, notice;
+  const services = {
+    prepareCodex: async () => { opens++; return "redirected"; },
+    ensurePlugin: async () => assert.fail("must not install into Windows"),
+    bootstrap: () => assert.fail("must not bootstrap Windows runtime"),
+    registerCommand: (name, callback) => { assert.equal(name, "agentFactory.mainChat.open"); handler = callback; return { dispose() {} }; },
+    showInformationMessage: async message => { notice = message; },
+    withProgress: async (_, task) => task(),
+    showErrorMessage: async () => assert.fail("successful handoff should not show an error")
+  };
+  await Promise.all([activate(context, services), activate(context, services)]);
+  await activate(context, services);
+  assert.equal(opens, 1);
+  await handler();
+  assert.match(notice, /new WSL window/);
+  assert.equal(context.subscriptions.length, 1);
+});

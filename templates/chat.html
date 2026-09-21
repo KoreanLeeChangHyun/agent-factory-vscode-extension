@@ -19,6 +19,27 @@
             <h1>Agent Factory</h1>
           </div>
         </section>
+        <button id="notes-toggle" class="jump-to-bottom notes-toggle" type="button" aria-controls="notes-panel" aria-expanded="false" data-i18n-title="notes.title" data-i18n-aria-label="notes.title" title="Notes" aria-label="Notes">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 3h14v18H5ZM8 8h8M8 12h8M8 16h5"></path></svg>
+        </button>
+        <aside id="notes-panel" class="notes-panel" aria-label="Notes" data-i18n-aria-label="notes.title" hidden>
+          <div id="notes-resize" role="separator" tabindex="0" aria-orientation="vertical" aria-label="Resize notes" data-i18n-aria-label="notes.resize"></div>
+          <header><strong data-i18n="notes.title">Notes</strong><div class="notes-header-actions"><button id="notes-new" type="button" data-i18n="notes.new">New note</button><button id="notes-close" type="button" data-i18n="ui.close">Close</button></div></header>
+          <div id="notes-scope" class="notes-scope-tabs" role="tablist" aria-label="Storage scope" data-i18n-aria-label="notes.scope">
+            <button id="notes-tab-global" type="button" role="tab" aria-selected="true" aria-controls="notes-content" data-notes-scope="global" data-i18n="notes.global">Global</button>
+            <button id="notes-tab-workspace" type="button" role="tab" aria-selected="false" aria-controls="notes-content" tabindex="-1" data-notes-scope="workspace" data-i18n="notes.workspace">Workspace</button>
+          </div>
+          <div id="notes-content" role="tabpanel" aria-labelledby="notes-tab-global">
+          <div id="notes-list-view"><div id="notes-list"></div></div>
+          <div id="notes-editor" hidden>
+            <button id="notes-back" type="button" data-i18n="notes.back">Back to list</button>
+            <input id="notes-title" type="text" aria-label="Title" placeholder="Title" data-i18n-aria-label="notes.note.title" data-i18n-placeholder="notes.note.title" />
+            <textarea id="notes-body" aria-label="Note" placeholder="Write freely…" data-i18n-aria-label="notes.body" data-i18n-placeholder="notes.placeholder"></textarea>
+            <div class="notes-actions"><button id="notes-copy" type="button" data-i18n="notes.copy">Copy</button><button id="notes-insert" type="button" data-i18n="notes.insert">Insert into input</button><button id="notes-save-copy" type="button" hidden data-i18n="notes.save.copy">Save a copy</button></div>
+          </div>
+          </div>
+          <p id="notes-status" role="status" aria-live="polite"></p>
+        </aside>
         <button id="jump-to-bottom" class="jump-to-bottom" type="button" title="Jump to latest message" aria-label="Jump to latest message" aria-controls="timeline" hidden data-i18n-title="ui.jump.to.latest.message" data-i18n-aria-label="ui.jump.to.latest.message">
           <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="m6 5 6 6 6-6m-12 8 6 6 6-6"></path></svg>
         </button>
@@ -67,10 +88,14 @@
                 <g class="bot-eyes"><path d="M15 16v3m10-3v3"/></g>
                 <path class="bot-mouth" d="M18 21h4"/>
                 <path class="bot-badge" d="M17 29h6m-3-2v4"/>
-                <path class="bot-arm bot-arm-left" d="M10 25 4 29 4 34"/>
-                <path class="bot-arm bot-arm-right" d="M30 25 36 29 36 34"/>
-                <g class="bot-prop bot-cup"><path class="bot-shell" d="M24 26h9v7h-9Zm9 1h3v4h-3"/><path class="bot-steam" d="M26 23q-2-2 0-4m4 4q-2-2 0-4"/></g>
-                <g class="bot-prop bot-book"><path class="bot-shell" d="M9 27q5-2 11 1 6-3 11-1v8q-5-2-11 0-6-2-11 0Z"/><path class="bot-prop-line" d="M20 28v7m-8-5 5 1m6 0 5-1"/></g>
+                <g class="bot-arm bot-arm-left"><path class="bot-arm-shape" d="M10 25 6 28Q5 29 5.5 30.5L7 34"/></g>
+                <g class="bot-arm bot-arm-right">
+                  <path class="bot-arm-shape" d="M30 25 34 28Q35 29 34.5 30.5L33 34"/>
+                  <g class="bot-wave-hand"><path d="M34 34c-1 0-1.7.8-1.7 1.7v1.4l-.8-.7q-.8-.5-.9.3l1.5 2.1q.5.7 1.4.7h1.2q1.2 0 1.2-1.2v-2.6q0-1.7-1.9-1.7Z"/></g>
+                </g>
+                <g class="bot-prop bot-cup"><path class="bot-shell" d="M24 26h9v7h-9Zm9 1h3v4h-3"/><path class="bot-steam" d="M26 23q-2-2 0-4m4 4q-2-2 0-4"/><path class="bot-prop-line" d="M31 32q3 1 4-2"/></g>
+                <g class="bot-prop bot-book"><path class="bot-shell" d="M9 27q5-2 11 1 6-3 11-1v8q-5-2-11 0-6-2-11 0Z"/><path class="bot-prop-line" d="M20 28v7m-8-5 5 1m6 0 5-1"/><path class="bot-prop-line bot-book-page" d="M20 28q5-3 10-1v7q-5-2-10 1Z"/></g>
+                <g class="bot-prop bot-meal"><path class="bot-shell" d="M12 30h16q-1 6-8 6t-8-6Z"/><path class="bot-prop-line" d="M15 29q1-3 3-1 2-4 4 0 3-2 4 1"/><g class="bot-spoon"><path class="bot-prop-line" d="m30 32-5-5"/><ellipse class="bot-shell" cx="24" cy="26" rx="2" ry="1.2"/></g></g>
               </g>
               <path class="bot-sleep-marks" d="M30 8h4l-4 4h4m1-11h4l-4 4h4"/>
               <path class="bot-celebration" d="m3 8 2 2m30-2-2 2M3 18h2m30 0h2m-3-15-1 2M7 3l1 2"/>
@@ -92,11 +117,22 @@
           </button>
           <div id="bot-menu" class="bot-menu" role="dialog" aria-label="Bot actions" data-i18n-aria-label="bot.actions" hidden>
             <strong data-i18n="bot.actions">Bot actions</strong>
-            <button type="button" data-bot-action="wave" data-i18n="bot.wave">Say hello</button>
-            <button type="button" data-bot-action="dance" data-i18n="bot.dance">Dance</button>
-            <button type="button" data-bot-action="stretch" data-i18n="bot.stretch">Stretch</button>
-            <button type="button" data-bot-action="sleep" data-i18n="bot.sleep">Sleep</button>
+            <div class="bot-care-stats">
+              <label><span data-i18n="bot.fullness">Fullness</span><meter id="bot-fullness" min="0" max="100" value="80"></meter><output id="bot-fullness-value">80</output></label>
+              <label><span data-i18n="bot.happiness">Mood</span><meter id="bot-happiness" min="0" max="100" value="80"></meter><output id="bot-happiness-value">80</output></label>
+              <label><span data-i18n="bot.energy">Energy</span><meter id="bot-energy" min="0" max="100" value="80"></meter><output id="bot-energy-value">80</output></label>
+              <small id="bot-care-growth"></small>
+            </div>
+            <button type="button" data-bot-action="feed"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M3 12h18q-1 8-9 8t-9-8Zm4 9h10M15 9l3-6m0 0q-2-2-3 0t1 3M6 7h.01m4 1h.01"/></svg><span data-i18n="bot.feed">Feed the bot</span></button>
+            <button type="button" data-bot-action="play"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M9 5h.01M9 8l-3 4 5 3-3 6m3-6 5 5m-5-9 5-2 2-5M4 6l2 2"/></svg><span data-i18n="bot.play">Play together</span></button>
+            <button type="button" data-bot-action="sleep"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M18 3A9 9 0 1 0 21 16 8 8 0 0 1 18 3ZM3 3h5L3 8h5"/></svg><span data-i18n="bot.sleep">Sleep</span></button>
+            <button id="bot-talk" type="button" disabled><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M4 4h16v12H9l-5 4Zm4 5h8m-8 3h5"/></svg><span data-i18n="bot.talk">Talk to the bot</span></button>
             <small id="bot-menu-note" data-i18n="bot.busy" hidden>Available when the bot is idle.</small>
+          </div>
+          <div id="bot-speech" class="bot-speech" hidden>
+            <button id="bot-speech-close" type="button" aria-label="Close reply" data-i18n-aria-label="bot.reply.close">×</button>
+            <div id="bot-speech-text" role="status" aria-live="polite"></div>
+            <button id="bot-speech-expand" type="button" aria-expanded="false" aria-controls="bot-speech-text" hidden data-i18n="bot.reply.expand">Expand reply</button>
           </div>
           <div id="attachment-list" class="attachment-list" aria-label="Attachments" data-i18n-aria-label="ui.attachments"></div>
           <div class="prompt-surface">
@@ -164,38 +200,62 @@
                 <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M4 12a8 8 0 1 1 8 8M4 6v6h6"></path></svg>
               </button>
               <div class="utility-picker question-picker">
-                <button id="question-button" class="utility-button question-button circular-action" type="button" title="User questions" aria-label="User questions" aria-haspopup="listbox" aria-expanded="false" aria-controls="question-menu" data-i18n-title="ui.user.questions" data-i18n-aria-label="ui.user.questions">
+                <button id="question-button" class="utility-button question-button circular-action" type="button" title="User questions" aria-label="User questions" aria-haspopup="dialog" aria-expanded="false" aria-controls="question-menu" data-i18n-title="ui.user.questions" data-i18n-aria-label="ui.user.questions">
                   <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M14 3H5a2 2 0 0 0-2 2v11l4-3h7a2 2 0 0 0 2-2V5a2 2 0 0 0-2-2Z"></path><path d="M8 16v1a2 2 0 0 0 2 2h7l4 3V11a2 2 0 0 0-2-2"></path></svg>
                 </button>
-                <div id="question-menu" class="utility-list-menu question-menu" role="listbox" aria-label="User questions" hidden data-i18n-aria-label="ui.user.questions">
+                <div id="question-menu" class="utility-list-menu question-menu" role="dialog" aria-label="User questions" hidden data-i18n-aria-label="ui.user.questions">
                   <div id="question-list" class="question-list"></div>
                 </div>
               </div>
-              <details id="task-history" class="utility-picker task-history" hidden>
-                <summary class="utility-button circular-action" title="Task history" aria-label="Task history" data-i18n-title="flow.history" data-i18n-aria-label="flow.history" aria-controls="task-history-list">
-                  <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M4 5v5h5M4 10a8 8 0 1 1 1 8M12 7v5l3 2"></path></svg>
-                </summary>
-                <div id="task-history-list" class="utility-list-menu"></div>
-              </details>
             </div>
             <div class="composer-actions-end setting-control">
-              <div id="submission-menu" class="setting-menu submission-menu" role="menu" aria-label="Submit draft" hidden data-i18n-aria-label="ui.submit.draft"></div>
-              <button id="submission-button" class="setting-button circular-action" type="button" title="More ways to submit" aria-label="More ways to submit" aria-haspopup="menu" aria-expanded="false" aria-controls="submission-menu" data-i18n-title="ui.more.ways.to.submit" data-i18n-aria-label="ui.more.ways.to.submit">
-                <svg class="submission-galaxy-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-                  <path class="galaxy-band" d="M17 4C10 4 3 10 3 15c0 4 7 3 12-1s7-9 4-10M7 20c5 0 12-5 14-10"></path>
-                  <path d="m12 7 1.3 3.7L17 12l-3.7 1.3L12 17l-1.3-3.7L7 12l3.7-1.3Z"></path>
-                  <path d="m5 3 .6 1.4L7 5l-1.4.6L5 7l-.6-1.4L3 5l1.4-.6Z"></path>
-                  <circle cx="19" cy="19" r="1"></circle>
+              <div id="submission-menu" class="setting-menu submission-menu" role="menu" aria-label="Agent Factory" hidden data-i18n-aria-label="ui.submit.draft">
+                <div id="submission-options"></div>
+                <div id="worktree-controls" role="group" aria-label="Worktree" data-i18n-aria-label="worktree.isolated" hidden>
+                  <div class="submission-heading" data-i18n="worktree.isolated">Worktree</div>
+                  <button id="worktree-create" class="setting-option" role="menuitem" type="button"><span data-i18n="worktree.create">Create worktree</span></button>
+                  <button id="worktree-merge" class="setting-option" role="menuitem" type="button" hidden><span data-i18n="worktree.merge">Merge and return</span></button>
+                  <button id="worktree-refresh" class="setting-option" role="menuitem" type="button"><span data-i18n="worktree.refresh">Refresh</span></button>
+                </div>
+                <details id="task-history" class="task-history" hidden>
+                  <summary class="setting-option" role="menuitem" title="Task history" aria-label="Task history" data-i18n-title="flow.history" data-i18n-aria-label="flow.history" aria-controls="task-history-list">
+                    <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M4 5v5h5M4 10a8 8 0 1 1 1 8M12 7v5l3 2"></path></svg>
+                    <span data-i18n="flow.history">Task history</span>
+                    <svg class="chevron-icon" viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="m6 4 4 4-4 4"></path></svg>
+                  </summary>
+                  <div id="task-history-list" class="task-history-list"></div>
+                </details>
+                <details id="conversation-history" class="task-history">
+                  <summary class="setting-option" role="menuitem" aria-controls="conversation-history-list">
+                    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 4h16v12H9l-5 4Z"></path></svg>
+                    <span data-i18n="ui.conversation.history">Conversation history</span>
+                    <svg class="chevron-icon" viewBox="0 0 16 16" aria-hidden="true"><path d="m6 4 4 4-4 4"></path></svg>
+                  </summary>
+                  <div id="conversation-history-list" class="task-history-list"></div>
+                </details>
+              </div>
+              <button id="submission-button" class="setting-button circular-action" type="button" title="Agent Factory" aria-label="Agent Factory" aria-haspopup="menu" aria-expanded="false" aria-controls="submission-menu" data-i18n-title="ui.more.ways.to.submit" data-i18n-aria-label="ui.more.ways.to.submit">
+                <svg class="submission-robot-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                  <rect x="5" y="7" width="14" height="13" rx="3"></rect>
+                  <path d="M12 7V3M2 12v4m20-4v4M9 12v2m6-2v2m-6 3h6"></path>
+                  <circle cx="12" cy="3" r="1"></circle>
                 </svg>
               </button>
               <button id="send-button" class="send-button" type="button" title="Send (Enter)" aria-label="Send message" data-i18n-title="ui.send.enter" data-i18n-aria-label="ui.send.message">
                 <svg id="send-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M12 19V5M6.5 10.5 12 5l5.5 5.5"></path></svg>
+                <svg id="goal-send-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false" hidden><circle cx="12" cy="12" r="9"></circle><circle cx="12" cy="12" r="4"></circle><circle cx="12" cy="12" r="1"></circle></svg>
                 <svg id="stop-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false" hidden><rect x="7" y="7" width="10" height="10" rx="1"></rect></svg>
               </button>
             </div>
           </div>
         </div>
       </section>
+      <dialog id="conversation-reader" aria-labelledby="conversation-reader-title">
+        <header><strong id="conversation-reader-title" data-i18n="ui.conversation.history">Conversation history</strong><button id="conversation-reader-close" type="button" data-i18n="ui.close">Close</button></header>
+        <p data-i18n="ui.conversation.readonly">Previous conversation · Read only</p>
+        <button id="conversation-reader-older" type="button" hidden data-i18n="ui.history.older">Load earlier messages</button>
+        <div id="conversation-reader-messages"></div>
+      </dialog>
       <div id="agents-menu" class="utility-list-menu agents-menu" role="listbox" aria-label="Called work and verification agents" hidden data-i18n-aria-label="ui.called.work.and.verification.agents">
         <div id="agents-list" class="agents-list"></div>
       </div>
@@ -226,6 +286,14 @@
           <p class="status-settings-hint" data-i18n="ui.show.the.companion.above.the.message.box.this.only.changes.its.visibility">Show the companion above the message box. This only changes its visibility.</p>
           <label class="settings-option"><input id="bot-animations" type="checkbox" checked><span data-i18n="ui.animate.bot">Animate bot</span></label>
           <p class="status-settings-hint" data-i18n="ui.your.system.s.reduced.motion.preference.takes.priority.these.preferences.are.saved.for.this.chat">Your system’s reduced motion preference takes priority. These preferences are saved for this chat.</p>
+          <label for="bot-prompt" data-i18n="bot.prompt.label">Luna bot prompt</label>
+          <textarea id="bot-prompt" rows="5" aria-describedby="bot-prompt-hint" spellcheck="false"></textarea>
+          <p id="bot-prompt-hint" class="status-settings-hint" data-i18n="bot.prompt.hint">Applies to future bot conversations in all chats. Leave empty to use the default.</p>
+          <div class="bot-prompt-actions">
+            <button id="bot-prompt-save" type="button" disabled data-i18n="bot.prompt.save">Save</button>
+            <button id="bot-prompt-reset" type="button" data-i18n="bot.prompt.reset">Use default</button>
+          </div>
+          <p id="bot-prompt-status" role="status" class="status-settings-hint"></p>
         </div>
         <div id="settings-panel-keyboard" class="settings-panel" role="tabpanel" aria-labelledby="settings-tab-keyboard" tabindex="0" hidden>
           <p class="status-settings-hint" data-i18n="ui.keyboard.controls.in.this.chat">Keyboard controls in this chat</p>
@@ -248,6 +316,29 @@
           </svg>
         </button>
       </div>
+      <dialog id="image-converter" aria-labelledby="image-converter-title">
+        <header>
+          <h2 id="image-converter-title" data-i18n="attachment.convert.heading">Convert image</h2>
+          <button id="image-converter-close" type="button" aria-label="Close" data-i18n-aria-label="attachment.convert.close" title="Close" data-i18n-title="attachment.convert.close"><span aria-hidden="true">×</span></button>
+        </header>
+        <div class="image-converter-body">
+          <div class="image-converter-source">
+            <div class="image-converter-thumbnail"><img id="image-converter-preview" alt="" hidden><span id="image-converter-icon" aria-hidden="true">▧</span></div>
+            <div class="image-converter-file"><span class="image-converter-caption" data-i18n="attachment.convert.source">Original file</span><p id="image-converter-name"></p></div>
+          </div>
+          <div class="image-converter-field">
+            <label for="image-converter-format" data-i18n="attachment.convert.format">Output format</label>
+            <select id="image-converter-format"></select>
+          </div>
+          <div class="image-converter-location"><span data-i18n="attachment.convert.destination">Save location</span><code>docs/output/</code></div>
+          <div class="image-converter-warning">
+            <strong data-i18n="attachment.convert.preserved">Your original is preserved</strong>
+            <p data-i18n="attachment.convert.loss.short">Animation and metadata are removed. JPG fills transparent areas with white. JPG/WebP may lose quality.</p>
+          </div>
+          <p id="image-converter-status" role="status" aria-live="polite"></p>
+        </div>
+        <footer><button id="image-converter-reveal" type="button" hidden data-i18n="attachment.convert.reveal">Show in Explorer</button><button id="image-converter-submit" type="button" data-i18n="attachment.convert.proceed">Convert</button></footer>
+      </dialog>
     </main>
     <script nonce="{{nonce}}" src="{{markdownScriptUri}}"></script>
     <script nonce="{{nonce}}" src="{{syntaxScriptUri}}"></script>

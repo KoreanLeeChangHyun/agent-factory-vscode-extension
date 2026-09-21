@@ -57,16 +57,16 @@ async function readGitStatus(projectRoot: string) {
   }
 }
 
-const instructionSnapshots = new Map<string, { signature: string; text: string }>();
+const instructionSnapshots = new Map<string, { signature: string; sha256: string }>();
 async function suppliedInstruction(path: string) {
   try {
     const file = await open(path, "r");
     try {
       const stat = await file.stat();
-      if (!stat.isFile() || stat.size > 128 * 1024) throw new Error("instruction-unavailable");
+      if (!stat.isFile() || stat.size === 0 || stat.size > 128 * 1024) throw new Error("instruction-unavailable");
       const signature = `${stat.dev}:${stat.ino}:${stat.size}:${stat.mtimeMs}:${stat.ctimeMs}`;
       const cached = instructionSnapshots.get(path);
-      if (cached?.signature === signature) return { source: path, collectedAt: new Date().toISOString(), availability: "available", text: cached.text };
+      if (cached?.signature === signature) return { source: path, collectedAt: new Date().toISOString(), availability: "not-loaded", sha256: cached.sha256 };
       const buffer = Buffer.alloc(stat.size + 1);
       let bytesRead = 0;
       while (bytesRead < buffer.length) {
@@ -75,15 +75,19 @@ async function suppliedInstruction(path: string) {
         bytesRead += next.bytesRead;
       }
       const after = await file.stat();
-      if (stat.size !== after.size || stat.mtimeMs !== after.mtimeMs || bytesRead !== after.size) throw new Error("instruction-changed");
+      if (stat.size !== after.size || stat.mtimeMs !== after.mtimeMs || stat.ctimeMs !== after.ctimeMs || bytesRead !== after.size) throw new Error("instruction-changed");
       if (bytesRead > 128 * 1024) throw new Error("instruction-too-large");
-      const text = buffer.subarray(0, bytesRead).toString("utf8");
+      const content = buffer.subarray(0, bytesRead);
+      const text = content.toString("utf8");
+      if (!text.trim() || !Buffer.from(text, "utf8").equals(content)) throw new Error("instruction-invalid");
+      const sha256 = createHash("sha256").update(content).digest("hex");
       instructionSnapshots.delete(path);
-      instructionSnapshots.set(path, { signature, text });
+      instructionSnapshots.set(path, { signature, sha256 });
       while (instructionSnapshots.size > 32) instructionSnapshots.delete(instructionSnapshots.keys().next().value!);
-      return { source: path, collectedAt: new Date().toISOString(), availability: "available", text };
+      return { source: path, collectedAt: new Date().toISOString(), availability: "not-loaded", sha256 };
     } finally { await file.close(); }
   } catch {
+    instructionSnapshots.delete(path);
     return { source: path, collectedAt: new Date().toISOString(), availability: "unavailable" };
   }
 }
@@ -93,11 +97,7 @@ export async function submissionContext(projectRoot: string, execPath: string): 
   // A host file cache does not prove that a resumed/compacted model still has
   // these instructions. Supply a content identity and a recoverable source,
   // rather than adding the complete Skill to every user message.
-  const instruction = await suppliedInstruction(join(agentRoot, "SKILL.md"));
-  const instructions = [instruction.text === undefined ? instruction : {
-    source: instruction.source, collectedAt: instruction.collectedAt,
-    availability: "not-loaded", sha256: createHash("sha256").update(instruction.text, "utf8").digest("hex")
-  }];
+  const instructions = [await suppliedInstruction(join(agentRoot, "SKILL.md"))];
   const references = ["execution-modes.md", "home-runtime.md"].map(name => ({
     source: join(agentRoot, "references", name), availability: "not-loaded"
   }));

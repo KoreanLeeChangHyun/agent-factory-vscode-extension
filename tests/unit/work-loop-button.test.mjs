@@ -116,14 +116,14 @@ test("action menu sends supported drafts without persisting a selection during e
     return { children: [], dataset: {}, handlers: {}, classList: { add() {} },
       setAttribute() {}, append(...children) { this.children.push(...children); },
       addEventListener(name, handler) { this.handlers[name] = handler; },
-      replaceChildren() { this.children = []; } };
+      querySelector() { return this; }, replaceChildren() { this.children = []; } };
   }
   const names = { verification: "Verification", plan: "Plan", work: "Work", "plan-work": "Plan · Work", "work-verification": "Work · Verification", "plan-work-verification": "Plan · Work · Verification" };
   const menu = element();
   const calls = [];
   const context = {
     state: { taskMode: "work", running: true, runtimeAvailable: true }, taskModeNames: names,
-    settingOptions: { task: Object.keys(names), business: [] }, menu,
+    settingOptions: { task: Object.keys(names), business: [] }, businessModeNames: { interview: "Interview", contract: "Contract" }, menu,
     document: { createElement: element, createElementNS: element },
     currentCapabilities: () => ({ taskModes: ["verification", "work", "work-verification"] }),
     submit(action) { calls.push(action); },
@@ -134,27 +134,17 @@ test("action menu sends supported drafts without persisting a selection during e
   runInNewContext(renderer + '\nrenderSettingMenu("task", menu);', context);
   const actionOptions = () => menu.children.flatMap(group => group.children.filter(item => item.dataset.action));
   const options = actionOptions().filter(item => item.dataset.goal !== "true");
-  assert.deepEqual(options.map(item => item.dataset.action), Object.keys(names));
-  assert.equal(options.length, 6);
-  assert.equal(options[0].disabled, false);
-  assert.equal(options.find(item => item.dataset.action === "plan-work").disabled, true);
-  assert.equal(options.find(item => item.dataset.action === "plan-work-verification").disabled, true);
-  assert.equal(options[1].disabled, true);
-  options[0].handlers.click();
+  assert.deepEqual(options.map(item => item.dataset.action), ["direct", "direct", "work", "work-verification"]);
+  assert.deepEqual(options.map(item => item.dataset.workflow), ["interview", "contract", "normal", "normal"]);
+  assert.ok(options.every(item => !item.disabled));
+  options[2].handlers.click();
   assert.equal(context.state.taskMode, "work");
   assert.equal(context.state.running, true);
-  assert.deepEqual(calls, ["verification"]);
-  context.currentCapabilities = () => ({ taskModes: ["direct", "work", "plan-work"] });
+  assert.deepEqual(calls, ["work"]);
+  context.currentCapabilities = () => ({ taskModes: ["direct", "work"] });
   runInNewContext('renderSettingMenu("task", menu);', context);
-  const planWork = actionOptions().find(item => item.dataset.action === "plan-work");
-  assert.equal(planWork.disabled, false);
-  planWork.handlers.click();
-  assert.equal(context.state.taskMode, "work");
-  assert.deepEqual(calls, ["verification", "plan-work"]);
-  assert.equal(context.state.running, true);
-  context.currentCapabilities = () => ({ taskModes: ["work"] });
-  runInNewContext('renderSettingMenu("task", menu);', context);
-  assert.equal(actionOptions().find(item => item.dataset.action === "verification").disabled, true);
+  assert.equal(actionOptions().find(item => item.dataset.action === "work-verification").disabled, true);
+
 });
 
 
@@ -262,4 +252,15 @@ test("host derives the objective from chat text and rejects invalid goals before
   await send("Child message", { goal: true, goalObjective: "Stale" });
   assert.equal(calls[2].goalMode, false);
   assert.equal(calls[2].goalObjective, undefined);
+});
+
+test("contract actions can use conversation context while ordinary sends still need input", () => {
+  for (const [action, workflow] of [["direct", "contract"], ["work", "normal"], ["work-verification", "normal"]]) {
+    const { sent, run } = harness({}, "   ");
+    run(`submit("${action}", "${workflow}")`);
+    assert.equal(sent.length, 1);
+    assert.ok(sent[0].text.includes("contract"));
+    assert.equal(sent[0].execution.taskMode, action);
+    assert.equal(sent[0].execution.businessMode, workflow);
+  }
 });

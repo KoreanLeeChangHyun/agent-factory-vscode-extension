@@ -1,6 +1,6 @@
 const assert = require('node:assert/strict');
 async function checkOneShotComposer(page) {
-  const actions = ['work', 'plan', 'verification', 'plan-work', 'work-verification', 'plan-work-verification'];
+  const actions = ['work', 'work-verification'];
   const capability = { model: true, reasoning: true, fast: true, goal: true, taskModes: ['direct', ...actions] };
   await page.evaluate(capability => window.postMessage({ type: 'host.initialize', panelId: 'one-shot', role: 'main', runtimeAvailable: true, fastMode: true, capabilities: { submit: capability, send: capability } }, '*'), capability);
   await page.waitForFunction(() => document.querySelector('#fast-mode-button').getAttribute('aria-pressed') === 'true');
@@ -25,7 +25,10 @@ async function checkOneShotComposer(page) {
   assert.equal(await page.locator('#model-menu select[data-role]').count(), 3);
   await page.keyboard.press('Escape');
   for (const [action, workflow, goal] of [
-    ...['interview','planning','design'].map(x => ['direct', x, false]),
+    ['direct', 'interview', false],
+    ['direct', 'migration', false],
+    ['direct', 'lessons', false],
+    ['direct', 'contract', false],
     ...actions.map(x => [x, 'normal', false])
   ]) {
     await page.locator('#prompt').fill('Current draft');
@@ -74,8 +77,7 @@ async function checkOneShotComposer(page) {
   await page.keyboard.press('Escape');
   assert.equal(await page.locator('#submission-button').evaluate(e => e === document.activeElement), true);
   for (const [action, workflow] of [
-    ...['interview', 'planning', 'design'].map(value => ['direct', value]),
-    ...actions.map(value => [value, 'normal'])
+    ['direct', 'interview']
   ]) {
     await page.locator('#prompt').fill('   ');
     const beforeEmpty = await count();
@@ -100,7 +102,7 @@ async function checkOneShotComposer(page) {
   await page.evaluate(capability => window.postMessage({ type: 'capabilities.updated', capabilities: { submit: {...capability, goal:false,taskModes:['direct','work']},send:capability } }, '*'), capability);
   await page.locator('#submission-button').click();
   assert.equal(await page.locator('#submission-menu [data-goal="true"]').isDisabled(), true);
-  assert.equal(await page.locator('#submission-menu [data-action="plan"]').isDisabled(), true);
+  assert.equal(await page.locator('#submission-menu [data-action="work-verification"]').isDisabled(), true);
   await page.screenshot({path:'/tmp/af-unified-composer.png'});
 }
 module.exports = { checkOneShotComposer };

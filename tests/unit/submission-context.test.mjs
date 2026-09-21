@@ -173,4 +173,12 @@ test("large Skill bodies stay out of requests and edits change their identity", 
   const missing = context(await submissionContext(root, join(agent, "scripts", "exec.py"))).instructions[0];
   assert.equal(missing.availability, "unavailable");
   assert.equal(missing.sha256, undefined);
+  for (const invalid of [Buffer.from([0xff]), Buffer.alloc(0), Buffer.from(" \r\n\t"), Buffer.alloc(128 * 1024 + 1, 65)]) {
+    await writeFile(path, invalid);
+    const rejected = context(await submissionContext(root, join(agent, "scripts", "exec.py"))).instructions[0];
+    assert.equal(rejected.availability, "unavailable");
+    assert.equal(rejected.sha256, undefined);
+  }
+  await writeFile(path, "Valid restored instructions");
+  assert.equal(context(await submissionContext(root, join(agent, "scripts", "exec.py"))).instructions[0].availability, "not-loaded");
 });

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { build } from "esbuild";
-import { chmod, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -87,6 +87,42 @@ test("configured absolute executable wins and invalid explicit paths never fall 
   assert.equal(selection.executable, join(configuredBin, "chosen-codex"));
   await assert.rejects(resolveCodexCli({ configuredPath: "codex --version", environment, platform: "linux", homeDirectory: root }), /absolute executable path/);
   await assert.rejects(resolveCodexCli({ configuredPath: join(root, "missing"), environment, platform: "linux", homeDirectory: root }), /not an executable file/);
+});
+
+test("Linux host finds a user-local standalone symlink with a minimal or missing PATH", async (t) => {
+  const root = await mkdtemp(join(tmpdir(), "af-codex-local-"));
+  t.after(() => { configureCodexCli(undefined); return rm(root, { recursive: true, force: true }); });
+  const bin = join(root, ".local", "bin");
+  await mkdir(bin, { recursive: true });
+  const target = join(root, "standalone-codex");
+  await executable(target);
+  await symlink(target, join(bin, "codex"));
+  for (const environment of [{ PATH: "/usr/bin:/bin" }, {}]) {
+    const selection = await resolveCodexCli({ environment, platform: "linux", homeDirectory: root });
+    assert.equal(selection.executable, join(bin, "codex"));
+    assert.equal(selection.source, "local");
+    configureCodexCli(selection);
+    assert.equal(runtimeEnvironment(environment, "linux", root).PATH.split(":")[0], bin);
+  }
+  await chmod(target, 0o644);
+  await assert.rejects(resolveCodexCli({ environment: {}, platform: "linux", homeDirectory: root }), /was not found/);
+  await rm(target);
+  await assert.rejects(resolveCodexCli({ environment: {}, platform: "linux", homeDirectory: root }), /was not found/);
+});
+
+test("PATH and NVM keep precedence over a user-local installation", async (t) => {
+  const root = await mkdtemp(join(tmpdir(), "af-codex-precedence-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const local = join(root, ".local", "bin");
+  const nvm = join(root, ".nvm", "versions", "node", "v24.1.0", "bin");
+  const path = join(root, "path");
+  for (const bin of [local, nvm, path]) {
+    await mkdir(bin, { recursive: true });
+    await executable(join(bin, "codex"));
+  }
+  await executable(join(nvm, "node"));
+  assert.equal((await resolveCodexCli({ environment: { PATH: path }, platform: "linux", homeDirectory: root })).source, "path");
+  assert.equal((await resolveCodexCli({ environment: {}, platform: "linux", homeDirectory: root })).source, "nvm");
 });
 
 test("missing CLI is distinct and native Windows does not claim NVM managed-runtime discovery", async (t) => {

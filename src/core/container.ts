@@ -50,7 +50,7 @@ export function createContainer(context: vscode.ExtensionContext): Container {
   );
 
   context.subscriptions.push(vscode.workspace.onDidChangeConfiguration(event => {
-    if (event.affectsConfiguration("agentFactory.mainChat.botsEnabled")) void chatPanels.refreshBots();
+    if (event.affectsConfiguration("agentFactory.mainChat.botsEnabled") || event.affectsConfiguration("agentFactory.mainChat.botPrompt")) void chatPanels.refreshBots();
     if (event.affectsConfiguration("agentFactory.mainChat.statusItems")) {
       void chatPanels.refreshStatusItems();
     }

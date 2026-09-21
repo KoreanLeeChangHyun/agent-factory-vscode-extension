@@ -45,6 +45,42 @@ runInNewContext(output.outputFiles[0].text, {
   require: name => name === "vscode" ? vscode : require(name)
 });
 
+test("conversation transition finishes while the completion notification remains open", async () => {
+  const posted = [];
+  let resetCount = 0;
+  let refreshCount = 0;
+  let dismissNotification;
+  const notification = new Promise(resolve => { dismissNotification = resolve; });
+  vscode.window.showInformationMessage = () => notification;
+  const manager = new module.exports.ChatPanelManager({}, {}, () => [], async () => ({
+    available: true, client: { async listChildSessions() { return []; } }
+  }));
+  manager.ensureController = async () => {};
+  manager.rememberAgent = async () => {};
+  manager.scheduleAgentList = () => { refreshCount++; };
+  const managed = {
+    state: { role: "main", agentId: "main-test" },
+    panel: { webview: { async postMessage(message) { posted.push(message); return true; } } },
+    controller: { async resetConversation() {
+      return { conversationId: `conversation-${++resetCount}` };
+    } }
+  };
+  try {
+    const transition = manager.transitionConversation(managed);
+    // Drain the reset's asynchronous work without dismissing its notification.
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(managed.sessionTransition, undefined);
+    await transition;
+    await manager.transitionConversation(managed);
+    assert.equal(resetCount, 2);
+    assert.equal(refreshCount, 2);
+    assert.deepEqual(posted.map(message => message.type), ["conversation.cleared", "conversation.cleared"]);
+  } finally {
+    dismissNotification();
+    delete vscode.window.showInformationMessage;
+  }
+});
+
 test("host sends approval only to current controller and rejects missing or stale decisions", async () => {
   const posted = [], calls = [];
   const manager = new module.exports.ChatPanelManager({}, {}, () => [], async () => {
@@ -867,4 +903,61 @@ test('global bot setting disposes every companion and prevents inference while p
     await manager.handleMessage(panel, { type: 'bots.configure', enabled: false });
     assert.deepEqual(configUpdates.at(-1), ['botsEnabled', false, vscode.ConfigurationTarget.Global]);
   } finally { configuredMode = undefined; }
+});
+
+test('bot talk validates drafts, forwards only their text and reports failure without submitting work', async () => {
+  const posted = [], seen = [];
+  const manager = new module.exports.ChatPanelManager({}, {}, () => [], async () => { throw Error('Must not connect task runtime'); });
+  let enabled = true;
+  manager.botsEnabled = () => enabled;
+  const managed = { state: {}, panel: { webview: { async postMessage(message) { posted.push(message); return true; } } },
+    lunaBot: { async talk(text) { seen.push(text); if (text === 'fail') throw Error('auth'); return 'hello'; } } };
+  for (const message of [{ type: 'bot.talk', text: 'x' }, { type: 'bot.talk', requestId: 'x', text: ' ' },
+    { type: 'bot.talk', requestId: '<script>', text: 'x' }]) await manager.handleMessage(managed, message);
+  assert.equal(seen.length, 0);
+  posted.length = 0; // Invalid messages produce normal protocol notices, not bot replies.
+  await manager.handleMessage(managed, { type: 'bot.talk', requestId: 'one', text: 'draft', history: ['not forwarded'] });
+  assert.deepEqual(seen, ['draft']);
+  assert.deepEqual(JSON.parse(JSON.stringify(posted.pop())), { type: 'bot.reply', requestId: 'one', text: 'hello' });
+  await manager.handleMessage(managed, { type: 'bot.talk', requestId: 'two', text: 'fail' });
+  assert.equal(posted.pop().failed, true);
+  enabled = false;
+  await manager.handleMessage(managed, { type: 'bot.talk', requestId: 'three', text: 'disabled' });
+  assert.equal(seen.length, 2);
+  assert.equal(posted.pop().failed, true);
+  enabled = true;
+  let finish;
+  managed.lunaBot.talk = () => new Promise(resolve => { finish = resolve; });
+  const pending = manager.handleMessage(managed, { type: 'bot.talk', requestId: 'four', text: 'late' });
+  managed.disposed = true; finish('late'); await pending;
+  assert.equal(posted.length, 0);
+});
+
+test('bot prompt saves globally and is read fresh for subsequent talks; failed save retains config', async () => {
+  const original = vscode.workspace.getConfiguration;
+  const config = { botsEnabled: true, botPrompt: 'initial' }, posts = [], calls = [], writes = [];
+  vscode.workspace.getConfiguration = () => ({
+    get: (key, fallback) => config[key] ?? fallback,
+    async update(key, value, target) { if (value === 'reject') throw Error('save'); writes.push({ key, value, target }); config[key] = value; }
+  });
+  try {
+    const manager = new module.exports.ChatPanelManager({}, {}, () => [], async () => { throw Error('not used'); });
+    const managed = { state: {}, panel: { webview: { async postMessage(message) { posts.push(message); return true; } } },
+      lunaBot: { async talk(text, prompt) { calls.push({ text, prompt }); return 'ok'; } } };
+    manager.panels.set('bot-prompt-test', managed);
+    await manager.handleMessage(managed, { type: 'bot.prompt.save', requestId: 'save1', prompt: '친절하게\n답변하세요' });
+    assert.equal(writes[0].target, vscode.ConfigurationTarget.Global);
+    assert.equal(config.botPrompt, '친절하게\n답변하세요');
+    assert.equal(posts.find(post => post.type === 'bots.updated').botPrompt, config.botPrompt);
+    assert.equal(posts.at(-1).type, 'bot.prompt.saved');
+    await manager.handleMessage(managed, { type: 'bot.talk', requestId: 'talk1', text: 'hello' });
+    assert.deepEqual(calls[0], { text: 'hello', prompt: config.botPrompt });
+    await manager.handleMessage(managed, { type: 'bot.prompt.save', requestId: 'save2', prompt: 'reject' });
+    assert.equal(posts.at(-1).failed, true);
+    assert.equal(config.botPrompt, '친절하게\n답변하세요');
+    await manager.handleMessage(managed, { type: 'bot.prompt.save', requestId: 'save3', prompt: '' });
+    assert.equal(config.botPrompt, '');
+    await manager.handleMessage(managed, { type: 'bot.talk', requestId: 'talk2', text: 'next' });
+    assert.equal(calls[1].prompt, '');
+  } finally { vscode.workspace.getConfiguration = original; }
 });

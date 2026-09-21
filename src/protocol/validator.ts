@@ -8,7 +8,12 @@ import type { ClientMessage } from "./messages";
 
 const clientMessageTypes = new Set([
   "client.ready",
+  "worktree.create", "worktree.merge", "worktree.refresh",
+  "notes.list",
+  "notes.save",
   "bots.configure",
+  "bot.talk",
+  "bot.prompt.save",
   "execution.select",
   "reference.copy",
   "message.copy",
@@ -24,6 +29,8 @@ const clientMessageTypes = new Set([
   "session.select",
   "agents.request",
   "history.request",
+  "conversations.request",
+  "conversation.read",
   "workflow.close",
   "agent.open",
   "attachments.pick",
@@ -31,6 +38,10 @@ const clientMessageTypes = new Set([
   "attachments.createImage",
   "attachments.createFile",
   "attachments.restore",
+  "attachment.revealConverted",
+  "attachment.convert",
+  "attachment.converted",
+  "attachment.conversionFailed",
   "attachment.open",
   "attachment.remove",
   "composer.settings",
@@ -46,15 +57,26 @@ export function parseClientMessage(value: unknown): ClientMessage | undefined {
   }
 
   switch (value.type) {
+    case "worktree.create":
+    case "worktree.merge":
+    case "worktree.refresh":
+      return { type: value.type };
     case "bots.configure":
       return typeof value.enabled === "boolean" ? { type: value.type, enabled: value.enabled } : undefined;
+    case "bot.prompt.save":
+      return typeof value.requestId === "string" && /^[a-zA-Z0-9_-]{1,128}$/.test(value.requestId) && typeof value.prompt === "string"
+        ? { type: value.type, requestId: value.requestId, prompt: value.prompt } : undefined;
+    case "bot.talk":
+      return typeof value.requestId === "string" && /^[a-zA-Z0-9_-]{1,128}$/.test(value.requestId) &&
+        typeof value.text === "string" && value.text.trim().length > 0
+        ? { type: value.type, requestId: value.requestId, text: value.text } : undefined;
     case "image.resolve":
     case "link.open":
       if (typeof value.href !== "string" || value.href.length < 1 || value.href.length > 8192 || /[\u0000-\u001f]/.test(value.href)) return undefined;
       if (!/^(?:https?:\/\/|mailto:|file:\/\/|\/|\.\.?\/)/i.test(value.href)) return undefined;
       return { type: value.type, href: value.href };
     case "message.copy":
-      if (typeof value.text !== "string" || !value.text.length || value.text.length > 100_000) return undefined;
+      if (typeof value.text !== "string" || !value.text.length) return undefined;
       return { type: value.type, text: value.text };
     case "reference.copy":
       if (typeof value.id !== "string" || !/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(value.id)) return undefined;
@@ -69,30 +91,32 @@ export function parseClientMessage(value: unknown): ClientMessage | undefined {
       if (typeof value.mode !== "string" || !["cli-default", "workspace-write", "danger-full-access", "bypass"].includes(value.mode)) return undefined;
       return { type: value.type, mode: value.mode as import("../infrastructure/agent-factory/agent-client").ExecutionMode };
     case "attachments.createText":
-      if (typeof value.text !== "string" || value.text.length < 8_000 || value.text.length > 1_000_000) return undefined;
+      if (typeof value.text !== "string" || value.text.length < 8_000) return undefined;
       return { type: value.type, text: value.text };
     case "attachments.createFile": {
       if (typeof value.id !== "string" || !/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(value.id)
           || typeof value.name !== "string" || !value.name || value.name.length > 255 || /[\\/\x00-\x1f]/.test(value.name) || [".", ".."].includes(value.name)
-          || !Number.isSafeInteger(value.size) || (value.size as number) < 0 || (value.size as number) > 10 * 1024 * 1024
-          || typeof value.data !== "string" || value.data.length > 14 * 1024 * 1024) return undefined;
+          || !Number.isSafeInteger(value.size) || (value.size as number) < 0
+          || typeof value.data !== "string") return undefined;
       const content = Buffer.from(value.data, "base64");
       if (content.byteLength !== value.size || content.toString("base64") !== value.data) return undefined;
       return { type: value.type, id: value.id, name: value.name, size: value.size as number, data: value.data };
     }
+    case "attachment.converted":
     case "attachments.createImage": {
       if (typeof value.id !== "string" || !/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(value.id)
           || typeof value.name !== "string" || !value.name || value.name.length > 255
           || typeof value.mediaType !== "string" || !["image/png", "image/jpeg", "image/gif", "image/webp"].includes(value.mediaType)
-          || typeof value.size !== "number" || !Number.isSafeInteger(value.size) || value.size < 1 || value.size > 10 * 1024 * 1024
-          || typeof value.data !== "string" || value.data.length > 14 * 1024 * 1024
+          || typeof value.size !== "number" || !Number.isSafeInteger(value.size) || value.size < 1
+          || typeof value.data !== "string"
           || !/^[A-Za-z0-9+/]+={0,2}$/.test(value.data)) return undefined;
+      if (value.type === "attachment.converted" && value.mediaType === "image/gif") return undefined;
       const content = Buffer.from(value.data, "base64");
       if (content.byteLength !== value.size || content.toString("base64") !== value.data) return undefined;
       return { type: value.type, id: value.id, name: value.name, mediaType: value.mediaType, size: value.size, data: value.data };
     }
     case "attachments.restore": {
-      if (!Array.isArray(value.attachments) || value.attachments.length > 100) return undefined;
+      if (!Array.isArray(value.attachments)) return undefined;
       const attachments = value.attachments.filter((item): item is { id: string; name: string; target: "composer" | "history" } => isRecord(item)
         && typeof item.id === "string" && /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(item.id)
         && typeof item.name === "string" && item.name.length > 0 && item.name.length <= 255
@@ -101,19 +125,42 @@ export function parseClientMessage(value: unknown): ClientMessage | undefined {
       if (attachments.length !== value.attachments.length) return undefined;
       return { type: value.type, attachments };
     }
+    case "attachment.convert":
+      if (typeof value.id !== "string" || !/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(value.id)
+          || typeof value.name !== "string" || !value.name || value.name.length > 255
+          || typeof value.requestId !== "string" || !/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(value.requestId)
+          || typeof value.mediaType !== "string" || !["image/png", "image/jpeg", "image/webp"].includes(value.mediaType)) return undefined;
+      return { type: value.type, id: value.id, name: value.name, requestId: value.requestId, mediaType: value.mediaType };
+    case "attachment.revealConverted":
+    case "attachment.conversionFailed":
     case "attachment.open":
     case "attachment.remove":
       if (typeof value.id !== "string" || !/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(value.id)) return undefined;
       return { type: value.type, id: value.id };
+    case "notes.list":
+      if (value.scope !== "global" && value.scope !== "workspace") return undefined;
+      return { type: value.type, scope: value.scope };
+    case "notes.save": {
+      if (value.scope !== "global" && value.scope !== "workspace") return undefined;
+      const note = value.note as Record<string, unknown> | undefined;
+      if (!note || typeof note.id !== "string" || !/^[A-Za-z0-9_-]+$/.test(note.id) || typeof note.title !== "string" || typeof note.body !== "string" || !Number.isSafeInteger(note.revision) || Number(note.revision) < 0) return undefined;
+      return { type: value.type, scope: value.scope, note: { id: note.id, title: note.title, body: note.body, revision: Number(note.revision) } };
+    }
     case "client.ready":
     case "queue.resume":
     case "run.cancel":
     case "conversation.clear":
+    case "conversations.request":
     case "sessions.request":
     case "models.request":
     case "agents.request":
     case "attachments.pick":
       return { type: value.type };
+    case "conversation.read": {
+      const id = (value: unknown): value is string => typeof value === "string" && /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(value);
+      if ((value.conversationId !== null && !id(value.conversationId)) || !id(value.requestId) || (value.before !== undefined && !id(value.before))) return undefined;
+      return { type: value.type, conversationId: value.conversationId as string | null, requestId: value.requestId, ...(value.before ? { before: value.before as string } : {}) };
+    }
     case "history.request":
       if (typeof value.before !== "string" || !/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(value.before)) return undefined;
       return { type: value.type, before: value.before };
@@ -159,7 +206,6 @@ export function parseClientMessage(value: unknown): ClientMessage | undefined {
         typeof value.id !== "string" ||
         !value.id ||
         typeof value.text !== "string" ||
-        value.text.length > 100_000 ||
         !Array.isArray(value.attachments) ||
         !isRecord(value.execution) ||
         (value.execution.businessMode !== undefined && !BUSINESS_MODES.includes(value.execution.businessMode as BusinessMode)) ||
@@ -174,7 +220,7 @@ export function parseClientMessage(value: unknown): ClientMessage | undefined {
           !reasoningEfforts.has(value.execution.reasoningEffort)
         )) ||
         (value.execution.goalObjective !== undefined && (typeof value.execution.goalObjective !== "string" ||
-          !value.execution.goalObjective.trim() || value.execution.goalObjective.length > 4000 || value.execution.goal !== true)) ||
+          !value.execution.goalObjective.trim() || value.execution.goal !== true)) ||
         typeof value.execution.fast !== "boolean" ||
         typeof value.execution.goal !== "boolean"
       ) {
@@ -183,11 +229,11 @@ export function parseClientMessage(value: unknown): ClientMessage | undefined {
       const attachments = value.attachments
         .map(parseAttachment)
         .filter((attachment): attachment is AttachmentReference => Boolean(attachment));
-      if (attachments.length !== value.attachments.length || attachments.length > 100) {
+      if (attachments.length !== value.attachments.length) {
         return undefined;
       }
       const images = attachments.filter((attachment) => attachment.kind === "image");
-      if (images.length > 8 || images.reduce((total, image) => total + (image.size ?? 0), 0) > 20 * 1024 * 1024) return undefined;
+
       return {
         type: value.type,
         id: value.id,

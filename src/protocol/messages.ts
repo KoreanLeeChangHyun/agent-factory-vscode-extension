@@ -13,7 +13,12 @@ export interface MessageSubmission {
 }
 
 export type ClientMessage =
+  | { readonly type: "worktree.create" | "worktree.merge" | "worktree.refresh" }
+  | { readonly type: "notes.list"; readonly scope: import("../infrastructure/vscode/note-store").NoteScope }
+  | { readonly type: "notes.save"; readonly scope: import("../infrastructure/vscode/note-store").NoteScope; readonly note: Omit<import("../infrastructure/vscode/note-store").Note, "updatedAt"> }
   | { readonly type: "bots.configure"; readonly enabled: boolean }
+  | { readonly type: "bot.talk"; readonly requestId: string; readonly text: string }
+  | { readonly type: "bot.prompt.save"; readonly requestId: string; readonly prompt: string }
   | { readonly type: "client.ready" }
   | { readonly type: "execution.select"; readonly mode: import("../infrastructure/agent-factory/agent-client").ExecutionMode }
   | { readonly type: "message.copy"; readonly text: string }
@@ -46,6 +51,8 @@ export type ClientMessage =
   | { readonly type: "models.request" }
   | { readonly type: "session.select"; readonly agentId: string }
   | { readonly type: "workflow.close"; readonly workAgentId: string; readonly loopId: string }
+  | { readonly type: "conversations.request" }
+  | { readonly type: "conversation.read"; readonly conversationId: string | null; readonly before?: string; readonly requestId: string }
   | { readonly type: "history.request"; readonly before: string }
   | { readonly type: "agents.request" }
   | { readonly type: "agent.open"; readonly agentId: string }
@@ -54,6 +61,10 @@ export type ClientMessage =
   | { readonly type: "attachments.createImage"; readonly id: string; readonly name: string; readonly mediaType: string; readonly size: number; readonly data: string }
   | { readonly type: "attachments.createFile"; readonly id: string; readonly name: string; readonly size: number; readonly data: string }
   | { readonly type: "attachments.restore"; readonly attachments: readonly { readonly id: string; readonly name: string; readonly target: "composer" | "history" }[] }
+  | { readonly type: "attachment.convert"; readonly id: string; readonly name: string; readonly requestId: string; readonly mediaType: string }
+  | { readonly type: "attachment.converted"; readonly id: string; readonly name: string; readonly mediaType: string; readonly size: number; readonly data: string }
+  | { readonly type: "attachment.revealConverted"; readonly id: string }
+  | { readonly type: "attachment.conversionFailed"; readonly id: string }
   | { readonly type: "attachment.open"; readonly id: string }
   | { readonly type: "attachment.remove"; readonly id: string }
   | {
@@ -74,7 +85,13 @@ export type ClientMessage =
     };
 
 export type HostMessage =
-  | { readonly type: "bots.updated"; readonly enabled: boolean }
+  | { readonly type: "attachment.conversionResult"; readonly id: string; readonly path?: string; readonly error?: string }
+  | { readonly type: "attachment.encode"; readonly id: string; readonly source: string; readonly mediaType: string; readonly name: string }
+  | { readonly type: "worktree.updated"; readonly value?: import("../infrastructure/agent-factory/agent-client").ConversationWorktree; readonly busy?: boolean; readonly supported?: boolean }
+  | { readonly type: "notes.list.result"; readonly scope: import("../infrastructure/vscode/note-store").NoteScope; readonly notes: readonly import("../infrastructure/vscode/note-store").Note[]; readonly error?: string }
+  | { readonly type: "notes.save.result"; readonly scope: import("../infrastructure/vscode/note-store").NoteScope; readonly id: string; readonly note?: import("../infrastructure/vscode/note-store").Note; readonly error?: string }
+  | { readonly type: "bots.updated"; readonly enabled: boolean; readonly botPrompt?: string }
+  | { readonly type: "bot.prompt.saved"; readonly requestId: string; readonly prompt?: string; readonly failed?: boolean }
   | { readonly type: "chat.rejected"; readonly id: string }
   | { readonly type: "chat.started"; readonly submission?: MessageSubmission; readonly id: string; readonly text: string; readonly attachments: readonly AttachmentReference[] }
   | { readonly type: "execution.updated"; readonly mode?: import("../infrastructure/agent-factory/agent-client").ExecutionMode | "read-only" }
@@ -94,6 +111,7 @@ export type HostMessage =
       readonly capabilities?: { readonly submit: import("../infrastructure/agent-factory/agent-client").ExecutionCapabilities; readonly send: import("../infrastructure/agent-factory/agent-client").ExecutionCapabilities };
       readonly running: boolean;
       readonly botsEnabled?: boolean;
+      readonly botPrompt?: string;
       readonly statusItems: readonly StatusItemId[];
       readonly model?: string;
       readonly agentModels?: AgentModels;
@@ -136,6 +154,8 @@ export type HostMessage =
     }
   | { readonly type: "session.bound"; readonly agentId: string; readonly reset?: boolean; readonly conversationId?: string }
   | { readonly type: "conversation.cleared"; readonly conversationId: string }
+  | { readonly type: "conversations.list"; readonly conversations: readonly import("../infrastructure/agent-factory/agent-client").SavedConversation[]; readonly error?: string }
+  | { readonly type: "conversation.read.result"; readonly requestId: string; readonly history?: import("../infrastructure/agent-factory/agent-client").ConversationHistory; readonly error?: string }
   | { readonly type: "conversation.history"; readonly agentId: string; readonly history: import("../infrastructure/agent-factory/agent-client").ConversationHistory }
   | { readonly type: "sessions.open" }
   | {
@@ -182,6 +202,7 @@ export type HostMessage =
       readonly running: boolean;
     }
   | { readonly type: "bot.mood"; readonly unavailable?: boolean; readonly mood?: "calm" | "curious" | "cheerful" | "focused" }
+  | { readonly type: "bot.reply"; readonly requestId: string; readonly text?: string; readonly failed?: boolean }
   | { readonly type: "run.observed"; readonly status: string }
   | { readonly type: "queue.updated"; readonly count: number }
   | {

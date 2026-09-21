@@ -10,6 +10,7 @@ import { randomUUID } from "node:crypto";
 import { constants as fsConstants } from "node:fs";
 import { open as openFile, realpath, unlink } from "node:fs/promises";
 import { readGitBranch } from "./git-branch";
+import { NoteStore } from "./note-store";
 import { RunningTitle } from "./running-title";
 import * as vscode from "vscode";
 import type { StatusItemId } from "../../core/config/types";
@@ -27,6 +28,7 @@ import type { ChatTemplateRenderer } from "./chat-template-renderer";
 import type { AgentRuntimeClient } from "../agent-factory/agent-client";
 import { readCodexModels } from "../agent-factory/model-catalog";
 import { ChatSessionController } from "../../modules/chat/session-controller";
+import { saveConvertedImage } from "./converted-image-store";
 import { writeNewImageAttachment } from "./image-attachment-store";
 
 type RuntimeConnection =
@@ -39,12 +41,15 @@ interface ManagedPanel {
   readonly subscriptions: vscode.Disposable[];
   readonly imageAttachments: Map<string, number>;
   imageMutation: Promise<void>;
+  convertedImages?: Map<string, string>;
+  imageConversions?: Map<string, { root: string; name: string; mediaType: string }>;
   chatSendPreparation: Promise<void>;
   pendingMessageIds?: Set<string>;
   startedMessages?: Extract<HostMessage, { type: "chat.started" }>[];
   controller?: ChatSessionController;
   controllerInitialization?: Promise<void>;
   sessionTransition?: Promise<void>;
+  worktree?: import("../agent-factory/agent-client").ConversationWorktree;
   disposed?: boolean;
   executionModeExplicit?: boolean;
   executionMode?: import("../agent-factory/agent-client").ExecutionMode;
@@ -76,6 +81,7 @@ export interface SidebarAgent {
 
 export class ChatPanelManager implements vscode.Disposable {
   public readonly viewType = "agentFactory.mainChat";
+  private noteStore?: NoteStore;
   private readonly disposedPanels = new WeakSet<vscode.WebviewPanel>();
   private readonly panels = new Map<string, ManagedPanel>();
   private activePanelId: string | undefined;
@@ -359,7 +365,7 @@ export class ChatPanelManager implements vscode.Disposable {
     if (!managed.branchRefreshStarted) return;
     try {
       if (managed.panel.visible) {
-        const branch = await readGitBranch(vscode.workspace.workspaceFolders?.[0]?.uri.fsPath);
+        const branch = await readGitBranch(managed.worktree?.workingDirectory ?? vscode.workspace.workspaceFolders?.[0]?.uri.fsPath);
         if (managed.branchRefreshStarted) {
           await this.post(managed.panel, { type: "branch.updated", branch });
         }
@@ -383,7 +389,20 @@ export class ChatPanelManager implements vscode.Disposable {
     }
 
     switch (message.type) {
+      case "worktree.refresh":
+        await this.refreshWorktree(managed);
+        return;
+      case "worktree.create":
+      case "worktree.merge": {
+        if (managed.sessionTransition) return;
+        const transition = this.changeWorktree(managed, message.type === "worktree.create" ? "create" : "merge");
+        managed.sessionTransition = transition;
+        try { await transition; }
+        finally { if (managed.sessionTransition === transition) managed.sessionTransition = undefined; }
+        return;
+      }
       case "client.ready":
+        managed.lunaBot?.cancelTalk();
         if (!managed.state.agentId) managed.executionMode ??= this.defaultExecutionMode();
         await this.post(managed.panel, { type: "execution.updated", mode: managed.executionMode });
         managed.themeReady = true;
@@ -424,6 +443,7 @@ export class ChatPanelManager implements vscode.Disposable {
           running: managed.controller?.running ?? Boolean(managed.state.agentId && connection.available),
           statusItems: this.statusItems(),
           botsEnabled: this.botsEnabled(),
+          botPrompt: this.botPrompt(),
           model: managed.state.model,
           agentModels: managed.state.agentModels,
           agentPermissions: managed.state.agentPermissions,
@@ -463,6 +483,7 @@ export class ChatPanelManager implements vscode.Disposable {
             await this.post(managed.panel, { type: "host.notice", level: "error", text: localize("ui.unable.to.check.the.active.run.0", error instanceof Error ? describeLocalizedMessage(error.message) ?? error.message : String(error)) });
           }
         }
+        await this.refreshWorktree(managed);
         this.scheduleAgentList(managed, true);
         if (!managed.branchRefreshStarted) {
           managed.branchRefreshStarted = true;
@@ -476,7 +497,7 @@ export class ChatPanelManager implements vscode.Disposable {
         await vscode.env.clipboard.writeText(message.id);
         return;
       case "image.resolve":
-        await this.post(managed.panel, { type: "image.resolved", href: message.href, src: await readMarkdownImage(message.href, (vscode.workspace.workspaceFolders ?? []).map(folder => folder.uri.fsPath)) });
+        await this.post(managed.panel, { type: "image.resolved", href: message.href, src: await readMarkdownImage(message.href, [...(managed.worktree ? [managed.worktree.workingDirectory] : []), ...(vscode.workspace.workspaceFolders ?? []).map(folder => folder.uri.fsPath)]) });
         return;
       case "link.open":
         await this.openLink(managed, message.href);
@@ -568,6 +589,52 @@ export class ChatPanelManager implements vscode.Disposable {
         }
         return;
       }
+      case "conversations.request":
+      case "conversation.read": {
+        const agentId = managed.state.agentId;
+        try {
+          if (!agentId) {
+            if (message.type === "conversations.request") await this.post(managed.panel, { type: "conversations.list", conversations: [] });
+            return;
+          }
+          const connection = await this.connectRuntime();
+          if (!connection.available) throw new Error(connection.diagnostic);
+          if (message.type === "conversations.request") {
+            if (!connection.client.conversations) throw new Error("Conversation history is unavailable.");
+            const conversations = await connection.client.conversations(agentId);
+            if (managed.state.agentId === agentId) await this.post(managed.panel, { type: "conversations.list", conversations });
+          } else {
+            if (!connection.client.history) throw new Error("Conversation history is unavailable.");
+            const history = await connection.client.history(agentId, { limit: 50, conversationId: message.conversationId, before: message.before });
+            if (managed.state.agentId === agentId) await this.post(managed.panel, { type: "conversation.read.result", requestId: message.requestId, history });
+          }
+        } catch (error) {
+          if (managed.state.agentId !== agentId) return;
+          const detail = error instanceof Error ? error.message : String(error);
+          await this.post(managed.panel, message.type === "conversations.request"
+            ? { type: "conversations.list", conversations: [], error: detail }
+            : { type: "conversation.read.result", requestId: message.requestId, error: detail });
+        }
+        return;
+      }
+      case "notes.list":
+      case "notes.save": {
+        this.noteStore ??= new NoteStore(this.context.globalState, this.context.workspaceState);
+        try {
+          if (message.type === "notes.list") {
+            await this.post(managed.panel, { type: "notes.list.result", scope: message.scope, notes: await this.noteStore.list(message.scope) });
+          } else {
+            const note = await this.noteStore.save(message.scope, message.note);
+            await this.post(managed.panel, { type: "notes.save.result", scope: message.scope, id: note.id, note });
+          }
+        } catch (error) {
+          const detail = error instanceof Error ? error.message : String(error);
+          await this.post(managed.panel, message.type === "notes.list"
+            ? { type: "notes.list.result", scope: message.scope, notes: [], error: detail }
+            : { type: "notes.save.result", scope: message.scope, id: message.note.id, error: detail });
+        }
+        return;
+      }
       case "history.request": {
         const connection = await this.connectRuntime();
         if (connection.available) await this.restoreConversationHistory(managed, connection.client, message.before);
@@ -607,6 +674,22 @@ export class ChatPanelManager implements vscode.Disposable {
       case "attachments.restore":
         await this.mutateImages(managed, () => this.restoreImageAttachments(managed, message.attachments));
         return;
+      case "attachment.convert":
+        await this.convertImageAttachment(managed, message.id, message.name, message.requestId, message.mediaType);
+        break;
+      case "attachment.converted":
+        await this.finishImageConversion(managed, message);
+        break;
+      case "attachment.revealConverted": {
+        const path = managed.convertedImages?.get(message.id);
+        if (path) await vscode.commands.executeCommand("revealInExplorer", vscode.Uri.file(path));
+        break;
+      }
+      case "attachment.conversionFailed":
+        if (managed.imageConversions?.delete(message.id)) {
+          await this.post(managed.panel, { type: "attachment.conversionResult", id: message.id, error: localize("attachment.convert.failed") });
+        }
+        break;
       case "attachment.open":
         await this.openImageAttachment(managed, message.id);
         return;
@@ -616,6 +699,35 @@ export class ChatPanelManager implements vscode.Disposable {
       case "bots.configure":
         await this.saveBots(message.enabled);
         return;
+      case "bot.talk": {
+        if (!this.botsEnabled() || managed.disposed) {
+          await this.post(managed.panel, { type: "bot.reply", requestId: message.requestId, failed: true });
+          return;
+        }
+        const bot = managed.lunaBot ??= new LunaBot();
+        try {
+          const text = await bot.talk(message.text, this.botPrompt());
+          if (!managed.disposed && this.botsEnabled() && managed.lunaBot === bot)
+            await this.post(managed.panel, { type: "bot.reply", requestId: message.requestId, text });
+        } catch {
+          if (!managed.disposed && this.botsEnabled() && managed.lunaBot === bot)
+            await this.post(managed.panel, { type: "bot.reply", requestId: message.requestId, failed: true });
+        }
+        return;
+      }
+      case "bot.prompt.save": {
+        const write = this.botsWrite.then(() => vscode.workspace.getConfiguration("agentFactory.mainChat")
+          .update("botPrompt", message.prompt, vscode.ConfigurationTarget.Global));
+        this.botsWrite = write.then(() => {}, () => {});
+        try {
+          await write;
+          await this.refreshBots();
+          await this.post(managed.panel, { type: "bot.prompt.saved", requestId: message.requestId, prompt: message.prompt });
+        } catch {
+          await this.post(managed.panel, { type: "bot.prompt.saved", requestId: message.requestId, failed: true });
+        }
+        return;
+      }
       case "status.reorder":
         await this.saveStatusItems(managed.panel, message.items);
         return;
@@ -630,7 +742,7 @@ export class ChatPanelManager implements vscode.Disposable {
       }
 
       const target = parseLocalLink(href);
-      const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+      const workspaceRoot = managed.worktree?.workingDirectory ?? vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
       const filePath = isAbsolute(target.path)
         ? target.path
         : resolve(workspaceRoot ?? this.context.extensionUri.fsPath, target.path);
@@ -1012,6 +1124,7 @@ Read the exact stored child result/receipt and existing workflow status for repo
       if (managed.disposed) return;
       await this.reconnectController(managed);
       if (managed.disposed) return;
+      await this.refreshWorktree(managed);
       const capabilities = await connection.client.capabilities(agentId);
       if (managed.disposed) return;
       await this.post(managed.panel, { type: "capabilities.updated", capabilities });
@@ -1072,6 +1185,7 @@ Read the exact stored child result/receipt and existing workflow status for repo
           managed.runningTitle?.setRunning(running);
           void this.post(managed.panel, { type: "run.state", running });
           this.scheduleAgentList(managed, !running);
+          if (!running) void this.refreshWorktree(managed);
         },
         onBeforeQueueDrain: async () => {
           // Include inputs already received while their attachments were preparing.
@@ -1115,6 +1229,61 @@ Read the exact stored child result/receipt and existing workflow status for repo
           void this.post(managed.panel, { type: "host.notice", level: "error", text: message });
         }
       }, managed.state.agentId);
+    }
+  }
+
+  private async refreshWorktree(managed: ManagedPanel): Promise<void> {
+    try {
+      const connection = await this.connectRuntime();
+      if (!connection.available || managed.disposed) return;
+      const supported = (await connection.client.capabilities(managed.state.agentId)).submit.worktrees === true && (managed.state.role ?? "main") === "main";
+      const agentId = managed.state.agentId;
+      const value = supported && agentId && connection.client.worktree ? await connection.client.worktree(agentId, "status") : undefined;
+      if (managed.disposed || managed.state.agentId !== agentId) return;
+      managed.worktree = value;
+      await this.post(managed.panel, { type: "worktree.updated", value, supported });
+      if (value) await this.post(managed.panel, { type: "branch.updated", branch: value.branch ?? undefined });
+    } catch (error) {
+      await this.post(managed.panel, { type: "host.notice", level: "error", text: localize("worktree.failed", error instanceof Error ? error.message : String(error)) });
+    }
+  }
+
+  private async changeWorktree(managed: ManagedPanel, action: "create" | "merge"): Promise<void> {
+    try {
+      if ((managed.state.role ?? "main") !== "main" || managed.pendingMessageIds?.size) throw new Error(localize("worktree.busy"));
+      await this.ensureController(managed);
+      if (!managed.controller) throw new Error(localize("worktree.unsupported"));
+      if (managed.controller.running || managed.controller.queueLength) throw new Error(localize("worktree.busy"));
+      await this.post(managed.panel, { type: "worktree.updated", value: managed.worktree, busy: true });
+      let changes: "keep" | "copy" | undefined;
+      let path: string | undefined;
+      if (action === "create") {
+        const choice = await vscode.window.showQuickPick([
+          { label: localize("worktree.keep"), value: "keep" as const },
+          { label: localize("worktree.copy"), value: "copy" as const }
+        ], { title: localize("worktree.changes") });
+        if (!choice) return;
+        changes = choice.value;
+        const location = await vscode.window.showQuickPick([
+          { label: localize("worktree.default.path"), custom: false },
+          { label: localize("worktree.custom.path"), custom: true }
+        ], { title: localize("worktree.location") });
+        if (!location) return;
+        if (location.custom) {
+          path = await vscode.window.showInputBox({ title: localize("worktree.location"), prompt: localize("worktree.path.prompt"),
+            validateInput: value => isAbsolute(value) ? undefined : localize("worktree.path.prompt") });
+          if (!path) return;
+        }
+      }
+      managed.worktree = await managed.controller.changeWorktree(action, { changes, path, executionMode: managed.executionMode ?? this.defaultExecutionMode() });
+      const conflicted = managed.worktree.worktree?.phase === "conflict";
+      await this.post(managed.panel, { type: "host.notice", level: conflicted ? "warning" : "info",
+        text: localize(conflicted ? "worktree.conflict.notice" : action === "merge" ? "worktree.merged.notice" : "worktree.created.notice") });
+    } catch (error) {
+      await this.post(managed.panel, { type: "host.notice", level: "error", text: localize("worktree.failed", error instanceof Error ? error.message : String(error)) });
+    } finally {
+      await this.refreshWorktree(managed);
+      await this.post(managed.panel, { type: "worktree.updated", value: managed.worktree, busy: false });
     }
   }
 
@@ -1173,12 +1342,6 @@ Read the exact stored child result/receipt and existing workflow status for repo
         return;
       }
     }
-    const answer = await vscode.window.showWarningMessage(
-      localize("ui.start.a.new.conversation.in.this.chat.the.main.agent.identity.settings.and.historical.run.records.will.be.retained"),
-      { modal: true },
-      localize("ui.clear.conversation")
-    );
-    if (answer !== localize("ui.clear.conversation")) return;
     if (managed.pendingMessageIds?.size || managed.controller.conversationResetBlockedReason) {
       await this.post(managed.panel, {
         type: "host.notice", level: "warning",
@@ -1199,7 +1362,7 @@ Read the exact stored child result/receipt and existing workflow status for repo
       };
       await this.rememberAgent(managed.state);
       await this.post(managed.panel, { type: "conversation.cleared", conversationId: reset.conversationId });
-      await vscode.window.showInformationMessage(localize("ui.started.a.new.conversation.historical.run.records.were.retained"));
+      void vscode.window.showInformationMessage(localize("ui.started.a.new.conversation.historical.run.records.were.retained"));
       this.scheduleAgentList(managed, true);
     } catch (error) {
       await this.post(managed.panel, {
@@ -1243,7 +1406,7 @@ Read the exact stored child result/receipt and existing workflow status for repo
     }
     const goalMode = (managed.state.role ?? "main") === "main" && execution.taskMode !== "verification" && execution.goal;
     const goalObjective = goalMode ? text.trim() : undefined;
-    if (goalMode && (!goalObjective || goalObjective.length > 4000)) {
+    if (goalMode && (!goalObjective)) {
       throw new Error(localize("ui.enter.a.chat.message.of.1.4.000.characters.or.turn.off.goal"));
     }
     await this.ensureController(managed);
@@ -1455,7 +1618,7 @@ Read the exact stored child result/receipt and existing workflow status for repo
   private async persistImage(panel: vscode.WebviewPanel, panelId: string, id: string, name: string, mediaType: string, content: Buffer): Promise<AttachmentReference> {
     assertAttachmentScopeId(panelId, "panel");
     assertAttachmentScopeId(id, "attachment");
-    if (content.byteLength < 1 || content.byteLength > 10 * 1024 * 1024 || !hasImageSignature(content, mediaType)) throw new Error(localize("ui.the.image.is.unsupported.or.too.large"));
+    if (content.byteLength < 1 || !hasImageSignature(content, mediaType)) throw new Error(localize("ui.the.image.is.unsupported.or.too.large"));
     const suffix = imageSuffix(mediaType);
     const directory = vscode.Uri.joinPath(this.context.globalStorageUri, "chat-images", panelId, id.slice(0, 2));
     await vscode.workspace.fs.createDirectory(directory);
@@ -1476,6 +1639,40 @@ Read the exact stored child result/receipt and existing workflow status for repo
       } catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; }
     }
     return undefined;
+  }
+
+  private async convertImageAttachment(managed: ManagedPanel, id: string, name: string, requestId: string, mediaType: string): Promise<void> {
+    try {
+      const root = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+      if (!root) throw new Error(localize("attachment.convert.workspace"));
+      const uri = await this.imageAttachmentPath(managed.state.panelId, id);
+      if (!uri) throw new Error(localize("ui.the.original.image.no.longer.exists"));
+      const sourceType = imageMediaType(uri.fsPath);
+      if (!["image/png", "image/jpeg", "image/webp"].includes(mediaType)) throw new Error(localize("attachment.convert.failed"));
+      const file = await openFile(uri.fsPath, fsConstants.O_RDONLY | fsConstants.O_NOFOLLOW);
+      let content: Buffer;
+      try { content = await file.readFile(); } finally { await file.close(); }
+      if (!sourceType || !hasImageSignature(content, sourceType)) throw new Error(localize("attachment.convert.failed"));
+      (managed.imageConversions ??= new Map()).set(requestId, { root, name, mediaType: mediaType });
+      await this.post(managed.panel, { type: "attachment.encode", id: requestId, name,
+        source: `data:${sourceType};base64,${content.toString("base64")}`, mediaType: mediaType });
+    } catch (error) {
+      await this.post(managed.panel, { type: "attachment.conversionResult", id: requestId, error: error instanceof Error ? error.message : String(error) });
+    }
+  }
+
+  private async finishImageConversion(managed: ManagedPanel, message: Extract<import("../../protocol/messages").ClientMessage, { type: "attachment.converted" }>): Promise<void> {
+    const pending = managed.imageConversions?.get(message.id);
+    if (!pending) return;
+    managed.imageConversions!.delete(message.id);
+    try {
+      if (pending.mediaType !== message.mediaType) throw new Error(localize("attachment.convert.failed"));
+      const path = await saveConvertedImage(pending.root, pending.name, pending.mediaType, message.data, message.size);
+      (managed.convertedImages ??= new Map()).set(message.id, path);
+      await this.post(managed.panel, { type: "attachment.conversionResult", id: message.id, path });
+    } catch (error) {
+      await this.post(managed.panel, { type: "attachment.conversionResult", id: message.id, error: error instanceof Error ? error.message : String(error) });
+    }
   }
 
   private async openImageAttachment(managed: ManagedPanel, id: string): Promise<void> {
@@ -1522,6 +1719,10 @@ Read the exact stored child result/receipt and existing workflow status for repo
   private botsEnabled(): boolean {
     return vscode.workspace.getConfiguration("agentFactory.mainChat").get<boolean>("botsEnabled", true);
   }
+  private botPrompt(): string {
+    const value = vscode.workspace.getConfiguration("agentFactory.mainChat").get<unknown>("botPrompt", "");
+    return typeof value === "string" ? value : "";
+  }
 
   public async refreshBots(): Promise<void> {
     const enabled = this.botsEnabled();
@@ -1530,7 +1731,7 @@ Read the exact stored child result/receipt and existing workflow status for repo
         managed.lunaBot?.dispose();
         managed.lunaBot = undefined;
       }
-      return this.post(managed.panel, { type: "bots.updated", enabled });
+      return this.post(managed.panel, { type: "bots.updated", enabled, botPrompt: this.botPrompt() });
     }));
   }
 
@@ -1665,7 +1866,7 @@ async function readSafeImage(path: string): Promise<Buffer> {
   const file = await openFile(path, fsConstants.O_RDONLY | fsConstants.O_NOFOLLOW);
   try {
     const before = await file.stat();
-    if (!before.isFile() || before.size < 1 || before.size > 10 * 1024 * 1024) throw new Error(localize("ui.image.size.is.outside.the.allowed.range"));
+    if (!before.isFile() || before.size < 1) throw new Error(localize("ui.image.size.is.outside.the.allowed.range"));
     const content = await file.readFile();
     const after = await file.stat();
     if (before.dev !== after.dev || before.ino !== after.ino || before.size !== after.size || before.mtimeMs !== after.mtimeMs) throw new Error(localize("ui.the.image.changed.while.being.read"));

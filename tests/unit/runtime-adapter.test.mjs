@@ -6,6 +6,7 @@ import { dirname, join } from "node:path";
 import test from "node:test";
 import { runUiInNewContext as runInNewContext } from "../support/ui-localization.mjs";
 import { build } from "esbuild";
+import { importTypeScript } from "../support/import-typescript.mjs";
 
 const runtimeTestHome = await mkdtemp(join(tmpdir(), "af-extension-home-"));
 process.env.AGENT_FACTORY_HOME = runtimeTestHome;
@@ -15,19 +16,6 @@ function agentsRoot(root) {
   return join(runtimeTestHome, "projects", id, "agents");
 }
 
-async function importTypeScript(relativePath) {
-  const sourcePath = new URL(`../../${relativePath}`, import.meta.url).pathname;
-  const output = await build({
-    entryPoints: [sourcePath],
-    bundle: true,
-    format: "esm",
-    platform: "node",
-    target: "node18",
-    write: false
-  });
-  const source = output.outputFiles[0].text;
-  return import(`data:text/javascript;base64,${Buffer.from(source).toString("base64")}`);
-}
 
 test("conversation history restores ordered durable messages and honors reset boundaries", async (t) => {
   const { AgentFactoryClient } = await importTypeScript("src/infrastructure/agent-factory/agent-client.ts");
@@ -65,6 +53,14 @@ test("conversation history restores ordered durable messages and honors reset bo
   const restored = await client.history("main-history");
   assert.equal(restored.conversationId, "conversation-new");
   assert.equal(restored.messages.length, 2);
+  assert.deepEqual(await client.conversations("main-history"), [{ conversationId: null, startedAt: "run-001", runCount: 2 }]);
+  const archived = await client.history("main-history", { limit: 2, conversationId: null, before: "run-003" });
+  assert.deepEqual(archived.messages.map(item => item.text), ["question run-001", "answer run-001", "question run-002", "answer run-002"]);
+  assert.equal(JSON.parse(await readFile(sessionPath, "utf8")).conversationId, "conversation-new");
+  const archivedPage = await client.history("main-history", { limit: 1, conversationId: null });
+  assert.equal(archivedPage.nextBefore, "run-002");
+  assert.deepEqual(archivedPage.messages.map(item => item.runId), ["run-002", "run-002"]);
+  await assert.rejects(client.history("main-history", { limit: 10, conversationId: "../escape" }));
   assert.equal(await readFile(join(agentRoot, "runs/run-001/result.md"), "utf8"), "answer run-001");
   // History paths are derived from the bound run, never supplied by state contents.
   await rm(join(agentRoot, "runs/run-004/request.md"));
@@ -279,6 +275,7 @@ test("composer shows only supported controls across draft and bound sessions", a
   const context = {
     document: { createElementNS: element, querySelector() { return null; }, getElementById() { return clearButton; } },
     renderStatusBar() { statusRenders++; },
+    updateComposerControls() {},
     modelMenu: { querySelector() { return null; } }, submissionButton: button(),
     promptSurface: { classList: { toggle() {} } },
     state: { role: 'main', businessMode: 'normal', taskMode: 'work', capabilities: { submit: { model: true }, send: {} }, model: 'gpt-6-astra', reasoning: 'medium', fastMode: true, goalMode: true },
@@ -341,8 +338,9 @@ test("webview persistence carries weekly usage through chat state restoration", 
     script.indexOf("  function safeCount(value)")
   );
   let serialized;
-  runInNewContext("let persistenceScheduled = false; let persistenceTimer;\n" + persist + "\npersist(false); persist(false);", {
+  runInNewContext("let persistenceScheduled = false; let persistenceTimer, persistenceStartedAt, lastPersistedState; let noteDraft = null;\n" + persist + "\npersist(false); persist(false);", {
     setTimeout,
+    clearTimeout,
     currentTaskFlows: () => [],
     state: {
       panelId: "panel-one",
@@ -633,6 +631,24 @@ test("runtime client invokes official commands and reads the bounded managed res
   ]);
   assert.equal(webUpdates[1].text, "Searching the web");
   assert.equal(webUpdates.at(-1).text, "Web search failed");
+  for (const type of ["openPage", "open_page", undefined]) {
+    const url = "https://dictionary.cambridge.org/us/dictionary/english/wave";
+    await writeFile(eventsPath, [
+      { type: "item.started", item: { id: "open-1", type: "webSearch", action: { type, url } } },
+      { type: "item.completed", item: { id: "open-1", type: "webSearch", action: { type, url } } },
+      { type: "item.completed", item: { id: "open-2", type: "web_search", action: { type, url }, error: "unavailable" } },
+      { type: "item.completed", item: { id: "url-search", type: "webSearch", action: { type: "search", query: url } } }
+    ].map(JSON.stringify).join("\n") + "\n");
+    const updates = (await client.updates("main-test", "run-fake", 0)).updates;
+    assert.deepEqual(updates.filter(update => update.kind === "activity").map(({ title, text, phase }) => ({ title, text, phase })), [
+      { title: "Open webpage", text: url, phase: "started" },
+      { title: "Open webpage", text: url, phase: "completed" },
+      { title: "Open webpage", text: url, phase: "failed" },
+      { title: "Web search", text: url, phase: "completed" }
+    ]);
+    assert.equal(updates[1].text, "Opening webpage");
+    assert.equal(updates[5].text, "Failed to open webpage");
+  }
   await writeFile(eventsPath, [
     { type: "native.commentary", text: "   " },
     { type: "native.commentary", text: commentary },

@@ -1,6 +1,6 @@
 import { localize, describeLocalizedMessage, joinLocalizedMessages, type LocalizedMessage } from "../../common/localization";
 import type { MessageSubmission } from "../../protocol/messages";
-import { withInspectionGuidance } from "./task-selection";
+import { withInspectionGuidance, withContractExecutionGuidance } from "./task-selection";
 import { withBusinessMode } from "../../common/types/business-mode";
 import { randomUUID } from "node:crypto";
 import { fileURLToPath } from "node:url";
@@ -68,6 +68,7 @@ export class ChatSessionController {
   private goalControlPending = false;
   private pendingGoalAction: GoalAction | undefined;
   private conversationResetInFlight: Promise<{ readonly conversationId: string; readonly startedAt: string }> | undefined;
+  private worktreeInFlight?: Promise<import("../../infrastructure/agent-factory/agent-client").ConversationWorktree>;
   private disposed = false;
   private readonly queuedSends: PendingSend[] = [];
 
@@ -88,6 +89,7 @@ export class ChatSessionController {
   public get queueLength(): number { return this.queuedSends.length; }
 
   public get conversationResetBlockedReason(): string | undefined {
+    if (this.worktreeInFlight) return localize("worktree.busy");
     if (this.conversationResetInFlight) return localize("ui.a.conversation.reset.is.already.processing");
     if (this.running || this.currentRunId) return localize("ui.finish.or.cancel.the.current.run.first");
     if (this.queuedSends.length) return localize("ui.send.restore.or.remove.queued.messages.first");
@@ -109,6 +111,31 @@ export class ChatSessionController {
     }
   }
 
+  public async changeWorktree(action: "create" | "merge", options: import("../../infrastructure/agent-factory/agent-client").WorktreeOptions = {}): Promise<import("../../infrastructure/agent-factory/agent-client").ConversationWorktree> {
+    if (this.worktreeInFlight || this.running || this.currentRunId || this.queueLength || this.conversationResetInFlight || this.goalControlPending) throw new Error(localize("worktree.busy"));
+    if (!this.runtime.worktree) throw new Error(localize("worktree.unsupported"));
+    const agent = this.agentId ?? `main-${randomUUID()}`;
+    const operation = this.runtime.worktree(agent, action, options);
+    this.worktreeInFlight = operation;
+    try {
+      const result = await operation;
+      if (!this.agentId) { this.agentId = agent; this.events.onBound(agent); }
+      return result;
+    } catch (error) {
+      // A failed Git operation can still have persisted a recoverable session.
+      if (!this.agentId) {
+        try {
+          await this.runtime.worktree(agent, "status");
+          this.agentId = agent;
+          this.events.onBound(agent);
+        } catch { /* No session was accepted. */ }
+      }
+      throw error;
+    } finally {
+      this.worktreeInFlight = undefined;
+    }
+  }
+
   public dispose(): void {
     this.disposed = true;
     for (const queued of this.queuedSends.splice(0)) queued.resolve?.();
@@ -116,6 +143,7 @@ export class ChatSessionController {
   }
 
   public async reconnect(): Promise<boolean> {
+    if (this.worktreeInFlight) await this.worktreeInFlight;
     if (this.conversationResetInFlight) await this.conversationResetInFlight;
     if (this.disposed || this.running) return this.running;
     if (!this.agentId) {
@@ -183,6 +211,7 @@ export class ChatSessionController {
     execution: ExecutionOptions,
     onStarted?: (submission: MessageSubmission) => void
   ): Promise<void> {
+    if (this.worktreeInFlight) await this.worktreeInFlight;
     if (this.conversationResetInFlight) await this.conversationResetInFlight;
     if (this.disposed) return;
     execution = { ...execution, ...(execution.agentPermissions ? { agentPermissions: structuredClone(execution.agentPermissions) } : {}), ...(execution.agentModels ? { agentModels: structuredClone(execution.agentModels) } : {}) };
@@ -386,6 +415,7 @@ Answer the Human's current question without cancelling these workflows. For task
   }
 
   public async controlGoal(action: GoalAction): Promise<void> {
+    if (this.worktreeInFlight) await this.worktreeInFlight;
     if (this.conversationResetInFlight) await this.conversationResetInFlight;
     if (!this.agentId) return;
     if (this.goalControlPending) {
@@ -565,7 +595,7 @@ function mergePendingSends(items: readonly PendingSend[]): Pick<PendingSend, "te
   const submissions = items.map(item => {
     const restricted = item.execution.inspectionOnly || item.execution.taskMode === "verification";
     const businessMode = restricted ? "normal" : item.execution.businessMode ?? "normal";
-    const workflowGuidance = withBusinessMode("", businessMode);
+    const workflowGuidance = withBusinessMode("", businessMode) + withContractExecutionGuidance(item.execution.taskMode);
     workflowGuidanceParts.push(workflowGuidance);
     return {
       taskMode: item.execution.taskMode ?? "direct",
@@ -671,7 +701,7 @@ The Human selected this workflow as an execution instruction. Consolidate the re
 Before dispatch, Main must assess whether the conversation and attachments provide enough information to perform the task. If a missing target, desired outcome, required input, constraint or unresolved decision prevents useful or safe execution, do not dispatch the affected work or invent the missing facts. Ask the Human a focused follow-up question: identify exactly what is missing, why it is needed, and give a short example or choices where helpful. Return needs-human-decision while preserving the original request and selected route. After the answer, combine it with the existing conversation and reassess sufficiency before dispatch. Do not ask again for information already supplied, require a fixed prompt length, or treat a short or attachment-only request as insufficient by itself. Sufficient requests proceed without an extra confirmation turn. Unrelated authorized background work continues while clarification is pending.
 Main decides worker count and session reuse using dependencies, context continuity, overlapping writes, shared resources and coordination cost. In an ordered list, optional workAgentId and verificationAgentId select each task's sessions; omitted values inherit the loop start arguments. The first task uses --work-agent, which remains the loop control identity. Failed Verification returns to the current task's assigned worker and verifier. One loop remains sequential. For independent parallel chains, use distinct lists, workflow IDs and active sessions; never dispatch the same full list to multiple workers. Main tracks cross-chain prerequisites before dispatching integration; there is no automatic cross-loop dependency scheduler. Do not mutate accepted assignments.
 Before dispatch, write one structured task-list JSON file {"id":"workflow-id","title":"Workflow title","tasks":[{"id":"task-id","title":"Concrete task name","description":"Requested work","completionCriteria":"Expected result and checks","requestFile":"/absolute/path/to/request.md"}]}. Register every task with its own completion criteria separately, regardless of worker count. Preserve the individual tasks communicated to the Human; six tasks stay six entries even with one worker. Include an absolute requestFile for every task, including the first. Use the installed exec.py announce-tasks --project-root PROJECT --task-list-file FILE command from this Main run. The runtime captures the ordered list and request bytes under the Main parent run and returns taskFlow, taskListFile, taskId and requestFile. Show the returned taskFlow JSON unchanged in a commentary fenced code block with language task-flow. Do not independently rewrite the presentation list, parse natural-language tables, or infer tasks from prose. Pass the returned taskListFile as --task-list-file, taskId as --task-id and requestFile as --request-file for submission. These presentation and submission forms come from the same runtime-owned snapshot, preserving IDs, titles, order, descriptions and completion criteria. Do not write runtime state from the extension or edit the snapshot. If the command is unavailable, report the compatibility limitation. Preparation does not launch work or prove that it was displayed or accepted.
-For work, plan-work, work-verification and plan-work-verification, pass these options to loop.py start once for the entire list. Only plan-only and standalone Verification use direct exec.py submit/send. Do not supply or calculate requestHash. Preserve the immutable list and accepted task/run identities for retries and loop revisions. Keep titles and descriptions in the Human's language, IDs within 128 letters/digits/dots/underscores/hyphens, titles within 300 characters, descriptions and completionCriteria within 4000 characters, and the list within 50 tasks. Never use agent IDs or generic lifecycle labels as task names. The lower task-status panel only shows this list after its actual agentId/runId binding is confirmed by runtime acceptance; emit the bound snapshot immediately after acceptance. Update that same taskFlow with actual accepted bindings and statuses while preserving task metadata and order. Allowed statuses are pending, running, verifying, completed, failed, blocked and cancelled. Never invent identifiers or completion; completed requires the selected route's results. The chat and lower task-status panel render this same structured list. Background continuations update the existing list, not a new workflow. On clarification, explain missing information without fabricating a list.
+For work, plan-work, work-verification and plan-work-verification, pass these options to loop.py start once for the entire list. Only plan-only and standalone Verification use direct exec.py submit/send. Do not supply or calculate requestHash. Preserve the immutable list and accepted task/run identities for retries and loop revisions. Keep titles and descriptions in the Human's language, IDs within 128 letters/digits/dots/underscores/hyphens. Never use agent IDs or generic lifecycle labels as task names. The lower task-status panel only shows this list after its actual agentId/runId binding is confirmed by runtime acceptance; emit the bound snapshot immediately after acceptance. Update that same taskFlow with actual accepted bindings and statuses while preserving task metadata and order. Allowed statuses are pending, running, verifying, completed, failed, blocked and cancelled. Never invent identifiers or completion; completed requires the selected route's results. The chat and lower task-status panel render this same structured list. Background continuations update the existing list, not a new workflow. On clarification, explain missing information without fabricating a list.
 Dispatch the captured route through the managed runtime. Preserve the accepted agent/run/loop IDs and report the accepted background work and its current stage. After acceptance, finish this Main turn promptly so the Human can continue the conversation; do not block this turn polling the child to completion. Work uses native Goal for bounded execution and necessary own checks. Keep Main Goal disabled for delegated routes so it cannot repeat or wait on Work execution. Unsupported Goal, blocked objectives and exhausted limits are not completion. The engine autonomously advances the submitted task list. Work–Verification advances only after a passing receipt; a failure returns to the same worker and verifier. The host displays the entire accepted graph and its current phase. A dispatch acknowledgement is not task completion.
 Do not wake Main or submit another task to advance a running loop. Main handles conversation, final reporting and exceptions; the engine owns normal stage transitions. On a terminal notification, acknowledge the exact stored result/receipt identity and report the result and exceptions. Do not review implementation, rerun tests, or redispatch completed Work. Goal completion is not a Verification pass. Keep completed, independently passed, failed, cancelled and needs-human-decision distinct. Reuse existing IDs and resolve uncertain acceptance before retrying. Never start a duplicate workflow. Report failures or required Human decisions with their recovery point. New questions do not cancel background work.
 [End background workflow]
