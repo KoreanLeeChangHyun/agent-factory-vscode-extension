@@ -2,7 +2,7 @@
   "name": "agent-factory-main-chat",
   "displayName": "Agent Factory Main Chat",
   "description": "%extension.description%",
-  "version": "1.0.12",
+  "version": "1.0.13",
   "publisher": "agent-factory",
   "icon": "static/images/agent-factory.png",
   "license": "UNLICENSED",
@@ -317,5 +317,9 @@
     "markdown-it": "^14.3.1",
     "plist": "^5.0.0",
     "shiki": "^4.4.3"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/KoreanLeeChangHyun/agent-factory-vscode-extension.git"
   }
 }

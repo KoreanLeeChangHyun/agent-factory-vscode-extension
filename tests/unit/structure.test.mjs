@@ -127,7 +127,8 @@ test("composer groups model, reasoning and permissions beside submission actions
   assert.match(chatScript, /select.dataset.setting = "permissions"/);
   assert.match(chatScript, /type: "execution\.select", mode: select.value/);
   assert.match(template, /id="fast-mode-button"/);
-  assert.match(template, /id="goal-mode-button"[^>]*aria-pressed="false"[^>]*hidden/);
+  assert.doesNotMatch(template, /id="goal-mode-button"/);
+  assert.match(chatScript, /submit\(action, workflow, goal\)/);
 });
 
 test("composer uses one SVG send button that becomes the stop control", function () {

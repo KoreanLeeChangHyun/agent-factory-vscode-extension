@@ -8,10 +8,10 @@ const submitSource = script.slice(script.indexOf('  function submit('), script.i
 const actions = ['work', 'plan', 'verification', 'plan-work', 'work-verification', 'plan-work-verification'];
 
 for (const action of actions) for (const goalEnabled of [false, true]) {
-  test(`${action} captures Goal=${goalEnabled} once; ordinary send remains direct`, () => {
+  test(`${action} captures explicit Goal=${goalEnabled} once; ordinary send remains direct`, () => {
     const sent = [];
     const context = {
-      state: { role: 'main', taskMode: 'work-verification', businessMode: 'interview', attachments: [], capabilities: {}, runtimeAvailable: true, goalMode: goalEnabled },
+      state: { role: 'main', taskMode: 'work-verification', businessMode: 'interview', attachments: [], capabilities: {}, runtimeAvailable: true, goalMode: true },
       taskModeNames: Object.fromEntries(['direct', ...actions].map(value => [value, value])),
       inputFeedback: {}, prompt: { value: 'Current draft', focus() {} }, timeline: {}, followLatest: false,
       currentCapabilities: () => ({ goal: true }), createId: () => String(sent.length),
@@ -19,14 +19,14 @@ for (const action of actions) for (const goalEnabled of [false, true]) {
       vscode: { postMessage(message) { sent.push(message); } }
     };
     context.state.attachments = [{ id: 'file', kind: 'file', name: 'example.ts', uri: 'file:///project/example.ts' }];
-    runInNewContext(submitSource + `\nsubmit(${JSON.stringify(action)});`, context);
+    runInNewContext(submitSource + `\nsubmit(${JSON.stringify(action)}, "normal", ${goalEnabled});`, context);
     assert.equal(sent[0].execution.taskMode, action);
     assert.equal(sent[0].execution.businessMode, 'normal');
     assert.equal(sent[0].execution.goal, goalEnabled && action !== 'verification');
     assert.equal(sent[0].execution.goalObjective, goalEnabled && action !== 'verification' ? 'Current draft' : undefined);
     assert.equal(sent[0].attachments[0].id, 'file');
     assert.equal(context.prompt.value, '');
-    assert.equal(context.state.goalMode, false);
+    // A stale saved toggle must not influence the next ordinary send.
     context.prompt.value = 'Next ordinary input';
     runInNewContext('submit();', context);
     assert.equal(sent[1].execution.taskMode, 'direct');
@@ -38,7 +38,7 @@ for (const action of actions) for (const goalEnabled of [false, true]) {
 test('composer has exactly six send actions and action choices send immediately', () => {
   const values = script.match(/task: (\[[^\n]+\]),/)[1];
   assert.deepEqual(JSON.parse(values), actions);
-  assert.match(script, /closeSettingMenu\(false\);\s+submit\(action, workflow\);/);
+  assert.match(script, /closeSettingMenu\(false\);\s+submit\(action, workflow, goal\);/);
   const persistence = script.slice(script.indexOf('  function persist('));
   assert.doesNotMatch(persistence, /taskMode: state.taskMode/);
 });
