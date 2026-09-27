@@ -174,34 +174,54 @@ async function windowsNative(path: string, command: string): Promise<Candidate |
 }
 
 async function claudeInPackage(root: string): Promise<string | undefined> {
-  const executable = join(root, "bin", "claude.exe");
-  return await isExecutableFile(executable) ? executable : undefined;
+  return findFileBelow([root, ...await siblingPackages(root, "claude-code-win32-")], "claude.exe");
 }
 
-/** `@openai/codex` vendors its binary in a per-platform package, nested or hoisted, or in older releases itself. */
+/** Search the package, its nested and hoisted per-platform packages; layouts change between releases. */
 async function codexInPackage(root: string): Promise<string | undefined> {
-  const preferred = process.arch === "arm64" ? ["arm64", "x64"] : ["x64", "arm64"];
-  const vendors: string[] = [];
-  for (const architecture of preferred) {
-    const platformPackage = `codex-win32-${architecture}`;
-    vendors.push(join(root, "node_modules", "@openai", platformPackage, "vendor"), join(dirname(root), platformPackage, "vendor"));
+  return findFileBelow([root, ...await siblingPackages(root, "codex-win32-")], "codex.exe");
+}
+
+/** Per-platform packages hoisted next to the main package (e.g. `@openai/codex-win32-x64`). */
+async function siblingPackages(root: string, prefix: string): Promise<string[]> {
+  try {
+    const preferred = process.arch === "arm64" ? "arm64" : "x64";
+    return (await readdir(dirname(root), { withFileTypes: true }))
+      .filter(entry => entry.isDirectory() && entry.name.startsWith(prefix))
+      .map(entry => entry.name)
+      .sort((left, right) => Number(!left.includes(preferred)) - Number(!right.includes(preferred)) || left.localeCompare(right))
+      .map(name => join(dirname(root), name));
+  } catch {
+    return [];
   }
-  vendors.push(join(root, "vendor"));
-  for (const vendor of vendors) {
-    let targets: string[];
-    try {
-      targets = (await readdir(vendor, { withFileTypes: true })).filter(entry => entry.isDirectory()).map(entry => entry.name);
-    } catch {
-      continue;
-    }
-    const order = (name: string) => (name.includes("windows") ? 0 : 1) + (name.startsWith(process.arch === "arm64" ? "aarch64" : "x86_64") ? 0 : 2);
-    for (const target of targets.sort((left, right) => order(left) - order(right) || left.localeCompare(right))) {
-      for (const executable of [join(vendor, target, "bin", "codex.exe"), join(vendor, target, "codex", "codex.exe")]) {
-        if (await isExecutableFile(executable)) return executable;
+}
+
+/** Bounded breadth-first search; prefers the host architecture when a package ships several binaries. */
+async function findFileBelow(roots: readonly string[], fileName: string, maxDepth = 8): Promise<string | undefined> {
+  const machine = process.arch === "arm64" ? /aarch64|arm64/i : /x86_64|x64|amd64/i;
+  const found: string[] = [];
+  let level = roots.map(root => ({ directory: root, depth: 0 }));
+  const visited = new Set<string>();
+  while (level.length && !found.length) {
+    const next: typeof level = [];
+    for (const { directory, depth } of level) {
+      if (visited.has(directory)) continue;
+      visited.add(directory);
+      let entries;
+      try {
+        entries = await readdir(directory, { withFileTypes: true });
+      } catch {
+        continue;
+      }
+      for (const entry of entries) {
+        const path = join(directory, entry.name);
+        if (entry.isFile() && entry.name.toLocaleLowerCase() === fileName && await isExecutableFile(path)) found.push(path);
+        else if (entry.isDirectory() && depth < maxDepth && entry.name !== ".bin") next.push({ directory: path, depth: depth + 1 });
       }
     }
+    level = next;
   }
-  return undefined;
+  return found.sort((left, right) => Number(!machine.test(left)) - Number(!machine.test(right)) || left.localeCompare(right))[0];
 }
 
 /** Install locations that are often absent from GUI, SSH, WSL and container extension-host PATHs. */
