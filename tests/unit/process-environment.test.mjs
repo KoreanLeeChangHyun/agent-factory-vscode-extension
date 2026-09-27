@@ -179,6 +179,70 @@ test("Windows npm global shims resolve to the native Codex and Claude binaries",
   // The npm directory is found through APPDATA even when PATH omits it.
   const environment = { PATH: join(root, "empty"), APPDATA: join(root, "AppData", "Roaming") };
   const selection = await resolveCodexCli({ environment, platform: "win32", homeDirectory: root });
-  assert.deepEqual([selection.executable, selection.source], [codex, "path"]);
+  assert.deepEqual([selection.executable, selection.source], [codex, "local"]);
   assert.equal(await resolveClaudeCli({ environment, platform: "win32", homeDirectory: root }), claude);
+});
+
+test("a terminal-only PATH entry is found when the extension host PATH is minimal (macOS GUI, SSH, containers)", async (t) => {
+  const root = await mkdtemp(join(tmpdir(), "af-terminal-path-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const shellOnly = join(root, "custom-npm-prefix", "bin");
+  await mkdir(shellOnly, { recursive: true });
+  await executable(join(shellOnly, "codex")); await executable(join(shellOnly, "claude"));
+  const options = { environment: { PATH: "/usr/bin" }, platform: "linux", homeDirectory: root, terminalPath: async () => [shellOnly] };
+  const selection = await resolveCodexCli(options);
+  assert.deepEqual([selection.executable, selection.source], [join(shellOnly, "codex"), "shell"]);
+  assert.equal(await resolveClaudeCli(options), join(shellOnly, "claude"));
+});
+
+test("WSL prefers Linux installs over Windows entries appended to PATH", async (t) => {
+  const root = await mkdtemp(join(tmpdir(), "af-wsl-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const linuxBin = join(root, "linux-bin");
+  await mkdir(linuxBin); await executable(join(linuxBin, "codex"));
+  const windowsEntry = "/mnt/c/Users/Admin/AppData/Roaming/npm";
+  const selection = await resolveCodexCli({ environment: { PATH: `${windowsEntry}:${linuxBin}`, WSL_DISTRO_NAME: "Ubuntu" },
+    platform: "linux", homeDirectory: root, probe: async () => true });
+  assert.equal(selection.executable, join(linuxBin, "codex"));
+});
+
+test("a candidate that does not start is skipped in favor of the next working installation", async (t) => {
+  const root = await mkdtemp(join(tmpdir(), "af-probe-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const broken = join(root, "broken"), working = join(root, ".local", "bin");
+  await mkdir(broken); await mkdir(working, { recursive: true });
+  await executable(join(broken, "codex")); await executable(join(working, "codex"));
+  const options = { environment: { PATH: broken }, platform: "linux", homeDirectory: root };
+  assert.equal((await resolveCodexCli({ ...options, probe: async path => !path.startsWith(broken) })).executable, join(working, "codex"));
+  // With no working candidate, the first installation is still reported rather than hidden.
+  assert.equal((await resolveCodexCli({ ...options, probe: async () => false })).executable, join(broken, "codex"));
+});
+
+test("fnm-managed Node versions are discovered like nvm", async (t) => {
+  const root = await mkdtemp(join(tmpdir(), "af-fnm-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const bin = join(root, ".local/share/fnm/node-versions/v22.3.0/installation/bin");
+  await mkdir(bin, { recursive: true });
+  await executable(join(bin, "codex")); await executable(join(bin, "node"));
+  const selection = await resolveCodexCli({ environment: { PATH: "" }, platform: "linux", homeDirectory: root });
+  assert.deepEqual([selection.executable, selection.source, selection.nodeVersion], [join(bin, "codex"), "nvm", "v22.3.0"]);
+});
+
+test("Windows Claude native installer, pnpm shims and a stale Windows override all resolve without a shell", async (t) => {
+  const root = await mkdtemp(join(tmpdir(), "af-windows-variants-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const nativeClaude = join(root, ".local", "bin", "claude.exe");
+  await mkdir(dirname(nativeClaude), { recursive: true }); await executable(nativeClaude);
+  // pnpm keeps packages outside the shim directory; the shim text points at them.
+  const pnpmHome = join(root, "pnpm");
+  const store = join(pnpmHome, "global", "5", "node_modules", "@openai", "codex");
+  const codex = join(store, "node_modules", "@openai", `codex-win32-${process.arch === "arm64" ? "arm64" : "x64"}`,
+    "vendor", "x86_64-pc-windows-msvc", "bin", "codex.exe");
+  await mkdir(dirname(codex), { recursive: true }); await executable(codex);
+  await writeFile(join(pnpmHome, "codex.cmd"), '@"%~dp0\\global\\5\\node_modules\\@openai\\codex\\bin\\codex.js" %*\r\n');
+  await chmod(join(pnpmHome, "codex.cmd"), 0o755);
+  const environment = { PATH: "", PNPM_HOME: pnpmHome, USERPROFILE: root };
+  const options = { environment, platform: "win32", homeDirectory: root, configuredPath: "D:/old/codex.exe" };
+  assert.equal((await resolveCodexCli(options)).executable, codex);
+  assert.equal(await resolveClaudeCli(options), nativeClaude);
 });
