@@ -3,57 +3,133 @@
 Turn conversations into defined tasks, delegate them to AI agents, and review
 results in VS Code.
 
-## Core features
+## 1. Get started
 
-- **Main, Work, and Verification** — Work directly with Main or delegate tasks
-  to Work with a separate Verification agent to check the results.
-- **Work contracts** — Turn a conversation into a task list with clear scope
-  and completion criteria, then submit it for Work or a Work–Verification loop.
-- **Interviews** — Clarify requirements and decisions through guided questions.
-- **Document migration and lessons learned** — Update project documents to
-  Agent Factory conventions and turn lessons from completed work into reusable rules.
-- **Goals** — Submit an objective and follow its progress in chat.
-- **Conversation worktrees** — Work in a separate Git worktree for each
-  conversation, then merge and return to the original workspace.
-- **Reusable notes** — Save global or workspace notes and insert them into messages.
-- **Conversation and task history** — Revisit earlier conversations and track
-  tasks, agent activity, command output, and code diffs.
-- **Files and images** — Attach context to requests and convert image formats
-  while keeping the original files.
+- Requires Python 3.10+ and an available Codex or Claude runtime in the workspace environment.
+- Official installation guides: [Codex CLI](https://developers.openai.com/codex/cli/) · [Claude Code](https://code.claude.com/docs/en/setup).
 
-## Get started
+1. Run **Agent Factory: Add Main Agent Chat** from the VS Code Command Palette.
+2. Work directly with Main, or submit a task for delegated execution.
 
-Install Python 3.10+ and Codex CLI in your workspace environment, then run
-**Agent Factory: Add Main Agent Chat** from the VS Code Command Palette.
-The extension installs the matching Agent Factory companion plugin when needed.
+- The extension installs the matching Agent Factory companion plugin when needed.
 
-## Claude models
+## 2. Core features
 
-Install and sign in to Claude Code in the same workspace environment. When its
-`claude` executable is available, the model picker also offers the pinned model
-versions `claude-opus-5-5`, `claude-sonnet-5`, `claude-fable-5-1` and
-`claude-haiku-4-5-20251001`, plus the aliases `claude-opus`, `claude-sonnet` and
-`claude-haiku`, which Claude Code resolves to the latest model of each family.
-Availability depends on your account.
+### 2.1. Document system
 
-Start a new chat when changing between Codex and Claude, or clear the current
-conversation first. Every execution mode works with Claude. Execution permissions
-map to the nearest Claude permission mode: Full access and Full bypass use
-`bypassPermissions`, Workspace uses `acceptEdits`, and CLI default follows
-`permissions.defaultMode` in your Claude settings (read-only when unset). These are
-Claude tool permissions, not an OS sandbox. Plan runs in Claude's plan mode and then
-continues in the same session. Context usage is shown after each Claude turn.
+- Keep project knowledge in a structured, searchable collection that agents can
+  consult across tasks. Maintain one editable source for each document.
+- Separate source references (**Original**), investigations and working knowledge
+  (**Refined**), accepted facts and rules (**Specification**), execution records
+  (**Progress**), and experience from previous work (**Lessons Learned**).
+- Preserve the distinction between evidence, assumptions, and accepted decisions.
+  Writing or summarizing a document does not automatically make it a project rule.
+- When you request migration, organize existing documents into the project structure
+  while preserving their content and references. Accepted Specification documents
+  can be synchronized into project Skills for agents to use in later work.
 
-Set `agentFactory.mainChat.claudePath` when `claude` is not on the workspace PATH or in
-`~/.local/bin`. Without a Codex CLI, the extension runs with Claude only; the Agent
-Factory plugin must already be installed (install it once with Codex) or
-`agentFactory.mainChat.runtimeExecPath` must point to its `exec.py`. The companion bot
-uses Claude Haiku when Codex is unavailable.
+### 2.2. Contracts → Work–Verification loop
 
-### Scoped agent defaults
+- Turn a conversation into a work contract with an intended outcome, individual
+  tasks, and observable completion criteria. For file changes, identify the exact
+  paths and operations so the execution boundary is clear before work begins.
+- Keep each task linked to its scope and results. Contract revisions preserve
+  earlier versions and record confirmed scope changes.
+- In a Work–Verification loop, the agents have distinct responsibilities:
 
-The chat's **Agent settings** dialog changes only that chat. Open **Settings → Agent defaults** and select **Project** or **Global** to configure Main, Work and Verification models and reasoning levels. Values resolve independently in this order: chat → project → global → provider default. **Use parent setting** removes an override; the chat dialog shows the source and effective value.
+  | Agent | Responsibility |
+  | --- | --- |
+  | Main | Consolidate the request, coordinate execution, and report results. |
+  | Work | Carry out the contracted tasks and perform its own checks. |
+  | Verification | Independently check the completed work against its requirements. |
 
-Defaults use the six `agentFactory.agents.<role>.model` / `reasoningEffort` VS Code settings. Global values are stored in VS Code User settings; project values in the active runtime workspace folder's `.vscode/settings.json`. The extension currently uses the first workspace folder as its runtime project. Chat overrides stay in the existing chat state. Changing a chat no longer writes model defaults for future chats. Existing chats retain their saved explicit choices; new chats inherit scoped defaults.
+- Verification findings return to Work for correction, and revised work returns
+  to Verification for another check. A passing result completes the verification
+  stage; unresolved findings remain visible.
+- Choose the execution mode for the task. Direct Main work and Work-only execution
+  are also available; a separate Verification agent runs only when the selected
+  route calls for it.
 
-The resolved model and reasoning values are captured with each submitted message, including queued messages. Later default changes affect future submissions, not already captured requests. Provider/session compatibility checks still apply.
+### 2.3. Interviews
+
+- Resolve missing requirements and decisions through guided questions in the
+  conversation. The agent uses existing context first and asks about gaps that
+  could materially change the outcome.
+- Address one decision at a time, with meaningful options, their advantages and
+  disadvantages, and a recommendation. Your answers guide the next question.
+- Skip, defer, correct, or narrow a question as needed. Recommendations and
+  assumptions remain distinct from your decisions.
+- Finish with a summary of the decisions and any remaining gaps. Save the interview
+  as a document when requested or required by the workflow, and use it to inform
+  a work contract or further planning.
+
+### 2.4. Lessons learned
+
+- Preserve errors, including recovered failures, alongside differences between
+  your judgment and the agent's. Record the context, known causes, attempted
+  solutions, and actual outcomes.
+- Retrieve relevant lessons before related work so earlier findings can inform
+  the approach. Keep unknown causes and unresolved issues explicit.
+- Record how a lesson was applied and whether it helped, needed correction, or
+  failed again. Recurrences add evidence without erasing the earlier record.
+- When you request consolidation, turn supported lessons into reusable project
+  rules. Lesson records remain evidence; they do not automatically become accepted
+  Specifications or trigger background changes.
+
+## 3. Agent settings
+
+### 3.1. Scope and inheritance
+
+- Use the chat's **Agent settings** dialog to change only that chat.
+- Open **Settings → Agent defaults**, then select **Project** or **Global**, to
+  configure Main, Work and Verification models and reasoning levels.
+- Each value resolves independently: **chat → project → global → provider default**.
+- **Use parent setting** removes an override. The chat dialog shows each value's
+  source and effective setting.
+- Existing chats retain their saved explicit choices. New chats inherit scoped
+  defaults; changing one chat does not change defaults for future chats.
+
+### 3.2. Storage and submitted messages
+
+| Scope | Storage |
+| --- | --- |
+| Chat | Existing chat state |
+| Project | Active runtime workspace folder's `.vscode/settings.json` |
+| Global | VS Code User settings |
+
+- Project and global defaults use six VS Code settings:
+  `agentFactory.agents.<role>.model` and
+  `agentFactory.agents.<role>.reasoningEffort`, where `<role>` is `main`, `work`
+  or `verification`.
+- The extension uses the first workspace folder as its runtime project.
+- Each submitted message captures the resolved model and reasoning values,
+  including queued messages. Later default changes affect future submissions only.
+- Provider and session compatibility checks still apply.
+
+### 3.3. Model selection and sessions
+
+- When `claude` is available, the model picker offers these identifiers:
+
+  | Selection | Model identifiers |
+  | --- | --- |
+  | Pinned versions | `claude-opus-5-5`, `claude-sonnet-5`, `claude-fable-5-1`, `claude-haiku-4-5-20251001` |
+  | Family aliases | `claude-opus`, `claude-sonnet`, `claude-haiku` |
+
+- Claude Code resolves family aliases to the latest model in each family.
+  Availability depends on your account.
+- Start a new chat or clear the current conversation before switching between
+  Codex and Claude.
+- Every execution mode works with Claude. Plan runs in Claude's plan mode and
+  continues in the same session.
+- Context usage is shown after each Claude turn.
+
+### 3.4. Execution permissions
+
+- Extension permissions map to Claude tool permissions as follows. These modes
+  do not provide an OS sandbox.
+
+| Extension setting | Claude permission mode |
+| --- | --- |
+| Full access or Full bypass | `bypassPermissions` |
+| Workspace | `acceptEdits` |
+| CLI default | `permissions.defaultMode` in Claude settings; read-only when unset |
