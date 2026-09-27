@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { build } from "esbuild";
 import { chmod, mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
 
@@ -162,4 +162,23 @@ test("Claude CLI resolves from the configured path, PATH, then the user-local in
   } finally {
     await rm(root, { recursive: true, force: true });
   }
+});
+
+test("Windows npm global shims resolve to the native Codex and Claude binaries", async (t) => {
+  const root = await mkdtemp(join(tmpdir(), "af-npm-shim-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const npmBin = join(root, "AppData", "Roaming", "npm");
+  const architecture = process.arch === "arm64" ? "arm64" : "x64";
+  const codex = join(npmBin, "node_modules/@openai/codex/node_modules/@openai", `codex-win32-${architecture}`,
+    "vendor/x86_64-pc-windows-msvc/bin/codex.exe");
+  const claude = join(npmBin, "node_modules/@anthropic-ai/claude-code/bin/claude.exe");
+  for (const file of [join(npmBin, "codex.cmd"), join(npmBin, "claude.cmd"), codex, claude]) {
+    await mkdir(dirname(file), { recursive: true });
+    await executable(file);
+  }
+  // The npm directory is found through APPDATA even when PATH omits it.
+  const environment = { PATH: join(root, "empty"), APPDATA: join(root, "AppData", "Roaming") };
+  const selection = await resolveCodexCli({ environment, platform: "win32", homeDirectory: root });
+  assert.deepEqual([selection.executable, selection.source], [codex, "path"]);
+  assert.equal(await resolveClaudeCli({ environment, platform: "win32", homeDirectory: root }), claude);
 });

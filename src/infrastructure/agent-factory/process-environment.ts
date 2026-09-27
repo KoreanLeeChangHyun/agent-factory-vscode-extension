@@ -126,12 +126,50 @@ function baseEnvironment(environment: NodeJS.ProcessEnv, platform: NodeJS.Platfo
 
 async function findOnPath(environment: NodeJS.ProcessEnv, platform: NodeJS.Platform, command = "codex"): Promise<string | undefined> {
   const value = platform === "win32" ? environment.PATH ?? environment.Path : environment.PATH;
-  if (!value) return undefined;
+  const directories = (value ?? "").split(platform === "win32" ? ";" : delimiter).filter(Boolean);
+  // npm's global bin is frequently missing from GUI/remote extension-host PATHs.
+  const npmPrefix = environment.npm_config_prefix?.trim();
+  if (platform === "win32") {
+    if (environment.APPDATA?.trim()) directories.push(join(environment.APPDATA.trim(), "npm"));
+    if (npmPrefix) directories.push(npmPrefix);
+  } else if (npmPrefix) {
+    directories.push(join(npmPrefix, "bin"));
+  }
   const names = platform === "win32" ? [`${command}.exe`, `${command}.cmd`, `${command}.bat`, command] : [command];
-  for (const directory of value.split(platform === "win32" ? ";" : delimiter).filter(Boolean)) {
+  for (const directory of directories) {
     for (const name of names) {
       const candidate = join(directory, name);
-      if (await isExecutableFile(candidate)) return candidate;
+      if (!await isExecutableFile(candidate)) continue;
+      if (platform !== "win32" || /\.exe$/i.test(name)) return candidate;
+      // Node refuses to spawn .cmd/.bat shims without a shell; use the native binary the npm shim wraps.
+      const native = await npmNativeExecutable(directory, command);
+      if (native) return native;
+    }
+  }
+  return undefined;
+}
+
+/** Native Windows binaries behind npm global shims for `@openai/codex` and `@anthropic-ai/claude-code`. */
+async function npmNativeExecutable(shimDirectory: string, command: string): Promise<string | undefined> {
+  const modules = join(shimDirectory, "node_modules");
+  if (command === "claude") {
+    const executable = join(modules, "@anthropic-ai", "claude-code", "bin", "claude.exe");
+    return await isExecutableFile(executable) ? executable : undefined;
+  }
+  if (command !== "codex") return undefined;
+  const architecture = process.arch === "arm64" ? "arm64" : "x64";
+  for (const scope of [join(modules, "@openai", "codex", "node_modules"), modules]) {
+    const vendor = join(scope, "@openai", `codex-win32-${architecture}`, "vendor");
+    let targets: string[];
+    try {
+      targets = (await readdir(vendor, { withFileTypes: true })).filter(entry => entry.isDirectory()).map(entry => entry.name);
+    } catch {
+      continue;
+    }
+    for (const target of targets.sort()) {
+      for (const executable of [join(vendor, target, "bin", "codex.exe"), join(vendor, target, "codex", "codex.exe")]) {
+        if (await isExecutableFile(executable)) return executable;
+      }
     }
   }
   return undefined;
