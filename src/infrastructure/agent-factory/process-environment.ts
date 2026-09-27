@@ -36,25 +36,18 @@ export function codexExecutable(): string {
   return selectedCodexCli?.executable ?? "codex";
 }
 
-/** Resolve without a shell: explicit path, PATH, stable NVM, then the user-local installation. */
+/** A configured override is honored only when it is a usable file on this host (settings can sync across hosts). */
+async function usableConfiguredPath(configuredPath: string | undefined): Promise<string | undefined> {
+  return configuredPath && isAbsolute(configuredPath) && await isExecutableFile(configuredPath) ? configuredPath : undefined;
+}
+
+/** Resolve the `codex` command without a shell: a usable override, PATH, stable NVM, then the user-local installation. */
 export async function resolveCodexCli(options: CodexCliResolutionOptions = {}): Promise<CodexCliSelection> {
   const environment = options.environment ?? process.env;
   const platform = options.platform ?? process.platform;
   const homeDirectory = options.homeDirectory ?? homedir();
-  const configuredPath = options.configuredPath?.trim();
-  if (configuredPath) {
-    // A Windows path reaching a POSIX host means a local setting leaked into a remote (SSH/WSL/container) host.
-    if (platform !== "win32" && /^[A-Za-z]:[\\/]/.test(configuredPath)) {
-      throw new Error(localize("ui.the.configured.codex.cli.path.0.is.a.windows.path.but.the.extension.host.runs.on.1", configuredPath, platform));
-    }
-    if (!isAbsolute(configuredPath)) {
-      throw new Error(localize("ui.the.configured.codex.cli.path.must.be.an.absolute.executable.path.no.shell.arguments.are.allowed.0", configuredPath));
-    }
-    if (!await isExecutableFile(configuredPath)) {
-      throw new Error(localize("ui.the.configured.codex.cli.path.is.not.an.executable.file.0.correct.agentfactory.mainchat.codexpath.then.retry", configuredPath));
-    }
-    return { executable: configuredPath, source: "configured", binDirectory: dirname(configuredPath) };
-  }
+  const configuredPath = await usableConfiguredPath(options.configuredPath?.trim());
+  if (configuredPath) return { executable: configuredPath, source: "configured", binDirectory: dirname(configuredPath) };
 
   const pathEnvironment = baseEnvironment(environment, platform, homeDirectory);
   const fromPath = await findOnPath(pathEnvironment, platform);
@@ -79,13 +72,13 @@ export async function resolveCodexCli(options: CodexCliResolutionOptions = {}): 
 
 let selectedClaudeCli: string | undefined;
 
-/** Optional provider: the configured path, PATH, then Claude Code's user-local installations. */
+/** Optional provider: a usable override, the `claude` command on PATH, then Claude Code's user-local installations. */
 export async function resolveClaudeCli(options: CodexCliResolutionOptions = {}): Promise<string | undefined> {
   const environment = options.environment ?? process.env;
   const platform = options.platform ?? process.platform;
   const homeDirectory = options.homeDirectory ?? homedir();
-  const configuredPath = options.configuredPath?.trim();
-  if (configuredPath) return isAbsolute(configuredPath) && await isExecutableFile(configuredPath) ? configuredPath : undefined;
+  const configuredPath = await usableConfiguredPath(options.configuredPath?.trim());
+  if (configuredPath) return configuredPath;
   const fromPath = await findOnPath(baseEnvironment(environment, platform, homeDirectory), platform, "claude");
   if (fromPath) return fromPath;
   if (platform === "win32") return undefined;

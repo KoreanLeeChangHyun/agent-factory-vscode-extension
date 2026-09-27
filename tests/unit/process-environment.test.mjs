@@ -75,7 +75,7 @@ test("NVM-only discovery selects the highest stable semantic Node version and ca
   configureCodexCli(undefined);
 });
 
-test("configured absolute executable wins and invalid explicit paths never fall back", async (t) => {
+test("configured absolute executable wins and unusable overrides fall back to the codex command", async (t) => {
   const root = await mkdtemp(join(tmpdir(), "af-codex-configured-"));
   t.after(() => rm(root, { recursive: true, force: true }));
   const pathBin = join(root, "path"), configuredBin = join(root, "configured");
@@ -85,9 +85,11 @@ test("configured absolute executable wins and invalid explicit paths never fall 
   const selection = await resolveCodexCli({ configuredPath: join(configuredBin, "chosen-codex"), environment, platform: "linux", homeDirectory: root });
   assert.equal(selection.source, "configured");
   assert.equal(selection.executable, join(configuredBin, "chosen-codex"));
-  await assert.rejects(resolveCodexCli({ configuredPath: "codex --version", environment, platform: "linux", homeDirectory: root }), /absolute executable path/);
-  await assert.rejects(resolveCodexCli({ configuredPath: join(root, "missing"), environment, platform: "linux", homeDirectory: root }), /not an executable file/);
-  await assert.rejects(resolveCodexCli({ configuredPath: "C:/Users/Admin/codex.exe", environment, platform: "linux", homeDirectory: root }), /Windows path, but the extension host runs on linux/);
+  // Unusable overrides (arguments, missing files, another host's Windows path) fall back to command discovery.
+  for (const configuredPath of ["codex --version", join(root, "missing"), "C:/Users/Admin/codex.exe"]) {
+    const fallback = await resolveCodexCli({ configuredPath, environment, platform: "linux", homeDirectory: root });
+    assert.notEqual(fallback.source, "configured", configuredPath);
+  }
 });
 
 test("Linux host finds a user-local standalone symlink with a minimal or missing PATH", async (t) => {
@@ -148,7 +150,7 @@ test("Claude CLI resolves from the configured path, PATH, then the user-local in
       await chmod(file, 0o755);
     }
     assert.equal(await resolveClaudeCli({ configuredPath: join(root, "chosen-claude"), environment: { PATH: onPath }, platform: "linux", homeDirectory: root }), join(root, "chosen-claude"));
-    assert.equal(await resolveClaudeCli({ configuredPath: "claude", environment: { PATH: onPath }, platform: "linux", homeDirectory: root }), undefined);
+    assert.equal(await resolveClaudeCli({ configuredPath: "claude", environment: { PATH: onPath }, platform: "linux", homeDirectory: root }), join(onPath, "claude"));
     assert.equal(await resolveClaudeCli({ environment: { PATH: onPath }, platform: "linux", homeDirectory: root }), join(onPath, "claude"));
     assert.equal(await resolveClaudeCli({ environment: { PATH: "/minimal" }, platform: "linux", homeDirectory: root }), join(local, "claude"));
     await rm(join(local, "claude"));
