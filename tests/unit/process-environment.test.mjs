@@ -87,6 +87,7 @@ test("configured absolute executable wins and invalid explicit paths never fall 
   assert.equal(selection.executable, join(configuredBin, "chosen-codex"));
   await assert.rejects(resolveCodexCli({ configuredPath: "codex --version", environment, platform: "linux", homeDirectory: root }), /absolute executable path/);
   await assert.rejects(resolveCodexCli({ configuredPath: join(root, "missing"), environment, platform: "linux", homeDirectory: root }), /not an executable file/);
+  await assert.rejects(resolveCodexCli({ configuredPath: "C:/Users/Admin/codex.exe", environment, platform: "linux", homeDirectory: root }), /Windows path, but the extension host runs on linux/);
 });
 
 test("Linux host finds a user-local standalone symlink with a minimal or missing PATH", async (t) => {

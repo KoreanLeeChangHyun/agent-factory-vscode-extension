@@ -43,6 +43,10 @@ export async function resolveCodexCli(options: CodexCliResolutionOptions = {}): 
   const homeDirectory = options.homeDirectory ?? homedir();
   const configuredPath = options.configuredPath?.trim();
   if (configuredPath) {
+    // A Windows path reaching a POSIX host means a local setting leaked into a remote (SSH/WSL/container) host.
+    if (platform !== "win32" && /^[A-Za-z]:[\\/]/.test(configuredPath)) {
+      throw new Error(localize("ui.the.configured.codex.cli.path.0.is.a.windows.path.but.the.extension.host.runs.on.1", configuredPath, platform));
+    }
     if (!isAbsolute(configuredPath)) {
       throw new Error(localize("ui.the.configured.codex.cli.path.must.be.an.absolute.executable.path.no.shell.arguments.are.allowed.0", configuredPath));
     }

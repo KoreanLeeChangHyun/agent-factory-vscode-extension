@@ -239,19 +239,19 @@
         },
         "agentFactory.mainChat.codexPath": {
           "type": "string",
-          "scope": "machine-overridable",
+          "scope": "machine",
           "default": "",
           "description": "%agentFactory.mainChat.codexPath.description%"
         },
         "agentFactory.mainChat.claudePath": {
           "type": "string",
-          "scope": "machine-overridable",
+          "scope": "machine",
           "default": "",
           "description": "%agentFactory.mainChat.claudePath.description%"
         },
         "agentFactory.mainChat.runtimeExecPath": {
           "type": "string",
-          "scope": "machine-overridable",
+          "scope": "machine",
           "default": "",
           "description": "%agentFactory.mainChat.runtimeExecPath.description%"
         },

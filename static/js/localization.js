@@ -113,6 +113,7 @@
   "bot.reply.collapse": {"en":"Collapse reply", "ko":"답변 접기"},
   "bot.play": {"en":"Play together", "ko":"놀아주기"},
   "bot.fullness": {"en":"Fullness", "ko":"포만감"},
+  "ui.the.configured.codex.cli.path.0.is.a.windows.path.but.the.extension.host.runs.on.1": {"en":"The configured Codex CLI path {0} is a Windows path, but the extension host runs on {1}. Clear agentFactory.mainChat.codexPath for this remote host (Remote settings) or set a path that exists on it, then retry.","ko":"설정한 Codex CLI 경로 {0}은 Windows 경로이지만 익스텐션 호스트는 {1}에서 실행 중입니다. 이 원격 호스트의 설정(원격 설정)에서 agentFactory.mainChat.codexPath를 비우거나 해당 호스트에 있는 경로로 바꾼 뒤 다시 시도하세요."},
   "bot.happiness": {"en":"Mood", "ko":"기분"},
   "bot.energy": {"en":"Energy", "ko":"에너지"},
   "bot.growth": {"en":"Friendship {0} · Care {1}", "ko":"친밀도 {0} · 돌봄 {1}회"},
