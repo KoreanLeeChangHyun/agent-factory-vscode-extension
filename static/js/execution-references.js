@@ -85,6 +85,18 @@
     return commands;
   }
 
+  // Plugin layout with entrypoints at `<plugin-root>/scripts/`; only known names are recognized.
+  const ROOT_SCRIPTS = {
+    "exec.py": "agent", "loop.py": "agent", "lessons.py": "document", "catalog_documents.py": "document",
+    "export_documents.py": "document", "migrate_document_paths.py": "document",
+    "search_documents.py": "document", "sync_documents.py": "document"
+  };
+
+  function rootScript(path) {
+    const match = /(?:^|\/)scripts\/([^/]+\.py)$/.exec(path);
+    return match && ROOT_SCRIPTS[match[1]] ? [match[0], ROOT_SCRIPTS[match[1]], match[1]] : null;
+  }
+
   function scriptInvocations(command) {
     const invocations = [];
     for (const words of shellCommands(command)) {
@@ -93,9 +105,11 @@
         index = 1;
         while (["-u", "-B", "-I", "-E", "-s", "-S", "--"].includes(words[index])) index += 1;
       }
-      const script = /(?:^|\/)skills\/(agent|convention|document)\/scripts\/([^/]+\.py)$/.exec(words[index] || "");
+      const path = words[index] || "";
+      const script = /(?:^|\/)skills\/(agent|convention|document)\/scripts\/([^/]+\.py)$/.exec(path)
+        || rootScript(path);
       if (!script) continue;
-      invocations.push({ skill: script[1], script: script[2], path: words[index], action: words[index + 1] || "", args: words.slice(index + 2) });
+      invocations.push({ skill: script[1], script: script[2], path, action: words[index + 1] || "", args: words.slice(index + 2) });
     }
     return invocations;
   }

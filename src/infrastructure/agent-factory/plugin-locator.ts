@@ -5,7 +5,8 @@ import { join, resolve } from "node:path";
 
 import { semanticBase } from "./plugin-dependency";
 
-const RELATIVE_EXEC_PATH = join("skills", "agent", "scripts", "exec.py");
+/** Plugin-relative exec.py locations, newest layout first. */
+export const RELATIVE_EXEC_PATHS = [join("scripts", "exec.py"), join("skills", "agent", "scripts", "exec.py")] as const;
 
 export interface PluginLocatorOptions {
   readonly configuredPath?: string;
@@ -50,15 +51,20 @@ export async function locateAgentFactoryExec(
         continue;
       }
       for (const version of versions) {
-        const candidate = join(pluginRoot, version.name, RELATIVE_EXEC_PATH);
         try {
           if (options.requiredVersion) {
             const manifest = JSON.parse(await readFile(join(pluginRoot, version.name, ".codex-plugin", "plugin.json"), "utf8"));
             if (manifest.name !== "agent-factory" || typeof manifest.version !== "string"
               || semanticBase(manifest.version) !== semanticBase(options.requiredVersion)) continue;
           }
-          const info = await lstat(candidate);
-          if (info.isFile()) candidates.push({ path: candidate, modifiedAt: info.mtimeMs });
+          for (const relative of RELATIVE_EXEC_PATHS) {
+            const candidate = join(pluginRoot, version.name, relative);
+            const info = await lstat(candidate).catch(() => undefined);
+            if (info?.isFile()) {
+              candidates.push({ path: candidate, modifiedAt: info.mtimeMs });
+              break;
+            }
+          }
         } catch {
           // Ignore incomplete or stale cache entries and keep searching.
         }
@@ -74,7 +80,7 @@ export async function locateAgentFactoryExec(
   if (candidates[0]) return { available: true, execPath: candidates[0].path };
   return {
     available: false,
-    diagnostic: localize("ui.unable.to.find.0.in.the.agent.factory.plugin.1.installed.from.the.marketplace", RELATIVE_EXEC_PATH, options.requiredVersion ? localize("ui.matching.extension.version.0", semanticBase(options.requiredVersion)) : "")
+    diagnostic: localize("ui.unable.to.find.0.in.the.agent.factory.plugin.1.installed.from.the.marketplace", RELATIVE_EXEC_PATHS[0], options.requiredVersion ? localize("ui.matching.extension.version.0", semanticBase(options.requiredVersion)) : "")
   };
 }
 

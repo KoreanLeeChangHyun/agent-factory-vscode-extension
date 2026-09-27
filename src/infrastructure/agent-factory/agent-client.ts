@@ -1348,7 +1348,7 @@ function childAgentReferencesFromCommand(command: string, execPath: string, proj
   for (const words of shellCommandWords(command)) {
     const executable = /(?:^|\/)python(?:3(?:\.\d+)?)?$/.test(words[0] ?? "") ? 1 : 0;
     const script = words[executable] ?? "";
-    if (script !== execPath && !/(?:^|\/)skills\/agent\/scripts\/exec\.py$/.test(script)) continue;
+    if (script !== execPath && !/(?:^|\/)(?:skills\/agent\/)?scripts\/exec\.py$/.test(script)) continue;
     if (!["submit", "send", "status", "result", "cancel"].includes(words[executable + 1] ?? "")) continue;
     const options = words.slice(executable + 2);
     const option = (name: string): string | undefined => {

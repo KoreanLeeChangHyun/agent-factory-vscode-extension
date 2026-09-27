@@ -492,6 +492,21 @@ test("plugin locator keeps an older matching release when newer plugins are cach
   assert.match(missing.diagnostic, /matching extension version 1\.0\.9/);
 });
 
+test("plugin locator prefers the root scripts layout and still finds legacy installs", async function (t) {
+  const { locateAgentFactoryExec } = await importTypeScript("src/infrastructure/agent-factory/plugin-locator.ts");
+  const root = await mkdtemp(join(tmpdir(), "agent-factory-layout-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const plugin = join(root, "plugins/cache/agent-factory/agent-factory/1.0.16+codex.new");
+  const legacy = join(plugin, "skills/agent/scripts/exec.py");
+  const current = join(plugin, "scripts/exec.py");
+  await mkdir(dirname(legacy), { recursive: true });
+  await writeFile(legacy, "# legacy");
+  assert.deepEqual(await locateAgentFactoryExec({ environment: { CODEX_HOME: root } }), { available: true, execPath: legacy });
+  await mkdir(dirname(current), { recursive: true });
+  await writeFile(current, "# current");
+  assert.deepEqual(await locateAgentFactoryExec({ environment: { CODEX_HOME: root } }), { available: true, execPath: current });
+});
+
 test("runtime client rediscovers an installed exec after its cache path is replaced", async function (t) {
   const { AgentFactoryClient } = await importTypeScript("src/infrastructure/agent-factory/agent-client.ts");
   const root = await mkdtemp(join(tmpdir(), "agent-factory-runtime-refresh-"));

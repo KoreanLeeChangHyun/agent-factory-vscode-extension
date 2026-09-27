@@ -124,6 +124,11 @@ test('Factory utility calls and batched runs retain a dedicated classification w
   assert.equal(scripts(exec + ' capabilities --project-root /repo')[0].action, 'capabilities');
   assert.equal(scripts('python3 skills/agent/scripts/loop.py status --loop-id loop-1')[0].script, 'loop.py');
   assert.equal(scripts(exec + ' status --agent work-1; ' + exec + ' status --agent work-2').length, 2);
+  const root = scripts('python3 "/installed plugin/scripts/exec.py" status --agent work-1')[0];
+  assert.deepEqual([root.skill, root.script, root.action], ['agent', 'exec.py', 'status']);
+  assert.equal(scripts('python3 /p/scripts/loop.py status --loop-id loop-1')[0].script, 'loop.py');
+  assert.equal(scripts('python3 /p/scripts/lessons.py --project-root /r record')[0].skill, 'document');
+  assert.deepEqual(scripts('python3 scripts/build.py'), []);
   for (const command of ['echo "' + exec + ' status --agent work-1"', 'python3 -c "' + exec + '"', 'cat <<EOF\n' + exec + '\nEOF', 'python3 other/exec.py status']) {
     assert.deepEqual(scripts(command), [], command);
   }
