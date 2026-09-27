@@ -4,11 +4,13 @@ import { readFileSync } from 'node:fs';
 import vm from 'node:vm';
 
 const source = readFileSync(new URL('../../static/js/chat.js', import.meta.url), 'utf8');
+const indexSource = source.slice(source.indexOf('  function indexedTimeline()'), source.indexOf('  function upsertActivity('));
 const body = source.slice(source.indexOf('  function canAnswerInterview('), source.indexOf('  function renderInterviewChoices('));
 function setup(timeline) {
   const state = { timeline, runtimeAvailable: true, running: false, pendingRequests: [] };
-  const context = vm.createContext({ state });
-  vm.runInContext(body, context);
+  const context = vm.createContext({ state, timelineIndexes: new WeakMap(), taskFlowParseCache: new WeakMap(), nextTimelineIndex: 0,
+    extractTaskFlows: () => ({ flows: [] }) });
+  vm.runInContext(indexSource + body, context);
   return { state, answer: context.canAnswerInterview };
 }
 
@@ -35,9 +37,10 @@ test('only the latest unanswered conversation turn permits a choice', () => {
 
 test('rendering 200 choices does not inspect 10,000 older turns', () => {
   const current = { type: 'assistant', phase: 'final' };
-  const timeline = Array(10000);
-  Object.defineProperty(timeline, 0, { get() { throw Error('Older history unnecessarily read'); } });
+  const timeline = Array.from({ length: 10000 }, () => ({ type: 'notice' }));
   timeline.push(current);
   const { answer } = setup(timeline);
+  assert.equal(answer(current), true);
+  Object.defineProperty(timeline, 0, { get() { throw Error('Older history unnecessarily read'); } });
   for (let i = 0; i < 200; i++) assert.equal(answer(current), true);
 });

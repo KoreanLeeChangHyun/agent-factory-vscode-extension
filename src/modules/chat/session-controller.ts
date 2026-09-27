@@ -35,6 +35,7 @@ export interface SessionControllerEvents {
 
 export interface SessionControllerOptions {
   readonly pollIntervalMs?: number;
+  /** Optional bounded observation for tests; production observes until terminal or disposal. */
   readonly maxPolls?: number;
 }
 
@@ -512,7 +513,8 @@ Answer the Human's current question without cancelling these workflows. For task
   }
 
   private async pollUntilTerminal(agentId: string, runId: string): Promise<void> {
-    const maxPolls = this.options.maxPolls ?? 7_200;
+    // Observation duration is not an execution deadline. Long-running work remains attached.
+    const maxPolls = this.options.maxPolls ?? Number.POSITIVE_INFINITY;
     const interval = this.options.pollIntervalMs ?? 250;
     const statusPollStride = this.options.pollIntervalMs === undefined ? 3 : 1;
     let cursor = 0;

@@ -101,6 +101,20 @@ async function checkAgentModels(page) {
   assert.equal(await page.locator('#model-menu [data-setting="permissions"]').count(), 0);
   await page.keyboard.press('Escape');
   await page.locator('#status-settings-button').click();
+  await emit({ type: 'agent.defaults', settings: { global: {}, project: {}, effective: {}, sources: {}, projectAvailable: true } });
+  await page.locator('#settings-tab-agents').click();
+  await page.locator('#agent-default-scope').selectOption('project');
+  assert.equal(await page.locator('#agent-default-fields select').count(), 6);
+  await page.locator('#agent-default-fields select').first().selectOption('gpt-6-astra');
+  assert.deepEqual(await page.evaluate(() => window.sentMessages.filter(m => m.type === 'agent.defaults.save').at(-1)), { type: 'agent.defaults.save', scope: 'project', role: 'main', field: 'model', value: 'gpt-6-astra' });
+  for (const width of [795, 320]) {
+    await page.setViewportSize({ width, height: 740 });
+    assert.equal(await page.locator('#settings-panel-agents').evaluate(el => el.scrollWidth > el.clientWidth + 1), false);
+    const control = page.locator('#agent-default-fields select').first();
+    assert.equal(await control.evaluate(el => getComputedStyle(el).height), '34px');
+    assert.notEqual(await control.evaluate(el => getComputedStyle(el).backgroundColor), 'rgb(255, 255, 255)');
+    await page.locator('#status-settings').screenshot({ path: path.join(artifactDir, 'defaults-' + width + '.png') });
+  }
   await page.locator('#settings-tab-general').click();
   const common = page.locator('[data-setting="permissions"]');
   await common.selectOption('bypass');

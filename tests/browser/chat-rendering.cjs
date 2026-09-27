@@ -80,7 +80,7 @@ async function main() {
     });
     const page = await browser.newPage({ viewport: { width: 795, height: 900 } });
     const errors = [];
-    page.on('pageerror', error => errors.push(error.message));
+    page.on('pageerror', error => { errors.push(error.message); console.error('Browser page error:', error.message); });
     page.on('console', message => { if (message.type() === 'error') errors.push(message.text()); });
     await page.addInitScript(events => {
       window.saved = JSON.parse(sessionStorage.getItem("submission-restoration-fixture") || "null") || { timeline: events };
@@ -94,6 +94,11 @@ async function main() {
       }, postMessage(message) { window.sentMessages.push(message); } });
     }, fixture);
     await page.goto('http://127.0.0.1:' + server.address().port);
+    if (process.argv.includes('--contracts-only')) {
+      await require('./contracts.cjs').checkContracts(page);
+      assert.deepEqual(errors, []);
+      return;
+    }
     if (process.argv.includes('--worktree-only')) {
       await require('./worktrees.cjs').checkWorktrees(page);
       assert.deepEqual(errors, []);

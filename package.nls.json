@@ -25,5 +25,12 @@
   "extension.description": "Main Agent chat sessions in VS Code editor tabs.",
   "agentFactory.sidebar.archive.title": "Remove Agent from List (Archive)",
   "agentFactory.sidebar.restore.title": "Restore Archived Agent",
-  "agentFactory.mainChat.botsEnabled.description": "Enable companion bots in all chats, including animations and AI expressions."
+  "agentFactory.mainChat.botsEnabled.description": "Enable companion bots in all chats, including animations and AI expressions.",
+  "agentFactory.mainChat.claudePath.description": "Optional absolute path to the Claude Code CLI. When empty, PATH and ~/.local/bin are searched. Claude models appear only when the CLI is found.",
+  "agentFactory.agents.main.model.description": "Main agent model. Empty inherits the parent scope. Chat overrides take priority.",
+  "agentFactory.agents.main.reasoningEffort.description": "Main agent reasoningEffort. Empty inherits the parent scope. Chat overrides take priority.",
+  "agentFactory.agents.work.model.description": "Work agent model. Empty inherits the parent scope. Chat overrides take priority.",
+  "agentFactory.agents.work.reasoningEffort.description": "Work agent reasoningEffort. Empty inherits the parent scope. Chat overrides take priority.",
+  "agentFactory.agents.verification.model.description": "Verification agent model. Empty inherits the parent scope. Chat overrides take priority.",
+  "agentFactory.agents.verification.reasoningEffort.description": "Verification agent reasoningEffort. Empty inherits the parent scope. Chat overrides take priority."
 }

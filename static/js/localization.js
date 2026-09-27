@@ -6,6 +6,28 @@
 })(globalThis, function () {
   "use strict";
   const messages = {
+  "ui.agent.defaults": {"en": "Agent defaults", "ko": "에이전트 기본값"},
+  "ui.settings.scope": {"en": "Scope", "ko": "설정 범위"},
+  "ui.project.defaults": {"en": "Project", "ko": "프로젝트"},
+  "ui.global.defaults": {"en": "Global", "ko": "글로벌"},
+  "ui.agent.defaults.help": {"en": "Priority: Chat > Project > Global. Values set at a narrower scope take precedence.", "ko": "우선순위: 채팅 > 프로젝트 > 글로벌. 좁은 범위에서 지정한 값이 우선합니다."},
+  "ui.use.parent.setting": {"en": "Inherit defaults", "ko": "기본값 상속"},
+  "ui.chat.override": {"en": "This chat", "ko": "현재 채팅"},
+  "ui.inherited.project": {"en": "Inherited from project", "ko": "프로젝트에서 상속"},
+  "ui.inherited.global": {"en": "Inherited from global", "ko": "글로벌에서 상속"},
+  "ui.inherited.product": {"en": "Product default", "ko": "제품 기본값"},
+
+  "sudo.title": {"en":"Administrator access requested for this command", "ko":"이 명령에 관리자 권한이 필요합니다"},
+  "sudo.password": {"en":"Administrator password", "ko":"관리자 비밀번호"},
+  "sudo.context": {"en":"Working directory: {0} · Requested by {1} ({2}). Check the command before entering your password.", "ko":"작업 디렉터리: {0} · 요청: {1} ({2}). 비밀번호를 입력하기 전에 명령을 확인하세요."},
+  "sudo.run": {"en":"Authenticate and run", "ko":"인증 후 실행"},
+  "sudo.cancel": {"en":"Cancel", "ko":"취소"},
+  "sudo.encrypting": {"en":"Protecting password…", "ko":"비밀번호 보호 중…"},
+  "sudo.running": {"en":"Running command…", "ko":"명령 실행 중…"},
+  "sudo.encryption.failed": {"en":"Could not protect password. Try again.", "ko":"비밀번호를 보호하지 못했습니다. 다시 시도해 주세요."},
+  "ui.claude.only.requires.installed.plugin": {"en":"Codex CLI was not found, so Agent Factory is running with Claude only. Claude-only mode needs an already installed Agent Factory plugin: {0} Install it once with Codex or set agentFactory.mainChat.runtimeExecPath, then retry.", "ko":"Codex CLI가 없어 Claude 전용으로 실행합니다. Claude 전용 모드는 이미 설치된 Agent Factory 플러그인이 필요합니다: {0} Codex로 한 번 설치하거나 agentFactory.mainChat.runtimeExecPath를 설정한 뒤 다시 시도하세요."},
+  "sudo.unavailable": {"en":"Administrator command handoff is unavailable: {0}", "ko":"관리자 명령 전달을 사용할 수 없습니다: {0}"},
+  "ui.clearing.conversation": {"en":"Clearing conversation… Previous records are being retained.", "ko":"대화를 초기화하고 있습니다… 이전 기록은 보존됩니다."},
   "attachment.convert.heading": {"en":"Convert image", "ko":"이미지 형식 변환"},
   "attachment.convert.source": {"en":"Original file", "ko":"원본 파일"},
   "attachment.convert.destination": {"en":"Save location", "ko":"저장 위치"},
@@ -118,6 +140,10 @@
   "ui.conversation.entry": {"en":"{0} · {1} requests", "ko":"{0} · 요청 {1}개"},
   "ui.conversation.loading": {"en":"Loading conversation history…", "ko":"대화 내역을 불러오는 중입니다…"},
   "ui.conversation.failed": {"en":"Unable to load conversation history: {0}", "ko":"대화 내역을 불러오지 못했습니다: {0}"},
+  "contracts.title": {"en":"Contracts", "ko":"계약 목록"},
+  "contracts.empty": {"en":"No saved contracts.", "ko":"저장된 계약서가 없습니다."},
+  "contracts.loading": {"en":"Loading contracts…", "ko":"계약 목록을 불러오는 중입니다…"},
+  "contracts.failed": {"en":"Could not load contracts.", "ko":"계약 목록을 불러오지 못했습니다."},
   "flow.history": {"en":"Task history", "ko":"작업 내역"},
   "flow.stage.accepted": {"en":"Accepted", "ko":"접수"},
   "flow.stage.execution": {"en":"Execution", "ko":"실행"},
@@ -1696,8 +1722,12 @@
     "ko": "먼저 초기화할 메인 에이전트 채팅 탭을 선택하세요."
   },
   "ui.received.an.invalid.message.from.the.chat.view": {
-    "en": "Received an invalid message from the chat view.",
-    "ko": "채팅 화면에서 유효하지 않은 메시지를 받았습니다."
+    "en": "The chat screen request could not be processed. See the Extension Host log for details.",
+    "ko": "채팅 화면의 동작 요청을 처리하지 못했습니다. 자세한 내용은 Extension Host 로그를 확인해 주세요."
+  },
+  "ui.queue.resume.failed": {
+    "en": "Could not resume queued messages. See the Extension Host log for details, then try again.",
+    "ko": "대기 메시지 재개 요청을 처리하지 못했습니다. Extension Host 로그를 확인한 후 다시 시도해 주세요."
   },
   "ui.unable.to.check.the.active.run.0": {
     "en": "Unable to check the active run: {0}",

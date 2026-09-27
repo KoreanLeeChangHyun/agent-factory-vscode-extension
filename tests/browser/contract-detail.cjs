@@ -1,0 +1,124 @@
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
+const {chromium} = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
+(async () => {
+ const browser = await chromium.launch({headless:true});
+ try {
+  const page = await browser.newPage({viewport:{width:1100,height:800}}); const errors=[];
+  page.on('pageerror',e=>errors.push(e.message));
+  await page.setContent('<main id="contract-app"></main>');
+  await page.evaluate(()=>{window.sent=[];window.acquireVsCodeApi=()=>({postMessage:m=>window.sent.push(m)});});
+  const root=path.resolve(__dirname,'../..');
+  // VS Code injects default webview body padding before extension styles.
+  await page.addStyleTag({content:'body { padding: 0 20px; }'});
+  await page.addStyleTag({path:path.join(root,'static/css/contracts.css')});
+  await page.addScriptTag({path:path.join(root,'static/vendor/markdown-it.min.js')});
+  await page.addScriptTag({path:path.join(root,'static/js/contracts.js')});
+  const payload={type:'detail',data:{id:'WC-1',observedAt:'2026-09-27',progress:'# Progress\nT1 completed',versions:[{version:'2',title:'Contract',content:'# Contract\n\n| ID | 작업 | 완료 기준 |\n|---|---|---|\n| T5 | 문서 경로 변경 회귀 검사·정합화 | 문서 경로 관련 실패 해결. 같은 계약 ID의 canonical/legacy 중복을 오류로 반환하고 회귀 검사를 추가합니다. |\n| T7 | 범위 외 런타임 변경 사후 기록 | 이미 작성한 루프·계약 사전 검사 변경을 파일 목록에 명시합니다. |\n\n<script>window.pwned=true</script>',modifiedAt:'today',operations:[{path:'src/test.ts',operation:'modify',task_ids:'T1'},{path:'src/new.ts',operation:'create'},{path:'src/old.ts',operation:'delete'},{path:'src/moved.ts',operation:'move',destination:'lib/moved.ts'},{path:'src/other.ts',operation:'inspect'}]},{version:'1',title:'Old',content:'# Old',modifiedAt:'yesterday',operations:[]}]},workflows:[{loopId:'loop-1',parentAgentId:'main-requester',parentRunId:'run-main',contract:{id:'WC-1',version:1},status:'active',workflow:{tasks:[{id:'T1',workStatus:'completed',verificationStatus:'running',workAgentId:'work-a',verificationAgentId:'verify-a'}]}}]};
+  await page.evaluate(p=>window.dispatchEvent(new MessageEvent('message',{data:p})),payload);
+  assert.match(await page.locator('.assignment').textContent(),/main-requester/);
+  assert.match(await page.locator('.assignment').textContent(),/work-a/);
+  assert.match(await page.locator('.assignment').textContent(),/verify-a/);
+  await page.getByRole('button',{name:'v2 ▾',exact:true}).click();
+  assert.ok(await page.getByRole('dialog',{name:'계약 버전 선택'}).isVisible());
+  await page.locator('.version-option').nth(1).click();
+  assert.ok(await page.getByRole('button',{name:'v1 ▾',exact:true}).isVisible());
+  await page.getByRole('button',{name:'v1 ▾',exact:true}).click();
+  await page.locator('.version-option').nth(0).click();
+  assert.equal(await page.locator('header .contract-toolbar nav').count(),1);
+  assert.equal(await page.locator('header .contract-toolbar .controls').count(),1);
+  for (const width of [900, 390]) {
+   await page.setViewportSize({width,height:800});
+   assert.equal(await page.getByRole('button',{name:'히스토리',exact:true}).evaluate(e=>getComputedStyle(e).whiteSpace),'nowrap');
+   const id = page.locator('tbody .identifier-cell').first();
+   assert.equal(await id.textContent(),'T5');
+   assert.equal(await id.evaluate(e=>getComputedStyle(e).whiteSpace),'nowrap');
+   assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=window.innerWidth));
+  }
+  await page.setViewportSize({width:1100,height:800});
+  assert.equal(await page.locator('table').count(),1); assert.equal(await page.evaluate(()=>window.pwned),undefined);
+  assert.match(await page.locator('header').textContent(),/선택 실행은 v1/);
+  if (process.env.CONTRACT_SCREENSHOTS) { fs.mkdirSync(process.env.CONTRACT_SCREENSHOTS,{recursive:true}); await page.screenshot({path:path.join(process.env.CONTRACT_SCREENSHOTS,'overview.png'),fullPage:true}); }
+  await page.getByRole('button',{name:'변경 파일',exact:true}).click();
+  assert.equal(await page.locator('.file.op-add .operation-badge').textContent(),'A');
+  assert.equal(await page.locator('.file.op-delete .operation-badge').textContent(),'D');
+  assert.equal(await page.locator('.file.op-rename .operation-badge').textContent(),'R');
+  assert.equal(await page.locator('.file.op-unknown .operation-badge').textContent(),'?');
+  assert.equal(await page.locator('.folder-name').textContent(),'src/');
+  const colors=await page.locator('.file.op-add,.file.op-modify,.file.op-delete').evaluateAll(nodes=>nodes.map(n=>getComputedStyle(n).color));
+  assert.equal(new Set(colors).size,3);
+  await page.getByRole('button',{name:'moved.ts · 이동·이름 변경'}).click();
+  assert.match(await page.locator('#contract-app > section').textContent(),/lib\/moved.ts/);
+  await page.getByRole('button',{name:'test.ts · 수정'}).click();
+  assert.match(await page.locator('#contract-app > section').textContent(),/T1/);
+  await page.getByRole('button',{name:'실행 현황',exact:true}).click();
+  assert.match(await page.locator('#contract-app > section').textContent(),/work-a/); assert.match(await page.locator('#contract-app > section').textContent(),/verify-a/);
+  assert.equal(await page.locator('.execution-table tbody tr').count(),1);
+  assert.match(await page.locator('.execution-table').textContent(),/완료/);
+  assert.match(await page.locator('.execution-table').textContent(),/진행 중/);
+  assert.doesNotMatch(await page.locator('#contract-app > section').textContent(),/T1 completed/);
+  await page.getByRole('button',{name:'에이전트',exact:true}).click();
+  assert.match(await page.locator('#contract-app > section').textContent(),/main-requester/);
+  assert.match(await page.locator('#contract-app > section').textContent(),/work-a/);
+  assert.match(await page.locator('#contract-app > section').textContent(),/verify-a/);
+  const agentLinks = page.getByRole('button',{name:'대화 열기',exact:true});
+  assert.equal(await agentLinks.count(),3);
+  await agentLinks.nth(0).click();
+  assert.deepEqual(await page.evaluate(()=>window.sent.at(-1)),{type:'agent.open',agentId:'main-requester'});
+  await agentLinks.nth(2).click();
+  assert.deepEqual(await page.evaluate(()=>window.sent.at(-1)),{type:'agent.open',agentId:'verify-a'});
+  await page.getByRole('button',{name:'버전 비교',exact:true}).click(); assert.equal(await page.locator('.columns pre').count(),2);
+  await page.getByRole('button',{name:'비교 기준 선택',exact:true}).click();
+  assert.ok(await page.getByRole('dialog',{name:'비교 기준 선택'}).isVisible());
+  assert.equal(await page.locator('select').count(),0);
+  await page.keyboard.press('Escape');
+  assert.ok(await page.getByRole('button',{name:'비교 기준 선택',exact:true}).evaluate(e=>e===document.activeElement));
+  await page.getByRole('button',{name:'실행 선택',exact:true}).click();
+  assert.ok(await page.getByRole('dialog',{name:'실행 선택'}).isVisible());
+  await page.keyboard.press('Home');
+  await page.keyboard.press('Enter');
+  assert.equal(await page.getByRole('dialog').count(),0);
+  assert.equal(await page.locator('nav button[aria-pressed=true]').textContent(),'버전 비교');
+  assert.equal(await page.locator('.controls').getByRole('button',{name:'버전 비교',exact:true}).count(),0);
+  await page.getByRole('button',{name:'개요',exact:true}).click();
+  assert.equal(await page.locator('.columns pre').count(),0);
+  assert.equal(await page.locator('nav button[aria-pressed=true]').textContent(),'개요');
+  await page.getByRole('button',{name:'히스토리',exact:true}).click();assert.match(await page.locator('#contract-app > section').textContent(),/파일 수정/);
+  const artifacts = process.env.CONTRACT_SCREENSHOTS;
+  if (artifacts) { fs.mkdirSync(artifacts,{recursive:true}); await page.screenshot({path:path.join(artifacts,'desktop.png'),fullPage:true}); }
+  await page.setViewportSize({width:390,height:800});
+  await page.getByRole('button',{name:'변경 파일',exact:true}).click();
+  assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth <= 390));
+  if (artifacts) await page.screenshot({path:path.join(artifacts,'mobile.png'),fullPage:true});
+  // Match the Human's header width and long title, without a version-mismatch warning.
+  const compact = structuredClone(payload);
+  compact.workflows = [];
+  compact.data.id = 'WC-20260927-DOCUMENT-STRUCTURE';
+  compact.data.versions[0].title = '회귀 검사 복구 및 범위 외 변경 기록 계약';
+  compact.data.versions[0].content = '# 본문\n\n' + '스크롤 고정 확인을 위한 계약 본문입니다.\n\n'.repeat(90);
+  await page.setViewportSize({width:773,height:700});
+  await page.evaluate(p=>window.dispatchEvent(new MessageEvent('message',{data:p})),compact);
+  await page.getByRole('button',{name:'개요',exact:true}).click();
+  const header = await page.locator('header').boundingBox();
+  assert.ok(header.height <= 72, 'compact header is approximately one third of the former 180–200px header');
+  await page.locator('#contract-app > section').evaluate(e=>e.scrollTo(0,500));
+  assert.ok(await page.locator('#contract-app > section').evaluate(e=>e.scrollTop>100));
+  assert.equal(await page.evaluate(()=>window.scrollY),0);
+  const bodyBounds = await page.locator('#contract-app > section').boundingBox();
+  assert.ok(bodyBounds.y >= header.y + header.height - 1, 'scroll area starts below header');
+  assert.ok(Math.abs((await page.locator('header').boundingBox()).y)<1, 'header stays at viewport top while scrolling');
+  assert.ok(await page.getByRole('button',{name:'새로고침',exact:true}).isVisible());
+  if (artifacts) await page.screenshot({path:path.join(artifacts,'sticky-header.png')});
+  for (const width of [390, 835, 1600]) {
+   await page.setViewportSize({width,height:700});
+   const bounds = await page.locator('#contract-app > section').boundingBox();
+   assert.ok(Math.abs(bounds.x + bounds.width - width) < 1, 'scroll container reaches right viewport edge');
+   assert.ok(await page.locator('#contract-app > section').evaluate(e=>parseFloat(getComputedStyle(e).paddingLeft)>=12), 'body retains inner spacing');
+   assert.equal(await page.evaluate(()=>window.scrollY),0);
+  }
+  console.log('Compact header height:', header.height);
+  assert.deepEqual(errors,[]);
+  console.log('Contract detail rendering, versions, tree, execution binding, history, XSS and narrow layout passed');
+ } finally {await browser.close();}
+})().catch(e=>{console.error(e);process.exitCode=1});

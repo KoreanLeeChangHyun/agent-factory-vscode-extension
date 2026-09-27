@@ -4,13 +4,14 @@ import { runInNewContext } from 'node:vm';
 import test from 'node:test';
 
 const source = await readFile(new URL('../../static/js/chat.js', import.meta.url), 'utf8');
+const indexSource = source.slice(source.indexOf('  function indexedTimeline()'), source.indexOf('  function upsertActivity('));
 const aggregation = source.slice(source.indexOf('  function currentTaskFlows() {'), source.indexOf('  function liveTaskStatus('));
 
 test('task-flow aggregation reuses unchanged histories and invalidates all input replacements', () => {
   let parses = 0;
   const state = { timeline: Array.from({ length: 10000 }, (_, id) => ({ type: 'assistant', text: String(id) })), taskFlows: [], childAgents: [], workflows: [] };
-  const context = { state, taskFlowParseCache: new WeakMap(), extractTaskFlows(text) { parses++; return { flows: [{ id: 'flow', title: text, tasks: [] }] }; }, acceptedTaskAgent: () => true, t: () => 'Verification' };
-  runInNewContext('let taskFlowSnapshot;\n' + aggregation + '\nglobalThis.getFlows = currentTaskFlows;', context);
+  const context = { state, taskFlowParseCache: new WeakMap(), timelineIndexes: new WeakMap(), nextTimelineIndex: 0, extractTaskFlows(text) { parses++; return { flows: [{ id: 'flow', title: text, tasks: [] }] }; }, acceptedTaskAgent: () => true, t: () => 'Verification' };
+  runInNewContext('let taskFlowSnapshot;\n' + indexSource + aggregation + '\nglobalThis.getFlows = currentTaskFlows;', context);
   const original = context.getFlows();
   assert.equal(original[0].title, '9999');
   assert.equal(parses, 10000);

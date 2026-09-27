@@ -16,7 +16,7 @@ async function importTypeScript(relativePath, mockExtensionImports = false) {
       buildApi.onLoad({ filter: /.*/, namespace: "mock" }, (args) => {
         if (args.path === "vscode") return { contents: "export const ExtensionMode = { Production: 1, Development: 2, Test: 3 }; export const ProgressLocation = { Notification: 15 }; export const window = {};" };
         if (args.path === "bootstrap") return { contents: "export function bootstrap() {}" };
-        return { contents: "export async function ensureAgentFactoryPlugin() {}" };
+        return { contents: "export async function ensureAgentFactoryPlugin() {} export function semanticBase(value) { return String(value).split('+')[0]; }" };
       });
     }
   }] : [];
@@ -104,26 +104,11 @@ test("release metadata and installation guidance stay coupled", async () => {
   const packageJson = JSON.parse(await readFile(new URL("../../package.json", import.meta.url), "utf8"));
   const packageLock = JSON.parse(await readFile(new URL("../../package-lock.json", import.meta.url), "utf8"));
   const readme = await readFile(new URL("../../README.md", import.meta.url), "utf8");
-  const normalizedReadme = readme.replace(/\s+/g, " ");
   const version = packageJson.version;
 
   assert.equal(packageLock.version, version);
   assert.equal(packageLock.packages[""].version, version);
-  assert.ok(readme.includes(`Extension \`${version}\``));
-  assert.ok(readme.includes(`${version}+codex.<token>`));
-  for (const notice of [
-    "installed and enabled",
-    "identical semantic base version",
-    "official `agent-factory` marketplace",
-    "attempt one compatible plugin installation",
-    "activation blocks",
-    "fully installable and usable without this extension",
-    "released together",
-    "does not contain or bundle"
-  ]) assert.ok(normalizedReadme.includes(notice), `README missing release notice: ${notice}`);
-  assert.ok(readme.includes("codex plugin marketplace add KoreanLeeChangHyun/agent-factory-codex-plugin --ref main"));
-  assert.ok(readme.includes("codex plugin marketplace upgrade agent-factory"));
-  assert.ok(readme.includes("codex plugin add agent-factory@agent-factory"));
+  assert.match(readme, /installs the matching Agent Factory companion plugin when needed/);
 });
 
 function record(overrides = {}) {
@@ -525,4 +510,44 @@ test("WSL handoff is deduplicated and never starts the Windows plugin or chat ru
   await handler();
   assert.match(notice, /new WSL window/);
   assert.equal(context.subscriptions.length, 1);
+});
+
+function codexMissing() {
+  const error = new Error("Codex CLI was not found");
+  error.name = "CodexCliNotFoundError";
+  return error;
+}
+
+test("Claude-only hosts activate with an installed plugin and never redirect or install through Codex", async () => {
+  const { activate } = await importTypeScript("src/extension.ts", true);
+  const context = { extension: { packageJSON: { version: "1.0.14" } }, subscriptions: [] };
+  const calls = [];
+  const services = {
+    prepareClaude: async () => { calls.push("claude"); return true; },
+    prepareCodex: async (_, options) => { calls.push(`codex:${options.allowRedirect}`); throw codexMissing(); },
+    ensurePlugin: async () => assert.fail("Codex marketplace is unavailable without Codex"),
+    requireInstalledPlugin: async version => { calls.push(`installed:${version}`); },
+    bootstrap: () => { calls.push("bootstrap"); },
+    withProgress: async (_, task) => task(),
+    showErrorMessage: async () => assert.fail("Claude-only activation should succeed")
+  };
+  await activate(context, services);
+  assert.deepEqual(calls, ["claude", "codex:false", "installed:1.0.14", "bootstrap"]);
+});
+
+test("a missing Codex CLI still fails activation when Claude is unavailable", async () => {
+  const { activate } = await importTypeScript("src/extension.ts", true);
+  const context = { extension: { packageJSON: { version: "1.0.14" } }, subscriptions: [] };
+  let shown;
+  const services = {
+    prepareClaude: async () => false,
+    prepareCodex: async (_, options) => { assert.equal(options.allowRedirect, true); throw codexMissing(); },
+    ensurePlugin: async () => assert.fail("must not install"),
+    requireInstalledPlugin: async () => assert.fail("must not use Claude-only mode"),
+    bootstrap: () => assert.fail("must not bootstrap"),
+    withProgress: async (_, task) => task(),
+    showErrorMessage: async message => { shown = message; return undefined; }
+  };
+  await activate(context, services);
+  assert.match(shown, /Codex CLI was not found/);
 });

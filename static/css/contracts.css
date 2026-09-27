@@ -1,0 +1,49 @@
+body{font-family:var(--vscode-font-family,sans-serif);color:var(--vscode-editor-foreground,#ddd);background:var(--vscode-editor-background,#1e1e1e);margin:0;font-size:var(--vscode-font-size,14px)}main{max-width:1200px;margin:auto;padding:24px}header{border-bottom:1px solid var(--vscode-panel-border,#555);padding-bottom:16px}h1{font-size:24px}h2{font-size:18px}button,select{font:inherit;color:inherit;background:var(--vscode-input-background,#333);border:1px solid var(--vscode-panel-border,#666);padding:7px 10px;border-radius:4px;cursor:pointer}button:hover,button[aria-pressed=true]{background:var(--vscode-list-activeSelectionBackground,#264f78)}button:focus-visible,select:focus-visible,summary:focus-visible{outline:2px solid var(--vscode-focusBorder,#007fd4)}.controls,nav{display:flex;gap:10px;flex-wrap:wrap;align-items:center}nav{margin:0}section{min-width:0}.muted{color:var(--vscode-descriptionForeground,#aaa)}.notice{padding:12px;border-left:3px solid var(--vscode-focusBorder,#007fd4);background:var(--vscode-textBlockQuote-background,#252526)}.columns{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.5fr);gap:24px}.columns>*{min-width:0}details{padding:8px 0}summary{cursor:pointer}.tree-children{padding-left:18px;border-left:1px solid var(--vscode-panel-border,#555)}.file{display:block;text-align:left;margin:5px 0;max-width:100%;overflow-wrap:anywhere}dl{display:grid;grid-template-columns:110px minmax(0,1fr);gap:8px}dd{margin:0;white-space:pre-wrap;overflow-wrap:anywhere}dt{font-weight:bold}pre{white-space:pre-wrap;overflow-wrap:anywhere;font-size:12px}.added{background:#164328}.removed{background:#542328}table{border-collapse:collapse;width:100%;table-layout:auto}td,th{border:1px solid var(--vscode-panel-border,#555);padding:10px;vertical-align:top;word-break:normal;overflow-wrap:normal}article{overflow-wrap:anywhere;line-height:1.6}.document-link{text-decoration:underline}li{margin:10px 0}@media(max-width:700px){main{padding:12px}.columns{grid-template-columns:1fr}dl{grid-template-columns:90px minmax(0,1fr)}}
+
+.contract-toolbar{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:12px;margin-top:16px}.contract-toolbar .controls{gap:8px}.table-scroll{overflow-x:auto;max-width:100%;margin:16px 0}.markdown th{white-space:nowrap}.markdown td{min-width:9em}.markdown .identifier-cell{min-width:3.5em;width:3.5em;white-space:nowrap}.markdown td:last-child:not(.identifier-cell){min-width:18em}.table-scroll:focus-visible{outline:2px solid var(--vscode-focusBorder,#007fd4)}
+
+/* Compact, persistent contract header. Preserve control sizes rather than scaling text. */
+#contract-app { padding-top: 0; }
+#contract-app > header { position: sticky; top: 0; z-index: 10; padding: 6px 0; background: var(--vscode-editor-background, #1e1e1e); }
+.contract-identity { display: flex; align-items: center; gap: 10px; min-width: 0; min-height: 22px; }
+.contract-identity h1 { font-size: 15px; line-height: 22px; margin: 0; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; }
+.contract-id { font-size: 11px; max-width: 26ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.header-status { font-size: 11px; white-space: nowrap; }
+header .contract-toolbar { margin-top: 4px; gap: 6px 12px; }
+header .contract-toolbar nav, header .contract-toolbar .controls { gap: 6px; }
+header button, header select { padding: 4px 8px; font-size: 12px; line-height: 18px; }
+header label { font-size: 12px; }
+header .notice { margin: 4px 0; padding: 4px 8px; font-size: 12px; }
+@media (max-width: 600px) { .contract-identity { flex-wrap: wrap; gap: 2px 8px; } .contract-identity h1 { flex-basis: 100%; } .contract-id { max-width: none; flex: 1; min-width: 0; } }
+
+/* The header is outside the sole vertical scrolling region. */
+html, body { height: 100%; width: 100%; margin: 0; padding: 0; box-sizing: border-box; overflow: hidden; }
+#contract-app { height: 100dvh; box-sizing: border-box; display: flex; flex-direction: column; padding-bottom: 0; }
+#contract-app > header { position: relative; flex: 0 0 auto; }
+#contract-app > section { flex: 1 1 auto; min-height: 0; overflow-y: auto; overflow-x: hidden; scrollbar-gutter: stable; padding-bottom: 24px; box-sizing: border-box; }
+
+.agent-card{border:1px solid var(--vscode-panel-border,#555);border-radius:6px;padding:12px;min-width:0}.agent-card h3{margin:0 0 8px;font-size:14px}.agent-card code{display:block;overflow-wrap:anywhere;margin-bottom:8px}.agent-chain{display:grid;grid-template-columns:minmax(0,1fr) auto minmax(0,1fr);gap:12px;align-items:start}.agent-arrow{align-self:center}.agent-task{margin-top:16px}@media(max-width:600px){.agent-chain{grid-template-columns:1fr}.agent-arrow{display:none}}
+
+/* Keep tab labels intact; wrap the toolbar groups, never individual words. */
+header nav{flex-wrap:nowrap;max-width:100%;overflow-x:auto}
+header nav button{white-space:nowrap;flex-shrink:0}
+header .controls{flex-shrink:0;max-width:100%}
+.version-dialog{color:inherit;background:var(--vscode-editor-background,#1e1e1e);border:1px solid var(--vscode-panel-border,#555);border-radius:8px;padding:18px;width:min(420px,calc(100vw - 64px));max-height:70vh;overflow:auto}
+.version-dialog::backdrop{background:#0008}
+.version-dialog h2{margin-top:0}.version-option{display:grid;text-align:left;gap:4px;width:100%;margin-bottom:8px;padding:10px;overflow-wrap:anywhere}.version-option small{font-size:11px}
+.assignment{border-bottom:1px solid var(--vscode-panel-border,#555);padding-bottom:12px;margin-bottom:20px}
+.assignment-node{border:1px solid var(--vscode-panel-border,#555);border-radius:6px;padding:10px;min-width:0;display:grid;gap:6px}.assignment-node code{overflow-wrap:anywhere;font-size:12px}
+.assignment-row{display:grid;grid-template-columns:minmax(90px,1fr) minmax(0,2fr) auto minmax(0,2fr);gap:10px;align-items:center;margin-top:10px}.assignment-label{overflow-wrap:anywhere}
+@media(max-width:600px){.assignment-row{grid-template-columns:minmax(0,1fr) auto minmax(0,1fr)}.assignment-label{grid-column:1/-1}}
+
+/* Scroll container spans the viewport; spacing belongs inside it. */
+#contract-app { max-width: none; width: 100%; margin: 0; padding: 0; --contract-inset: max(24px, calc((100vw - 1152px) / 2)); }
+#contract-app > header { padding-left: var(--contract-inset); padding-right: var(--contract-inset); }
+#contract-app > section { padding-left: var(--contract-inset); padding-right: var(--contract-inset); }
+@media (max-width: 700px) { #contract-app { --contract-inset: 12px; } }
+
+.selection-control{display:inline-flex;align-items:center;gap:6px;min-width:0;max-width:100%}.selection-control>button{min-width:0;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.selection-control>span{white-space:nowrap}
+
+.execution-table table{min-width:720px}.execution-table td{overflow-wrap:anywhere;min-width:8em}.execution-table th{white-space:nowrap}.execution-table td:first-child{min-width:14em}.execution-table td:last-child{min-width:16em}.execution-table td p{margin:6px 0;font-size:12px}
+
+.file-tree{font-family:var(--vscode-editor-font-family,monospace);font-size:13px}.folder-name{color:var(--vscode-symbolIcon-folderForeground,#dcb67a);font-weight:600}.file-tree .file{display:flex;align-items:center;gap:8px;width:100%;border:0;background:transparent;padding:5px 8px;text-align:left}.file-tree .file:hover{background:var(--vscode-list-hoverBackground,#2a2d2e)}.file-name{flex:1;min-width:0;overflow-wrap:anywhere}.file-extension{opacity:.85}.file-icon{color:var(--vscode-descriptionForeground,#aaa)}.operation-badge{font-weight:bold;flex-shrink:0;border:1px solid currentColor;border-radius:3px;padding:0 4px;font-size:11px}.file-legend{display:flex;flex-wrap:wrap;gap:16px;font-size:12px;margin:12px 0}.op-add{color:var(--vscode-gitDecoration-addedResourceForeground,#81b88b)}.op-modify{color:var(--vscode-gitDecoration-modifiedResourceForeground,#e2c08d)}.op-delete{color:var(--vscode-gitDecoration-deletedResourceForeground,#c74e39)}.op-rename{color:var(--vscode-gitDecoration-renamedResourceForeground,#73c991)}.op-unknown{color:var(--vscode-descriptionForeground,#aaa)}

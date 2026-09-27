@@ -243,6 +243,12 @@
           "default": "",
           "description": "%agentFactory.mainChat.codexPath.description%"
         },
+        "agentFactory.mainChat.claudePath": {
+          "type": "string",
+          "scope": "machine-overridable",
+          "default": "",
+          "description": "%agentFactory.mainChat.claudePath.description%"
+        },
         "agentFactory.mainChat.runtimeExecPath": {
           "type": "string",
           "scope": "machine-overridable",
@@ -279,6 +285,72 @@
           "default": true,
           "scope": "application",
           "description": "%agentFactory.mainChat.botsEnabled.description%"
+        },
+        "agentFactory.agents.main.model": {
+          "type": "string",
+          "default": "",
+          "scope": "resource",
+          "description": "%agentFactory.agents.main.model.description%",
+          "pattern": "^$|^[A-Za-z0-9][A-Za-z0-9._:/-]{0,99}$"
+        },
+        "agentFactory.agents.main.reasoningEffort": {
+          "type": "string",
+          "default": "",
+          "scope": "resource",
+          "description": "%agentFactory.agents.main.reasoningEffort.description%",
+          "enum": [
+            "",
+            "none",
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ]
+        },
+        "agentFactory.agents.work.model": {
+          "type": "string",
+          "default": "",
+          "scope": "resource",
+          "description": "%agentFactory.agents.work.model.description%",
+          "pattern": "^$|^[A-Za-z0-9][A-Za-z0-9._:/-]{0,99}$"
+        },
+        "agentFactory.agents.work.reasoningEffort": {
+          "type": "string",
+          "default": "",
+          "scope": "resource",
+          "description": "%agentFactory.agents.work.reasoningEffort.description%",
+          "enum": [
+            "",
+            "none",
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ]
+        },
+        "agentFactory.agents.verification.model": {
+          "type": "string",
+          "default": "",
+          "scope": "resource",
+          "description": "%agentFactory.agents.verification.model.description%",
+          "pattern": "^$|^[A-Za-z0-9][A-Za-z0-9._:/-]{0,99}$"
+        },
+        "agentFactory.agents.verification.reasoningEffort": {
+          "type": "string",
+          "default": "",
+          "scope": "resource",
+          "description": "%agentFactory.agents.verification.reasoningEffort.description%",
+          "enum": [
+            "",
+            "none",
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ]
         }
       }
     },
@@ -305,7 +377,7 @@
     "release": "node scripts/release.mjs",
     "watch": "node scripts/build.mjs --watch",
     "check": "npm run typecheck && npm run check:static && npm run test && npm run build",
-    "check:static": "node --check static/js/localization.js && node --check static/js/chat.js && node --check static/js/ansi-renderer.js && node --check static/js/execution-references.js && node --check static/js/loading-animation-gallery.js",
+    "check:static": "node --check static/js/localization.js && node --check static/js/chat.js && node --check static/js/contracts.js && node --check static/js/ansi-renderer.js && node --check static/js/execution-references.js && node --check static/js/loading-animation-gallery.js",
     "typecheck": "tsc --noEmit",
     "test": "node --test tests/unit/*.test.mjs",
     "package": "npm run check && node -e \"require('node:fs').mkdirSync('releases', { recursive: true })\" && node --require ./scripts/node-file-polyfill.cjs ./node_modules/@vscode/vsce/vsce package --allow-missing-repository --out releases",

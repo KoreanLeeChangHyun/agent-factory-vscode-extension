@@ -13,6 +13,9 @@ export interface MessageSubmission {
 }
 
 export type ClientMessage =
+  | { readonly type: "contract.open"; readonly id: string }
+  | { readonly type: "contracts.request" }
+  | { readonly type: "agent.defaults.save"; readonly scope: "global" | "project"; readonly role: "main" | "work" | "verification"; readonly field: "model" | "reasoningEffort"; readonly value: string }
   | { readonly type: "worktree.create" | "worktree.merge" | "worktree.refresh" }
   | { readonly type: "notes.list"; readonly scope: import("../infrastructure/vscode/note-store").NoteScope }
   | { readonly type: "notes.save"; readonly scope: import("../infrastructure/vscode/note-store").NoteScope; readonly note: Omit<import("../infrastructure/vscode/note-store").Note, "updatedAt"> }
@@ -42,6 +45,7 @@ export type ClientMessage =
         readonly goalObjective?: string;
       };
     }
+  | { readonly type: "sudo.reply"; readonly id: string; readonly key?: string; readonly iv?: string; readonly data?: string; readonly cancelled?: boolean }
   | { readonly type: "decision.approve"; readonly runId: string }
   | { readonly type: "goal.control"; readonly action: import("../infrastructure/agent-factory/agent-client").GoalAction }
   | { readonly type: "queue.resume" }
@@ -85,6 +89,10 @@ export type ClientMessage =
     };
 
 export type HostMessage =
+  | { readonly type: "contracts.list"; readonly contracts: readonly import("../infrastructure/filesystem/contracts").ContractEntry[]; readonly error?: string }
+  | { readonly type: "agent.defaults"; readonly settings: import("../core/config/agent-settings").AgentDefaultsSnapshot }
+  | import("../infrastructure/vscode/sudo-broker").SudoChallenge
+  | { readonly type: "sudo.closed" }
   | { readonly type: "attachment.conversionResult"; readonly id: string; readonly path?: string; readonly error?: string }
   | { readonly type: "attachment.encode"; readonly id: string; readonly source: string; readonly mediaType: string; readonly name: string }
   | { readonly type: "worktree.updated"; readonly value?: import("../infrastructure/agent-factory/agent-client").ConversationWorktree; readonly busy?: boolean; readonly supported?: boolean }
@@ -153,6 +161,7 @@ export type HostMessage =
       readonly title: string;
     }
   | { readonly type: "session.bound"; readonly agentId: string; readonly reset?: boolean; readonly conversationId?: string }
+  | { readonly type: "conversation.clearing"; readonly busy: boolean }
   | { readonly type: "conversation.cleared"; readonly conversationId: string }
   | { readonly type: "conversations.list"; readonly conversations: readonly import("../infrastructure/agent-factory/agent-client").SavedConversation[]; readonly error?: string }
   | { readonly type: "conversation.read.result"; readonly requestId: string; readonly history?: import("../infrastructure/agent-factory/agent-client").ConversationHistory; readonly error?: string }

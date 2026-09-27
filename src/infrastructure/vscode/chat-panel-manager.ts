@@ -1,3 +1,6 @@
+import { openContractPanel } from "./contract-panel";
+import { listContracts } from "../filesystem/contracts";
+import { readAgentDefaults, saveAgentDefault } from "./agent-settings-store";
 import { readMarkdownImage } from "./markdown-image";
 import { localize, describeLocalizedMessage } from "../../common/localization";
 import { LunaBot, type BotContext } from "../codex/luna-bot";
@@ -26,16 +29,18 @@ import type { HostMessage } from "../../protocol/messages";
 import { parseClientMessage } from "../../protocol/validator";
 import type { ChatTemplateRenderer } from "./chat-template-renderer";
 import type { AgentRuntimeClient } from "../agent-factory/agent-client";
-import { readCodexModels } from "../agent-factory/model-catalog";
+import { readProviderModels } from "../agent-factory/model-catalog";
 import { ChatSessionController } from "../../modules/chat/session-controller";
 import { saveConvertedImage } from "./converted-image-store";
 import { writeNewImageAttachment } from "./image-attachment-store";
+import { SudoBroker } from "./sudo-broker";
 
 type RuntimeConnection =
   | { readonly available: true; readonly client: AgentRuntimeClient }
   | { readonly available: false; readonly diagnostic: string };
 
 interface ManagedPanel {
+  contractWorkflows?: readonly Record<string, unknown>[];
   readonly panel: vscode.WebviewPanel;
   state: ChatPanelState;
   readonly subscriptions: vscode.Disposable[];
@@ -48,6 +53,7 @@ interface ManagedPanel {
   startedMessages?: Extract<HostMessage, { type: "chat.started" }>[];
   controller?: ChatSessionController;
   controllerInitialization?: Promise<void>;
+  queueResumeInFlight?: boolean;
   sessionTransition?: Promise<void>;
   worktree?: import("../agent-factory/agent-client").ConversationWorktree;
   disposed?: boolean;
@@ -92,6 +98,17 @@ export class ChatPanelManager implements vscode.Disposable {
     readonly workflows: readonly Record<string, unknown>[] | undefined;
   }>>>();
   private readonly terminalDeliveryClaims = new WeakMap<object, Set<string>>();
+  private readonly sudoBroker = new SudoBroker((runId, agentId) => {
+    const active = this.findActivePanel();
+    const managed = active && (active.state.role ?? "main") === "main" && active.controller?.running && active.controller.runId === runId && active.state.agentId === agentId ? active :
+      [...this.panels.values()].find(candidate => (candidate.state.role ?? "main") === "main" && candidate.controller?.running && candidate.controller.runId === runId && candidate.state.agentId === agentId);
+    const cwd = managed?.worktree?.workingDirectory ?? vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+    return managed && cwd ? { id: managed.state.panelId, cwd,
+      post: (message: import("./sudo-broker").SudoChallenge | { type: "sudo.closed" }) => {
+        if (!managed.panel.visible) managed.panel.reveal(undefined, true);
+        return this.post(managed.panel, message);
+      } } : undefined;
+  });
 
   public onAgentsChanged(listener: () => void): vscode.Disposable {
     this.sidebarListeners.add(listener);
@@ -174,7 +191,14 @@ export class ChatPanelManager implements vscode.Disposable {
     private readonly templates: ChatTemplateRenderer,
     private readonly statusItems: () => readonly StatusItemId[],
     private readonly connectRuntime: () => Promise<RuntimeConnection>
-  ) {}
+  ) {
+    const listener = vscode.workspace.onDidChangeConfiguration?.(event => {
+      if (event.affectsConfiguration("agentFactory.agents")) {
+        for (const managed of this.panels.values()) void this.refreshAgentDefaults(managed);
+      }
+    });
+    if (listener) this.context.subscriptions.push(listener);
+  }
 
   public async openDraft(): Promise<void> {
     const state = { ...createDraftChatState(this.composerPreferences()), role: "main" as const };
@@ -257,6 +281,7 @@ export class ChatPanelManager implements vscode.Disposable {
   }
 
   public dispose(): void {
+    this.sudoBroker.dispose();
     for (const managed of this.panels.values()) {
       managed.disposed = true;
       this.disposedPanels.add(managed.panel);
@@ -318,6 +343,7 @@ export class ChatPanelManager implements vscode.Disposable {
     subscriptions.push(
       panel.onDidDispose(() => {
         managed.disposed = true;
+        this.sudoBroker.cancelPanel(managed.state.panelId);
         this.disposedPanels.add(panel);
         managed.lunaBot?.dispose();
         if (managed.agentRefreshTimer) clearTimeout(managed.agentRefreshTimer);
@@ -377,9 +403,24 @@ export class ChatPanelManager implements vscode.Disposable {
     }
   }
 
+  private async ensureSudoBroker(managed: ManagedPanel): Promise<void> {
+    if (!this.context.extensionPath || process.platform === "win32") return;
+    try {
+      await this.sudoBroker.start(join(this.context.extensionPath, "static", "sudo-request.py"));
+    } catch (error) {
+      await this.post(managed.panel, { type: "host.notice", level: "warning",
+        text: localize("sudo.unavailable", error instanceof Error ? error.message : String(error)) });
+    }
+  }
+
   private async handleMessage(managed: ManagedPanel, rawMessage: unknown): Promise<void> {
     const message = parseClientMessage(rawMessage);
     if (!message) {
+      const type = rawMessage && typeof rawMessage === "object" && "type" in rawMessage
+        && typeof rawMessage.type === "string" && /^[a-z.]{1,64}$/.test(rawMessage.type)
+        ? rawMessage.type : "unknown";
+      // Log the protocol operation only, never chat text, attachments or credentials.
+      console.warn("[Agent Factory] Chat request rejected", { type, reason: "protocol-validation-failed" });
       await this.post(managed.panel, {
         type: "host.notice",
         level: "error",
@@ -402,14 +443,18 @@ export class ChatPanelManager implements vscode.Disposable {
         return;
       }
       case "client.ready":
+        await this.ensureSudoBroker(managed);
         managed.lunaBot?.cancelTalk();
+        const pendingSudo = this.sudoBroker.challengeFor(managed.state.panelId);
+        if (pendingSudo) await this.post(managed.panel, pendingSudo);
         if (!managed.state.agentId) managed.executionMode ??= this.defaultExecutionMode();
         await this.post(managed.panel, { type: "execution.updated", mode: managed.executionMode });
         managed.themeReady = true;
         managed.themeSignature = undefined;
         await this.refreshTheme(managed);
         const connection = await this.connectRuntime();
-        const capabilities = connection.available ? await connection.client.capabilities(managed.state.agentId) : undefined;
+        await this.post(managed.panel, { type: "agent.defaults", settings: readAgentDefaults() });
+        const capabilities = connection.available ? await connection.client.capabilities(managed.state.agentId, this.effectiveModel(managed)) : undefined;
         let runtimeConversationId: string | undefined;
         if (managed.state.agentId && connection.available) {
           runtimeConversationId = (await connection.client.listSessions())
@@ -505,7 +550,11 @@ export class ChatPanelManager implements vscode.Disposable {
       case "execution.select":
         await this.selectExecutionMode(managed, message.mode);
         return;
+      case "sudo.reply":
+        this.sudoBroker.respond(managed.state.panelId, message);
+        return;
       case "chat.send": {
+        await this.ensureSudoBroker(managed);
         const previous = managed.startedMessages?.find(item => item.id === message.id);
         if (previous) { await this.post(managed.panel, previous); return; }
         if (managed.pendingMessageIds?.has(message.id)) return;
@@ -536,6 +585,13 @@ export class ChatPanelManager implements vscode.Disposable {
           await this.post(managed.panel, { type: "host.notice", level: "warning", text: localize("ui.this.request.has.already.been.answered.or.has.expired.reply.directly.in.the.current.conversation") });
         }
         return;
+      case "agent.defaults.save":
+        try {
+          await saveAgentDefault(message.scope, message.role, message.field, message.value);
+        } finally {
+          for (const panel of this.panels.values()) await this.refreshAgentDefaults(panel);
+        }
+        return;
       case "composer.settings":
         managed.state = {
           ...managed.state,
@@ -550,6 +606,17 @@ export class ChatPanelManager implements vscode.Disposable {
           workLoopMode: false
         };
         await this.saveComposerPreferences(managed.state);
+        await this.rememberAgent(managed.state);
+        {
+          const selectedModel = this.effectiveModel(managed);
+          const connection = await this.connectRuntime();
+          if (connection.available) {
+            const capabilities = await connection.client.capabilities(managed.state.agentId, selectedModel);
+            if (!managed.disposed && this.effectiveModel(managed) === selectedModel) {
+              await this.post(managed.panel, { type: "capabilities.updated", capabilities });
+            }
+          }
+        }
         return;
       case "goal.control":
         if ((managed.state.role ?? "main") !== "main") return;
@@ -557,8 +624,17 @@ export class ChatPanelManager implements vscode.Disposable {
         void managed.controller?.controlGoal(message.action);
         return;
       case "queue.resume":
-        try { await managed.controller?.reconnect(); }
-        catch (error) { await this.post(managed.panel, { type: "host.notice", level: "error", text: String(error) }); }
+        if (managed.queueResumeInFlight) return;
+        managed.queueResumeInFlight = true;
+        try {
+          if (!managed.controller) throw new Error("Chat controller is unavailable");
+          await managed.controller.reconnect();
+        } catch (error) {
+          console.error("[Agent Factory] Queue resume failed", error);
+          await this.post(managed.panel, { type: "host.notice", level: "error", text: localize("ui.queue.resume.failed") });
+        } finally {
+          managed.queueResumeInFlight = false;
+        }
         return;
       case "run.cancel":
         if (!managed.controller) {
@@ -586,6 +662,30 @@ export class ChatPanelManager implements vscode.Disposable {
           await this.post(managed.panel, { type: "agents.list", agents: await connection.client.listChildSessions(managed.state.agentId), workflows: [snapshot] });
         } catch (error) {
           await this.post(managed.panel, { type: "host.notice", level: "error", text: String(error) });
+        }
+        return;
+      }
+      case "contract.open": {
+        const root = managed.worktree?.workingDirectory ?? vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+        if (!root) return;
+        try { await openContractPanel(this.context.extensionUri, root, message.id, async () => {
+          const connection = await this.connectRuntime();
+          if (!connection.available || !managed.state.agentId) throw new Error("Runtime unavailable; execution status could not be refreshed");
+          const agents = await connection.client.listChildSessions(managed.state.agentId);
+          return await connection.client.advanceWorkflows?.(managed.state.agentId, agents, false) ?? [];
+        }, async agentId => {
+          if (agentId === managed.state.agentId) await this.openSidebarAgent(managed.state);
+          else await this.openChildAgent(managed, agentId);
+        }); }
+        catch (error) { await vscode.window.showErrorMessage(String(error)); }
+        return;
+      }
+      case "contracts.request": {
+        const root = managed.worktree?.workingDirectory ?? vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+        try {
+          await this.post(managed.panel, { type: "contracts.list", contracts: root ? await listContracts(root) : [] });
+        } catch (error) {
+          await this.post(managed.panel, { type: "contracts.list", contracts: [], error: String(error) });
         }
         return;
       }
@@ -815,7 +915,7 @@ export class ChatPanelManager implements vscode.Disposable {
   }
 
   private async sendModelList(managed: ManagedPanel): Promise<void> {
-    const models = await readCodexModels();
+    const models = await readProviderModels();
     if (models !== undefined) await this.post(managed.panel, { type: "models.list", models });
   }
 
@@ -833,6 +933,7 @@ export class ChatPanelManager implements vscode.Disposable {
       const { agents, workflows } = await this.sharedAgentRefresh(connection.client, agentId);
       if (managed.disposed || managed.state.agentId !== agentId) return;
       await this.post(managed.panel, { type: "agents.list", agents, workflows });
+      if (workflows) managed.contractWorkflows = workflows;
       if (workflows) await this.reportWorkflowResults(managed, workflows, connection.client);
       await this.continueBackgroundWork(managed, agents.filter(agent => !workflows?.some(flow => flow.workAgentId === agent.agentId || flow.verificationAgentId === agent.agentId ||
         (Array.isArray((flow.workflow as { tasks?: unknown[] } | undefined)?.tasks) &&
@@ -1024,21 +1125,32 @@ Read the exact stored child result/receipt and existing workflow status for repo
     }
   }
 
+  private effectiveModel(managed: ManagedPanel): string | undefined {
+    return managed.state.model || readAgentDefaults().effective[managed.state.role ?? "main"]?.model;
+  }
+
+  private async refreshAgentDefaults(managed: ManagedPanel): Promise<void> {
+    if (managed.disposed) return;
+    await this.post(managed.panel, { type: "agent.defaults", settings: readAgentDefaults() });
+    const model = this.effectiveModel(managed);
+    const connection = await this.connectRuntime();
+    if (connection.available) {
+      const capabilities = await connection.client.capabilities(managed.state.agentId, model);
+      if (!managed.disposed && model === this.effectiveModel(managed)) await this.post(managed.panel, { type: "capabilities.updated", capabilities });
+    }
+  }
+
   private composerPreferences(): ComposerPreferences {
-    return restoreChatState(
-      this.context.globalState.get(COMPOSER_PREFERENCES_KEY),
-      {}
-    );
+    const { model, reasoning, agentModels, ...preferences } = restoreChatState(
+      this.context.globalState.get(COMPOSER_PREFERENCES_KEY), {});
+    return preferences;
   }
 
   private async saveComposerPreferences(state: ChatPanelState): Promise<void> {
     // A child chat override must not replace the Main composer defaults.
     if (state.role && state.role !== "main") return;
     await this.context.globalState.update(COMPOSER_PREFERENCES_KEY, {
-      model: state.model,
-      agentModels: state.agentModels,
       agentPermissions: state.agentPermissions,
-      reasoning: state.reasoning,
       businessMode: "normal",
       taskMode: "direct",
       fastMode: state.fastMode === true,
@@ -1275,7 +1387,8 @@ Read the exact stored child result/receipt and existing workflow status for repo
           if (!path) return;
         }
       }
-      managed.worktree = await managed.controller.changeWorktree(action, { changes, path, executionMode: managed.executionMode ?? this.defaultExecutionMode() });
+      managed.worktree = await managed.controller.changeWorktree(action, { changes, path, executionMode: managed.executionMode ?? this.defaultExecutionMode(),
+        ...(managed.state.model ? { model: managed.state.model } : {}) });
       const conflicted = managed.worktree.worktree?.phase === "conflict";
       await this.post(managed.panel, { type: "host.notice", level: conflicted ? "warning" : "info",
         text: localize(conflicted ? "worktree.conflict.notice" : action === "merge" ? "worktree.merged.notice" : "worktree.created.notice") });
@@ -1290,9 +1403,26 @@ Read the exact stored child result/receipt and existing workflow status for repo
   private async transitionConversation(managed: ManagedPanel): Promise<void> {
     if (managed.sessionTransition) {
       await this.post(managed.panel, { type: "host.notice", level: "warning", text: localize("ui.another.session.is.loading") });
+      try {
+        await managed.sessionTransition;
+      } finally {
+        await this.post(managed.panel, { type: "conversation.clearing", busy: false });
+      }
       return;
     }
-    const transition = this.clearConversation(managed);
+    const transition = Promise.resolve().then(async () => {
+      try {
+        await this.post(managed.panel, { type: "conversation.clearing", busy: true });
+        await this.clearConversation(managed);
+      } catch (error) {
+        await this.post(managed.panel, {
+          type: "host.notice", level: "error",
+          text: localize("ui.unable.to.clear.the.conversation.0", error instanceof Error ? describeLocalizedMessage(error.message) ?? error.message : String(error))
+        });
+      } finally {
+        await this.post(managed.panel, { type: "conversation.clearing", busy: false });
+      }
+    });
     managed.sessionTransition = transition;
     try {
       await transition;
@@ -1407,7 +1537,7 @@ Read the exact stored child result/receipt and existing workflow status for repo
     const goalMode = (managed.state.role ?? "main") === "main" && execution.taskMode !== "verification" && execution.goal;
     const goalObjective = goalMode ? text.trim() : undefined;
     if (goalMode && (!goalObjective)) {
-      throw new Error(localize("ui.enter.a.chat.message.of.1.4.000.characters.or.turn.off.goal"));
+      throw new Error(localize("ui.describe.the.goal.you.want.to.achieve.for.example.make.the.attached.page.usable.on.mobile"));
     }
     await this.ensureController(managed);
     if (!managed.controller) throw new Error(localize("ui.unable.to.connect.to.the.runtime.queued.messages.have.been.preserved"));

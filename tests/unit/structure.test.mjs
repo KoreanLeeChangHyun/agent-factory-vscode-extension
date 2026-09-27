@@ -102,7 +102,7 @@ test("session menu remains available without a composer session-load button", fu
 test("user question picker lists prompts and jumps to the selected message", function () {
   assert.match(template, /id="question-button"[^>]*aria-controls="question-menu"/);
   assert.match(template, /id="question-button"[^>]*>[\s\S]*?<svg/);
-  assert.match(template, /id="question-menu"[^>]*role="listbox"/);
+  assert.match(template, /id="question-menu"[^>]*role="dialog"/);
   assert.match(template, /id="question-list"/);
   assert.match(chatScript, /event\.type === "user"/);
   assert.match(chatScript, /jumpToQuestion\(question\.id\)/);

@@ -1,3 +1,4 @@
+import { validAgentValue } from "../core/config/agent-settings";
 import { parseAgentPermissions } from "../common/types/agent-permissions";
 import { parseAgentModels } from "../common/types/agent-models";
 import { BUSINESS_MODES, type BusinessMode } from "../common/types/business-mode";
@@ -7,6 +8,7 @@ import type { AttachmentKind, AttachmentReference } from "../common/types/attach
 import type { ClientMessage } from "./messages";
 
 const clientMessageTypes = new Set([
+  "agent.defaults.save",
   "client.ready",
   "worktree.create", "worktree.merge", "worktree.refresh",
   "notes.list",
@@ -21,7 +23,9 @@ const clientMessageTypes = new Set([
   "image.resolve",
   "chat.send",
   "decision.approve",
+  "sudo.reply",
   "run.cancel",
+  "queue.resume",
   "conversation.clear",
   "goal.control",
   "sessions.request",
@@ -29,6 +33,8 @@ const clientMessageTypes = new Set([
   "session.select",
   "agents.request",
   "history.request",
+  "contract.open",
+  "contracts.request",
   "conversations.request",
   "conversation.read",
   "workflow.close",
@@ -57,6 +63,12 @@ export function parseClientMessage(value: unknown): ClientMessage | undefined {
   }
 
   switch (value.type) {
+    case "sudo.reply":
+      if (typeof value.id !== "string" || !/^[0-9a-f-]{36}$/.test(value.id)) return undefined;
+      if (value.cancelled === true) return { type: "sudo.reply", id: value.id, cancelled: true };
+      if ([value.key, value.iv, value.data].every(part => typeof part === "string" && /^[A-Za-z0-9+/]+={0,2}$/.test(part)))
+        return { type: "sudo.reply", id: value.id, key: value.key as string, iv: value.iv as string, data: value.data as string };
+      return undefined;
     case "worktree.create":
     case "worktree.merge":
     case "worktree.refresh":
@@ -78,6 +90,7 @@ export function parseClientMessage(value: unknown): ClientMessage | undefined {
     case "message.copy":
       if (typeof value.text !== "string" || !value.text.length) return undefined;
       return { type: value.type, text: value.text };
+    case "contract.open":
     case "reference.copy":
       if (typeof value.id !== "string" || !/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(value.id)) return undefined;
       return { type: value.type, id: value.id };
@@ -146,10 +159,16 @@ export function parseClientMessage(value: unknown): ClientMessage | undefined {
       if (!note || typeof note.id !== "string" || !/^[A-Za-z0-9_-]+$/.test(note.id) || typeof note.title !== "string" || typeof note.body !== "string" || !Number.isSafeInteger(note.revision) || Number(note.revision) < 0) return undefined;
       return { type: value.type, scope: value.scope, note: { id: note.id, title: note.title, body: note.body, revision: Number(note.revision) } };
     }
+    case "agent.defaults.save":
+      if ((value.scope !== "global" && value.scope !== "project") ||
+          !["main", "work", "verification"].includes(String(value.role)) ||
+          (value.field !== "model" && value.field !== "reasoningEffort") || !validAgentValue(value.field, value.value)) return undefined;
+      return { type: value.type, scope: value.scope, role: value.role as "main" | "work" | "verification", field: value.field, value: value.value };
     case "client.ready":
     case "queue.resume":
     case "run.cancel":
     case "conversation.clear":
+    case "contracts.request":
     case "conversations.request":
     case "sessions.request":
     case "models.request":

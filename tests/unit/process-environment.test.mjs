@@ -11,7 +11,7 @@ const output = await build({
   bundle: true, format: "esm", platform: "node", target: "node18", write: false
 });
 const environmentModule = await import(`data:text/javascript;base64,${Buffer.from(output.outputFiles[0].text).toString("base64")}`);
-const { codexExecutable, configureCodexCli, resolveCodexCli, runtimeEnvironment } = environmentModule;
+const { codexExecutable, configureCodexCli, resolveCodexCli, runtimeEnvironment, resolveClaudeCli, claudeExecutable, configureClaudeCli } = environmentModule;
 
 async function executable(path) {
   await writeFile(path, "#!/bin/sh\nexit 0\n");
@@ -133,4 +133,30 @@ test("missing CLI is distinct and native Windows does not claim NVM managed-runt
   await executable(join(nvmBin, "codex")); await executable(join(nvmBin, "node"));
   await assert.rejects(resolveCodexCli({ environment: { Path: "C:\\missing" }, platform: "win32", homeDirectory: root }), /was not found/);
   await assert.rejects(resolveCodexCli({ environment: { PATH: "/missing" }, platform: "linux", homeDirectory: join(root, "other") }), /was not found/);
+});
+
+test("Claude CLI resolves from the configured path, PATH, then the user-local install", async () => {
+  const root = await mkdtemp(join(tmpdir(), "af-claude-cli-"));
+  try {
+    const onPath = join(root, "path-bin");
+    const local = join(root, ".local", "bin");
+    await mkdir(onPath, { recursive: true });
+    await mkdir(local, { recursive: true });
+    for (const file of [join(onPath, "claude"), join(local, "claude"), join(root, "chosen-claude")]) {
+      await writeFile(file, "#!/bin/sh\n");
+      await chmod(file, 0o755);
+    }
+    assert.equal(await resolveClaudeCli({ configuredPath: join(root, "chosen-claude"), environment: { PATH: onPath }, platform: "linux", homeDirectory: root }), join(root, "chosen-claude"));
+    assert.equal(await resolveClaudeCli({ configuredPath: "claude", environment: { PATH: onPath }, platform: "linux", homeDirectory: root }), undefined);
+    assert.equal(await resolveClaudeCli({ environment: { PATH: onPath }, platform: "linux", homeDirectory: root }), join(onPath, "claude"));
+    assert.equal(await resolveClaudeCli({ environment: { PATH: "/minimal" }, platform: "linux", homeDirectory: root }), join(local, "claude"));
+    await rm(join(local, "claude"));
+    assert.equal(await resolveClaudeCli({ environment: { PATH: "/minimal" }, platform: "linux", homeDirectory: root }), undefined);
+    configureClaudeCli(join(root, "chosen-claude"));
+    assert.equal(claudeExecutable(), join(root, "chosen-claude"));
+    configureClaudeCli(undefined);
+    assert.equal(claudeExecutable(), "claude");
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
 });

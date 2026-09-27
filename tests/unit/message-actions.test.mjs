@@ -14,6 +14,7 @@ for (const action of actions) for (const goalEnabled of [false, true]) {
       state: { role: 'main', taskMode: 'work-verification', businessMode: 'interview', attachments: [], capabilities: {}, runtimeAvailable: true, goalMode: true },
       taskModeNames: Object.fromEntries(['direct', ...actions].map(value => [value, value])),
       inputFeedback: {}, prompt: { value: 'Current draft', focus() {} }, timeline: {}, followLatest: false,
+      conversationClearing: false,
       currentCapabilities: () => ({ goal: true }), createId: () => String(sent.length),
       appendNotice() { throw Error('Unexpected notice'); }, saveComposerSettings() {}, renderAll() {}, resizePrompt() {}, persist() {},
       vscode: { postMessage(message) { sent.push(message); } }
@@ -50,19 +51,21 @@ for (const action of ['direct', ...actions]) {
       state: { role: 'main', attachments: [], capabilities: {}, runtimeAvailable: true, goalMode: false },
       taskModeNames: Object.fromEntries(['direct', ...actions].map(value => [value, value])),
       inputFeedback: {}, prompt: { value: '   ', focus() {} }, timeline: {}, followLatest: false,
+      conversationClearing: false,
       currentCapabilities: () => ({ goal: true }), createId: () => 'attachment-only',
       appendNotice() { throw Error('Unexpected notice'); }, saveComposerSettings() {}, renderAll() {}, resizePrompt() {}, persist() {},
       vscode: { postMessage(message) { sent.push(message); } }
     };
     runInNewContext(submitSource + `\nsubmit(${JSON.stringify(action)});`, context);
-    assert.equal(sent.length, 0);
-    assert.equal(context.prompt.value, '   ');
-    assert.equal(context.inputFeedback.hidden, false);
+    const contextual = action === 'work' || action === 'work-verification';
+    assert.equal(sent.length, contextual ? 1 : 0);
+    assert.equal(context.prompt.value, contextual ? '' : '   ');
+    assert.equal(context.inputFeedback.hidden, contextual);
     context.state.attachments = [{ id: 'image', kind: 'image', name: 'example.png', uri: 'file:///project/example.png' }];
     runInNewContext(`submit(${JSON.stringify(action)});`, context);
-    assert.equal(sent.length, 1);
-    assert.equal(sent[0].text, '');
-    assert.equal(sent[0].execution.taskMode, action);
-    assert.equal(sent[0].attachments[0].id, 'image');
+    assert.equal(sent.length, contextual ? 2 : 1);
+    assert.equal(sent.at(-1).text, contextual ? sent[0].text : '');
+    assert.equal(sent.at(-1).execution.taskMode, action);
+    assert.equal(sent.at(-1).attachments[0].id, 'image');
   });
 }

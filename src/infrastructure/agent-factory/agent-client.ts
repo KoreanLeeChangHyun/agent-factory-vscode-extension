@@ -6,7 +6,8 @@ import type { AgentPermissions } from "../../common/types/agent-permissions";
 import type { AgentModels } from "../../common/types/agent-models";
 import { constants as fsConstants, type Dirent } from "node:fs";
 import { spawn } from "node:child_process";
-import { codexExecutable, runtimeEnvironment } from "./process-environment";
+import { claudeExecutable, codexExecutable, runtimeEnvironment } from "./process-environment";
+import { sudoHandoffEnvironment } from "../vscode/sudo-broker";
 import { pluginRuntimeEnvironment } from "./development-plugin";
 import { lstat, mkdtemp, open as openFile, readFile, readdir, realpath, rm, writeFile } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
@@ -181,13 +182,15 @@ export interface WorktreeOptions {
   readonly changes?: "keep" | "copy";
   readonly path?: string;
   readonly executionMode?: ExecutionMode;
+  /** Selects the provider when the worktree creates the conversation's first session. */
+  readonly model?: string;
 }
 
 export interface AgentRuntimeClient {
   worktree?(agentId: string, action: "status" | "create" | "merge", options?: WorktreeOptions): Promise<ConversationWorktree>;
   conversations?(agentId: string): Promise<readonly SavedConversation[]>;
   history?(agentId: string, options?: { before?: string; limit: number; conversationId?: string | null }): Promise<ConversationHistory>;
-  capabilities(agentId?: string): Promise<{ readonly submit: ExecutionCapabilities; readonly send: ExecutionCapabilities; readonly executionMode?: "read-only" | "workspace-write" | "danger-full-access" | "bypass" }>;
+  capabilities(agentId?: string, model?: string): Promise<{ readonly submit: ExecutionCapabilities; readonly send: ExecutionCapabilities; readonly executionMode?: "read-only" | "workspace-write" | "danger-full-access" | "bypass" }>;
   submit(agentId: string, message: string, execution: ExecutionOptions, images?: readonly RuntimeImageInput[]): Promise<RunAcceptance>;
   send(agentId: string, message: string, execution: ExecutionOptions, images?: readonly RuntimeImageInput[]): Promise<RunAcceptance>;
   status(agentId: string, runId: string): Promise<RunStatus>;
@@ -264,12 +267,12 @@ export class AgentFactoryClient implements AgentRuntimeClient {
 
   private readonly eventSnapshots = new Map<string, { readonly signature: string; readonly lines: readonly string[]; readonly bytes: number; readonly offset: number; readonly identity: string }>();
 
-  public async capabilities(agentId?: string): ReturnType<AgentRuntimeClient["capabilities"]> {
-    return this.capabilityCache.get(JSON.stringify([this.execPath, agentId ?? ""]), () => this.readCapabilities(agentId));
+  public async capabilities(agentId?: string, model?: string): ReturnType<AgentRuntimeClient["capabilities"]> {
+    return this.capabilityCache.get(JSON.stringify([this.execPath, agentId ?? "", model ?? ""]), () => this.readCapabilities(agentId, model));
   }
 
-  private async readCapabilities(agentId?: string): ReturnType<AgentRuntimeClient["capabilities"]> {
-    const document = await this.command(["capabilities", "--project-root", this.projectRoot, ...(agentId ? ["--agent", agentId] : [])]);
+  private async readCapabilities(agentId?: string, model?: string): ReturnType<AgentRuntimeClient["capabilities"]> {
+    const document = await this.command(["capabilities", "--project-root", this.projectRoot, ...(agentId ? ["--agent", agentId] : []), ...(model ? ["--model", model] : [])]);
     if (document.kind !== "execution-capabilities" || document.schemaVersion !== "0.1.0") {
       throw new Error(localize("ui.update.to.an.agent.factory.runtime.that.provides.native.capability.information"));
     }
@@ -306,6 +309,7 @@ export class AgentFactoryClient implements AgentRuntimeClient {
     const value = await this.command(["worktree", "--project-root", this.projectRoot, "--agent", agentId, action,
       ...(options.changes ? ["--changes", options.changes] : []),
       ...(options.path ? ["--path", options.path] : []),
+      ...(options.model ? ["--model", options.model] : []),
       ...executionPolicyArguments(options.executionMode)]);
     if (value.kind !== "worktree" || value.schemaVersion !== 1 || value.agentId !== agentId ||
         typeof value.workspaceRoot !== "string" || typeof value.workingDirectory !== "string" ||
@@ -342,7 +346,7 @@ export class AgentFactoryClient implements AgentRuntimeClient {
   }
 
   private async checkedExecution(command: "submit" | "send", execution: ExecutionOptions, agentId?: string, hasImages = false): Promise<string[]> {
-    const supported = (await this.capabilities(agentId))[command];
+    const supported = (await this.capabilities(agentId, execution.model))[command];
     if (agentId && supported.worktrees === true) this.worktreeAgents.add(agentId);
     else if (agentId) this.worktreeAgents.delete(agentId);
     if (execution.taskMode && !supported.taskModes?.includes(execution.taskMode)) {
@@ -431,7 +435,13 @@ export class AgentFactoryClient implements AgentRuntimeClient {
       const directory = arguments_[0] === "send" && this.worktreeAgents.has(agent) ? await this.workingDirectory(agent) : this.projectRoot;
       preparationGuidance = await submissionContext(directory, this.execPath);
     }
-    return { document: await this.rawInputCommand(arguments_, message + (preparationGuidance ?? ""), images), preparationGuidance };
+    const helper = sudoHandoffEnvironment().AGENT_FACTORY_SUDO_HELPER;
+    const sudoGuidance = helper ? `
+[Agent Factory administrator command handoff]
+When a command needs sudo and the Human has requested it, use python3 ${JSON.stringify(helper)} -- <executable> <arguments...>. This opens a protected password form in the current Main chat. Pass exact argument tokens, never a shell command string. Wait for the command result before reporting completion. Never ask for the password in a normal chat message.
+` : "";
+    preparationGuidance = (preparationGuidance ?? "") + sudoGuidance;
+    return { document: await this.rawInputCommand(arguments_, message + preparationGuidance, images), preparationGuidance };
   }
 
   private async rawInputCommand(arguments_: string[], message: string, images: readonly RuntimeImageInput[]): Promise<Record<string, unknown>> {
@@ -704,7 +714,9 @@ export class AgentFactoryClient implements AgentRuntimeClient {
       } catch { rolloutPath = undefined; }
     }
     const usage = rolloutPath && (force || signature !== previous?.signature)
-      ? await readLatestTokenCount(rolloutPath).catch(() => undefined) : undefined;
+      ? await readLatestTokenCount(rolloutPath).catch(() => undefined)
+      // Claude runs have no Codex rollout; the runtime records their context usage in the run state.
+      : rolloutPath ? undefined : await this.readRecordedContextUsage(agentId, runId);
     const latestUsage = usage ?? previous?.usage;
     this.contextUsageSnapshots.set(key, {
       checkedAt,
@@ -719,6 +731,21 @@ export class AgentFactoryClient implements AgentRuntimeClient {
         previous.usage.contextWindowTokens === usage.contextWindowTokens &&
         previous.usage.weeklyUsedPercent === usage.weeklyUsedPercent)) return undefined;
     return usage;
+  }
+
+  private async readRecordedContextUsage(agentId: string, runId: string): Promise<ContextUsage | undefined> {
+    try {
+      const statePath = await this.managedPath(agentId, "runs", runId, "state.json");
+      const info = await lstat(statePath);
+      if (!info.isFile() || info.size > 256 * 1024) return undefined;
+      const state = readRecordOrUndefined(JSON.parse((await readManagedBytes(statePath, 256 * 1024)).toString("utf8")));
+      const recorded = readRecordOrUndefined(state?.contextUsage);
+      const usedTokens = readTokenCount(recorded?.usedTokens);
+      const contextWindowTokens = readTokenCount(recorded?.contextWindowTokens);
+      return usedTokens !== undefined && contextWindowTokens !== undefined ? { usedTokens, contextWindowTokens } : undefined;
+    } catch {
+      return undefined;
+    }
   }
 
   private async findCurrentRolloutPath(agentId: string, runId: string): Promise<string | undefined> {
@@ -916,6 +943,9 @@ export class AgentFactoryClient implements AgentRuntimeClient {
             AGENT_FACTORY_EXECUTION_POLICY: JSON.stringify(policy) });
         const snapshot = JSON.parse(output.stdout);
         if (output.exitCode !== 0 || snapshot.kind === "error") throw new Error(snapshot.error?.message || "Workflow reconciliation failed");
+        // The parent state path was checked against this Main and exact run above.
+        snapshot.parentAgentId = mainAgentId;
+        snapshot.parentRunId = parentRun;
         this.workflowSnapshots.set(path, { signature, observedAt: Date.now(), state, snapshot });
         while (this.workflowSnapshots.size > 256) this.workflowSnapshots.delete(this.workflowSnapshots.keys().next().value!);
         snapshots.push(snapshot);
@@ -1233,6 +1263,9 @@ export class AgentFactoryClient implements AgentRuntimeClient {
     if (codexExecutable() !== "codex" && ["submit", "capabilities", "worktree"].includes(arguments_[0] ?? "") && !arguments_.includes("--codex")) {
       arguments_ = [...arguments_, "--codex", codexExecutable()];
     }
+    if (claudeExecutable() !== "claude" && ["submit", "capabilities", "worktree"].includes(arguments_[0] ?? "") && !arguments_.includes("--claude")) {
+      arguments_ = [...arguments_, "--claude", claudeExecutable()];
+    }
     try {
       const info = await lstat(this.execPath);
       if (!info.isFile()) throw new Error(localize("ui.agent.factory.exec.py.is.not.a.regular.file"));
@@ -1241,11 +1274,11 @@ export class AgentFactoryClient implements AgentRuntimeClient {
       await this.refreshExecPath(error);
     }
     try {
-      return await runBoundedProcess(this.pythonCommand, [this.execPath, ...arguments_], timeoutMs, maxOutputBytes, pluginRuntimeEnvironment(this.developmentRoot));
+      return await runBoundedProcess(this.pythonCommand, [this.execPath, ...arguments_], timeoutMs, maxOutputBytes, pluginRuntimeEnvironment(this.developmentRoot, { ...process.env, ...sudoHandoffEnvironment() }));
     } catch (error) {
       if (!this.rediscoverExecPath || !isMissingFile(error)) throw error;
       await this.refreshExecPath(error);
-      return runBoundedProcess(this.pythonCommand, [this.execPath, ...arguments_], timeoutMs, maxOutputBytes, pluginRuntimeEnvironment(this.developmentRoot));
+      return runBoundedProcess(this.pythonCommand, [this.execPath, ...arguments_], timeoutMs, maxOutputBytes, pluginRuntimeEnvironment(this.developmentRoot, { ...process.env, ...sudoHandoffEnvironment() }));
     }
   }
 

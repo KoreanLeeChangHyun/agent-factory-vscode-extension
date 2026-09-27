@@ -15,6 +15,7 @@ function harness(overrides = {}, text = "오류 수정") {
     taskModeNames: Object.fromEntries(["direct", "work", "plan", "verification", "plan-work", "work-verification", "plan-work-verification"].map(value => [value, value])),
     timeline: { scrollTop: 0, scrollHeight: 500 },
     inputFeedback: {}, prompt: { value: text, focus() {} }, nativeGoal: null,
+    conversationClearing: false,
     currentCapabilities: () => ({ model: true, reasoning: true, fast: true, goal: true }),
     createId: () => "message-id", renderAll() {}, resizePrompt() {}, persist() {}, saveComposerSettings() {},
     summarizeChildAgents: () => ({ activeUnits: 0, workActive: 0, verificationActive: 0, totalCalled: 0 }),
@@ -134,10 +135,10 @@ test("action menu sends supported drafts without persisting a selection during e
   runInNewContext(renderer + '\nrenderSettingMenu("task", menu);', context);
   const actionOptions = () => menu.children.flatMap(group => group.children.filter(item => item.dataset.action));
   const options = actionOptions().filter(item => item.dataset.goal !== "true");
-  assert.deepEqual(options.map(item => item.dataset.action), ["direct", "direct", "work", "work-verification"]);
-  assert.deepEqual(options.map(item => item.dataset.workflow), ["interview", "contract", "normal", "normal"]);
+  assert.deepEqual(options.map(item => item.dataset.action), ["direct", "direct", "direct", "direct", "work", "work-verification"]);
+  assert.deepEqual(options.map(item => item.dataset.workflow), ["interview", "migration", "lessons", "contract", "normal", "normal"]);
   assert.ok(options.every(item => !item.disabled));
-  options[2].handlers.click();
+  options.find(item => item.dataset.action === "work").handlers.click();
   assert.equal(context.state.taskMode, "work");
   assert.equal(context.state.running, true);
   assert.deepEqual(calls, ["work"]);
@@ -187,8 +188,8 @@ test("Goal snapshots the current composer, replaces an existing objective and re
   }
 });
 
-test("invalid Goal drafts are preserved with an actionable error even with an existing goal", () => {
-  for (const text of ["", "   ", "x".repeat(4001)]) {
+test("blank Goal drafts are preserved with an actionable error even with an existing goal", () => {
+  for (const text of ["", "   "]) {
     for (const attachments of [[], [{ id: "image", kind: "image", name: "image.png" }]]) {
       const { context, sent, notices, run } = harness({ goalMode: true, attachments }, text);
       context.nativeGoal = { objective: "Stale goal" };
@@ -198,7 +199,7 @@ test("invalid Goal drafts are preserved with an actionable error even with an ex
       assert.equal(context.state.attachments, attachments);
       assert.equal(context.state.goalMode, true);
       assert.equal(context.inputFeedback.hidden, false);
-      assert.match(context.inputFeedback.textContent, /goal|4,000|target/);
+      assert.match(context.inputFeedback.textContent, /goal|target/);
     }
   }
 });
@@ -226,7 +227,7 @@ test("ordinary submission ignores stale Goal selection and native Goal updates",
   assert.equal(sent[1].execution.goal, false);
 });
 
-test("host derives the objective from chat text and rejects invalid goals before dispatch", async () => {
+test("host derives the objective from chat text and rejects blank goals before dispatch", async () => {
   const { transform } = await import("esbuild");
   const hostSource = await readFile(new URL("../../src/infrastructure/vscode/chat-panel-manager.ts", import.meta.url), "utf8");
   const method = hostSource.slice(hostSource.indexOf("  private async sendChat("), hostSource.indexOf("  private async mutateImages("));
@@ -241,17 +242,17 @@ test("host derives the objective from chat text and rejects invalid goals before
   const send = (text, execution) => sendChat.call(host, managed, text, [], execution, "id", "workspace-write", false);
   await send(" Current composer goal ", { goal: true, goalObjective: "Stale hidden objective" });
   assert.equal(calls[0].goalObjective, "Current composer goal");
-  for (const text of ["", "x".repeat(4001)]) {
-    await assert.rejects(send(text, { goal: true, goalObjective: "Stale hidden objective" }), /1–4,000/);
-  }
+  await assert.rejects(send("", { goal: true, goalObjective: "Stale hidden objective" }), /goal|목표/i);
   assert.equal(calls.length, 1);
+  await send("x".repeat(4001), { goal: true, goalObjective: "Stale hidden objective" });
+  assert.equal(calls[1].goalObjective.length, 4001);
   await send("Inspect", { goal: true, taskMode: "verification", goalObjective: "Stale" });
-  assert.equal(calls[1].goalMode, false);
-  assert.equal(calls[1].goalObjective, undefined);
-  managed.state.role = "work";
-  await send("Child message", { goal: true, goalObjective: "Stale" });
   assert.equal(calls[2].goalMode, false);
   assert.equal(calls[2].goalObjective, undefined);
+  managed.state.role = "work";
+  await send("Child message", { goal: true, goalObjective: "Stale" });
+  assert.equal(calls[3].goalMode, false);
+  assert.equal(calls[3].goalObjective, undefined);
 });
 
 test("contract actions can use conversation context while ordinary sends still need input", () => {

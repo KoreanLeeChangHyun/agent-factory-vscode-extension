@@ -49,3 +49,22 @@ test('failed creation retains an accepted session for status and retry', async (
   assert.equal(bound.length, 1);
   controller.dispose();
 });
+
+test('worktree toolbar reflects queue, connection and unsupported state', async () => {
+  const { readFile } = await import('node:fs/promises');
+  const { runInNewContext } = await import('node:vm');
+  const script = await readFile('static/js/chat.js', 'utf8');
+  const nodes = new Map();
+  const node = id => {
+    if (!nodes.has(id)) nodes.set(id, {hidden:false, disabled:false, classList:{toggle(){}},setAttribute(){}});
+    return nodes.get(id);
+  };
+  const context = {document:{getElementById:node},state:{role:'main',running:false,queueCount:0},worktreeSupported:true,worktreeBusy:false,conversationWorktree:undefined,openSettingId:undefined,worktreeButton:node('worktree-button'),worktreeLocationDescription:()=>'/workspace',closeSettingMenu(){}};
+  runInNewContext(script.slice(script.indexOf('  function renderWorktree()'),script.indexOf('  const statusBar =')),context);
+  const render=()=>runInNewContext('renderWorktree()',context);
+  render(); assert.equal(node('worktree-picker').hidden,false); assert.equal(node('worktree-create').disabled,false);
+  context.state.queueCount=1; render(); assert.equal(node('worktree-create').disabled,true); assert.equal(node('worktree-refresh').disabled,false);
+  context.state.queueCount=0; context.conversationWorktree={worktree:{phase:'active'}};render();assert.equal(node('worktree-create').hidden,true);assert.equal(node('worktree-merge').hidden,false);
+  context.state.running=true;render();assert.equal(node('worktree-merge').disabled,true);
+  context.worktreeSupported=false;render();assert.equal(node('worktree-picker').hidden,true);
+});

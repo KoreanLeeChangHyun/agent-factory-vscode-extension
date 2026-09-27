@@ -22,7 +22,10 @@ export interface CodexCliResolutionOptions {
 
 let selectedCodexCli: CodexCliSelection | undefined;
 
-export class CodexCliNotFoundError extends Error {}
+export class CodexCliNotFoundError extends Error {
+  // Named so activation can recognize it across separately bundled modules and test doubles.
+  public override readonly name = "CodexCliNotFoundError";
+}
 
 /** Apply one selection to dependency setup and every subsequently spawned runtime process. */
 export function configureCodexCli(selection: CodexCliSelection | undefined): void {
@@ -70,6 +73,32 @@ export async function resolveCodexCli(options: CodexCliResolutionOptions = {}): 
   throw new CodexCliNotFoundError(localize("ui.codex.cli.was.not.found.on.the.workspace.extension.host.path.or.in.nvm.install.codex.there.or.set.agentfactory.mainchat.codexpath.then.retry"));
 }
 
+let selectedClaudeCli: string | undefined;
+
+/** Optional provider: the configured path, PATH, then Claude Code's user-local installations. */
+export async function resolveClaudeCli(options: CodexCliResolutionOptions = {}): Promise<string | undefined> {
+  const environment = options.environment ?? process.env;
+  const platform = options.platform ?? process.platform;
+  const homeDirectory = options.homeDirectory ?? homedir();
+  const configuredPath = options.configuredPath?.trim();
+  if (configuredPath) return isAbsolute(configuredPath) && await isExecutableFile(configuredPath) ? configuredPath : undefined;
+  const fromPath = await findOnPath(baseEnvironment(environment, platform, homeDirectory), platform, "claude");
+  if (fromPath) return fromPath;
+  if (platform === "win32") return undefined;
+  for (const candidate of [join(homeDirectory, ".local", "bin", "claude"), join(homeDirectory, ".claude", "local", "claude")]) {
+    if (await isExecutableFile(candidate)) return candidate;
+  }
+  return undefined;
+}
+
+export function configureClaudeCli(executable: string | undefined): void {
+  selectedClaudeCli = executable;
+}
+
+export function claudeExecutable(): string {
+  return selectedClaudeCli ?? "claude";
+}
+
 /** GUI hosts may omit package-manager paths; preserve caller order except for the selected CLI bin. */
 export function runtimeEnvironment(
   environment: NodeJS.ProcessEnv = process.env,
@@ -98,10 +127,10 @@ function baseEnvironment(environment: NodeJS.ProcessEnv, platform: NodeJS.Platfo
   return { ...environment, PATH: paths.join(delimiter) };
 }
 
-async function findOnPath(environment: NodeJS.ProcessEnv, platform: NodeJS.Platform): Promise<string | undefined> {
+async function findOnPath(environment: NodeJS.ProcessEnv, platform: NodeJS.Platform, command = "codex"): Promise<string | undefined> {
   const value = platform === "win32" ? environment.PATH ?? environment.Path : environment.PATH;
   if (!value) return undefined;
-  const names = platform === "win32" ? ["codex.exe", "codex.cmd", "codex.bat", "codex"] : ["codex"];
+  const names = platform === "win32" ? [`${command}.exe`, `${command}.cmd`, `${command}.bat`, command] : [command];
   for (const directory of value.split(platform === "win32" ? ";" : delimiter).filter(Boolean)) {
     for (const name of names) {
       const candidate = join(directory, name);

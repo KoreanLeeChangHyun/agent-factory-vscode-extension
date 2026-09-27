@@ -39,8 +39,11 @@ const vscode = {
   }; } }
 };
 const module = { exports: {} };
+const diagnostics = [];
 runInNewContext(output.outputFiles[0].text, {
-  module, exports: module.exports, Buffer, URL, console, process, setTimeout, clearTimeout,
+  module, exports: module.exports, Buffer, URL,
+  console: { ...console, warn: (...args) => diagnostics.push(args), error: (...args) => diagnostics.push(args) },
+  process, setTimeout, clearTimeout,
   global: { Date },
   require: name => name === "vscode" ? vscode : require(name)
 });
@@ -74,7 +77,7 @@ test("conversation transition finishes while the completion notification remains
     await manager.transitionConversation(managed);
     assert.equal(resetCount, 2);
     assert.equal(refreshCount, 2);
-    assert.deepEqual(posted.map(message => message.type), ["conversation.cleared", "conversation.cleared"]);
+    assert.deepEqual(posted.map(message => message.type), ["conversation.clearing", "conversation.cleared", "conversation.clearing", "conversation.clearing", "conversation.cleared", "conversation.clearing"]);
   } finally {
     dismissNotification();
     delete vscode.window.showInformationMessage;
@@ -197,14 +200,14 @@ test("conversation clear publishes its boundary before a racing chat is promoted
     execution: { taskMode: "direct", businessMode: "normal", fast: false, goal: false }
   });
   await new Promise(resolve => setImmediate(resolve));
-  assert.deepEqual(posted, []);
+  assert.deepEqual(posted.map(message => message.type), ["conversation.clearing"]);
   assert.equal(managed.pendingMessageIds.has("racing-message"), true);
 
   releaseBoundary();
   await Promise.all([clearing, sending]);
   await new Promise(resolve => setImmediate(resolve));
-  assert.deepEqual(posted.map(message => message.type), ["conversation.cleared", "chat.started"]);
-  assert.deepEqual(JSON.parse(JSON.stringify(posted[1])), {
+  assert.deepEqual(posted.map(message => message.type), ["conversation.clearing", "conversation.cleared", "conversation.clearing", "chat.started"]);
+  assert.deepEqual(JSON.parse(JSON.stringify(posted[3])), {
     type: "chat.started", id: "racing-message", text: "new request", attachments: [], submission
   });
 });
@@ -670,8 +673,11 @@ test("uncertain background acceptance is surfaced without automatic retry storms
   await manager.handleMessage(managed, { type: "message.copy", text });
   assert.equal(clipboardWrites.at(-1), text);
   const before = clipboardWrites.length;
-  for (const text of [null, "", "x".repeat(100001)]) await manager.handleMessage(managed, { type: "message.copy", text });
+  for (const text of [null, ""]) await manager.handleMessage(managed, { type: "message.copy", text });
   assert.equal(clipboardWrites.length, before);
+  const longText = "x".repeat(100001);
+  await manager.handleMessage(managed, { type: "message.copy", text: longText });
+  assert.equal(clipboardWrites.at(-1), longText);
 });
 
  test("archive links offer binary save, preserve cancellation and avoid editor fallback", async () => {
@@ -960,4 +966,84 @@ test('bot prompt saves globally and is read fresh for subsequent talks; failed s
     await manager.handleMessage(managed, { type: 'bot.talk', requestId: 'talk2', text: 'next' });
     assert.equal(calls[1].prompt, '');
   } finally { vscode.workspace.getConfiguration = original; }
+});
+
+test('clear progress covers slow preflight, blocks duplicates and ends on failure', async () => {
+  const posted = [];
+  let rejectPreflight;
+  let attempts = 0;
+  const manager = new module.exports.ChatPanelManager({}, {}, () => [], async () => ({}));
+  manager.ensureController = () => {
+    attempts++;
+    return new Promise((_resolve, reject) => { rejectPreflight = reject; });
+  };
+  const managed = {
+    state: { role: 'main', agentId: 'main-test' },
+    panel: { webview: { async postMessage(message) { posted.push(message); return true; } } }
+  };
+  const transition = manager.transitionConversation(managed);
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(posted[0].type, 'conversation.clearing');
+  assert.equal(posted[0].busy, true);
+  const duplicate = manager.transitionConversation(managed);
+  assert.equal(attempts, 1);
+  rejectPreflight(new Error('preflight unavailable'));
+  await Promise.all([transition, duplicate]);
+  assert.ok(posted.some(message => message.level === 'error'));
+  assert.equal(posted.at(-1).type, 'conversation.clearing');
+  assert.equal(posted.at(-1).busy, false);
+  assert.equal(managed.sessionTransition, undefined);
+  assert.equal(managed.state.agentId, 'main-test');
+});
+
+test('queue resume reaches the controller and coalesces concurrent button requests', async () => {
+  const posted = [];
+  let finish, calls = 0;
+  const pending = new Promise(resolve => { finish = resolve; });
+  const manager = new module.exports.ChatPanelManager({}, {}, () => [], async () => ({}));
+  const managed = {
+    state: {}, panel: { webview: { async postMessage(message) { posted.push(message); } } },
+    controller: { async reconnect() { calls++; await pending; } }
+  };
+  const first = manager.handleMessage(managed, { type: 'queue.resume' });
+  await manager.handleMessage(managed, { type: 'queue.resume' });
+  assert.equal(calls, 1);
+  finish(); await first;
+  assert.equal(posted.length, 0);
+  await manager.handleMessage(managed, { type: 'queue.resume' });
+  assert.equal(calls, 2);
+});
+
+test('queue resume failure is actionable and allows a subsequent retry', async () => {
+  const posted = [];
+  let calls = 0;
+  const manager = new module.exports.ChatPanelManager({}, {}, () => [], async () => ({}));
+  const managed = {
+    state: {}, panel: { webview: { async postMessage(message) { posted.push(message); } } },
+    controller: { async reconnect() { if (++calls === 1) throw new Error('fixture reconnect failure'); } }
+  };
+  await manager.handleMessage(managed, { type: 'queue.resume' });
+  assert.equal(posted.length, 1);
+  assert.equal(posted[0].level, 'error');
+  assert.match(posted[0].text, /Could not resume queued messages/);
+  assert.doesNotMatch(posted[0].text, /fixture reconnect failure/);
+  assert.equal(diagnostics.at(-1)[0], '[Agent Factory] Queue resume failed');
+  assert.equal(diagnostics.at(-1)[1].message, 'fixture reconnect failure');
+  await manager.handleMessage(managed, { type: 'queue.resume' });
+  assert.equal(calls, 2);
+  assert.equal(posted.length, 1);
+  delete managed.controller;
+  await manager.handleMessage(managed, { type: 'queue.resume' });
+  assert.equal(posted.length, 2);
+});
+
+test('invalid chat requests log the operation without private payloads', async () => {
+  const posted = [];
+  const manager = new module.exports.ChatPanelManager({}, {}, () => [], async () => ({}));
+  const managed = { state: {}, panel: { webview: { async postMessage(message) { posted.push(message); } } } };
+  await manager.handleMessage(managed, { type: 'chat.send', text: 'private text', password: 'private password' });
+  assert.match(posted[0].text, /chat screen request could not be processed/);
+  assert.equal(diagnostics.at(-1)[1].type, 'chat.send');
+  assert.equal(diagnostics.at(-1)[1].reason, 'protocol-validation-failed');
+  assert.doesNotMatch(JSON.stringify(diagnostics.at(-1)), /private text|private password/);
 });

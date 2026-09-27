@@ -197,7 +197,7 @@ for name in ['init', 'capabilities', 'submit', 'send', 'list']:
     c.add_argument('--project-root')
     c.add_argument('--runtime-home')
     c.add_argument('--project-id')
-    if name == 'submit': c.add_argument('--model')
+    if name in ['submit', 'capabilities']: c.add_argument('--model')
 args = p.parse_args()
 if args.command == 'init':
     home = pathlib.Path(os.environ['AGENT_FACTORY_HOME'])
@@ -259,7 +259,7 @@ test("conversation reset uses the runtime command and requires retained-history 
 
 test("composer shows only supported controls across draft and bound sessions", async function () {
   const script = await readFile(new URL('../../static/js/chat.js', import.meta.url), 'utf8');
-  const functions = script.slice(script.indexOf('  function currentCapabilities()'), script.indexOf('  function openSetting(setting)'));
+  const functions = script.slice(script.indexOf('  function inheritedAgentRole('), script.indexOf('  function renderAgentDefaults(')) + '\n' + script.slice(script.indexOf('  function currentCapabilities()'), script.indexOf('  function openSetting(setting)'));
   const iconFunction = script.slice(script.indexOf('  function createBusinessModeIcon(mode)'), script.indexOf('  function handleSettingMenuKeydown(event)'));
   const element = (namespaceURI, localName) => ({
     namespaceURI, localName, children: [], attributes: {}, dataset: {},
@@ -274,6 +274,7 @@ test("composer shows only supported controls across draft and bound sessions", a
   const clearControl = script.slice(script.indexOf('  function updateConversationClearControl()'), script.indexOf('  function resetConversationState()'));
   const context = {
     document: { createElementNS: element, querySelector() { return null; }, getElementById() { return clearButton; } },
+    conversationClearing: false,
     renderStatusBar() { statusRenders++; },
     updateComposerControls() {},
     modelMenu: { querySelector() { return null; } }, submissionButton: button(),
@@ -433,7 +434,7 @@ test("chat links allow browser and local-file targets while rejecting active sch
   }
 });
 
-test("long pasted text attachment requests are bounded", async function () {
+test("long pasted text attachment requests preserve content", async function () {
   const { parseClientMessage } = await importTypeScript("src/protocol/validator.ts");
   const text = "가".repeat(8_000);
   assert.deepEqual(parseClientMessage({ type: "attachments.createText", text }), {
@@ -441,7 +442,7 @@ test("long pasted text attachment requests are bounded", async function () {
     text
   });
   assert.equal(parseClientMessage({ type: "attachments.createText", text: "short" }), undefined);
-  assert.equal(parseClientMessage({ type: "attachments.createText", text: "x".repeat(1_000_001) }), undefined);
+  assert.equal(parseClientMessage({ type: "attachments.createText", text: "x".repeat(1_000_001) }).text.length, 1_000_001);
 });
 
 test("plugin locator honors an override and discovers the newest install across marketplaces", async function () {
@@ -993,7 +994,7 @@ test("native Goal events expose status and usage without turning a turn end into
   assert.ok(updates.updates.some(update => update.kind === "status" && update.text.includes("next turn")));
 });
 
-test("Goal control and objective protocol rejects unsupported actions and overlong objectives", async () => {
+test("Goal control rejects unsupported actions and preserves long objectives", async () => {
   const { parseClientMessage } = await importTypeScript("src/protocol/validator.ts");
   for (const action of ["get", "refresh", "pause", "cancel", "disable", "reopen"]) {
     assert.deepEqual(parseClientMessage({ type: "goal.control", action }), { type: "goal.control", action });
@@ -1001,7 +1002,7 @@ test("Goal control and objective protocol rejects unsupported actions and overlo
   assert.equal(parseClientMessage({ type: "goal.control", action: "complete" }), undefined);
   const message = { type: "chat.send", id: "one", text: "request", attachments: [], execution: { fast: false, goal: true, goalObjective: "finish" } };
   assert.equal(parseClientMessage(message).execution.goalObjective, "finish");
-  assert.equal(parseClientMessage({ ...message, execution: { ...message.execution, goalObjective: "x".repeat(4001) } }), undefined);
+  assert.equal(parseClientMessage({ ...message, execution: { ...message.execution, goalObjective: "x".repeat(4001) } }).execution.goalObjective.length, 4001);
   assert.equal(parseClientMessage({ ...message, execution: { ...message.execution, goal: false } }), undefined);
 });
 

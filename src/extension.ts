@@ -3,12 +3,17 @@ import * as vscode from "vscode";
 import { bootstrap } from "./core/bootstrap";
 import { ensureAgentFactoryPlugin } from "./infrastructure/agent-factory/plugin-dependency";
 import { developmentPluginRoot, validateDevelopmentPlugin } from "./infrastructure/agent-factory/development-plugin";
-import { CodexCliNotFoundError, configureCodexCli, resolveCodexCli } from "./infrastructure/agent-factory/process-environment";
+import { locateAgentFactoryExec } from "./infrastructure/agent-factory/plugin-locator";
+import { CodexCliNotFoundError, configureClaudeCli, configureCodexCli, resolveClaudeCli, resolveCodexCli } from "./infrastructure/agent-factory/process-environment";
 import { openWslWorkspace } from "./infrastructure/vscode/wsl-workspace";
 
 export interface ActivationServices {
-  readonly prepareCodex?: (configuredPath?: string) => Promise<void | "redirected">;
+  readonly prepareCodex?: (configuredPath?: string, options?: { readonly allowRedirect: boolean }) => Promise<void | "redirected">;
+  /** Resolves the optional Claude Code CLI; true when Claude can run without Codex. */
+  readonly prepareClaude?: (configuredPath?: string) => Promise<boolean>;
   readonly ensurePlugin: (requiredVersion: string) => Promise<void>;
+  /** Claude-only hosts cannot install from the Codex marketplace; they need an already installed plugin. */
+  readonly requireInstalledPlugin?: (requiredVersion: string) => Promise<void>;
   readonly bootstrap: (context: vscode.ExtensionContext) => void;
   readonly withProgress: typeof vscode.window.withProgress;
   readonly showErrorMessage: typeof vscode.window.showErrorMessage;
@@ -44,8 +49,19 @@ async function start(context: vscode.ExtensionContext, services: ActivationServi
         throw new Error(localize("ui.unable.to.read.the.extension.version"));
       }
       const developmentRoot = developmentPluginRoot(context.extensionMode === vscode.ExtensionMode.Development);
-      const configuredCodexPath = vscode.workspace?.getConfiguration("agentFactory.mainChat").get<string>("codexPath")?.trim();
-      if (await services.prepareCodex?.(configuredCodexPath) === "redirected") {
+      const settings = vscode.workspace?.getConfiguration("agentFactory.mainChat");
+      const configuredCodexPath = settings?.get<string>("codexPath")?.trim();
+      const claudeAvailable = await services.prepareClaude?.(settings?.get<string>("claudePath")?.trim()) ?? false;
+      let codexAvailable = true;
+      let prepared: void | "redirected" = undefined;
+      try {
+        // A usable local Claude CLI makes a WSL redirect for a missing Codex unnecessary.
+        prepared = await services.prepareCodex?.(configuredCodexPath, { allowRedirect: !claudeAvailable });
+      } catch (error) {
+        if (!(error instanceof Error && error.name === "CodexCliNotFoundError") || !claudeAvailable) throw error;
+        codexAvailable = false;
+      }
+      if (prepared === "redirected") {
         recoveryCommands.get(context)?.dispose();
         recoveryCommands.delete(context);
         // The command that triggered activation must still exist in the original window.
@@ -62,7 +78,9 @@ async function start(context: vscode.ExtensionContext, services: ActivationServi
         cancellable: false
       }, () => developmentRoot
         ? validateDevelopmentPlugin(developmentRoot, requiredVersion)
-        : services.ensurePlugin(requiredVersion));
+        : codexAvailable || !services.requireInstalledPlugin
+          ? services.ensurePlugin(requiredVersion)
+          : services.requireInstalledPlugin(requiredVersion));
     } catch (error) {
       const detail = error instanceof Error ? error.message : localize("ui.an.unknown.error.occurred");
       const action = await services.showErrorMessage(
@@ -86,16 +104,26 @@ export function deactivate(): void {
 
 function defaultActivationServices(): ActivationServices {
   return {
-    prepareCodex: async (configuredPath) => {
+    prepareCodex: async (configuredPath, options) => {
       configureCodexCli(undefined);
       try {
         configureCodexCli(await resolveCodexCli({ configuredPath }));
       } catch (error) {
-        if (error instanceof CodexCliNotFoundError && await openWslWorkspace()) return "redirected";
+        if (error instanceof CodexCliNotFoundError && (options?.allowRedirect ?? true) && await openWslWorkspace()) return "redirected";
         throw error;
       }
     },
+    prepareClaude: async (configuredPath) => {
+      const executable = await resolveClaudeCli({ configuredPath });
+      configureClaudeCli(executable);
+      return executable !== undefined;
+    },
     ensurePlugin: ensureAgentFactoryPlugin,
+    requireInstalledPlugin: async (requiredVersion) => {
+      const configuredPath = vscode.workspace?.getConfiguration("agentFactory.mainChat").get<string>("runtimeExecPath")?.trim();
+      const location = await locateAgentFactoryExec({ configuredPath, requiredVersion });
+      if (!location.available) throw new Error(localize("ui.claude.only.requires.installed.plugin", location.diagnostic));
+    },
     bootstrap,
     withProgress: vscode.window.withProgress.bind(vscode.window),
     showErrorMessage: vscode.window.showErrorMessage.bind(vscode.window),

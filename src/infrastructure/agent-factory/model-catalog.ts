@@ -1,8 +1,40 @@
 import { open } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
+import { claudeExecutable, runtimeEnvironment } from "./process-environment";
 
 const MAX_CATALOG_BYTES = 4 * 1024 * 1024;
+
+// Pinned Claude model ids first, then the tracking aliases (always the latest of each family).
+// The runtime passes full ids to `claude --model` unchanged; Claude checks availability at execution time.
+export const CLAUDE_MODELS = [
+  "claude-opus-5-5", "claude-sonnet-5", "claude-fable-5-1", "claude-haiku-4-5-20251001",
+  "claude-opus", "claude-sonnet", "claude-haiku"
+] as const;
+
+const CLAUDE_PROBE_TTL_MS = 60_000;
+const claudeProbes = new Map<string, { readonly checkedAt: number; readonly available: Promise<boolean> }>();
+
+export async function readProviderModels(codexHome?: string, claude = claudeExecutable()): Promise<readonly string[] | undefined> {
+  const codex = await readCodexModels(codexHome);
+  if (await isClaudeAvailable(claude)) return [...new Set([...(codex ?? []), ...CLAUDE_MODELS])];
+  return codex;
+}
+
+/** The picker asks often; probe each executable at most once a minute. */
+function isClaudeAvailable(claude: string): Promise<boolean> {
+  const cached = claudeProbes.get(claude);
+  if (cached && Date.now() - cached.checkedAt < CLAUDE_PROBE_TTL_MS) return cached.available;
+  const available = promisify(execFile)(claude, ["--version"], {
+    cwd: homedir(), env: runtimeEnvironment(), timeout: 5000, maxBuffer: 65536, encoding: "utf8"
+  }).then(({ stdout }) => stdout.includes("Claude Code"),
+    // An optional provider must not hide the existing model catalog.
+    () => false);
+  claudeProbes.set(claude, { checkedAt: Date.now(), available });
+  return available;
+}
 
 // Codex owns refreshing this cache; read it again for each model picker request.
 export async function readCodexModels(

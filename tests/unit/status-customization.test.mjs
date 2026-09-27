@@ -36,12 +36,14 @@ function harness() {
     document: { createElement: element, createElementNS: (_namespace, _tag) => element(), getElementById(id) { if (!nodes.has(id)) nodes.set(id, element()); return nodes.get(id); }, querySelectorAll: () => elements },
     state: { statusItems: ["project", "branch", "queue"], title: "Main", projectName: "fixture-project", branch: "fixture-branch", role: "main", runtimeAvailable: true, workUnitsKnown: true, workUnits: { workActive: 1, verificationActive: 2, totalCalled: 3 }, queueCount: 0 },
     nativeGoal: null, goalError: undefined, taskModeNames: { work: "Work" },
+    conversationWorktree: undefined, worktreeLocationDescription: () => "Workspace", receiveBotPrompt() {},
     currentCapabilities: () => ({ model: true, reasoning: true, fast: true }),
     renderStatusBar() {},
     persist() { persisted.push(clean(context.state.statusItems)); },
     vscode: { postMessage(message) { sent.push(clean(message)); } }
   };
   runInNewContext([
+    section('  function inheritedAgentRole(', '  function renderAgentDefaults('),
     section('  const defaultStatusItems =', '  const longPasteThreshold'),
     section('  function setStatusItems(', '  statusSettingsButton.addEventListener'),
     section('  function statusItemAvailable(', '  function statusLabel('),
@@ -155,7 +157,7 @@ test("live labels distinguish absent values, zero usage, selected model and elap
   context.state.title = 'my-long-agent-name';
   context.state.projectName = 'my-long-project-name';
   assert.equal(run('statusLabel("agent")'), context.state.title);
-  assert.equal(run('statusLabel("project")'), context.state.projectName);
+  assert.equal(run('statusLabel("project")'), 'Home');
 });
 
 test("Content and Weekly used/remaining items are independently selectable and calculated", () => {

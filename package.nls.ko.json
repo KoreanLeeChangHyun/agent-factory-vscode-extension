@@ -25,5 +25,12 @@
   "extension.description": "VS Code 편집기 탭의 메인 에이전트 채팅 세션입니다.",
   "agentFactory.sidebar.archive.title": "에이전트 목록에서 제거 (보관)",
   "agentFactory.sidebar.restore.title": "보관한 에이전트 복원",
-  "agentFactory.mainChat.botsEnabled.description": "모든 채팅에서 봇 캐릭터, 애니메이션과 AI 표정 기능을 사용합니다."
+  "agentFactory.mainChat.botsEnabled.description": "모든 채팅에서 봇 캐릭터, 애니메이션과 AI 표정 기능을 사용합니다.",
+  "agentFactory.mainChat.claudePath.description": "Claude Code CLI의 절대 경로(선택). 비워 두면 PATH와 ~/.local/bin에서 찾습니다. CLI가 있을 때만 Claude 모델이 표시됩니다.",
+  "agentFactory.agents.main.model.description": "메인 에이전트의 모델입니다. 빈 값은 상위 설정을 상속하며 채팅별 지정값이 우선합니다.",
+  "agentFactory.agents.main.reasoningEffort.description": "메인 에이전트의 추론 수준입니다. 빈 값은 상위 설정을 상속하며 채팅별 지정값이 우선합니다.",
+  "agentFactory.agents.work.model.description": "작업 에이전트의 모델입니다. 빈 값은 상위 설정을 상속하며 채팅별 지정값이 우선합니다.",
+  "agentFactory.agents.work.reasoningEffort.description": "작업 에이전트의 추론 수준입니다. 빈 값은 상위 설정을 상속하며 채팅별 지정값이 우선합니다.",
+  "agentFactory.agents.verification.model.description": "검증 에이전트의 모델입니다. 빈 값은 상위 설정을 상속하며 채팅별 지정값이 우선합니다.",
+  "agentFactory.agents.verification.reasoningEffort.description": "검증 에이전트의 추론 수준입니다. 빈 값은 상위 설정을 상속하며 채팅별 지정값이 우선합니다."
 }
