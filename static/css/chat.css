@@ -307,6 +307,19 @@ button {
   font-weight: 600;
 }
 
+/* Cells wrap only between words, never inside identifiers or Korean words; wide tables scroll instead.
+   Inline code (paths, names) stays on one line, so a column of identifiers keeps its width. */
+.markdown-body th,
+.markdown-body td {
+  overflow-wrap: normal;
+  word-break: keep-all;
+}
+
+.markdown-body th,
+.markdown-body td code {
+  white-space: nowrap;
+}
+
 .message-notice .message-content {
   display: flex;
   gap: 9px;
