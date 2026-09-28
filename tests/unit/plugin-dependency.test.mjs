@@ -529,12 +529,17 @@ test("Claude-only hosts activate with an installed plugin and never redirect or 
     ensurePlugin: async () => assert.fail("Codex marketplace is unavailable without Codex"),
     ensureClaudePlugin: async version => { calls.push(`claude-plugin:${version}`); },
     requireInstalledPlugin: async version => { calls.push(`installed:${version}`); },
+    initializeDefaults: async (actualContext, providers) => {
+      assert.equal(actualContext, context);
+      assert.deepEqual(providers, { codex: false, claude: true });
+      calls.push("defaults");
+    },
     bootstrap: () => { calls.push("bootstrap"); },
     withProgress: async (_, task) => task(),
     showErrorMessage: async () => assert.fail("Claude-only activation should succeed")
   };
   await activate(context, services);
-  assert.deepEqual(calls, ["claude", "codex:false", "claude-plugin:1.0.14", "installed:1.0.14", "bootstrap"]);
+  assert.deepEqual(calls, ["claude", "codex:false", "claude-plugin:1.0.14", "installed:1.0.14", "defaults", "bootstrap"]);
 });
 
 test("with both CLIs, both plugins are managed and a Claude plugin failure only warns", async () => {

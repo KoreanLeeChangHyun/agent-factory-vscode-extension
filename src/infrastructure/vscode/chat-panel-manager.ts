@@ -2,7 +2,7 @@ import { workUnitContextText, workUnitBranch } from "./work-unit-context";
 import { unitGit, validateUnitBranch, directBranchEvidence } from "./work-unit-git";
 import { openContractPanel } from "./contract-panel";
 import { listContracts } from "../filesystem/contracts";
-import { readAgentDefaults, saveAgentDefault } from "./agent-settings-store";
+import { readAgentDefaults, saveAgentDefault, useAgentPreset } from "./agent-settings-store";
 import { readMarkdownImage } from "./markdown-image";
 import { localize, describeLocalizedMessage } from "../../common/localization";
 import { LunaBot, type BotContext } from "../codex/luna-bot";
@@ -465,7 +465,7 @@ export class ChatPanelManager implements vscode.Disposable {
         managed.themeSignature = undefined;
         await this.refreshTheme(managed);
         const connection = await this.connectRuntime();
-        await this.post(managed.panel, { type: "agent.defaults", settings: readAgentDefaults() });
+        await this.post(managed.panel, { type: "agent.defaults", settings: readAgentDefaults(this.context.globalState) });
         const capabilities = connection.available ? await connection.client.capabilities(managed.state.agentId, this.effectiveModel(managed)) : undefined;
         let runtimeConversationId: string | undefined;
         if (managed.state.agentId && connection.available) {
@@ -604,6 +604,17 @@ export class ChatPanelManager implements vscode.Disposable {
           await this.post(managed.panel, { type: "host.notice", level: "warning", text: localize("ui.this.request.has.already.been.answered.or.has.expired.reply.directly.in.the.current.conversation") });
         }
         return;
+      case "agent.preset": {
+        let error: string | undefined;
+        try {
+          await useAgentPreset(this.context.globalState, message.action, message.scope, message.name);
+        } catch (cause) { error = cause instanceof Error ? cause.message : String(cause); }
+        finally {
+          await this.post(managed.panel, {type: "agent.preset.result", ...(error ? {error} : {})});
+          for (const panel of this.panels.values()) await this.refreshAgentDefaults(panel);
+        }
+        return;
+      }
       case "agent.defaults.save":
         try {
           await saveAgentDefault(message.scope, message.role, message.field, message.value);
@@ -1147,12 +1158,12 @@ Read the exact stored child result/receipt and existing workflow status for repo
   }
 
   private effectiveModel(managed: ManagedPanel): string | undefined {
-    return managed.state.model || readAgentDefaults().effective[managed.state.role ?? "main"]?.model;
+    return managed.state.model || readAgentDefaults(this.context.globalState).effective[managed.state.role ?? "main"]?.model;
   }
 
   private async refreshAgentDefaults(managed: ManagedPanel): Promise<void> {
     if (managed.disposed) return;
-    await this.post(managed.panel, { type: "agent.defaults", settings: readAgentDefaults() });
+    await this.post(managed.panel, { type: "agent.defaults", settings: readAgentDefaults(this.context.globalState) });
     const model = this.effectiveModel(managed);
     const connection = await this.connectRuntime();
     if (connection.available) {

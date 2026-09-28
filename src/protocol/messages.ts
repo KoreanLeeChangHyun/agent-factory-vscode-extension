@@ -15,6 +15,7 @@ export interface MessageSubmission {
 export type ClientMessage =
   | { readonly type: "contract.open"; readonly id: string }
   | { readonly type: "contracts.request" }
+  | { readonly type: "agent.preset"; readonly action: "save" | "apply"; readonly scope: "global" | "project"; readonly name: string }
   | { readonly type: "agent.defaults.save"; readonly scope: "global" | "project"; readonly role: "main" | "work" | "verification"; readonly field: "model" | "reasoningEffort"; readonly value: string }
   | { readonly type: "worktree.create"; readonly repository: string; readonly name: string; readonly base: string }
   | { readonly type: "worktree.merge" | "worktree.refresh" | "worktree.repositories" }
@@ -92,6 +93,7 @@ export type ClientMessage =
 
 export type HostMessage =
   | { readonly type: "contracts.list"; readonly contracts: readonly import("../infrastructure/filesystem/contracts").ContractEntry[]; readonly error?: string }
+  | { readonly type: "agent.preset.result"; readonly error?: string }
   | { readonly type: "agent.defaults"; readonly settings: import("../core/config/agent-settings").AgentDefaultsSnapshot }
   | import("../infrastructure/vscode/sudo-broker").SudoChallenge
   | { readonly type: "sudo.closed" }

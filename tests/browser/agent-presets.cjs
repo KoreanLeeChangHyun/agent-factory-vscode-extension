@@ -1,0 +1,37 @@
+const assert = require('node:assert/strict');
+async function checkAgentPresets(page) {
+  const emit=async data=>{await page.evaluate(data=>window.postMessage(data,'*'),data);await page.evaluate(()=>new Promise(requestAnimationFrame));};
+  const settings={global:{main:{model:'gpt-6-astra'}},project:{},effective:{main:{model:'gpt-6-astra'}},projectAvailable:true,presets:[]};
+  await emit({type:'agent.defaults',settings});
+  if (!await page.locator('#model-menu').isVisible()) await page.locator('#model-button').click();
+  await page.locator('#agent-default-scope').selectOption('global');
+  assert.equal(await page.locator('#agent-preset-apply').isDisabled(),true);
+  assert.equal(await page.locator('#agent-preset-save').isDisabled(),true);
+  await page.locator('#agent-preset-name').fill('Quality');
+  await page.locator('#agent-preset-save').click();
+  const last=()=>page.evaluate(()=>window.sentMessages.filter(m=>m.type==='agent.preset').at(-1));
+  assert.deepEqual(await last(),{type:'agent.preset',action:'save',scope:'global',name:'Quality'});
+  assert.equal(await page.locator('#agent-default-scope').isDisabled(),true);
+  assert.equal(await page.locator('#agent-preset-save').isDisabled(),true);
+  settings.presets=[{name:'Quality',settings:settings.global},{name:'Fast',settings:{main:{model:'gpt-6-sol'}}}];
+  await emit({type:'agent.defaults',settings});
+  await emit({type:'agent.preset.result'});
+  await page.locator('#agent-preset-select').selectOption('Quality');
+  await page.locator('#agent-default-scope').selectOption('project');
+  await page.locator('#agent-preset-apply').click();
+  assert.deepEqual(await last(),{type:'agent.preset',action:'apply',scope:'project',name:'Quality'});
+  await emit({type:'agent.preset.result',error:'Simulated write failure'});
+  assert.equal(await page.locator('#agent-preset-status').textContent(),'Simulated write failure');
+  assert.equal(await page.locator('#agent-preset-apply').isEnabled(),true);
+  await page.locator('#agent-preset-select').selectOption('Fast');
+  await page.locator('#agent-preset-apply').click();
+  assert.equal((await last()).name,'Fast');
+  await emit({type:'agent.preset.result'});
+  await page.setViewportSize({width:375,height:800});
+  const bounds=await page.locator('.agent-preset-controls').boundingBox();
+  assert.ok(bounds.x>=0 && bounds.x+bounds.width<=375,JSON.stringify(bounds));
+  assert.equal(await page.locator('.agent-preset-controls').evaluate(el=>el.scrollWidth<=el.clientWidth+1),true);
+  await page.locator('#agent-default-scope').selectOption('chat');
+  console.log('Agent preset save/apply, scope selection, errors and narrow layout passed');
+}
+module.exports={checkAgentPresets};

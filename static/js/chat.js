@@ -1313,6 +1313,12 @@
       return;
     }
     switch (message.type) {
+      case "agent.preset.result": {
+        agentPresetBusy = false;
+        const status = document.getElementById("agent-preset-status"); status.hidden = false; status.textContent = message.error || t("preset.done");
+        renderAgentDefaults();
+        break;
+      }
       case "agent.defaults":
         state.agentDefaults = message.settings;
         renderAgentDefaults();
@@ -5150,6 +5156,7 @@
     const scope = scopeControl.value;
     container.replaceChildren();
     container.classList.add("aligned-settings");
+    renderAgentPresets();
     const columns = document.createElement("div");
     columns.className = "agent-settings-columns";
     columns.setAttribute("aria-hidden", "true");
@@ -5169,7 +5176,36 @@
       }
       container.append(row);
     }
+    if (agentPresetBusy) for (const control of container.querySelectorAll("input, select, button")) control.disabled = true;
   }
+
+  let agentPresetBusy = false;
+  function renderAgentPresets() {
+    const select = document.getElementById("agent-preset-select");
+    const selected = select.value;
+    select.replaceChildren();
+    const placeholder = document.createElement("option"); placeholder.value = ""; placeholder.textContent = t("preset.choose"); select.append(placeholder);
+    for (const preset of state.agentDefaults?.presets || []) {
+      const option = document.createElement("option"); option.value = preset.name; option.textContent = preset.name; select.append(option);
+    }
+    select.value = Array.from(select.options).some(option => option.value === selected) ? selected : "";
+    select.disabled = agentPresetBusy;
+    document.getElementById("agent-preset-apply").disabled = agentPresetBusy || !select.value;
+    document.getElementById("agent-preset-save").disabled = agentPresetBusy || !document.getElementById("agent-preset-name").value.trim();
+    document.getElementById("agent-preset-name").disabled = agentPresetBusy;
+    document.getElementById("agent-default-scope").disabled = agentPresetBusy;
+  }
+  for (const action of ["save", "apply"]) document.getElementById("agent-preset-" + action).addEventListener("click", () => {
+    if (agentPresetBusy) return;
+    const name = document.getElementById(action === "save" ? "agent-preset-name" : "agent-preset-select").value.trim();
+    if (!name) return;
+    agentPresetBusy = true;
+    const status = document.getElementById("agent-preset-status"); status.hidden = false; status.textContent = t("preset.busy");
+    renderAgentDefaults();
+    vscode.postMessage({type: "agent.preset", action, scope: document.getElementById("agent-default-scope").value, name});
+  });
+  document.getElementById("agent-preset-name").addEventListener("input", renderAgentPresets);
+  document.getElementById("agent-preset-select").addEventListener("change", renderAgentPresets);
 
   document.getElementById("agent-default-scope")?.addEventListener("change", renderAgentDefaults);
 

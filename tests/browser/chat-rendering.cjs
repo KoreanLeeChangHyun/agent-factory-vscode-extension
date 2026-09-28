@@ -401,6 +401,11 @@ async function main() {
       console.log('Localization, restoration and source preservation checks passed.');
       return;
     }
+    if (process.argv.includes('--agent-presets-only')) {
+      await require('./agent-presets.cjs').checkAgentPresets(page);
+      assert.deepEqual(errors, []);
+      return;
+    }
     if (process.argv.includes('--general-settings-only')) {
       await checkGeneralSettings(page);
       assert.deepEqual(errors, []);

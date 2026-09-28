@@ -7,8 +7,10 @@ import { developmentPluginRoot, validateDevelopmentPlugin } from "./infrastructu
 import { locateAgentFactoryExec } from "./infrastructure/agent-factory/plugin-locator";
 import { CodexCliNotFoundError, configureClaudeCli, configureCodexCli, resolveClaudeCli, resolveCodexCli } from "./infrastructure/agent-factory/process-environment";
 import { openWslWorkspace } from "./infrastructure/vscode/wsl-workspace";
+import { initializeAgentDefaults } from "./infrastructure/vscode/agent-settings-store";
 
 export interface ActivationServices {
+  readonly initializeDefaults?: (context: vscode.ExtensionContext, providers: { codex: boolean; claude: boolean }) => Promise<void>;
   readonly prepareCodex?: (configuredPath?: string, options?: { readonly allowRedirect: boolean }) => Promise<void | "redirected">;
   /** Resolves the optional Claude Code CLI; true when Claude can run without Codex. */
   readonly prepareClaude?: (configuredPath?: string) => Promise<boolean>;
@@ -94,6 +96,7 @@ async function start(context: vscode.ExtensionContext, services: ActivationServi
         }
         if (!codexAvailable && services.requireInstalledPlugin) await services.requireInstalledPlugin(requiredVersion);
       });
+      await services.initializeDefaults?.(context, { codex: codexAvailable, claude: claudeAvailable });
     } catch (error) {
       const detail = error instanceof Error ? error.message : localize("ui.an.unknown.error.occurred");
       const action = await services.showErrorMessage(
@@ -117,6 +120,7 @@ export function deactivate(): void {
 
 function defaultActivationServices(): ActivationServices {
   return {
+    initializeDefaults: (context, providers) => initializeAgentDefaults(context.globalState, providers),
     prepareCodex: async (configuredPath, options) => {
       configureCodexCli(undefined);
       try {

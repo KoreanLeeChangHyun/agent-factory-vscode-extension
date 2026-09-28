@@ -9,7 +9,7 @@ import type { AttachmentKind, AttachmentReference } from "../common/types/attach
 import type { ClientMessage } from "./messages";
 
 const clientMessageTypes = new Set([
-  "agent.defaults.save",
+  "agent.defaults.save", "agent.preset",
   "client.ready",
   "worktree.create", "worktree.merge", "worktree.refresh", "worktree.repositories",
   "notes.list", "notes.folder",
@@ -167,6 +167,9 @@ export function parseClientMessage(value: unknown): ClientMessage | undefined {
       if (!validNoteFolder(note.folder ?? "")) return undefined;
       return { type: value.type, scope: value.scope, note: { folder: (note.folder as string) || "", id: note.id, title: note.title, body: note.body, revision: Number(note.revision) } };
     }
+    case "agent.preset":
+      if ((value.action !== "save" && value.action !== "apply") || (value.scope !== "global" && value.scope !== "project") || typeof value.name !== "string" || !value.name.trim()) return undefined;
+      return {type: value.type, action: value.action, scope: value.scope, name: value.name.trim()};
     case "agent.defaults.save":
       if ((value.scope !== "global" && value.scope !== "project") ||
           !["main", "work", "verification"].includes(String(value.role)) ||

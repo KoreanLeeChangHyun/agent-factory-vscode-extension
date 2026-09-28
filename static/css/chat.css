@@ -3010,3 +3010,9 @@ table.interview-options td:first-child {
 /* Anchor compact progress to the composer edge, including when queue controls are taller. */
 .composer-status-row > .run-status:not(.is-expanded),
 .composer-status-row > .pending-queue-toggle { margin-bottom: 4px; }
+
+.agent-preset-controls { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; margin-top: 12px; align-items: end; }
+.agent-preset-controls label { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.agent-preset-controls input, .agent-preset-controls select { width: 100%; box-sizing: border-box; min-width: 0; }
+.agent-preset-controls input { color: var(--vscode-input-foreground); background: var(--vscode-input-background); border: 1px solid var(--vscode-input-border, transparent); border-radius: 4px; padding: 6px 8px; }
+.agent-preset-controls button { padding: 6px 10px; }
