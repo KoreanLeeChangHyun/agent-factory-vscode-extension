@@ -155,6 +155,55 @@
     });
     document.getElementById("worktree-" + action)?.addEventListener("keydown", handleSettingMenuKeydown);
   }
+  const unitDialog = document.getElementById("unit-create-dialog");
+  const unitForm = document.getElementById("unit-create-form");
+  const unitRepository = document.getElementById("unit-repository");
+  const unitName = document.getElementById("unit-name");
+  const unitBase = document.getElementById("unit-base");
+  const unitError = document.getElementById("unit-create-error");
+  const unitStatus = document.getElementById("unit-create-status");
+  let unitRepositories = [], unitBusy = false;
+  function unitSelectRepository() {
+    const repo = unitRepositories.find(r => r.path === unitRepository.value);
+    unitBase.replaceChildren();
+    for (const branch of repo?.branches || []) { const option = document.createElement("option"); option.value = branch; option.textContent = branch; unitBase.append(option); }
+    if (repo?.defaultBranch) unitBase.value = repo.defaultBranch;
+  }
+  function unitSetBusy(busy) {
+    unitBusy = busy;
+    for (const control of unitForm.querySelectorAll("input, select, textarea, button")) control.disabled = busy;
+    document.getElementById("unit-create-submit").disabled = busy;
+    unitForm.setAttribute("aria-busy", String(busy));
+  }
+  function openUnitCreate(repository) {
+    closeSettingMenu(false);
+    unitForm.reset(); unitError.hidden = true;
+    unitRepository.replaceChildren();
+    for (const repo of unitRepositories) { const option = document.createElement("option"); option.value = repo.path; option.textContent = repo.path; unitRepository.append(option); }
+    unitRepository.value = repository;
+    unitSelectRepository();
+    unitSetBusy(false); unitStatus.textContent = "";
+    unitDialog.showModal(); unitName.focus();
+  }
+  unitRepository.addEventListener("change", unitSelectRepository);
+  document.getElementById("unit-create-cancel").addEventListener("click", () => unitDialog.close());
+  unitDialog.addEventListener("cancel", event => { if (unitBusy) event.preventDefault(); });
+  unitDialog.addEventListener("keydown", event => {
+    if (event.key !== "Tab") return;
+    const controls = [...unitDialog.querySelectorAll("input:not(:disabled), select:not(:disabled), textarea:not(:disabled), button:not(:disabled)")];
+    const first = controls[0], last = controls.at(-1);
+    if (!first) { event.preventDefault(); return; }
+    if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); }
+    else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
+  });
+  unitDialog.addEventListener("close", () => worktreeButton.focus());
+  unitForm.addEventListener("submit", event => {
+    event.preventDefault();
+    if (unitBusy || !unitForm.reportValidity()) return;
+    unitError.hidden = true; unitStatus.textContent = t("unit.creating");
+    unitSetBusy(true);
+    vscode.postMessage({ type: "worktree.create", repository: unitRepository.value, name: unitName.value.trim(), base: unitBase.value });
+  });
   function positionWorktreeMenu() {
     if (worktreeMenu.hidden) return;
     const anchor = worktreeButton.getBoundingClientRect();
@@ -1067,7 +1116,7 @@
 
   document.addEventListener("keydown", function (event) {
     if (event.key === "Escape") {
-      if (document.getElementById("image-converter").open) return;
+      if (unitDialog.open || document.getElementById("image-converter").open) return;
       if (!notesPanel.hidden) {
         event.preventDefault();
         setNotesOpen(false);
@@ -1265,7 +1314,15 @@
       case "syntax.theme":
         void updateSyntaxTheme(message.selection || {});
         break;
+      case "worktree.created":
+        unitSetBusy(false); unitStatus.textContent = "";
+        if (message.error) {
+          unitError.textContent = message.error; unitError.hidden = false;
+          if (message.created) document.getElementById("unit-create-submit").disabled = true;
+        } else unitDialog.close();
+        break;
       case "worktree.repositories": {
+        unitRepositories = message.repositories;
         const list = document.getElementById("worktree-repositories");
         list.replaceChildren();
         for (const repo of message.repositories) {
@@ -1276,7 +1333,7 @@
           const path = document.createElement("span"); path.className = "worktree-repository-path"; path.textContent = repo.path;
           const action = document.createElement("span"); action.className = "worktree-repository-action"; action.textContent = "+ " + t("worktree.create");
           button.append(name, path, action);
-          button.addEventListener("click", () => { closeSettingMenu(false); vscode.postMessage({ type: "worktree.create", repository: repo.path }); });
+          button.addEventListener("click", () => { openUnitCreate(repo.path); });
           button.addEventListener("keydown", handleSettingMenuKeydown); list.append(button);
         }
         if (!message.repositories.length) {
@@ -1751,6 +1808,10 @@
     if (conversationClearing || (conversationWorktree?.worktree?.workUnit && conversationWorktree.worktree.phase === "merged")) return;
     if (!Object.hasOwn(taskModeNames(), action)) action = "direct";
     const contextualRequest = workflow === "contract" ? t("submission.contract.request")
+      : workflow === "planning" ? t("submission.planning.request")
+      : workflow === "interview" ? t("submission.interview.request")
+      : workflow === "migration" ? t("submission.migration.request")
+      : workflow === "lessons" ? t("submission.lessons.request")
       : action === "work" ? t("submission.work.request")
       : action === "work-verification" ? t("submission.work.verification.request") : "";
     const userText = choiceAnswer ?? (prompt.value.trim() || contextualRequest);
@@ -1841,12 +1902,13 @@
       const rows = Array.from(table.querySelectorAll("tbody tr"));
       if (rows.length < 2 || rows.length > 3 || rows.some((row, index) => row.cells[0]?.textContent.trim() !== String(index + 1))) continue;
       table.classList.add("interview-options");
+      const yesNo = rows.length === 2 && rows[0].cells[1]?.textContent.trim() === "Yes" && rows[1].cells[1]?.textContent.trim() === "No";
       for (const row of rows) {
         const number = row.cells[0].textContent.trim();
         const button = document.createElement("button");
         button.type = "button";
         button.className = "interview-choice";
-        button.textContent = number;
+        button.textContent = yesNo ? row.cells[1].textContent.trim() : number;
         button.setAttribute("aria-label", number + ": " + row.cells[1].textContent.trim());
         button.disabled = !canAnswerInterview(event);
         button.addEventListener("click", function () {
@@ -5199,6 +5261,7 @@
     menu.replaceChildren();
     const groups = [
       [t("ui.document.main"), [
+        [businessModeNames().planning, "direct", "planning", false],
         [businessModeNames().interview, "direct", "interview", false],
         [businessModeNames().migration, "direct", "migration", false],
         [businessModeNames().lessons, "direct", "lessons", false]

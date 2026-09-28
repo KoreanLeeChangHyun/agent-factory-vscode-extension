@@ -361,6 +361,21 @@
         </div>
         <footer><button id="image-converter-reveal" type="button" hidden data-i18n="attachment.convert.reveal">Show in Explorer</button><button id="image-converter-submit" type="button" data-i18n="attachment.convert.proceed">Convert</button></footer>
       </dialog>
+      <dialog id="unit-create-dialog" aria-labelledby="unit-create-title">
+        <form id="unit-create-form">
+          <header><strong id="unit-create-title" data-i18n="unit.create.title">Create worktree</strong></header>
+          <div class="unit-create-body">
+            <label><span data-i18n="unit.repository">Repository</span><select id="unit-repository" required></select></label>
+            <label><span data-i18n="unit.name">Work Unit name</span><input id="unit-name" required autocomplete="off" /></label>
+            <label><span data-i18n="unit.base">Base branch</span><select id="unit-base" required></select></label>
+            <p data-i18n="unit.context.auto">Requirements and decisions are carried over automatically.</p>
+            <p data-i18n="unit.create.note">Uncommitted changes stay in the original folder.</p>
+            <p id="unit-create-status" role="status" aria-live="polite"></p>
+            <p id="unit-create-error" role="alert" hidden></p>
+          </div>
+          <footer><button id="unit-create-cancel" type="button" data-i18n="unit.cancel">Cancel</button><button id="unit-create-submit" type="submit" data-i18n="unit.create.submit">Create</button></footer>
+        </form>
+      </dialog>
     </main>
     <script nonce="{{nonce}}" src="{{markdownScriptUri}}"></script>
     <script nonce="{{nonce}}" src="{{syntaxScriptUri}}"></script>

@@ -6,6 +6,38 @@ const { withBusinessMode, BUSINESS_MODES } = await importTypeScript('src/common/
 const { withContractExecutionGuidance } = await importTypeScript('src/modules/chat/task-selection.ts');
 const { historyPresentation } = await importTypeScript('src/infrastructure/agent-factory/history-presentation.ts');
 
+test('planning starts a conversation listening phase and preserves its guidance on restore', () => {
+  const request = 'I will describe the product';
+  const guided = withBusinessMode(request, 'planning');
+  assert.match(guided, /ongoing planning listening and organizing phase/);
+  assert.match(guided, /ordinary messages without a workflow selection/);
+  assert.match(guided, /Listen and concisely organize the substance/);
+  assert.match(guided, /When the Human asks for research, investigate/);
+  assert.match(guided, /Research or a summary request does not by itself end planning/);
+  assert.doesNotMatch(guided, /Reply only with a brief, polite acknowledgment/);
+  assert.match(guided, /must not leak to another chat/);
+  assert.doesNotMatch(guided, /completion-based Specification promotion/);
+  const restored = historyPresentation(guided, 'direct', false);
+  assert.equal(restored.text, request);
+  assert.equal(restored.submission.businessMode, 'planning');
+  assert.equal(restored.submission.taskMode, 'direct');
+  assert.equal(restored.submission.guidance, guided.slice(request.length));
+  assert.equal(withBusinessMode('One more idea', 'normal'), 'One more idea');
+});
+
+test('interview confirmation retains the request and clickable Yes/No continuation guidance', () => {
+  const request = 'Discuss the current login flow';
+  const guided = withBusinessMode(request, 'interview');
+  assert.match(guided, /before proposing an interview/);
+  assert.match(guided, /decision cells exactly Yes and No/);
+  assert.match(guided, /Wait for the Human's answer/);
+  assert.match(guided, /No \(2\) does not start it/);
+  const restored = historyPresentation(guided, 'direct', false);
+  assert.equal(restored.text, request);
+  assert.equal(restored.submission.businessMode, 'interview');
+  assert.equal(restored.submission.guidance, guided.slice(request.length));
+});
+
 test('contract preparation is restored with its captured guidance and direct route', () => {
   const request = 'Use the current conversation';
   const guided = withBusinessMode(request, 'contract');
@@ -46,6 +78,8 @@ for (const mode of ['migration', 'lessons']) {
     if (mode === 'migration') {
       assert.match(guided, /do not assume the installed version is latest/);
       assert.match(guided, /preserve their meaning, language, provenance and authority/);
+      assert.match(guided, /analyze all documents in the current project/);
+      assert.match(guided, /Honor an explicit target or constraint first/);
     } else {
       assert.match(guided, /retaining concrete evidence and provenance/);
       assert.match(guided, /Consolidate with existing rules without duplication/);

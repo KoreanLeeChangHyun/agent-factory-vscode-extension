@@ -1,0 +1,45 @@
+import assert from 'node:assert/strict';
+import test from 'node:test';
+import { build } from 'esbuild';
+import { createRequire } from 'node:module';
+import { runInNewContext } from 'node:vm';
+import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { execFileSync } from 'node:child_process';
+const require = createRequire(import.meta.url);
+const output = await build({ entryPoints: ['src/infrastructure/vscode/chat-panel-manager.ts'], bundle: true, platform: 'node', format: 'cjs', write: false, external: ['vscode'] });
+const module = { exports: {} };
+let nativePrompts = 0;
+const forbidden = () => { nativePrompts++; throw new Error('Native creation prompt used'); };
+const vscode = { window: { showInputBox: forbidden, showQuickPick: forbidden, showTextDocument: forbidden, showInformationMessage: forbidden, createWebviewPanel: () => ({ dispose() {} }) }, workspace: { workspaceFolders: [], updateWorkspaceFolders: () => true }, ViewColumn: { Active: 1 }, Uri: { file: path => ({ fsPath: path }) } };
+runInNewContext(output.outputFiles[0].text, { module, exports: module.exports, require: name => name === 'vscode' ? vscode : require(name), global: { Date }, console, process, Buffer, URL, setTimeout, clearTimeout });
+const { ChatPanelManager } = module.exports;
+test('creation validates the draft and forwards reviewed context without native prompts', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'unit-create-ui-'));
+  try {
+    const git = (...args) => execFileSync('git', ['-C', root, ...args], { stdio: 'pipe' });
+    git('init', '-b', 'main'); git('config', 'user.name', 'Test'); git('config', 'user.email', 'test@example.invalid');
+    await writeFile(join(root, 'file'), 'base'); git('add', '.'); git('commit', '-m', 'base');
+    const sent = [], changes = [];
+    const manager = new ChatPanelManager({}, {}, () => [], async () => ({ available: true, client: { worktreeRepositories: async () => [{ path: root, branches: ['main'], defaultBranch: 'main' }], history: async () => ({ messages: [{ type: 'user', text: 'Keep requirements\n[Agent Factory administrator command handoff]\nDo not forward this' }, { type: 'assistant', phase: 'final', text: JSON.stringify({ resultText: 'Keep decisions' }) }] }) } }));
+    manager.post = async (_, message) => { sent.push(message); };
+    manager.refreshWorktree = async () => {};
+    manager.composerPreferences = () => ({});
+    manager.webviewOptions = () => ({});
+    manager.defaultExecutionMode = () => ({});
+    manager.ensureController = async () => {};
+    manager.attach = async (panel, state) => { manager.panels.set(state.panelId, { panel, state, controller: { changeWorktree: async (action, options) => { changes.push({ action, options }); return { worktree: { path: join(root, 'unit'), branch: options.branch } }; } } }); };
+    const source = { panel: {}, state: { role: 'main', agentId: 'source' } };
+    const draft = { repository: root, name: 'Task', branch: 'feature', base: 'main', context: 'Injected client context' };
+    await manager.changeWorktree(source, 'create', { ...draft, repository: '/outside' });
+    assert.equal(changes.length, 0); assert.ok(sent.some(m => m.type === 'worktree.created' && m.error));
+    await manager.changeWorktree(source, 'create', { ...draft, name: 'main' });
+    assert.equal(changes.length, 0);
+    await manager.changeWorktree(source, 'create', draft);
+    assert.equal(changes.length, 1); assert.equal(changes[0].options.branch, 'Task'); assert.equal(changes[0].options.base, 'main');
+    assert.ok(sent.some(m => m.type === 'composer.prefill' && m.text.includes('Keep requirements') && m.text.includes('Keep decisions') && !m.text.includes('handoff') && !m.text.includes('Injected')));
+    assert.ok(sent.some(m => m.type === 'worktree.created' && m.created));
+    assert.equal(nativePrompts, 0);
+  } finally { await rm(root, { recursive: true, force: true }); }
+});

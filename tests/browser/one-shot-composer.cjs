@@ -77,15 +77,18 @@ async function checkOneShotComposer(page) {
   await page.keyboard.press('Escape');
   assert.equal(await page.locator('#submission-button').evaluate(e => e === document.activeElement), true);
   for (const [action, workflow] of [
-    ['direct', 'interview']
+    ['direct', 'interview'], ['direct', 'migration'], ['direct', 'lessons']
   ]) {
     await page.locator('#prompt').fill('   ');
     const beforeEmpty = await count();
     await page.locator('#submission-button').click();
     await page.locator(`#submission-menu [data-action="${action}"][data-workflow="${workflow}"]`).click();
-    assert.equal(await count(), beforeEmpty, `${action}/${workflow} must not submit empty input`);
-    assert.equal(await page.locator('#prompt').inputValue(), '   ');
-    assert.equal(await page.locator('#input-feedback').isVisible(), true);
+    assert.equal(await count(), beforeEmpty + 1, `${action}/${workflow} submits a contextual request`);
+    assert.ok((await last()).text.trim());
+    assert.equal((await last()).execution.businessMode, workflow);
+    assert.equal((await last()).execution.taskMode, action);
+    assert.equal(await page.locator('#prompt').inputValue(), '');
+    assert.equal(await page.locator('#input-feedback').isVisible(), false);
   }
   await page.evaluate(() => {
     window.postMessage({ type: 'run.state', running: false }, '*');
@@ -105,4 +108,42 @@ async function checkOneShotComposer(page) {
   assert.equal(await page.locator('#submission-menu [data-action="work-verification"]').isDisabled(), true);
   await page.screenshot({path:'/tmp/af-unified-composer.png'});
 }
-module.exports = { checkOneShotComposer };
+async function checkDocumentSubmissions(page) {
+  const capability = { model: true, reasoning: true, fast: true, goal: true, taskModes: ['direct'] };
+  await page.evaluate(capability => window.postMessage({ type: 'host.initialize', panelId: 'documents', role: 'main', runtimeAvailable: true, fastMode: true, capabilities: { submit: capability, send: capability } }, '*'), capability);
+  await page.waitForFunction(() => document.querySelector('#fast-mode-button').getAttribute('aria-pressed') === 'true');
+  const messages = () => page.evaluate(() => window.sentMessages.filter(m => m.type === 'chat.send'));
+  await page.locator('#submission-button').click();
+  assert.deepEqual(await page.locator('#submission-options [data-workflow]').evaluateAll(items => items.slice(0, 2).map(item => item.dataset.workflow)), ['planning', 'interview']);
+  await page.keyboard.press('Escape');
+  for (const workflow of ['planning', 'interview', 'migration', 'lessons']) {
+    for (const draft of ['', '   ', 'Use only the selected document']) {
+      await page.locator('#prompt').fill(draft);
+      const before = (await messages()).length;
+      await page.locator('#submission-button').click();
+      await page.locator(`#submission-menu [data-workflow="${workflow}"]`).click();
+      const sent = await messages();
+      assert.equal(sent.length, before + 1);
+      assert.equal(sent.at(-1).execution.businessMode, workflow);
+      assert.equal(sent.at(-1).execution.taskMode, 'direct');
+      assert.equal(sent.at(-1).execution.goal, false);
+      assert.ok(sent.at(-1).text.trim());
+      if (draft.trim()) assert.equal(sent.at(-1).text, draft);
+      assert.equal(await page.locator('#input-feedback').isVisible(), false);
+    }
+    const attachment = { id: `document-${workflow}`, name: 'notes.txt', kind: 'file', uri: 'file:///test/notes.txt' };
+    await page.evaluate(attachment => window.postMessage({ type: 'attachments.add', attachments: [attachment] }, '*'), attachment);
+    await page.waitForFunction(id => window.saved.attachments.some(a => a.id === id), attachment.id);
+    await page.locator('#submission-button').click();
+    await page.locator(`#submission-menu [data-workflow="${workflow}"]`).click();
+    assert.equal((await messages()).at(-1).attachments[0].uri, attachment.uri);
+    assert.equal((await messages()).at(-1).execution.businessMode, workflow);
+  }
+  const before = (await messages()).length;
+  await page.locator('#prompt').press('Enter');
+  assert.equal((await messages()).length, before, 'Ordinary empty submission remains blocked');
+  await page.locator('#prompt').fill('Next ordinary request');
+  await page.locator('#prompt').press('Enter');
+  assert.equal((await messages()).at(-1).execution.businessMode, 'normal');
+}
+module.exports = { checkOneShotComposer, checkDocumentSubmissions };

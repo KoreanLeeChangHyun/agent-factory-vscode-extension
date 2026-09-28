@@ -8,9 +8,13 @@ const events = overrides => ({ onBound() {}, onRunningChanged() {}, onAssistantT
   onUsage() {}, onActivity() {}, onError() {}, ...overrides });
 
 test('worktree actions use an allowlisted message and discard caller paths', () => {
-  for (const type of ['worktree.create', 'worktree.merge', 'worktree.refresh']) {
+  for (const type of ['worktree.merge', 'worktree.refresh']) {
     assert.deepEqual(parseClientMessage({ type, path: '/untrusted', agentId: 'other' }), { type });
   }
+  const draft = { type: 'worktree.create', repository: '/repo', name: 'Task', base: 'main' };
+  assert.deepEqual(parseClientMessage({ ...draft, path: '/untrusted', agentId: 'other' }), draft);
+  for (const field of ['repository', 'name', 'base']) assert.equal(parseClientMessage({ ...draft, [field]: 123 }), undefined);
+  assert.equal(parseClientMessage({ type: 'worktree.create' }), undefined);
   assert.equal(parseClientMessage({ type: 'worktree.delete' }), undefined);
 });
 

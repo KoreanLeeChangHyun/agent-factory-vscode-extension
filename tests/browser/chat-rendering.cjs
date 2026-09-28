@@ -367,6 +367,11 @@ async function main() {
       console.log('Task flow rendering checks passed');
       return;
     }
+    if (process.argv.includes('--document-submissions-only')) {
+      await require('./one-shot-composer.cjs').checkDocumentSubmissions(page);
+      assert.deepEqual(errors, []);
+      return;
+    }
     if (process.argv.includes('--one-shot-composer-only')) {
       await checkOneShotComposer(page);
       assert.deepEqual(errors, []);

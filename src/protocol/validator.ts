@@ -70,7 +70,9 @@ export function parseClientMessage(value: unknown): ClientMessage | undefined {
         return { type: "sudo.reply", id: value.id, key: value.key as string, iv: value.iv as string, data: value.data as string };
       return undefined;
     case "worktree.create":
-      return value.repository === undefined || typeof value.repository === "string" ? { type: value.type, ...(typeof value.repository === "string" ? { repository: value.repository } : {}) } : undefined;
+      if (![value.repository, value.name, value.base].every(v => typeof v === "string")) return undefined;
+      if (![value.repository, value.name, value.base].every(v => (v as string).trim())) return undefined;
+      return { type: value.type, repository: value.repository as string, name: value.name as string, base: value.base as string };
     case "worktree.repositories":
     case "worktree.merge":
     case "worktree.refresh":

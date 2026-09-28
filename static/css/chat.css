@@ -2071,9 +2071,9 @@ select:focus-visible,
 .agent-model-name { font-size: 12px; font-weight: 500; overflow-wrap: anywhere; }
 .agent-model-row label { min-width: 0; }
 .agent-model-caption { display: none; }
-:is(.agent-model-menu, #general-permissions, .general-language, #image-converter, #settings-panel-agents) select { box-sizing: border-box; width: 100%; min-width: 0; height: 34px; padding: 0 9px; border-radius: 6px; font: inherit; font-size: 12px; color: var(--vscode-dropdown-foreground, var(--vscode-foreground)); background: var(--vscode-dropdown-background, var(--vscode-editor-background)); border: 1px solid var(--vscode-dropdown-border, var(--vscode-panel-border, #ffffff20)); cursor: pointer; }
-:is(.agent-model-menu, #general-permissions, .general-language, #image-converter, #settings-panel-agents) select:hover:not(:disabled) { border-color: var(--vscode-descriptionForeground); }
-:is(.agent-model-menu, #general-permissions, .general-language, #image-converter, #settings-panel-agents) select {
+:is(.agent-model-menu, #general-permissions, .general-language, #image-converter, #settings-panel-agents, #unit-create-dialog) select { box-sizing: border-box; width: 100%; min-width: 0; height: 34px; padding: 0 9px; border-radius: 6px; font: inherit; font-size: 12px; color: var(--vscode-dropdown-foreground, var(--vscode-foreground)); background: var(--vscode-dropdown-background, var(--vscode-editor-background)); border: 1px solid var(--vscode-dropdown-border, var(--vscode-panel-border, #ffffff20)); cursor: pointer; }
+:is(.agent-model-menu, #general-permissions, .general-language, #image-converter, #settings-panel-agents, #unit-create-dialog) select:hover:not(:disabled) { border-color: var(--vscode-descriptionForeground); }
+:is(.agent-model-menu, #general-permissions, .general-language, #image-converter, #settings-panel-agents, #unit-create-dialog) select {
   appearance: none;
   padding-inline: 12px 32px;
   background-image: linear-gradient(45deg, transparent 50%, currentColor 50%), linear-gradient(135deg, currentColor 50%, transparent 50%);
@@ -2082,17 +2082,17 @@ select:focus-visible,
   background-repeat: no-repeat;
 }
 @media (forced-colors: active) {
-  :is(.agent-model-menu, #general-permissions, .general-language, #image-converter, #settings-panel-agents) select { appearance: auto; background-image: none; }
+  :is(.agent-model-menu, #general-permissions, .general-language, #image-converter, #settings-panel-agents, #unit-create-dialog) select { appearance: auto; background-image: none; }
 }
-:is(.agent-model-menu, #general-permissions, .general-language, #image-converter, #settings-panel-agents) select:disabled { opacity: .5; cursor: default; }
-:is(.agent-model-menu, #general-permissions, .general-language, #image-converter, #settings-panel-agents) option { color: var(--vscode-dropdown-foreground, var(--vscode-foreground)); background: var(--vscode-dropdown-background, var(--vscode-editor-background)); }
+:is(.agent-model-menu, #general-permissions, .general-language, #image-converter, #settings-panel-agents, #unit-create-dialog) select:disabled { opacity: .5; cursor: default; }
+:is(.agent-model-menu, #general-permissions, .general-language, #image-converter, #settings-panel-agents, #unit-create-dialog) option { color: var(--vscode-dropdown-foreground, var(--vscode-foreground)); background: var(--vscode-dropdown-background, var(--vscode-editor-background)); }
 /* Keep native selection and keyboard behavior while styling the open picker. */
 @supports (appearance: base-select) {
-  :is(.agent-model-menu, #general-permissions, .general-language, #image-converter, #settings-panel-agents) select,
-  :is(.agent-model-menu, #general-permissions, .general-language, #image-converter, #settings-panel-agents) select::picker(select) { appearance: base-select; }
-  :is(.agent-model-menu, #general-permissions, .general-language, #image-converter, #settings-panel-agents) select { align-items: center; }
-  :is(.agent-model-menu, #general-permissions, .general-language, #image-converter, #settings-panel-agents) select::picker-icon { display: none; }
-  :is(.agent-model-menu, #general-permissions, .general-language, #image-converter, #settings-panel-agents) select::picker(select) {
+  :is(.agent-model-menu, #general-permissions, .general-language, #image-converter, #settings-panel-agents, #unit-create-dialog) select,
+  :is(.agent-model-menu, #general-permissions, .general-language, #image-converter, #settings-panel-agents, #unit-create-dialog) select::picker(select) { appearance: base-select; }
+  :is(.agent-model-menu, #general-permissions, .general-language, #image-converter, #settings-panel-agents, #unit-create-dialog) select { align-items: center; }
+  :is(.agent-model-menu, #general-permissions, .general-language, #image-converter, #settings-panel-agents, #unit-create-dialog) select::picker-icon { display: none; }
+  :is(.agent-model-menu, #general-permissions, .general-language, #image-converter, #settings-panel-agents, #unit-create-dialog) select::picker(select) {
     min-width: 144px;
     max-width: calc(100vw - 24px);
     max-height: min(300px, 60vh);
@@ -2107,7 +2107,7 @@ select:focus-visible,
     font: inherit;
     font-size: 12px;
   }
-  :is(.agent-model-menu, #general-permissions, .general-language, #image-converter, #settings-panel-agents) option {
+  :is(.agent-model-menu, #general-permissions, .general-language, #image-converter, #settings-panel-agents, #unit-create-dialog) option {
     display: flex;
     align-items: center;
     gap: 12px;
@@ -2118,14 +2118,14 @@ select:focus-visible,
     background: transparent;
     cursor: pointer;
   }
-  :is(.agent-model-menu, #general-permissions, .general-language, #image-converter, #settings-panel-agents) option:checked { background: color-mix(in srgb, var(--af-color-accent) 15%, transparent); }
-  :is(.agent-model-menu, #general-permissions, .general-language, #image-converter, #settings-panel-agents) option:hover,
-  :is(.agent-model-menu, #general-permissions, .general-language, #image-converter, #settings-panel-agents) option:focus-visible {
+  :is(.agent-model-menu, #general-permissions, .general-language, #image-converter, #settings-panel-agents, #unit-create-dialog) option:checked { background: color-mix(in srgb, var(--af-color-accent) 15%, transparent); }
+  :is(.agent-model-menu, #general-permissions, .general-language, #image-converter, #settings-panel-agents, #unit-create-dialog) option:hover,
+  :is(.agent-model-menu, #general-permissions, .general-language, #image-converter, #settings-panel-agents, #unit-create-dialog) option:focus-visible {
     background: var(--vscode-list-hoverBackground, #ffffff12);
     outline: 1px solid var(--af-color-accent);
     outline-offset: -1px;
   }
-  :is(.agent-model-menu, #general-permissions, .general-language, #image-converter, #settings-panel-agents) option::checkmark { order: 1; margin-inline-start: auto; color: var(--af-color-accent); }
+  :is(.agent-model-menu, #general-permissions, .general-language, #image-converter, #settings-panel-agents, #unit-create-dialog) option::checkmark { order: 1; margin-inline-start: auto; color: var(--af-color-accent); }
 }
 .agent-permissions-row { margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--vscode-panel-border, #ffffff20); }
 .agent-permissions-heading { display: flex; justify-content: space-between; align-items: center; margin-bottom: 9px; gap: 8px; }
@@ -2140,7 +2140,7 @@ select:focus-visible,
   .agent-settings-heading { margin-bottom: 4px; }
 }
 
-:is(.agent-model-menu, #general-permissions, .general-language, #image-converter, #settings-panel-agents) select:focus {
+:is(.agent-model-menu, #general-permissions, .general-language, #image-converter, #settings-panel-agents, #unit-create-dialog) select:focus {
   outline: none;
 }
 
@@ -2965,3 +2965,27 @@ table.interview-options td:first-child {
 .question-menu .question-row { grid-template-columns: minmax(0, 1fr) 30px; gap: 8px; padding-right: 4px; }
 .question-menu .question-item { min-height: 36px; box-sizing: border-box; align-items: center; padding: 8px 10px; }
 .question-menu .question-copy { display: inline-flex; align-items: center; justify-content: center; padding: 0; }
+
+/* A single, scrollable creation form inside the chat Webview. */
+#unit-create-dialog { box-sizing: border-box; width: min(600px, calc(100vw - 24px)); max-height: calc(100vh - 24px); padding: 0; color: var(--vscode-foreground); background: var(--vscode-editorWidget-background, #252526); border: 1px solid var(--vscode-widget-border, #454545); border-radius: 12px; box-shadow: 0 16px 48px #0006; }
+#unit-create-dialog::backdrop { background: #0007; }
+#unit-create-form { display: flex; flex-direction: column; max-height: calc(100vh - 26px); }
+#unit-create-dialog header, #unit-create-dialog footer { padding: 16px 20px; flex: none; }
+#unit-create-dialog header { border-bottom: 1px solid var(--vscode-panel-border, #ffffff18); }
+.unit-create-body { padding: 16px 20px; overflow-y: auto; min-height: 0; }
+#unit-create-dialog label { display: flex; flex-direction: column; gap: 7px; min-width: 0; margin-bottom: 16px; font-size: 12px; }
+#unit-create-dialog input, #unit-create-dialog textarea { box-sizing: border-box; width: 100%; min-width: 0; font: inherit; color: var(--vscode-input-foreground); background-color: var(--vscode-input-background, #1e1e1e); border: 1px solid var(--vscode-input-border, #454545); border-radius: 6px; padding: 8px 10px; }
+#unit-create-dialog textarea { resize: vertical; min-height: 110px; line-height: 1.5; }
+.unit-create-columns { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+#unit-create-dialog p { font-size: 12px; line-height: 1.6; color: var(--vscode-descriptionForeground); overflow-wrap: anywhere; margin: 0 0 12px; }
+#unit-create-dialog #unit-create-error { color: var(--vscode-errorForeground, #f48771); }
+#unit-create-dialog footer { display: flex; justify-content: flex-end; gap: 8px; border-top: 1px solid var(--vscode-panel-border, #ffffff18); }
+#unit-create-dialog button { padding: 7px 16px; border-radius: 6px; cursor: pointer; border: 1px solid var(--vscode-button-border, #454545); background: var(--vscode-button-secondaryBackground, #333); color: var(--vscode-button-secondaryForeground, #fff); }
+#unit-create-dialog #unit-create-submit { background: var(--vscode-button-background, #007acc); color: var(--vscode-button-foreground, #fff); }
+#unit-create-dialog :disabled { opacity: .55; cursor: default; }
+@media (max-width: 420px) { .unit-create-columns { grid-template-columns: 1fr; gap: 0; } }
+
+@supports (appearance: base-select) {
+  #unit-create-dialog select::picker(select) { width: anchor-size(width); box-sizing: border-box; }
+  #unit-create-dialog option { overflow-wrap: anywhere; white-space: normal; }
+}

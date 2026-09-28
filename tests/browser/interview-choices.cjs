@@ -35,6 +35,16 @@ async function checkInterviewChoices(page) {
   assert.equal(await page.locator('#prompt').inputValue(), '작성 중인 초안');
   for (let i = 0; i < 3; i++) assert.equal(await choices.nth(i).isDisabled(), true);
   assert.equal(await page.locator('.decision-reply').count(), 0);
+  for (const [label, answer] of [['Yes', '1'], ['No', '2']]) {
+    const previous = await page.evaluate(() => window.sentMessages.filter(m => m.type === 'chat.send').at(-1));
+    await emit({ ...previous, type: 'chat.started' });
+    await emit({ type: 'session.bound', agentId: 'interview', conversationId: 'confirmation-' + label, reset: true });
+    await emit({ type: 'chat.assistant', text: '로그인 흐름의 요구사항을 확인하는 인터뷰를 제안합니다.\n\n**질문 [1/1]:** 이 범위로 인터뷰를 진행할까요?\n\n| 선택지 | 결정 | 설명 |\n|---|---|---|\n| 1 | Yes | 제안한 인터뷰 시작 |\n| 2 | No | 주제나 범위 수정 |', phase: 'final', runId: 'confirm-' + label });
+    assert.equal(await page.locator('.interview-choice').count(), 2);
+    await page.locator('.interview-choice').filter({ hasText: label }).click();
+    assert.equal(await page.evaluate(() => window.sentMessages.filter(m => m.type === 'chat.send').at(-1).text), answer);
+    assert.equal(await page.locator('#prompt').inputValue(), '작성 중인 초안');
+  }
 }
 
 module.exports = { checkInterviewChoices };

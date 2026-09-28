@@ -1,3 +1,4 @@
+import { workUnitContextText, workUnitBranch } from "./work-unit-context";
 import { unitGit, validateUnitBranch, directBranchEvidence } from "./work-unit-git";
 import { openContractPanel } from "./contract-panel";
 import { listContracts } from "../filesystem/contracts";
@@ -447,7 +448,7 @@ export class ChatPanelManager implements vscode.Disposable {
       case "worktree.create":
       case "worktree.merge": {
         if (managed.sessionTransition) return;
-        const transition = this.changeWorktree(managed, message.type === "worktree.create" ? "create" : "merge", message.type === "worktree.create" ? message.repository : undefined);
+        const transition = this.changeWorktree(managed, message.type === "worktree.create" ? "create" : "merge", message.type === "worktree.create" ? message : undefined);
         managed.sessionTransition = transition;
         try { await transition; }
         finally { if (managed.sessionTransition === transition) managed.sessionTransition = undefined; }
@@ -1404,7 +1405,7 @@ Read the exact stored child result/receipt and existing workflow status for repo
     } catch { /* Without Git evidence, do not infer a completed push or merge. */ }
   }
 
-  private async changeWorktree(managed: ManagedPanel, action: "create" | "merge", repository?: string): Promise<void> {
+  private async changeWorktree(managed: ManagedPanel, action: "create" | "merge", draft?: { repository: string; name: string; base: string }): Promise<void> {
     let targetPanel = managed;
     try {
       if ((managed.state.role ?? "main") !== "main" || managed.pendingMessageIds?.size || managed.controller?.running || managed.controller?.queueLength) throw new Error(localize("worktree.busy"));
@@ -1415,32 +1416,22 @@ Read the exact stored child result/receipt and existing workflow status for repo
       await this.post(managed.panel, { type: "worktree.updated", value: managed.worktree, busy: true });
       let options: import("../agent-factory/agent-client").WorktreeOptions;
       if (action === "create") {
-        const repo = repositories.find(r => r.path === repository) ?? (repositories.length === 1 ? repositories[0] : undefined);
-        if (!repo) { await this.post(managed.panel, { type: "worktree.repositories", repositories }); throw new Error(localize("unit.pick.repository")); }
-        const name = await vscode.window.showInputBox({ title: localize("unit.name"), validateInput: value => value.trim() ? undefined : localize("unit.name.required") });
-        if (!name) return;
-        const base = await vscode.window.showQuickPick([...repo.branches].sort((a, b) => Number(b === repo.defaultBranch) - Number(a === repo.defaultBranch)).map(label => ({ label, picked: label === repo.defaultBranch })), { title: localize("unit.base"), placeHolder: repo.defaultBranch ?? undefined });
-        if (!base) return;
-        const branch = await vscode.window.showInputBox({ title: localize("unit.branch"), value: name.trim().replace(/\s+/g, "-"), validateInput: value => validateUnitBranch(repo.path, value) });
-        if (!branch) return;
-        // Build an editable context handoff from the durable conversation; never share its session identity.
-        let context = "";
+        const repo = repositories.find(r => r.path === draft?.repository);
+        if (!repo || !draft) throw new Error(localize("unit.pick.repository"));
+        const name = draft.name.trim(), branch = workUnitBranch(name);
+        if (!name) throw new Error(localize("unit.name.required"));
+        if (!repo.branches.includes(draft.base)) throw new Error(localize("unit.base"));
+        const invalid = await validateUnitBranch(repo.path, branch);
+        if (invalid) throw new Error(invalid);
+        let summary = "";
         if (managed.state.agentId && connection.client.history) {
           const history = await connection.client.history(managed.state.agentId, { limit: 50 });
-          context = history.messages.filter(m => m.type === "user" || m.phase === "final").slice(-8)
+          summary = history.messages.filter(m => m.type === "user" || m.phase === "final").slice(-8)
             .map(m => {
-              let text = m.text;
-              const request = text.match(/<agent-factory-request>([\s\S]*?)<\/agent-factory-request>/);
-              if (request) text = request[1]!.split("[Agent Factory administrator command handoff]")[0]!;
-              else { try { const result = JSON.parse(text); if (typeof result.resultText === "string") text = result.resultText; } catch { /* Plain conversation text. */ } }
-              return `${m.type === "user" ? localize("unit.summary.request") : localize("unit.summary.result")}: ${text.split("\n").filter(line => line.trim()).slice(0, 6).join("\n")}`;
-            }).join("\n\n");
+              const text = workUnitContextText(m.text);
+              return text ? `${localize(m.type === "user" ? "unit.summary.request" : "unit.summary.result")}: ${text}` : "";
+            }).filter(Boolean).join("\n\n");
         }
-        const document = await vscode.workspace.openTextDocument({ language: "markdown", content: `# ${localize("unit.summary.title", name)}\n\n${context}\n\n` });
-        await vscode.window.showTextDocument(document, { preview: false });
-        const confirm = await vscode.window.showInformationMessage(localize("unit.summary.review"), { modal: false }, localize("unit.summary.confirm"));
-        if (!confirm) return;
-        const summary = document.getText();
         const state = { ...createDraftChatState(this.composerPreferences()), role: "main" as const, title: name.trim(), ...(managed.state.model ? { model: managed.state.model } : {}) };
         const panel = vscode.window.createWebviewPanel(this.viewType, state.title, vscode.ViewColumn.Active, this.webviewOptions(state.panelId));
         await this.attach(panel, state);
@@ -1448,7 +1439,7 @@ Read the exact stored child result/receipt and existing workflow status for repo
         targetPanel.initialPrompt = summary;
         targetPanel.executionMode = managed.executionMode ?? this.defaultExecutionMode();
         await this.ensureController(targetPanel);
-        options = { repository: repo.path, name: name.trim(), branch, base: base.label, changes: "keep" };
+        options = { repository: repo.path, name: name.trim(), branch, base: draft.base, changes: "keep" };
       } else {
         await this.ensureController(managed);
         const tree = managed.worktree?.worktree;
@@ -1473,9 +1464,13 @@ Read the exact stored child result/receipt and existing workflow status for repo
         const index = vscode.workspace.workspaceFolders?.findIndex(f => f.uri.fsPath === tree.path) ?? -1;
         if (index >= 0 && !vscode.workspace.updateWorkspaceFolders(index, 1)) throw new Error(localize("unit.explorer.remove.failed"));
       }
+      if (action === "create") await this.post(managed.panel, { type: "worktree.created", created: true });
       await this.post(targetPanel.panel, { type: "host.notice", level: "info", text: localize(action === "create" ? "worktree.created.notice" : "worktree.merged.notice") });
     } catch (error) {
-      await this.post(targetPanel.panel, { type: "host.notice", level: "error", text: localize("worktree.failed", error instanceof Error ? error.message : String(error)) });
+      if (action === "create") {
+        await this.post(managed.panel, { type: "worktree.created", created: Boolean(targetPanel !== managed && targetPanel.worktree?.worktree), error: error instanceof Error ? error.message : String(error) });
+        if (targetPanel !== managed && !targetPanel.worktree?.worktree) targetPanel.panel.dispose();
+      } else await this.post(targetPanel.panel, { type: "host.notice", level: "error", text: localize("worktree.failed", error instanceof Error ? error.message : String(error)) });
     } finally {
       await this.refreshWorktree(targetPanel);
       await this.post(managed.panel, { type: "worktree.updated", value: managed.worktree, busy: false });
