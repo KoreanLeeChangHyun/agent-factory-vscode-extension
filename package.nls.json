@@ -14,7 +14,7 @@
   "agentFactory.sidebar.deleteGroup.title": "Ungroup",
   "agentFactory.mainChat.statusItems.description": "Choose which information to display and its order in the status bar settings below the chat. Drag items or use the move buttons to reorder them. An empty array hides all items.",
   "agentFactory.mainChat.pythonPath.description": "Python 3.10+ executable path on the extension host (without shell arguments). Empty uses python3 from PATH (python on Windows). On macOS, select your installed Python if the system Python is older.",
-  "agentFactory.mainChat.codexPath.description": "Optional absolute Codex CLI executable path on the workspace extension host (without shell arguments). Empty uses PATH, then supported NVM installations. An invalid configured path blocks startup instead of falling back.",
+  "agentFactory.mainChat.codexPath.description": "Optional absolute Codex CLI executable path on this extension host (without shell arguments). Empty or unusable values fall back to finding the `codex` command like a new terminal would (PATH, login-shell or registry PATH, nvm/fnm and common install locations).",
   "agentFactory.mainChat.runtimeExecPath.description": "Optional exec.py override for the Extension Development Host only. Normal windows always use the installed plugin cache. The F5 local plugin root takes precedence.",
   "agentFactory.mainChat.executionMode.description": "Permissions for the next Main Agent run. The default allows full file system and network access without additional execution approval. You can restrict access to workspace writes or CLI defaults. Permissions can change between runs in the same session; the current run is unaffected.",
   "agentFactory.mainChat.executionMode.enum.0": "New sessions use CLI settings; existing sessions keep their saved policy.",
@@ -26,11 +26,12 @@
   "agentFactory.sidebar.archive.title": "Remove Agent from List (Archive)",
   "agentFactory.sidebar.restore.title": "Restore Archived Agent",
   "agentFactory.mainChat.botsEnabled.description": "Enable companion bots in all chats, including animations and AI expressions.",
-  "agentFactory.mainChat.claudePath.description": "Optional absolute path to the Claude Code CLI. When empty, PATH and ~/.local/bin are searched. Claude models appear only when the CLI is found.",
+  "agentFactory.mainChat.claudePath.description": "Optional absolute path to the Claude Code CLI on this extension host. Empty or unusable values fall back to finding the `claude` command like a new terminal would. Claude models appear only when the CLI is found.",
   "agentFactory.agents.main.model.description": "Main agent model. Empty inherits the parent scope. Chat overrides take priority.",
   "agentFactory.agents.main.reasoningEffort.description": "Main agent reasoningEffort. Empty inherits the parent scope. Chat overrides take priority.",
   "agentFactory.agents.work.model.description": "Work agent model. Empty inherits the parent scope. Chat overrides take priority.",
   "agentFactory.agents.work.reasoningEffort.description": "Work agent reasoningEffort. Empty inherits the parent scope. Chat overrides take priority.",
   "agentFactory.agents.verification.model.description": "Verification agent model. Empty inherits the parent scope. Chat overrides take priority.",
-  "agentFactory.agents.verification.reasoningEffort.description": "Verification agent reasoningEffort. Empty inherits the parent scope. Chat overrides take priority."
+  "agentFactory.agents.verification.reasoningEffort.description": "Verification agent reasoningEffort. Empty inherits the parent scope. Chat overrides take priority.",
+  "agentFactory.workUnits.warnDefaultBranch.description": "Show a repository-specific notice when working directly on main/master."
 }

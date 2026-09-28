@@ -178,7 +178,8 @@ test("conversation clear publishes its boundary before a racing chat is promoted
   let releaseBoundary;
   const boundaryReady = new Promise(resolve => { releaseBoundary = resolve; });
   const posted = [];
-  const manager = new module.exports.ChatPanelManager({}, {}, () => [], async () => { throw new Error("not used"); });
+  // chat.send refreshes worktree state first; report no runtime instead of failing that probe.
+  const manager = new module.exports.ChatPanelManager({}, {}, () => [], async () => ({ available: false }));
   manager.clearConversation = async managed => {
     await boundaryReady;
     managed.state.conversationId = "conversation-new";

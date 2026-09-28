@@ -6,7 +6,7 @@ import { runInNewContext } from 'node:vm';
 const require = createRequire(import.meta.url);
 const output = await build({ entryPoints: [new URL('../../src/infrastructure/vscode/chat-panel-manager.ts', import.meta.url).pathname], bundle: true, platform: 'node', format: 'cjs', write: false, external: ['vscode'] });
 const module = { exports: {} };
-runInNewContext(output.outputFiles[0].text, { module, exports: module.exports, require: name => name === 'vscode' ? {} : require(name), global: { Date }, console, process, Buffer, URL, setTimeout, clearTimeout });
+runInNewContext(output.outputFiles[0].text, { module, exports: module.exports, require: name => name === 'vscode' ? { workspace: {} } : require(name), global: { Date }, console, process, Buffer, URL, setTimeout, clearTimeout });
 const { ChatPanelManager } = module.exports;
 const make = () => new ChatPanelManager({}, {}, () => [], async () => ({ available: false }));
 test('manager disposal blocks controller final notifications before accessing Webview', async () => {

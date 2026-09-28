@@ -355,7 +355,7 @@
         "agentFactory.workUnits.warnDefaultBranch": {
           "type": "boolean",
           "default": true,
-          "description": "Show a repository-specific notice when working directly on main/master. / main·master 직접 작업 시 저장소별 알림을 표시합니다."
+          "description": "%agentFactory.workUnits.warnDefaultBranch.description%"
         }
       }
     },

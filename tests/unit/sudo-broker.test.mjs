@@ -10,6 +10,9 @@ import { build } from 'esbuild';
 import test from 'node:test';
 import { importTypeScript } from '../support/import-typescript.mjs';
 
+// Tests may run inside an Agent Factory chat that already exported a live broker handoff.
+for (const key of ['AGENT_FACTORY_SUDO_SOCKET', 'AGENT_FACTORY_SUDO_TOKEN', 'AGENT_FACTORY_SUDO_HELPER']) delete process.env[key];
+
 const root = dirname(dirname(dirname(fileURLToPath(import.meta.url))));
 const output = await build({ entryPoints: [join(root, 'src/infrastructure/vscode/sudo-broker.ts')],
   bundle: true, write: false, platform: 'node', format: 'cjs', target: 'node18' });

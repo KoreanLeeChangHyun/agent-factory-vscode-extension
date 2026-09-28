@@ -274,7 +274,7 @@ test("composer shows only supported controls across draft and bound sessions", a
   const clearControl = script.slice(script.indexOf('  function updateConversationClearControl()'), script.indexOf('  function resetConversationState()'));
   const context = {
     document: { createElementNS: element, querySelector() { return null; }, getElementById() { return clearButton; } },
-    conversationClearing: false,
+    conversationClearing: false, conversationWorktree: undefined,
     renderStatusBar() { statusRenders++; },
     updateComposerControls() {},
     modelMenu: { querySelector() { return null; } }, submissionButton: button(),

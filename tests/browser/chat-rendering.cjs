@@ -805,8 +805,13 @@ async function main() {
       await page.setViewportSize({ width: viewportWidth, height: 900 });
       for (const [sample, label] of [['short', '검증중'], ['long', '작업 결과를 검증하고 있습니다. 실행 결과와 변경 내용을 확인하고 있습니다']]) {
         await emit({ type: 'run.progress', text: label });
+        // The first element screenshot can change layout (scrolling or scrollbar toggling) and resize the
+        // label; take a discarded capture so the resting baseline and later frames share one width.
+        await page.locator('.run-status-label').screenshot({ animations: 'allow' });
+        await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
         const snapshots = new Map();
         const visibleFrames = [];
+        let scanWidth;
         for (const time of [0, 300, 600, 900, 1200, 1500, 1800, 2100, 2399, 2400]) {
           const computed = await page.locator('.run-status-label').evaluate((element, time) => {
             const animation = element.getAnimations()[0];
@@ -818,6 +823,8 @@ async function main() {
           assert.equal(computed.repeat, 'no-repeat');
           assert.equal(computed.backgroundSize, '230% 100%');
           assert.equal(computed.delay, '0s');
+          if (time === 0) scanWidth = computed.width;
+          assert.equal(computed.width, scanWidth, 'Scan frames must share one settled layout width');
           const screenshot = await page.locator('.run-status-label').screenshot({ path: path.join(artifactDir, 'scan-' + viewportWidth + '-' + sample + '-' + time + '.png'), animations: 'allow' });
           snapshots.set(time, screenshot);
           const pixels = await page.evaluate(async ({ base64, baseline }) => {

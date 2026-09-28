@@ -4,7 +4,9 @@ import { runUiInNewContext as runInNewContext } from '../support/ui-localization
 import test from 'node:test';
 
 const script = await readFile(new URL('../../static/js/chat.js', import.meta.url), 'utf8');
-const submitSource = script.slice(script.indexOf('  function submit('), script.indexOf('  function cancelRun()'));
+const submitSource = script.slice(script.indexOf('  function submit('), script.indexOf('  function cancelRun()'))
+  // submit() resolves delegated model settings through these helpers.
+  + script.slice(script.indexOf('  function inheritedAgentRole('), script.indexOf('  function createAgentSettingControl('));
 const actions = ['work', 'plan', 'verification', 'plan-work', 'work-verification', 'plan-work-verification'];
 
 for (const action of actions) for (const goalEnabled of [false, true]) {
@@ -14,7 +16,7 @@ for (const action of actions) for (const goalEnabled of [false, true]) {
       state: { role: 'main', taskMode: 'work-verification', businessMode: 'interview', attachments: [], capabilities: {}, runtimeAvailable: true, goalMode: true },
       taskModeNames: Object.fromEntries(['direct', ...actions].map(value => [value, value])),
       inputFeedback: {}, prompt: { value: 'Current draft', focus() {} }, timeline: {}, followLatest: false,
-      conversationClearing: false,
+      conversationClearing: false, conversationWorktree: undefined,
       currentCapabilities: () => ({ goal: true }), createId: () => String(sent.length),
       appendNotice() { throw Error('Unexpected notice'); }, saveComposerSettings() {}, renderAll() {}, resizePrompt() {}, persist() {},
       vscode: { postMessage(message) { sent.push(message); } }
@@ -51,7 +53,7 @@ for (const action of ['direct', ...actions]) {
       state: { role: 'main', attachments: [], capabilities: {}, runtimeAvailable: true, goalMode: false },
       taskModeNames: Object.fromEntries(['direct', ...actions].map(value => [value, value])),
       inputFeedback: {}, prompt: { value: '   ', focus() {} }, timeline: {}, followLatest: false,
-      conversationClearing: false,
+      conversationClearing: false, conversationWorktree: undefined,
       currentCapabilities: () => ({ goal: true }), createId: () => 'attachment-only',
       appendNotice() { throw Error('Unexpected notice'); }, saveComposerSettings() {}, renderAll() {}, resizePrompt() {}, persist() {},
       vscode: { postMessage(message) { sent.push(message); } }

@@ -4,7 +4,9 @@ import { runUiInNewContext as runInNewContext } from "../support/ui-localization
 import test from "node:test";
 
 const script = await readFile(new URL("../../static/js/chat.js", import.meta.url), "utf8");
-const submit = script.slice(script.indexOf("  function submit("), script.indexOf("  function cancelRun()"));
+const submit = script.slice(script.indexOf("  function submit("), script.indexOf("  function cancelRun()"))
+  // submit() resolves delegated model settings through these helpers.
+  + script.slice(script.indexOf('  function inheritedAgentRole('), script.indexOf('  function createAgentSettingControl('));
 const controls = script.slice(script.indexOf("  function updateSendButton()"), script.indexOf("  function updateRunControls()"));
 
 function harness(overrides = {}, text = "오류 수정") {
@@ -15,7 +17,7 @@ function harness(overrides = {}, text = "오류 수정") {
     taskModeNames: Object.fromEntries(["direct", "work", "plan", "verification", "plan-work", "work-verification", "plan-work-verification"].map(value => [value, value])),
     timeline: { scrollTop: 0, scrollHeight: 500 },
     inputFeedback: {}, prompt: { value: text, focus() {} }, nativeGoal: null,
-    conversationClearing: false,
+    conversationClearing: false, conversationWorktree: undefined,
     currentCapabilities: () => ({ model: true, reasoning: true, fast: true, goal: true }),
     createId: () => "message-id", renderAll() {}, resizePrompt() {}, persist() {}, saveComposerSettings() {},
     summarizeChildAgents: () => ({ activeUnits: 0, workActive: 0, verificationActive: 0, totalCalled: 0 }),
