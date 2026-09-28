@@ -802,6 +802,16 @@ test("runtime client refreshes changed context usage during a turn and forces th
       { kind: "usage", usedTokens: 30_000, contextWindowTokens: 258_400 }
     ]
   });
+
+  // Claude runs have no rollout; the runtime records context and weekly usage in the run state.
+  const claudeRunRoot = join(agentsRoot(projectRoot), "main-test/runs/run-claude");
+  await mkdir(claudeRunRoot, { recursive: true });
+  await writeFile(join(claudeRunRoot, "state.json"), JSON.stringify({
+    contextUsage: { usedTokens: 40_000, contextWindowTokens: 1_000_000, weeklyUsedPercent: 19 }
+  }));
+  await writeFile(join(claudeRunRoot, "events.jsonl"), JSON.stringify({ type: "turn.started" }) + "\n");
+  assert.deepEqual((await client.updates("main-test", "run-claude", 0)).updates.at(-1),
+    { kind: "usage", usedTokens: 40_000, contextWindowTokens: 1_000_000, weeklyUsedPercent: 19 });
 });
 
 test("session controller binds once, sends later turns, and retains attachment references", async function () {

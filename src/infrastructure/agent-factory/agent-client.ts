@@ -761,7 +761,9 @@ When a command needs sudo and the Human has requested it, use python3 ${JSON.str
       const recorded = readRecordOrUndefined(state?.contextUsage);
       const usedTokens = readTokenCount(recorded?.usedTokens);
       const contextWindowTokens = readTokenCount(recorded?.contextWindowTokens);
-      return usedTokens !== undefined && contextWindowTokens !== undefined ? { usedTokens, contextWindowTokens } : undefined;
+      if (usedTokens === undefined || contextWindowTokens === undefined) return undefined;
+      const weeklyUsedPercent = readUsedPercent(recorded?.weeklyUsedPercent);
+      return { usedTokens, contextWindowTokens, ...(weeklyUsedPercent !== undefined ? { weeklyUsedPercent } : {}) };
     } catch {
       return undefined;
     }
@@ -1640,12 +1642,14 @@ function readWeeklyUsedPercent(value: unknown): number | undefined {
   for (const key of ["primary", "secondary"] as const) {
     const window = readRecordOrUndefined(rateLimits?.[key]);
     if (window?.window_minutes !== 7 * 24 * 60) continue;
-    const usedPercent = window.used_percent;
-    if (typeof usedPercent === "number" && Number.isFinite(usedPercent) && usedPercent >= 0 && usedPercent <= 100) {
-      return usedPercent;
-    }
+    const usedPercent = readUsedPercent(window.used_percent);
+    if (usedPercent !== undefined) return usedPercent;
   }
   return undefined;
+}
+
+function readUsedPercent(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isFinite(value) && value >= 0 && value <= 100 ? value : undefined;
 }
 
 function activityUpdate(
