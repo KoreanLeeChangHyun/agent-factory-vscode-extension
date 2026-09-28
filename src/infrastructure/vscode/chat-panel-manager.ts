@@ -1,3 +1,4 @@
+import { unitGit, validateUnitBranch, directBranchEvidence } from "./work-unit-git";
 import { openContractPanel } from "./contract-panel";
 import { listContracts } from "../filesystem/contracts";
 import { readAgentDefaults, saveAgentDefault } from "./agent-settings-store";
@@ -40,6 +41,7 @@ type RuntimeConnection =
   | { readonly available: false; readonly diagnostic: string };
 
 interface ManagedPanel {
+  initialPrompt?: string;
   contractWorkflows?: readonly Record<string, unknown>[];
   readonly panel: vscode.WebviewPanel;
   state: ChatPanelState;
@@ -93,6 +95,7 @@ export class ChatPanelManager implements vscode.Disposable {
   private activePanelId: string | undefined;
   private readonly sidebarListeners = new Set<() => void>();
   private sidebarAgentWrite: Promise<void> = Promise.resolve();
+  private branchNoticeWrite: Promise<void> = Promise.resolve();
   private readonly agentRefreshes = new WeakMap<AgentRuntimeClient, Map<string, Promise<{
     readonly agents: readonly import("../agent-factory/agent-client").ChildAgentSession[];
     readonly workflows: readonly Record<string, unknown>[] | undefined;
@@ -430,13 +433,21 @@ export class ChatPanelManager implements vscode.Disposable {
     }
 
     switch (message.type) {
+      case "worktree.repositories": {
+        const connection = await this.connectRuntime();
+        try {
+          const repositories = connection.available ? await connection.client.worktreeRepositories?.() ?? [] : [];
+          await this.post(managed.panel, { type: "worktree.repositories", repositories });
+        } catch (error) { await this.post(managed.panel, { type: "host.notice", level: "error", text: String(error) }); }
+        return;
+      }
       case "worktree.refresh":
         await this.refreshWorktree(managed);
         return;
       case "worktree.create":
       case "worktree.merge": {
         if (managed.sessionTransition) return;
-        const transition = this.changeWorktree(managed, message.type === "worktree.create" ? "create" : "merge");
+        const transition = this.changeWorktree(managed, message.type === "worktree.create" ? "create" : "merge", message.type === "worktree.create" ? message.repository : undefined);
         managed.sessionTransition = transition;
         try { await transition; }
         finally { if (managed.sessionTransition === transition) managed.sessionTransition = undefined; }
@@ -529,6 +540,7 @@ export class ChatPanelManager implements vscode.Disposable {
           }
         }
         await this.refreshWorktree(managed);
+        if (managed.initialPrompt) { await this.post(managed.panel, { type: "composer.prefill", text: managed.initialPrompt }); managed.initialPrompt = undefined; }
         this.scheduleAgentList(managed, true);
         if (!managed.branchRefreshStarted) {
           managed.branchRefreshStarted = true;
@@ -554,6 +566,12 @@ export class ChatPanelManager implements vscode.Disposable {
         this.sudoBroker.respond(managed.state.panelId, message);
         return;
       case "chat.send": {
+        await this.refreshWorktree(managed);
+        if (managed.worktree?.worktree?.workUnit && managed.worktree.worktree.phase === "merged") {
+          await this.post(managed.panel, { type: "host.notice", level: "warning", text: localize("unit.archived") });
+          return;
+        }
+        await this.warnDirectBranch(managed);
         await this.ensureSudoBroker(managed);
         const previous = managed.startedMessages?.find(item => item.id === message.id);
         if (previous) { await this.post(managed.panel, previous); return; }
@@ -1360,42 +1378,103 @@ Read the exact stored child result/receipt and existing workflow status for repo
     }
   }
 
-  private async changeWorktree(managed: ManagedPanel, action: "create" | "merge"): Promise<void> {
+  private async warnDirectBranch(managed: ManagedPanel): Promise<void> {
+    const pending = this.branchNoticeWrite.then(() => this.updateDirectBranchNotice(managed));
+    this.branchNoticeWrite = pending.catch(() => {});
+    await pending;
+  }
+
+  private async updateDirectBranchNotice(managed: ManagedPanel): Promise<void> {
+    if (!vscode.workspace.getConfiguration("agentFactory").get<boolean>("workUnits.warnDefaultBranch", true)) return;
+    const root = managed.worktree?.workingDirectory ?? vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+    if (!root) return;
     try {
-      if ((managed.state.role ?? "main") !== "main" || managed.pendingMessageIds?.size) throw new Error(localize("worktree.busy"));
-      await this.ensureController(managed);
-      if (!managed.controller) throw new Error(localize("worktree.unsupported"));
-      if (managed.controller.running || managed.controller.queueLength) throw new Error(localize("worktree.busy"));
+      const evidence = await directBranchEvidence(root);
+      const key = "agentFactory.workUnit.warning." + evidence.key;
+      const previous = this.context.globalState.get<{ shown: boolean; operations: string[] }>(key);
+      const completed = previous && evidence.operations.some(operation => !previous.operations.includes(operation));
+      const shown = previous?.shown && !completed;
+      if (["main", "master"].includes(evidence.branch) && !shown) {
+        await this.context.globalState.update(key, { shown: true, operations: evidence.operations });
+        await vscode.window.showInformationMessage(localize("unit.direct.notice", evidence.branch));
+      } else await this.context.globalState.update(key, { shown: Boolean(shown), operations: evidence.operations });
+    } catch { /* Without Git evidence, do not infer a completed push or merge. */ }
+  }
+
+  private async changeWorktree(managed: ManagedPanel, action: "create" | "merge", repository?: string): Promise<void> {
+    let targetPanel = managed;
+    try {
+      if ((managed.state.role ?? "main") !== "main" || managed.pendingMessageIds?.size || managed.controller?.running || managed.controller?.queueLength) throw new Error(localize("worktree.busy"));
+      const connection = await this.connectRuntime();
+      if (!connection.available) throw new Error(connection.diagnostic);
+      const repositories = await connection.client.worktreeRepositories?.();
+      if (!repositories) throw new Error(localize("worktree.unsupported"));
       await this.post(managed.panel, { type: "worktree.updated", value: managed.worktree, busy: true });
-      let changes: "keep" | "copy" | undefined;
-      let path: string | undefined;
+      let options: import("../agent-factory/agent-client").WorktreeOptions;
       if (action === "create") {
-        const choice = await vscode.window.showQuickPick([
-          { label: localize("worktree.keep"), value: "keep" as const },
-          { label: localize("worktree.copy"), value: "copy" as const }
-        ], { title: localize("worktree.changes") });
-        if (!choice) return;
-        changes = choice.value;
-        const location = await vscode.window.showQuickPick([
-          { label: localize("worktree.default.path"), custom: false },
-          { label: localize("worktree.custom.path"), custom: true }
-        ], { title: localize("worktree.location") });
-        if (!location) return;
-        if (location.custom) {
-          path = await vscode.window.showInputBox({ title: localize("worktree.location"), prompt: localize("worktree.path.prompt"),
-            validateInput: value => isAbsolute(value) ? undefined : localize("worktree.path.prompt") });
-          if (!path) return;
+        const repo = repositories.find(r => r.path === repository) ?? (repositories.length === 1 ? repositories[0] : undefined);
+        if (!repo) { await this.post(managed.panel, { type: "worktree.repositories", repositories }); throw new Error(localize("unit.pick.repository")); }
+        const name = await vscode.window.showInputBox({ title: localize("unit.name"), validateInput: value => value.trim() ? undefined : localize("unit.name.required") });
+        if (!name) return;
+        const base = await vscode.window.showQuickPick([...repo.branches].sort((a, b) => Number(b === repo.defaultBranch) - Number(a === repo.defaultBranch)).map(label => ({ label, picked: label === repo.defaultBranch })), { title: localize("unit.base"), placeHolder: repo.defaultBranch ?? undefined });
+        if (!base) return;
+        const branch = await vscode.window.showInputBox({ title: localize("unit.branch"), value: name.trim().replace(/\s+/g, "-"), validateInput: value => validateUnitBranch(repo.path, value) });
+        if (!branch) return;
+        // Build an editable context handoff from the durable conversation; never share its session identity.
+        let context = "";
+        if (managed.state.agentId && connection.client.history) {
+          const history = await connection.client.history(managed.state.agentId, { limit: 50 });
+          context = history.messages.filter(m => m.type === "user" || m.phase === "final").slice(-8)
+            .map(m => {
+              let text = m.text;
+              const request = text.match(/<agent-factory-request>([\s\S]*?)<\/agent-factory-request>/);
+              if (request) text = request[1]!.split("[Agent Factory administrator command handoff]")[0]!;
+              else { try { const result = JSON.parse(text); if (typeof result.resultText === "string") text = result.resultText; } catch { /* Plain conversation text. */ } }
+              return `${m.type === "user" ? localize("unit.summary.request") : localize("unit.summary.result")}: ${text.split("\n").filter(line => line.trim()).slice(0, 6).join("\n")}`;
+            }).join("\n\n");
         }
+        const document = await vscode.workspace.openTextDocument({ language: "markdown", content: `# ${localize("unit.summary.title", name)}\n\n${context}\n\n` });
+        await vscode.window.showTextDocument(document, { preview: false });
+        const confirm = await vscode.window.showInformationMessage(localize("unit.summary.review"), { modal: false }, localize("unit.summary.confirm"));
+        if (!confirm) return;
+        const summary = document.getText();
+        const state = { ...createDraftChatState(this.composerPreferences()), role: "main" as const, title: name.trim(), ...(managed.state.model ? { model: managed.state.model } : {}) };
+        const panel = vscode.window.createWebviewPanel(this.viewType, state.title, vscode.ViewColumn.Active, this.webviewOptions(state.panelId));
+        await this.attach(panel, state);
+        targetPanel = this.panels.get(state.panelId)!;
+        targetPanel.initialPrompt = summary;
+        targetPanel.executionMode = managed.executionMode ?? this.defaultExecutionMode();
+        await this.ensureController(targetPanel);
+        options = { repository: repo.path, name: name.trim(), branch, base: base.label, changes: "keep" };
+      } else {
+        await this.ensureController(managed);
+        const tree = managed.worktree?.worktree;
+        const repo = repositories.find(r => r.path === tree?.repositoryRoot) ?? repositories[0];
+        if (!tree || !repo) throw new Error(localize("unit.merge.missing"));
+        const target = await vscode.window.showQuickPick(repo.branches.filter(b => b !== tree.branch).sort((a, b) => Number(b === tree.targetBranch) - Number(a === tree.targetBranch)).map(label => ({ label, picked: label === tree.targetBranch })), { title: localize("unit.merge.target"), placeHolder: tree.targetBranch });
+        if (!target) return;
+        const diff = await unitGit(repo.path, ["diff", "--stat", `refs/heads/${target.label}...refs/heads/${tree.branch}`, "--"]);
+        const confirmed = await vscode.window.showWarningMessage(localize("unit.merge.review", tree.branch, target.label, diff || localize("unit.merge.empty")), { modal: true }, localize("unit.merge.confirm"));
+        if (!confirmed) return;
+        options = { target: target.label };
       }
-      managed.worktree = await managed.controller.changeWorktree(action, { changes, path, executionMode: managed.executionMode ?? this.defaultExecutionMode(),
-        ...(managed.state.model ? { model: managed.state.model } : {}) });
-      const conflicted = managed.worktree.worktree?.phase === "conflict";
-      await this.post(managed.panel, { type: "host.notice", level: conflicted ? "warning" : "info",
-        text: localize(conflicted ? "worktree.conflict.notice" : action === "merge" ? "worktree.merged.notice" : "worktree.created.notice") });
+      if (!targetPanel.controller) throw new Error(localize("worktree.unsupported"));
+      targetPanel.worktree = await targetPanel.controller.changeWorktree(action, { ...options,
+        executionMode: targetPanel.executionMode ?? this.defaultExecutionMode(), ...(targetPanel.state.model ? { model: targetPanel.state.model } : {}) });
+      const tree = targetPanel.worktree.worktree;
+      if (action === "create" && tree) {
+        const folders = vscode.workspace.workspaceFolders ?? [];
+        if (!folders.some(f => f.uri.fsPath === tree.path) && !vscode.workspace.updateWorkspaceFolders(folders.length, 0, { uri: vscode.Uri.file(tree.path), name: tree.name ?? tree.branch })) throw new Error(localize("unit.explorer.add.failed"));
+        if (targetPanel.initialPrompt) { await this.post(targetPanel.panel, { type: "composer.prefill", text: targetPanel.initialPrompt }); targetPanel.initialPrompt = undefined; }
+      } else if (tree?.cleaned) {
+        const index = vscode.workspace.workspaceFolders?.findIndex(f => f.uri.fsPath === tree.path) ?? -1;
+        if (index >= 0 && !vscode.workspace.updateWorkspaceFolders(index, 1)) throw new Error(localize("unit.explorer.remove.failed"));
+      }
+      await this.post(targetPanel.panel, { type: "host.notice", level: "info", text: localize(action === "create" ? "worktree.created.notice" : "worktree.merged.notice") });
     } catch (error) {
-      await this.post(managed.panel, { type: "host.notice", level: "error", text: localize("worktree.failed", error instanceof Error ? error.message : String(error)) });
+      await this.post(targetPanel.panel, { type: "host.notice", level: "error", text: localize("worktree.failed", error instanceof Error ? error.message : String(error)) });
     } finally {
-      await this.refreshWorktree(managed);
+      await this.refreshWorktree(targetPanel);
       await this.post(managed.panel, { type: "worktree.updated", value: managed.worktree, busy: false });
     }
   }

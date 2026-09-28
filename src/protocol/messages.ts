@@ -16,7 +16,8 @@ export type ClientMessage =
   | { readonly type: "contract.open"; readonly id: string }
   | { readonly type: "contracts.request" }
   | { readonly type: "agent.defaults.save"; readonly scope: "global" | "project"; readonly role: "main" | "work" | "verification"; readonly field: "model" | "reasoningEffort"; readonly value: string }
-  | { readonly type: "worktree.create" | "worktree.merge" | "worktree.refresh" }
+  | { readonly type: "worktree.create"; readonly repository?: string }
+  | { readonly type: "worktree.merge" | "worktree.refresh" | "worktree.repositories" }
   | { readonly type: "notes.list"; readonly scope: import("../infrastructure/vscode/note-store").NoteScope }
   | { readonly type: "notes.save"; readonly scope: import("../infrastructure/vscode/note-store").NoteScope; readonly note: Omit<import("../infrastructure/vscode/note-store").Note, "updatedAt"> }
   | { readonly type: "bots.configure"; readonly enabled: boolean }
@@ -95,6 +96,8 @@ export type HostMessage =
   | { readonly type: "sudo.closed" }
   | { readonly type: "attachment.conversionResult"; readonly id: string; readonly path?: string; readonly error?: string }
   | { readonly type: "attachment.encode"; readonly id: string; readonly source: string; readonly mediaType: string; readonly name: string }
+  | { readonly type: "worktree.repositories"; readonly repositories: readonly import("../infrastructure/agent-factory/agent-client").WorktreeRepository[] }
+  | { readonly type: "composer.prefill"; readonly text: string }
   | { readonly type: "worktree.updated"; readonly value?: import("../infrastructure/agent-factory/agent-client").ConversationWorktree; readonly busy?: boolean; readonly supported?: boolean }
   | { readonly type: "notes.list.result"; readonly scope: import("../infrastructure/vscode/note-store").NoteScope; readonly notes: readonly import("../infrastructure/vscode/note-store").Note[]; readonly error?: string }
   | { readonly type: "notes.save.result"; readonly scope: import("../infrastructure/vscode/note-store").NoteScope; readonly id: string; readonly note?: import("../infrastructure/vscode/note-store").Note; readonly error?: string }

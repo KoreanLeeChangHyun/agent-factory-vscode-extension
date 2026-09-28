@@ -31,6 +31,11 @@ export interface CodexCliResolutionOptions {
 let selectedCodexCli: CodexCliSelection | undefined;
 let hostTerminalPath: readonly string[] | undefined;
 
+/** Windows Python installers provide `python`; `python3` is often only the Store alias stub. */
+export function defaultPythonCommand(platform: NodeJS.Platform = process.platform): string {
+  return platform === "win32" ? "python" : "python3";
+}
+
 export class CodexCliNotFoundError extends Error {
   // Named so activation can recognize it across separately bundled modules and test doubles.
   public override readonly name = "CodexCliNotFoundError";

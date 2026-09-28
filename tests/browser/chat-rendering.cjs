@@ -379,6 +379,10 @@ async function main() {
       console.log('Astra starfield: animation, typing, responsive layout and reduced motion passed.');
       return;
     }
+    if (process.argv.includes('--work-units-only')) {
+      await require('./work-units.cjs').checkWorkUnits(page);
+      assert.deepEqual(errors, []); console.log('Work Unit browser checks passed'); return;
+    }
     if (process.argv.includes('--interview-choices-only')) {
       await require('./interview-choices.cjs').checkInterviewChoices(page);
       assert.deepEqual(errors, []);

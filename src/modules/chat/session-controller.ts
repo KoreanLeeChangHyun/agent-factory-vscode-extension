@@ -519,6 +519,8 @@ Answer the Human's current question without cancelling these workflows. For task
     const statusPollStride = this.options.pollIntervalMs === undefined ? 3 : 1;
     let cursor = 0;
     let lastCommentary: string | undefined;
+    // Activities whose completion event never arrives (e.g. a cancelled compaction) must not keep spinning.
+    const openActivities = new Map<string, Parameters<SessionControllerEvents["onActivity"]>[0]>();
     for (let poll = 0; poll < maxPolls; poll += 1) {
       if (this.disposed) return;
       const updates = await this.runtime.updates(agentId, runId, cursor);
@@ -538,7 +540,10 @@ Answer the Human's current question without cancelling these workflows. For task
           this.events.onUsage(update.usedTokens, update.contextWindowTokens, update.weeklyUsedPercent);
         } else {
           lastCommentary = undefined;
-          this.events.onActivity({ ...update, id: `${runId}:${update.id}` });
+          const activity = { ...update, id: `${runId}:${update.id}` };
+          if (activity.phase === "started") openActivities.set(activity.id, activity);
+          else openActivities.delete(activity.id);
+          this.events.onActivity(activity);
         }
       }
       if (poll % statusPollStride === 0) {
@@ -547,6 +552,16 @@ Answer the Human's current question without cancelling these workflows. For task
         this.events.onStatusObserved?.(status.status);
         if (TERMINAL_STATES.has(status.status)) {
           const result = await this.runtime.result(agentId, runId);
+          if (result.status === "cancelled" || result.status === "failed") {
+            const compactionTitle = localize("ui.context.compaction");
+            for (const activity of openActivities.values()) {
+              this.events.onActivity({
+                ...activity,
+                phase: "failed",
+                text: activity.title === compactionTitle ? localize("ui.context.compaction.interrupted") : activity.text
+              });
+            }
+          }
           const diagnostic = result.error ?? status.error;
           const goalError = result.goalError ?? status.goalError;
           if (goalError) this.events.onGoal?.(null, goalError);

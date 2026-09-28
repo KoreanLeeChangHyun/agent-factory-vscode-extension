@@ -149,11 +149,26 @@
   let worktreeSupported = false;
   for (const action of ["create", "merge", "refresh"]) {
     document.getElementById("worktree-" + action)?.addEventListener("click", () => {
-      closeSettingMenu(false);
+      if (action !== "refresh") closeSettingMenu(false);
+      else vscode.postMessage({ type: "worktree.repositories" });
       vscode.postMessage({ type: "worktree." + action });
     });
     document.getElementById("worktree-" + action)?.addEventListener("keydown", handleSettingMenuKeydown);
   }
+  function positionWorktreeMenu() {
+    if (worktreeMenu.hidden) return;
+    const anchor = worktreeButton.getBoundingClientRect();
+    const margin = 8;
+    const width = Math.min(320, window.innerWidth - margin * 2);
+    worktreeMenu.style.width = width + "px";
+    worktreeMenu.style.left = Math.max(margin, Math.min(anchor.right - width, window.innerWidth - width - margin)) + "px";
+    worktreeMenu.style.bottom = Math.max(margin, window.innerHeight - anchor.top + 8) + "px";
+    worktreeMenu.style.maxHeight = Math.max(48, anchor.top - margin * 2) + "px";
+  }
+  window.addEventListener("resize", positionWorktreeMenu);
+  const worktreePositionObserver = new ResizeObserver(positionWorktreeMenu);
+  worktreePositionObserver.observe(document.getElementById("worktree-picker"));
+  worktreePositionObserver.observe(promptSurface);
   function worktreeLocationDescription() {
     const tree = conversationWorktree?.worktree;
     const isolated = tree && tree.phase !== "merged";
@@ -173,14 +188,18 @@
     const tree = conversationWorktree?.worktree;
     const isolated = tree && tree.phase !== "merged";
     worktreeButton.classList.toggle("is-connected", Boolean(isolated));
-    worktreeButton.title = worktreeLocationDescription();
-    worktreeButton.setAttribute("aria-label", worktreeLocationDescription());
-    document.getElementById("worktree-summary").textContent = worktreeLocationDescription();
+    worktreeButton.title = t("worktree.isolated");
+    worktreeButton.setAttribute("aria-label", t("worktree.isolated"));
+    const summary = document.getElementById("worktree-summary");
+    summary.hidden = !isolated;
+    summary.textContent = isolated ? (tree.name || tree.branch) + " · " + tree.branch : "";
     const busy = worktreeBusy || state.running || (state.pendingRequests || []).length > 0 || state.queueCount > 0;
     const create = document.getElementById("worktree-create");
     const merge = document.getElementById("worktree-merge");
-    create.hidden = Boolean(isolated && tree.phase !== "creating");
-    merge.hidden = !isolated || tree.phase === "creating";
+    create.hidden = true;
+    merge.hidden = (!isolated && !(tree?.workUnit && !tree.cleaned)) || tree?.phase === "creating";
+    prompt.readOnly = Boolean(tree?.workUnit && tree.phase === "merged");
+    updateSendButton();
     create.disabled = merge.disabled = busy;
     document.getElementById("worktree-refresh").disabled = worktreeBusy;
   }
@@ -1246,6 +1265,30 @@
       case "syntax.theme":
         void updateSyntaxTheme(message.selection || {});
         break;
+      case "worktree.repositories": {
+        const list = document.getElementById("worktree-repositories");
+        list.replaceChildren();
+        for (const repo of message.repositories) {
+          const button = document.createElement("button"); button.type = "button"; button.className = "setting-option";
+          button.setAttribute("role", "menuitem"); button.classList.add("worktree-repository");
+          button.title = repo.path;
+          const name = document.createElement("strong"); name.textContent = repo.path.replace(/[\\/]+$/, "").split(/[\\/]/).at(-1) || repo.path;
+          const path = document.createElement("span"); path.className = "worktree-repository-path"; path.textContent = repo.path;
+          const action = document.createElement("span"); action.className = "worktree-repository-action"; action.textContent = "+ " + t("worktree.create");
+          button.append(name, path, action);
+          button.addEventListener("click", () => { closeSettingMenu(false); vscode.postMessage({ type: "worktree.create", repository: repo.path }); });
+          button.addEventListener("keydown", handleSettingMenuKeydown); list.append(button);
+        }
+        if (!message.repositories.length) {
+          const empty = document.createElement("p"); empty.className = "worktree-summary"; empty.textContent = t("worktree.empty"); list.append(empty);
+        }
+        positionWorktreeMenu();
+        break;
+      }
+      case "composer.prefill":
+        prompt.value = message.text;
+        prompt.dispatchEvent(new Event("input", { bubbles: true }));
+        break;
       case "worktree.updated":
         if (typeof message.supported === "boolean") worktreeSupported = message.supported;
         if (typeof message.busy === "boolean") worktreeBusy = message.busy;
@@ -1686,7 +1729,7 @@
   });
 
   function submit(action = "direct", workflow = "normal", asGoal = false, choiceAnswer = null) {
-    if (conversationClearing) return;
+    if (conversationClearing || (conversationWorktree?.worktree?.workUnit && conversationWorktree.worktree.phase === "merged")) return;
     if (!Object.hasOwn(taskModeNames(), action)) action = "direct";
     const contextualRequest = workflow === "contract" ? t("submission.contract.request")
       : action === "work" ? t("submission.work.request")
@@ -1762,11 +1805,23 @@
   function renderInterviewChoices(content, event) {
     if (event.phase === "commentary") return;
     for (const table of content.querySelectorAll("table")) {
-      const heading = table.previousElementSibling?.textContent.trim() || "";
-      if (!/^(?:질문|Question)\s*\[\d+\s*\/\s*\d+\]\s*:/i.test(heading)) continue;
+      // Explanatory paragraphs may separate an explicitly designated question and its table.
+      let preceding = table.previousElementSibling;
+      let designated = false;
+      while (preceding && /^(?:P|H[1-6])$/.test(preceding.tagName)) {
+        const heading = preceding.textContent.trim();
+        if (/^(?:질문|Question)\s*\[\d+\s*\/\s*\d+(?:\s*,[^\]\n]+)?\]\s*:/i.test(heading)) {
+          designated = true;
+          break;
+        }
+        if (/^H[1-6]$/.test(preceding.tagName) || /^(?:권고|이전 결정|Recommendation|Previous decision)\s*:/i.test(heading)) break;
+        preceding = preceding.previousElementSibling;
+      }
+      if (!designated) continue;
       if (!/^(?:선택지?|Option)$/i.test(table.querySelector("th")?.textContent.trim() || "")) continue;
       const rows = Array.from(table.querySelectorAll("tbody tr"));
       if (rows.length < 2 || rows.length > 3 || rows.some((row, index) => row.cells[0]?.textContent.trim() !== String(index + 1))) continue;
+      table.classList.add("interview-options");
       for (const row of rows) {
         const number = row.cells[0].textContent.trim();
         const button = document.createElement("button");
@@ -4661,7 +4716,7 @@
   }
 
   function updateSendButton() {
-    sendButton.disabled = conversationClearing || !state.runtimeAvailable || !state.capabilities;
+    sendButton.disabled = conversationClearing || !state.runtimeAvailable || !state.capabilities || Boolean(conversationWorktree?.worktree?.workUnit && conversationWorktree.worktree.phase === "merged");
   }
 
   function updateRunControls() {
@@ -4756,6 +4811,7 @@
     const menu = settingMenu(setting);
     renderSettingMenu(setting, menu);
     menu.hidden = false;
+    if (setting === "worktree") positionWorktreeMenu();
     button.setAttribute("aria-expanded", "true");
     const selected = menu.querySelector('[aria-checked="true"]:not(:disabled)');
     (selected || menu.querySelector("button:not(:disabled), select:not(:disabled), details:not([hidden]) > summary"))?.focus();
@@ -5060,7 +5116,7 @@
 
   function renderSettingMenu(setting, menu) {
     if (setting === "model") renderModelSettings(menu);
-    else if (setting === "worktree") renderWorktree();
+    else if (setting === "worktree") { renderWorktree(); vscode.postMessage({ type: "worktree.repositories" }); }
     else renderSubmissionMenu(menu);
   }
 

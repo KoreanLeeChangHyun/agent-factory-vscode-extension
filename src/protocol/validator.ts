@@ -10,7 +10,7 @@ import type { ClientMessage } from "./messages";
 const clientMessageTypes = new Set([
   "agent.defaults.save",
   "client.ready",
-  "worktree.create", "worktree.merge", "worktree.refresh",
+  "worktree.create", "worktree.merge", "worktree.refresh", "worktree.repositories",
   "notes.list",
   "notes.save",
   "bots.configure",
@@ -70,6 +70,8 @@ export function parseClientMessage(value: unknown): ClientMessage | undefined {
         return { type: "sudo.reply", id: value.id, key: value.key as string, iv: value.iv as string, data: value.data as string };
       return undefined;
     case "worktree.create":
+      return value.repository === undefined || typeof value.repository === "string" ? { type: value.type, ...(typeof value.repository === "string" ? { repository: value.repository } : {}) } : undefined;
+    case "worktree.repositories":
     case "worktree.merge":
     case "worktree.refresh":
       return { type: value.type };

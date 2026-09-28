@@ -2897,7 +2897,7 @@ html[data-af-hidden="true"] *::after {
   :is(#model-menu, #agent-default-fields) .agent-reasoning-value { grid-column: 1; }
 }
 
-.worktree-menu { width: min(300px, calc(100vw - 32px)); min-width: 0; left: 0; right: auto; }
+.worktree-menu { position: fixed; box-sizing: border-box; width: min(320px, calc(100vw - 16px)); min-width: 0; right: auto; padding: 8px; border-radius: 10px; overflow-x: hidden; }
 .worktree-summary { margin: 6px 10px; font-size: 11px; color: var(--vscode-descriptionForeground); overflow-wrap: anywhere; }
 #worktree-button.is-connected { color: var(--vscode-button-foreground); background: var(--vscode-button-background); }
 #worktree-button svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.5; }
@@ -2911,6 +2911,28 @@ html[data-af-hidden="true"] *::after {
 .contract-list-entry + .contract-list-entry { border-top: 1px solid var(--vscode-panel-border, #454545); }
 .contract-list-title { font-weight: 600; overflow-wrap: anywhere; }
 .contract-list-metadata { font-size: 11px; color: var(--vscode-descriptionForeground); overflow-wrap: anywhere; }
+
+/* Keep the option label and number controls intact in narrow chat panels. */
+.markdown-body table.interview-options th:first-child,
+.markdown-body table.interview-options td:first-child,
+table.interview-options th:first-child,
+table.interview-options td:first-child {
+  min-width: 4em;
+  width: 4em;
+  white-space: nowrap;
+  word-break: normal;
+  overflow-wrap: normal;
+  text-align: center;
+}
+
+.worktree-heading { display: flex; align-items: center; justify-content: space-between; padding: 2px 6px 8px; gap: 12px; }
+.worktree-heading strong { font-size: 12px; }
+.worktree-heading .icon-button { width: 26px; height: 26px; font-size: 19px; }
+.worktree-repository.setting-option { display: grid; width: 100%; box-sizing: border-box; gap: 5px; padding: 10px; text-align: left; white-space: normal; border-radius: 6px; }
+.worktree-repository strong { font-size: 13px; overflow-wrap: anywhere; }
+.worktree-repository-path { color: var(--vscode-descriptionForeground); font-size: 11px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.worktree-repository-action { font-size: 11px; color: var(--vscode-textLink-foreground, #3794ff); margin-top: 3px; }
+.worktree-repository + .worktree-repository { margin-top: 4px; }
 
 .question-menu { position: fixed; box-sizing: border-box; right: auto; min-width: 0; max-width: none; padding: 6px; overflow-x: hidden; }
 .question-menu .question-row { grid-template-columns: minmax(0, 1fr) 30px; gap: 8px; padding-right: 4px; }

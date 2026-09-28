@@ -7,6 +7,7 @@ import { locateAgentFactoryExec } from "../infrastructure/agent-factory/plugin-l
 import { AgentFactoryClient } from "../infrastructure/agent-factory/agent-client";
 import { AsyncCache } from "../common/async-cache";
 import { developmentPluginRoot, developmentExecPath } from "../infrastructure/agent-factory/development-plugin";
+import { defaultPythonCommand } from "../infrastructure/agent-factory/process-environment";
 
 type RuntimeConnection = { readonly available: true; readonly client: AgentFactoryClient } | { readonly available: false; readonly diagnostic: string };
 
@@ -32,7 +33,7 @@ export function createContainer(context: vscode.ExtensionContext): Container {
       const configuredPath = developmentRoot ? developmentExecPath(developmentRoot) : isDevelopment ? vscode.workspace
         .getConfiguration("agentFactory.mainChat")
         .get<string>("runtimeExecPath") : undefined;
-      const pythonPath = vscode.workspace.getConfiguration("agentFactory.mainChat").get<string>("pythonPath")?.trim() || "python3";
+      const pythonPath = vscode.workspace.getConfiguration("agentFactory.mainChat").get<string>("pythonPath")?.trim() || defaultPythonCommand();
       const key = JSON.stringify([projectRoot, configuredPath, pythonPath, process.env.CODEX_HOME, process.env.PATH]);
       return connections.get(key, async () => {
         const location = await locateAgentFactoryExec({ configuredPath, requiredVersion });

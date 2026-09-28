@@ -11,7 +11,7 @@ const output = await build({
   bundle: true, format: "esm", platform: "node", target: "node18", write: false
 });
 const environmentModule = await import(`data:text/javascript;base64,${Buffer.from(output.outputFiles[0].text).toString("base64")}`);
-const { codexExecutable, configureCodexCli, resolveCodexCli, runtimeEnvironment, resolveClaudeCli, claudeExecutable, configureClaudeCli } = environmentModule;
+const { defaultPythonCommand, codexExecutable, configureCodexCli, resolveCodexCli, runtimeEnvironment, resolveClaudeCli, claudeExecutable, configureClaudeCli } = environmentModule;
 
 async function executable(path) {
   await writeFile(path, "#!/bin/sh\nexit 0\n");
@@ -162,6 +162,12 @@ test("Claude CLI resolves from the configured path, PATH, then the user-local in
   } finally {
     await rm(root, { recursive: true, force: true });
   }
+});
+
+test("default Python command follows the platform installer convention", () => {
+  assert.equal(defaultPythonCommand("win32"), "python");
+  assert.equal(defaultPythonCommand("linux"), "python3");
+  assert.equal(defaultPythonCommand("darwin"), "python3");
 });
 
 test("Windows npm global shims resolve to the native Codex and Claude binaries", async (t) => {

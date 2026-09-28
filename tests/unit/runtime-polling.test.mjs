@@ -66,3 +66,28 @@ test('query failure preserves accepted identity and never fabricates completion 
   assert.equal(f.observed.cancellations, 0);
   assert.deepEqual(f.observed.finals, []);
 });
+
+test('cancelled run settles an unfinished context compaction instead of leaving it spinning', async t => {
+  accelerate(t);
+  const activities = [];
+  const f = fixture(async () => ({ status: 'cancelled' }));
+  f.events.onActivity = activity => activities.push(activity);
+  f.runtime.result = async () => ({ status: 'cancelled', text: '' });
+  let delivered = false;
+  f.runtime.updates = async (a, r, cursor) => {
+    if (delivered) return { cursor, updates: [] };
+    delivered = true;
+    return { cursor: cursor + 1, updates: [
+      { kind: 'activity', id: 'compact-1', category: 'tool', phase: 'started', text: 'Compacting context', title: 'Context compaction' },
+      { kind: 'activity', id: 'cmd-1', category: 'command', phase: 'started', text: 'ls' },
+      { kind: 'activity', id: 'cmd-1', category: 'command', phase: 'completed', text: 'ls' }
+    ] };
+  };
+  const controller = new ChatSessionController(f.runtime, f.events);
+  await controller.send('work', [], {});
+  const settled = activities.slice(3);
+  assert.equal(settled.length, 1);
+  assert.equal(settled[0].id, 'run-test:compact-1');
+  assert.equal(settled[0].phase, 'failed');
+  assert.equal(settled[0].text, 'Context compaction interrupted');
+});

@@ -6,7 +6,7 @@ import type { AgentPermissions } from "../../common/types/agent-permissions";
 import type { AgentModels } from "../../common/types/agent-models";
 import { constants as fsConstants, type Dirent } from "node:fs";
 import { spawn } from "node:child_process";
-import { claudeExecutable, codexExecutable, runtimeEnvironment } from "./process-environment";
+import { claudeExecutable, codexExecutable, defaultPythonCommand, runtimeEnvironment } from "./process-environment";
 import { sudoHandoffEnvironment } from "../vscode/sudo-broker";
 import { pluginRuntimeEnvironment } from "./development-plugin";
 import { lstat, mkdtemp, open as openFile, readFile, readdir, realpath, rm, writeFile } from "node:fs/promises";
@@ -167,6 +167,8 @@ export interface ChildAgentSession {
   readonly verifiedWorkRunId?: string;
 }
 
+export interface WorktreeRepository { readonly path: string; readonly branches: readonly string[]; readonly defaultBranch: string | null; }
+
 export interface ConversationWorktree {
   readonly agentId: string;
   readonly workspaceRoot: string;
@@ -175,10 +177,15 @@ export interface ConversationWorktree {
   readonly dirty: boolean;
   readonly available: boolean;
   readonly conflicts: readonly string[];
-  readonly worktree: { readonly id: string; readonly path: string; readonly branch: string; readonly targetBranch: string; readonly phase: "creating" | "active" | "merging" | "conflict" | "merged" } | null;
+  readonly worktree: { readonly workUnit?: boolean; readonly cleaned?: boolean; readonly repositoryRoot?: string; readonly name?: string; readonly id: string; readonly path: string; readonly branch: string; readonly targetBranch: string; readonly phase: "creating" | "active" | "merging" | "conflict" | "merged" } | null;
 }
 
 export interface WorktreeOptions {
+  readonly repository?: string;
+  readonly name?: string;
+  readonly branch?: string;
+  readonly base?: string;
+  readonly target?: string;
   readonly changes?: "keep" | "copy";
   readonly path?: string;
   readonly executionMode?: ExecutionMode;
@@ -187,6 +194,7 @@ export interface WorktreeOptions {
 }
 
 export interface AgentRuntimeClient {
+  worktreeRepositories?(): Promise<readonly WorktreeRepository[]>;
   worktree?(agentId: string, action: "status" | "create" | "merge", options?: WorktreeOptions): Promise<ConversationWorktree>;
   conversations?(agentId: string): Promise<readonly SavedConversation[]>;
   history?(agentId: string, options?: { before?: string; limit: number; conversationId?: string | null }): Promise<ConversationHistory>;
@@ -305,10 +313,19 @@ export class AgentFactoryClient implements AgentRuntimeClient {
     return { goal: readNativeGoal(document.goal), ...(typeof document.error === "string" ? { error: document.error } : {}) };
   }
 
+  public async worktreeRepositories(): Promise<readonly WorktreeRepository[]> {
+    const value = await this.command(["worktree", "--project-root", this.projectRoot, "--agent", "main-discovery", "repositories"]);
+    if (value.kind !== "worktree-repositories" || value.schemaVersion !== 1 || !Array.isArray(value.repositories) ||
+      !value.repositories.every((r: any) => typeof r.path === "string" && isAbsolute(r.path) && Array.isArray(r.branches) &&
+        r.branches.every((b: unknown) => typeof b === "string") && (r.defaultBranch === null || typeof r.defaultBranch === "string"))) throw new Error(localize("worktree.invalid"));
+    return value.repositories as unknown as readonly WorktreeRepository[];
+  }
+
   public async worktree(agentId: string, action: "status" | "create" | "merge", options: WorktreeOptions = {}): Promise<ConversationWorktree> {
     const value = await this.command(["worktree", "--project-root", this.projectRoot, "--agent", agentId, action,
       ...(options.changes ? ["--changes", options.changes] : []),
       ...(options.path ? ["--path", options.path] : []),
+      ...(["repository", "name", "branch", "base", "target"] as const).flatMap(key => options[key] ? [`--${key}`, options[key]!] : []),
       ...(options.model ? ["--model", options.model] : []),
       ...executionPolicyArguments(options.executionMode)]);
     if (value.kind !== "worktree" || value.schemaVersion !== 1 || value.agentId !== agentId ||
@@ -371,7 +388,7 @@ export class AgentFactoryClient implements AgentRuntimeClient {
   public constructor(
     private execPath: string,
     private readonly projectRoot: string,
-    private readonly pythonCommand = "python3",
+    private readonly pythonCommand = defaultPythonCommand(),
     private readonly codexHome = process.env.CODEX_HOME ?? join(homedir(), ".codex"),
     private readonly rediscoverExecPath?: () => Promise<string>,
     private readonly now = Date.now,
