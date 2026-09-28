@@ -1061,7 +1061,7 @@ The engine owns execution and has stopped at this recorded state. Acknowledge th
     managed.backgroundContinuation = true;
     const notification = `[Background workflow continuation — not a new Human request]
 ${JSON.stringify(child)}
-Read the exact stored child result/receipt and existing workflow status for reporting. The engine owns loop transitions; do not reconcile or advance the loop, redispatch completed Work, review implementation or rerun tests. Goal completion is not a Verification pass. Preserve the accepted identities and captured route. If the child needs a Human decision or failed, report it; do not automatically grant approval or retry failed work. Report completion only when the captured route has completed; otherwise report the current stage and return promptly. Answer any pending Human questions while preserving this workflow.`;
+Read the exact stored child result/receipt and existing workflow status for reporting. The engine owns loop transitions; do not reconcile or advance the loop, redispatch completed Work, review implementation or rerun tests. Goal completion is not a Verification pass. Preserve the accepted identities and captured route. If the child needs a Human decision or failed, report it; do not automatically grant approval or retry failed work. Report completion only when the captured route has completed; otherwise report the current stage and return promptly. When the workflow is bound to a work contract, record the terminal task statuses and result/receipt evidence in its Main-owned progress record. Answer any pending Human questions while preserving this workflow.`;
     let accepted = false;
     void managed.controller.send(notification, [], { taskMode: "direct" }, () => {
       accepted = true;
