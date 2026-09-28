@@ -56,6 +56,18 @@ test("Git snapshots distinguish clean, non-Git and failed lookup and omit ignore
   assert.ok(Date.parse(snapshot.collectedAt) >= Date.parse(snapshot.collectionStartedAt));
 });
 
+test("current plugin layout resolves the Agent Skill beside scripts/", async t => {
+  const root = await directory(t);
+  const agent = join(root, "skills", "agent");
+  await mkdir(join(root, "scripts"), { recursive: true });
+  await mkdir(agent, { recursive: true });
+  await writeFile(join(agent, "SKILL.md"), "# Agent\n");
+  const supplied = context(await submissionContext(root, join(root, "scripts", "exec.py")));
+  assert.equal(supplied.instructions[0].source, join(agent, "SKILL.md"));
+  assert.match(supplied.instructions[0].sha256, /^[a-f0-9]{64}$/);
+  assert.equal(supplied.references[0].source, join(agent, "references", "execution-modes.md"));
+});
+
 test("dispatch instructions have a recoverable content identity instead of a repeated body", async t => {
   const root = await directory(t);
   const agent = join(root, "skills", "agent");
@@ -75,6 +87,7 @@ test("dispatch instructions have a recoverable content identity instead of a rep
     assert.match(supplied.instructions[0].sha256, /^[a-f0-9]{64}$/);
     assert.ok(!guidance.includes(skill));
     assert.equal(supplied.references[0].source, join(agent, "references", "execution-modes.md"));
+    assert.equal(supplied.references[1].source, join(agent, "references", "task-dispatch.md"));
     const restored = historyPresentation("원문\n" + guidance, "work", false);
     assert.equal(restored.text, "원문\n");
     assert.equal(restored.submission.guidance, guidance);
@@ -144,7 +157,7 @@ test("preparation does not probe hash capabilities or read detailed reference bo
   await mkdir(join(agent, "references"), { recursive: true });
   await writeFile(join(agent, "SKILL.md"), "Use the dispatch quick path.");
   const detail = "Unneeded runtime detail. ".repeat(10000);
-  for (const name of ["execution-modes.md", "home-runtime.md"]) {
+  for (const name of ["execution-modes.md", "task-dispatch.md"]) {
     await writeFile(join(agent, "references", name), detail);
   }
   const client = new AgentFactoryClient(join(agent, "scripts", "exec.py"), root);

@@ -1,4 +1,5 @@
 import { execFile } from "node:child_process";
+import { existsSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { open } from "node:fs/promises";
 import { dirname, join } from "node:path";
@@ -93,12 +94,15 @@ async function suppliedInstruction(path: string) {
 }
 
 export async function submissionContext(projectRoot: string, execPath: string): Promise<string> {
-  const agentRoot = dirname(dirname(execPath));
+  // Current plugins keep scripts/ beside skills/; legacy plugins nest scripts/ inside skills/agent/.
+  const pluginRoot = dirname(dirname(execPath));
+  const agentRoot = existsSync(join(pluginRoot, "skills", "agent", "SKILL.md")) ? join(pluginRoot, "skills", "agent") : pluginRoot;
   // A host file cache does not prove that a resumed/compacted model still has
   // these instructions. Supply a content identity and a recoverable source,
   // rather than adding the complete Skill to every user message.
   const instructions = [await suppliedInstruction(join(agentRoot, "SKILL.md"))];
-  const references = ["execution-modes.md", "home-runtime.md"].map(name => ({
+  // The references a dispatching Main needs: captured routes and the task binding/dispatch contract.
+  const references = ["execution-modes.md", "task-dispatch.md"].map(name => ({
     source: join(agentRoot, "references", name), availability: "not-loaded"
   }));
   const git = await collectGitStatus(projectRoot);
