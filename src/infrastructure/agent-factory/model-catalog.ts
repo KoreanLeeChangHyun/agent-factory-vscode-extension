@@ -17,10 +17,42 @@ export const CLAUDE_MODELS = [
 const CLAUDE_PROBE_TTL_MS = 60_000;
 const claudeProbes = new Map<string, { readonly checkedAt: number; readonly available: Promise<boolean> }>();
 
-export async function readProviderModels(codexHome?: string, claude = claudeExecutable()): Promise<readonly string[] | undefined> {
-  const codex = await readCodexModels(codexHome);
-  if (await isClaudeAvailable(claude)) return [...new Set([...(codex ?? []), ...CLAUDE_MODELS])];
-  return codex;
+export async function readProviderModels(
+  codexHome?: string, claude = claudeExecutable(), agy = "agy"
+): Promise<readonly string[] | undefined> {
+  const [codex, claudeAvailable, antigravity] = await Promise.all([readCodexModels(codexHome), isClaudeAvailable(claude), readAntigravityModels(agy)]);
+  const models = [...(codex ?? []), ...(claudeAvailable ? CLAUDE_MODELS : []), ...antigravity];
+  return models.length || codex ? [...new Set(models)] : undefined;
+}
+
+const antigravityProbes = new Map<string, { readonly checkedAt: number; readonly models: Promise<readonly string[]> }>();
+
+/** `agy models` lists the signed-in subscription's models; probe each executable at most once a minute. */
+export function readAntigravityModels(agy = "agy"): Promise<readonly string[]> {
+  const cached = antigravityProbes.get(agy);
+  if (cached && Date.now() - cached.checkedAt < CLAUDE_PROBE_TTL_MS) return cached.models;
+  const models = promisify(execFile)(agy, ["models"], {
+    cwd: homedir(), env: runtimeEnvironment(), timeout: 15000, maxBuffer: 1024 * 1024, encoding: "utf8"
+  }).then(({ stdout }) => antigravityModels(stdout.split("\n").map(line => line.split("\t")[0]?.trim() ?? "")),
+    // Not installed or not signed in: the other providers' catalogs stay usable.
+    () => []);
+  antigravityProbes.set(agy, { checkedAt: Date.now(), models });
+  return models;
+}
+
+/**
+ * Gemini ids ending in an effort level collapse to their base id, which takes the reasoning
+ * slider as `--effort`. Other families are named `antigravity/<id>` so the runtime selects
+ * Antigravity instead of the vendor's own CLI.
+ */
+export function antigravityModels(ids: readonly string[]): readonly string[] {
+  const result = new Set<string>();
+  for (const id of ids) {
+    if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,80}$/.test(id)) continue;
+    const gemini = /^(gemini-.+)-(?:low|medium|high)$/.exec(id);
+    result.add(gemini ? gemini[1]! : id.startsWith("gemini-") ? id : `antigravity/${id}`);
+  }
+  return [...result];
 }
 
 /** The picker asks often; probe each executable at most once a minute. */

@@ -8,6 +8,8 @@
   const messages = {
   "ui.agent.defaults": {"en": "Agent defaults", "ko": "에이전트 기본값"},
   "ui.settings.scope": {"en": "Scope", "ko": "설정 범위"},
+  "ui.chat.scope": {"en": "This chat", "ko": "이 채팅"},
+  "ui.scope.priority": {"en": "Priority: chat > project > global. The narrower scope wins.", "ko": "우선순위: 채팅 > 프로젝트 > 글로벌. 좁은 범위에서 지정한 값이 우선합니다."},
   "ui.project.defaults": {"en": "Project", "ko": "프로젝트"},
   "ui.global.defaults": {"en": "Global", "ko": "글로벌"},
   "ui.use.parent.setting": {"en": "Inherit defaults", "ko": "기본값 상속"},
@@ -320,6 +322,14 @@
   "ui.model": {
     "en": "Model",
     "ko": "모델"
+  },
+  "ui.model.vendor": {
+    "en": "Model vendor",
+    "ko": "모델 제공사"
+  },
+  "ui.model.route.new.chat": {
+    "en": "This model runs on another CLI; select it in a new or cleared conversation.",
+    "ko": "다른 CLI에서 실행되는 모델입니다. 새 대화나 초기화한 대화에서 선택할 수 있습니다."
   },
   "ui.reasoning": {
     "en": "Reasoning",

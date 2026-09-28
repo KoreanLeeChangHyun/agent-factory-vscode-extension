@@ -1322,7 +1322,8 @@
       case "agent.defaults":
         state.agentDefaults = message.settings;
         renderAgentDefaults();
-        if (openSettingId === "model") renderModelSettings(modelMenu);
+        // Default rows update in place; chat rows show inherited defaults and re-render.
+        if (openSettingId === "model" && document.getElementById("agent-default-scope").value === "chat") renderModelSettings(modelMenu);
         updateModeControls();
         break;
       case "host.initialize":
@@ -1430,6 +1431,8 @@
       case "capabilities.updated":
         state.capabilities = message.capabilities;
         updateModeControls();
+        // The conversation's provider decides which model routes remain selectable.
+        if (openSettingId === "model") renderSettingMenu("model", modelMenu);
         break;
       case "models.list":
         if (Array.isArray(message.models)) {
@@ -5032,7 +5035,7 @@
     fastModeButton.setAttribute("aria-label", state.fastMode ? t("ui.fast.mode.on") : t("ui.fast.mode.off"));
     fastModeButton.title = state.fastMode ? t("ui.fast.mode.on") : t("ui.fast.mode.off");
     promptSurface.classList.toggle("is-astra", /(?:^|[-/])astra(?:$|-)/i.test(effectiveAgentValue("main", "model")));
-    const modelText = (effectiveAgentValue("main", "model") || t("ui.default")) + " · " + reasoningDisplayLabel(effectiveAgentValue("main", "reasoningEffort"));
+    const modelText = (effectiveAgentValue("main", "model") ? modelOptionLabel(effectiveAgentValue("main", "model")) : t("ui.default")) + " · " + reasoningDisplayLabel(effectiveAgentValue("main", "reasoningEffort"));
     if (modelLabel.textContent !== modelText) modelLabel.textContent = modelText;
     modelButton.title = t("ui.models.and.reasoning");
     modelButton.setAttribute("aria-label", modelButton.title);
@@ -5113,13 +5116,9 @@
       }
       slider.append(progress, ticks);
     } else {
-      for (const value of values) {
-        const option = document.createElement("option");
-        option.value = value;
-        option.textContent = value || inheritLabel;
-        option.selected = value === (current || "");
-        control.append(option);
-      }
+      control.id = "agent-model-" + (inheritLabel ? "default-" : "") + role + "-" + createId();
+      wrapper.htmlFor = control.id; // The vendor tabs below are buttons; keep the label on the select.
+      renderModelPicker(wrapper, control, values, current || "", inheritLabel, role === "main" && !inheritLabel);
     }
     const selectedValue = () => isReasoning ? values[Number(control.value)] : control.value;
     const showEffort = () => {
@@ -5146,14 +5145,100 @@
     return wrapper;
   }
 
+  // Vendor tabs group a long catalog. A route is the CLI that runs the model: Codex, Claude Code
+  // or Antigravity (gemini-* and antigravity/<id>, which may be another vendor's model).
+  const MODEL_VENDORS = [["openai", "OpenAI"], ["anthropic", "Anthropic"], ["google", "Google"]];
+  const MODEL_ROUTES = { codex: "Codex", claude: "Claude Code", antigravity: "Antigravity" };
+  function modelRoute(model) {
+    return model.startsWith("antigravity/") || model.startsWith("gemini-") ? "antigravity" : model.startsWith("claude-") ? "claude" : "codex";
+  }
+  function modelVendor(model) {
+    const id = model.replace(/^antigravity\//, "");
+    return id.startsWith("claude-") ? "anthropic" : id.startsWith("gemini-") ? "google" : "openai";
+  }
+  function modelOptionLabel(model) {
+    return model.startsWith("antigravity/") ? model.slice("antigravity/".length) + " · Antigravity" : model;
+  }
+
+  function renderModelPicker(wrapper, control, values, current, inheritLabel, lockRoute) {
+    const models = values.filter(Boolean);
+    wrapper.classList.add("agent-model-picker");
+    // A started conversation keeps its provider; other routes apply to a new or cleared chat.
+    const locked = lockRoute && state.agentId ? currentCapabilities().sessionProvider : undefined;
+    const tabs = document.createElement("span");
+    tabs.className = "model-vendor-tabs";
+    tabs.setAttribute("role", "tablist");
+    tabs.setAttribute("aria-label", t("ui.model.vendor"));
+    let active = current ? modelVendor(current) : (MODEL_VENDORS.find(([vendor]) => models.some(m => modelVendor(m) === vendor)) || MODEL_VENDORS[0])[0];
+    const show = () => {
+      for (const tab of tabs.children) tab.setAttribute("aria-selected", String(tab.dataset.vendor === active));
+      for (const element of control.querySelectorAll("option, optgroup")) {
+        const vendor = element.dataset.vendor;
+        element.hidden = Boolean(vendor) && vendor !== active;
+      }
+    };
+    for (const [vendor, name] of MODEL_VENDORS) {
+      const tab = document.createElement("button");
+      tab.type = "button";
+      tab.className = "model-vendor-tab";
+      tab.dataset.vendor = vendor;
+      tab.setAttribute("role", "tab");
+      tab.textContent = name;
+      tab.disabled = !models.some(model => modelVendor(model) === vendor);
+      tab.addEventListener("click", () => {
+        if (tab.disabled || control.disabled) return;
+        active = vendor;
+        show();
+        control.focus();
+        try { control.showPicker?.(); } catch { /* Not every host allows opening a select programmatically. */ }
+      });
+      tabs.append(tab);
+    }
+    if (inheritLabel) {
+      const option = document.createElement("option");
+      option.value = "";
+      option.textContent = inheritLabel;
+      option.selected = !current;
+      control.append(option);
+    }
+    for (const [vendor] of MODEL_VENDORS) {
+      const own = models.filter(model => modelVendor(model) === vendor);
+      const routes = [...new Set(own.map(modelRoute))];
+      for (const route of routes) {
+        // Name the route only where one vendor's models run through several CLIs.
+        const parent = routes.length > 1 ? document.createElement("optgroup") : control;
+        if (parent !== control) { parent.label = MODEL_ROUTES[route]; parent.dataset.vendor = vendor; control.append(parent); }
+        for (const model of own.filter(item => modelRoute(item) === route)) {
+          const option = document.createElement("option");
+          option.value = model;
+          option.dataset.vendor = vendor;
+          option.textContent = modelOptionLabel(model);
+          option.selected = model === current;
+          if (locked && route !== locked && model !== current) {
+            option.disabled = true;
+            option.title = t("ui.model.route.new.chat");
+          }
+          parent.append(option);
+        }
+      }
+    }
+    // Long names are truncated in the closed select; the title keeps the full name and route.
+    const describe = () => { control.title = control.value ? modelOptionLabel(control.value) : inheritLabel; };
+    control.addEventListener("change", () => { describe(); if (control.value) { active = modelVendor(control.value); show(); } });
+    describe();
+    show();
+    wrapper.append(tabs);
+  }
+
   function renderAgentDefaults() {
     const container = document.getElementById("agent-default-fields");
     const scopeControl = document.getElementById("agent-default-scope");
     if (!container || !scopeControl) return;
     const settings = state.agentDefaults || {};
-    if (!settings.projectAvailable) scopeControl.value = "global";
+    if (!settings.projectAvailable && scopeControl.value === "project") scopeControl.value = "global";
     scopeControl.querySelector('option[value="project"]').disabled = !settings.projectAvailable;
     const scope = scopeControl.value;
+    if (scope === "chat") return; // Chat overrides are the model menu's own rows.
     container.replaceChildren();
     container.classList.add("aligned-settings");
     renderAgentPresets();
@@ -5207,9 +5292,15 @@
   document.getElementById("agent-preset-name").addEventListener("input", renderAgentPresets);
   document.getElementById("agent-preset-select").addEventListener("change", renderAgentPresets);
 
-  document.getElementById("agent-default-scope")?.addEventListener("change", renderAgentDefaults);
+  document.getElementById("agent-default-scope")?.addEventListener("change", event => {
+    if (openSettingId !== "model") { renderAgentDefaults(); return; }
+    renderModelSettings(modelMenu);
+    event.currentTarget.focus(); // Re-rendering moves the select; keep keyboard focus on it.
+  });
 
   function renderModelSettings(menu) {
+    // Scope and default controls are persistent nodes; park them so they stay in the document.
+    document.getElementById("agent-scope-parts").append(document.getElementById("agent-scope-row"), document.getElementById("agent-defaults-content"));
     menu.replaceChildren();
     menu.setAttribute("role", "dialog");
     menu.setAttribute("aria-label", t("ui.models.and.reasoning"));
@@ -5224,6 +5315,18 @@
     close.append(createModeIcon("m6 6 12 12M18 6 6 18", "agent-settings-close-icon"));
     close.addEventListener("click", function () { closeSettingMenu(true); });
     header.append(title, close);
+    // One panel edits every scope: this chat's overrides, or the project/global defaults beneath them.
+    const scopeControl = document.getElementById("agent-default-scope");
+    const priority = document.createElement("p");
+    priority.className = "agent-scope-priority";
+    priority.textContent = t("ui.scope.priority");
+    menu.classList.add("aligned-settings");
+    menu.append(header, document.getElementById("agent-scope-row"), priority);
+    if (scopeControl.value !== "chat") {
+      menu.append(document.getElementById("agent-defaults-content"));
+      renderAgentDefaults();
+      return;
+    }
     const columns = document.createElement("div");
     columns.className = "agent-settings-columns";
     columns.setAttribute("aria-hidden", "true");
@@ -5232,8 +5335,7 @@
       column.textContent = text;
       columns.append(column);
     }
-    menu.classList.add("aligned-settings");
-    menu.append(header, columns);
+    menu.append(columns);
     const roles = state.role === "main" ? [["main", t("ui.main")], ["work", t("ui.work")], ["verification", t("ui.verification")]] : [["main", state.role === "work" ? t("ui.work") : t("ui.verification")]];
     let initialized = false;
     for (const [role, label] of roles) {
@@ -5670,7 +5772,7 @@
   }
 
   function normalizeModel(value) {
-    return typeof value === "string" && /^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$/.test(value) ? value : "";
+    return typeof value === "string" && /^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$|^antigravity\/[A-Za-z0-9][A-Za-z0-9._-]{0,80}$/.test(value) ? value : "";
   }
 
   function safePercentOrUndefined(value) {
