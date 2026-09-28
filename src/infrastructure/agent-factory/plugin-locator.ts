@@ -33,16 +33,19 @@ export async function locateAgentFactoryExec(
   }
 
   const environment = options.environment ?? process.env;
-  const codexHome = environment.CODEX_HOME?.trim()
-    ? resolve(environment.CODEX_HOME)
-    : join(options.homeDirectory ?? homedir(), ".codex");
+  const home = options.homeDirectory ?? homedir();
+  const codexHome = environment.CODEX_HOME?.trim() ? resolve(environment.CODEX_HOME) : join(home, ".codex");
+  const claudeHome = environment.CLAUDE_CONFIG_DIR?.trim() ? resolve(environment.CLAUDE_CONFIG_DIR) : join(home, ".claude");
   const cacheRoot = join(codexHome, "plugins", "cache");
   const candidates: Array<{ readonly path: string; readonly modifiedAt: number }> = [];
-  try {
-    const marketplaces = (await readdir(cacheRoot, { withFileTypes: true }))
+  // Claude Code installs the same runtime under its own cache; either host's copy can drive the extension.
+  const cacheRoots = [cacheRoot, join(claudeHome, "plugins", "cache")];
+  let readableRoots = 0;
+  for (const root of cacheRoots) try {
+    const marketplaces = (await readdir(root, { withFileTypes: true }))
       .filter((entry) => entry.isDirectory() && !entry.isSymbolicLink());
     for (const marketplace of marketplaces) {
-      const pluginRoot = join(cacheRoot, marketplace.name, "agent-factory");
+      const pluginRoot = join(root, marketplace.name, "agent-factory");
       let versions;
       try {
         versions = (await readdir(pluginRoot, { withFileTypes: true }))
@@ -53,7 +56,8 @@ export async function locateAgentFactoryExec(
       for (const version of versions) {
         try {
           if (options.requiredVersion) {
-            const manifest = JSON.parse(await readFile(join(pluginRoot, version.name, ".codex-plugin", "plugin.json"), "utf8"));
+            const manifestPath = root === cacheRoot ? ".codex-plugin" : ".claude-plugin";
+            const manifest = JSON.parse(await readFile(join(pluginRoot, version.name, manifestPath, "plugin.json"), "utf8"));
             if (manifest.name !== "agent-factory" || typeof manifest.version !== "string"
               || semanticBase(manifest.version) !== semanticBase(options.requiredVersion)) continue;
           }
@@ -70,10 +74,14 @@ export async function locateAgentFactoryExec(
         }
       }
     }
+    readableRoots += 1;
   } catch {
+    // A host that was never installed has no cache; the other host may still provide the runtime.
+  }
+  if (!readableRoots) {
     return {
       available: false,
-      diagnostic: localize("ui.unable.to.find.the.agent.factory.plugin.cache.0", cacheRoot)
+      diagnostic: localize("ui.unable.to.find.the.agent.factory.plugin.cache.0", cacheRoots.join(", "))
     };
   }
   candidates.sort((left, right) => right.modifiedAt - left.modifiedAt || right.path.localeCompare(left.path));

@@ -12,10 +12,11 @@ async function importTypeScript(relativePath, mockExtensionImports = false) {
     setup(buildApi) {
       buildApi.onResolve({ filter: /^vscode$/ }, () => ({ path: "vscode", namespace: "mock" }));
       buildApi.onResolve({ filter: /core\/bootstrap$/ }, () => ({ path: "bootstrap", namespace: "mock" }));
-      buildApi.onResolve({ filter: /plugin-dependency$/ }, () => ({ path: "dependency", namespace: "mock" }));
+      buildApi.onResolve({ filter: /plugin-dependency$/ }, (args) => ({ path: /claude-plugin-dependency$/.test(args.path) ? "claude-dependency" : "dependency", namespace: "mock" }));
       buildApi.onLoad({ filter: /.*/, namespace: "mock" }, (args) => {
         if (args.path === "vscode") return { contents: "export const ExtensionMode = { Production: 1, Development: 2, Test: 3 }; export const ProgressLocation = { Notification: 15 }; export const window = {};" };
         if (args.path === "bootstrap") return { contents: "export function bootstrap() {}" };
+        if (args.path === "claude-dependency") return { contents: "export async function ensureAgentFactoryClaudePlugin() {}" };
         return { contents: "export async function ensureAgentFactoryPlugin() {} export function semanticBase(value) { return String(value).split('+')[0]; }" };
       });
     }
@@ -526,13 +527,51 @@ test("Claude-only hosts activate with an installed plugin and never redirect or 
     prepareClaude: async () => { calls.push("claude"); return true; },
     prepareCodex: async (_, options) => { calls.push(`codex:${options.allowRedirect}`); throw codexMissing(); },
     ensurePlugin: async () => assert.fail("Codex marketplace is unavailable without Codex"),
+    ensureClaudePlugin: async version => { calls.push(`claude-plugin:${version}`); },
     requireInstalledPlugin: async version => { calls.push(`installed:${version}`); },
     bootstrap: () => { calls.push("bootstrap"); },
     withProgress: async (_, task) => task(),
     showErrorMessage: async () => assert.fail("Claude-only activation should succeed")
   };
   await activate(context, services);
-  assert.deepEqual(calls, ["claude", "codex:false", "installed:1.0.14", "bootstrap"]);
+  assert.deepEqual(calls, ["claude", "codex:false", "claude-plugin:1.0.14", "installed:1.0.14", "bootstrap"]);
+});
+
+test("with both CLIs, both plugins are managed and a Claude plugin failure only warns", async () => {
+  const { activate } = await importTypeScript("src/extension.ts", true);
+  const context = { extension: { packageJSON: { version: "1.0.17" } }, subscriptions: [] };
+  const calls = [];
+  const services = {
+    prepareClaude: async () => true,
+    prepareCodex: async () => {},
+    ensurePlugin: async version => { calls.push(`codex-plugin:${version}`); },
+    ensureClaudePlugin: async () => { calls.push("claude-plugin"); throw new Error("marketplace offline"); },
+    requireInstalledPlugin: async () => assert.fail("Codex installs the runtime"),
+    showWarningMessage: async message => { calls.push(`warning:${/marketplace offline/.test(message)}`); },
+    bootstrap: () => { calls.push("bootstrap"); },
+    withProgress: async (_, task) => task(),
+    showErrorMessage: async () => assert.fail("a Claude plugin failure must not block Codex")
+  };
+  await activate(context, services);
+  assert.deepEqual(calls, ["codex-plugin:1.0.17", "claude-plugin", "warning:true", "bootstrap"]);
+});
+
+test("Claude-only activation fails when the Claude plugin cannot be installed", async () => {
+  const { activate } = await importTypeScript("src/extension.ts", true);
+  const context = { extension: { packageJSON: { version: "1.0.17" } }, subscriptions: [] };
+  let shown;
+  const services = {
+    prepareClaude: async () => true,
+    prepareCodex: async () => { throw codexMissing(); },
+    ensurePlugin: async () => assert.fail("no Codex"),
+    ensureClaudePlugin: async () => { throw new Error("claude install failed"); },
+    requireInstalledPlugin: async () => assert.fail("must not continue"),
+    bootstrap: () => assert.fail("must not bootstrap"),
+    withProgress: async (_, task) => task(),
+    showErrorMessage: async message => { shown = message; return undefined; }
+  };
+  await activate(context, services);
+  assert.match(shown, /claude install failed/);
 });
 
 test("a missing Codex CLI still fails activation when Claude is unavailable", async () => {

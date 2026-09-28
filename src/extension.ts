@@ -2,6 +2,7 @@ import { localize, setHostLanguage } from "./common/localization";
 import * as vscode from "vscode";
 import { bootstrap } from "./core/bootstrap";
 import { ensureAgentFactoryPlugin } from "./infrastructure/agent-factory/plugin-dependency";
+import { ensureAgentFactoryClaudePlugin } from "./infrastructure/agent-factory/claude-plugin-dependency";
 import { developmentPluginRoot, validateDevelopmentPlugin } from "./infrastructure/agent-factory/development-plugin";
 import { locateAgentFactoryExec } from "./infrastructure/agent-factory/plugin-locator";
 import { CodexCliNotFoundError, configureClaudeCli, configureCodexCli, resolveClaudeCli, resolveCodexCli } from "./infrastructure/agent-factory/process-environment";
@@ -12,6 +13,9 @@ export interface ActivationServices {
   /** Resolves the optional Claude Code CLI; true when Claude can run without Codex. */
   readonly prepareClaude?: (configuredPath?: string) => Promise<boolean>;
   readonly ensurePlugin: (requiredVersion: string) => Promise<void>;
+  /** Installs or updates the matching Claude Code plugin when the Claude CLI is available. */
+  readonly ensureClaudePlugin?: (requiredVersion: string) => Promise<void>;
+  readonly showWarningMessage?: typeof vscode.window.showWarningMessage;
   /** Claude-only hosts cannot install from the Codex marketplace; they need an already installed plugin. */
   readonly requireInstalledPlugin?: (requiredVersion: string) => Promise<void>;
   readonly bootstrap: (context: vscode.ExtensionContext) => void;
@@ -76,11 +80,20 @@ async function start(context: vscode.ExtensionContext, services: ActivationServi
         location: vscode.ProgressLocation.Notification,
         title: localize("ui.checking.agent.factory.plugin.dependencies"),
         cancellable: false
-      }, () => developmentRoot
-        ? validateDevelopmentPlugin(developmentRoot, requiredVersion)
-        : codexAvailable || !services.requireInstalledPlugin
-          ? services.ensurePlugin(requiredVersion)
-          : services.requireInstalledPlugin(requiredVersion));
+      }, async () => {
+        if (developmentRoot) return validateDevelopmentPlugin(developmentRoot, requiredVersion);
+        if (codexAvailable) await services.ensurePlugin(requiredVersion);
+        if (claudeAvailable && services.ensureClaudePlugin) {
+          try {
+            await services.ensureClaudePlugin(requiredVersion);
+          } catch (error) {
+            // With Codex present the runtime is already installed; the Claude plugin only adds Claude Code skills.
+            if (!codexAvailable) throw error;
+            void services.showWarningMessage?.(localize("claude.plugin.warning", error instanceof Error ? error.message : String(error)));
+          }
+        }
+        if (!codexAvailable && services.requireInstalledPlugin) await services.requireInstalledPlugin(requiredVersion);
+      });
     } catch (error) {
       const detail = error instanceof Error ? error.message : localize("ui.an.unknown.error.occurred");
       const action = await services.showErrorMessage(
@@ -119,6 +132,8 @@ function defaultActivationServices(): ActivationServices {
       return executable !== undefined;
     },
     ensurePlugin: ensureAgentFactoryPlugin,
+    ensureClaudePlugin: ensureAgentFactoryClaudePlugin,
+    showWarningMessage: vscode.window.showWarningMessage.bind(vscode.window),
     requireInstalledPlugin: async (requiredVersion) => {
       const configuredPath = vscode.workspace?.getConfiguration("agentFactory.mainChat").get<string>("runtimeExecPath")?.trim();
       const location = await locateAgentFactoryExec({ configuredPath, requiredVersion });
