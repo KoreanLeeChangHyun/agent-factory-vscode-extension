@@ -4,9 +4,12 @@ async function checkAgentModels(page) {
   const capability = { model: true, reasoning: true, taskModes: ['direct', 'work', 'work-verification'] };
   await emit({ type: 'host.initialize', panelId: 'roles', role: 'main', title: 'Main', agentPermissions: { main: 'bypass', work: 'bypass', verification: 'danger-full-access' }, runtimeAvailable: true, capabilities: { submit: capability, send: capability } });
   await emit({ type: 'models.list', models: ['main-model', 'work-model', 'verify-model'] });
+  await emit({ type: 'agent.defaults', settings: { effective: { work: { model: 'work-model', reasoningEffort: 'medium' }, verification: { model: 'verify-model', reasoningEffort: 'high' } }, sources: {} } });
   assert.equal(await page.locator('#reasoning-button').isVisible(), false);
   await page.locator('#model-button').click();
   assert.equal(await page.locator('#model-menu select[data-role]').count(), 3);
+  assert.equal(await page.evaluate(() => window.saved.agentModels.work.model), 'work-model');
+  assert.equal(await page.evaluate(() => window.saved.agentModels.work.reasoningEffort), 'medium');
   for (const height of [900, 600]) {
     await page.setViewportSize({ width: 795, height });
     const layout = await page.locator('#model-menu').evaluate(element => ({
@@ -29,7 +32,7 @@ async function checkAgentModels(page) {
   }
   for (const [role, model, effort] of [['main', 'main-model', 'low'], ['work', 'work-model', 'high'], ['verification', 'verify-model', 'medium']]) {
     await page.locator(`#model-menu select[data-role="${role}"][data-field="model"]`).selectOption(model);
-    await page.locator(`#model-menu input[data-role="${role}"][data-field="reasoningEffort"]`).fill(String(["", "none", "low", "medium", "high", "xhigh", "max"].indexOf(effort)));
+    await page.locator(`#model-menu input[data-role="${role}"][data-field="reasoningEffort"]`).fill(String(["none", "low", "medium", "high", "xhigh", "max"].indexOf(effort)));
   }
   const saved = await page.evaluate(() => window.saved);
   assert.equal(saved.model, 'main-model');
@@ -43,13 +46,15 @@ async function checkAgentModels(page) {
   assert.equal(sent.execution.reasoningEffort, 'low');
   assert.deepEqual(sent.execution.agentModels, saved.agentModels);
   await page.locator('#model-button').click();
-  await page.locator('#model-menu select[data-role="work"][data-field="model"]').selectOption('');
-  assert.equal(await page.evaluate(() => window.saved.agentModels.work.model), undefined);
-  assert.equal(sent.execution.agentModels.work.model, 'work-model');
+  assert.equal(await page.locator('#model-menu option[value=""]').count(), 0);
+  assert.equal(await page.locator('#model-menu .agent-setting-reset').count(), 0);
+  assert.equal(await page.locator('#model-menu .agent-setting-source').count(), 0);
+  await emit({ type: 'agent.defaults', settings: { effective: { work: { model: 'different', reasoningEffort: 'none' } }, sources: {} } });
+  assert.equal(await page.evaluate(() => window.saved.agentModels.work.model), 'work-model');
   await emit({ type: 'models.list', models: ['gpt-5.6-sol', 'gpt-6-astra', 'gpt-5.6-terra', 'gpt-5.6-luna', 'gpt-5.5'] });
   await page.locator('#model-menu select[data-role="main"][data-field="model"]').selectOption('gpt-5.6-sol');
-  await page.locator('#model-menu input[data-role="main"][data-field="reasoningEffort"]').fill('3');
-  await page.locator('#model-menu select[data-role="verification"][data-field="model"]').selectOption('');
+  await page.locator('#model-menu input[data-role="main"][data-field="reasoningEffort"]').fill('2');
+
   const fs = require('node:fs');
   const path = require('node:path');
   const artifactDir = path.resolve(__dirname, '../../out/agent-settings');
@@ -68,32 +73,32 @@ async function checkAgentModels(page) {
     const modelBox = await page.locator('#model-menu select[data-role="main"]').boundingBox();
     const rangeBox = await reasoning.boundingBox();
     assert.ok(Math.abs(modelBox.width - rangeBox.width) < 1);
-    const rows = await page.locator('.agent-model-row').evaluateAll(rows => rows.map(row => {
+    const rows = await page.locator('#model-menu .agent-model-row').evaluateAll(rows => rows.map(row => {
       const rect = node => { const r = node.getBoundingClientRect(); return { x: r.x, y: r.y + r.height / 2, width: r.width, height: r.height }; };
       return [rect(row.querySelector('select[data-field="model"]')), rect(row.querySelector('input[type="range"]'))];
     }));
     for (const [model, reasoning] of rows) {
       assert.ok(Math.abs(model.y - reasoning.y) < 1, 'Role controls must share a horizontal centerline');
     }
-    await reasoning.fill('4');
+    await reasoning.fill('3');
     assert.equal(await page.evaluate(() => window.saved.reasoning), 'high');
     const slider = page.locator('.agent-reasoning-slider').first();
-    assert.equal(await slider.locator('.agent-reasoning-ticks span').count(), 7);
-    assert.equal(await slider.locator('progress').evaluate(element => element.value), 4);
+    assert.equal(await slider.locator('.agent-reasoning-ticks span').count(), 6);
+    assert.equal(await slider.locator('progress').evaluate(element => element.value), 3);
     await reasoning.focus();
     await page.keyboard.press('ArrowLeft');
     assert.equal(await page.evaluate(() => window.saved.reasoning), 'medium');
     await reasoning.press('Home');
-    assert.equal(await page.evaluate(() => window.saved.reasoning), '');
-    assert.equal(await reasoning.getAttribute('aria-valuetext'), 'Default');
+    assert.equal(await page.evaluate(() => window.saved.reasoning), 'none');
+    assert.equal(await reasoning.getAttribute('aria-valuetext'), 'none');
     assert.equal(await slider.locator('progress').evaluate(element => element.value), 0);
     await reasoning.press('End');
     assert.equal(await page.evaluate(() => window.saved.reasoning), 'max');
-    assert.equal(await slider.locator('progress').evaluate(element => element.value), 6);
+    assert.equal(await slider.locator('progress').evaluate(element => element.value), 5);
     assert.equal(await reasoning.evaluate(element => element.closest('.agent-reasoning-control').classList.contains('is-ultra')), true);
     assert.equal(await page.locator('.agent-reasoning-value').first().textContent(), 'ULTRA');
     await page.locator('#model-menu').screenshot({ path: path.join(artifactDir, 'ultra-' + width + '.png') });
-    await reasoning.fill('3');
+    await reasoning.fill('2');
     assert.equal(await reasoning.evaluate(element => element.closest('.agent-reasoning-control').classList.contains('is-ultra')), false);
 
   }
@@ -104,15 +109,34 @@ async function checkAgentModels(page) {
   await emit({ type: 'agent.defaults', settings: { global: {}, project: {}, effective: {}, sources: {}, projectAvailable: true } });
   await page.locator('#settings-tab-agents').click();
   await page.locator('#agent-default-scope').selectOption('project');
-  assert.equal(await page.locator('#agent-default-fields select').count(), 6);
+  assert.equal(await page.locator('#agent-default-fields select').count(), 3);
   await page.locator('#agent-default-fields select').first().selectOption('gpt-6-astra');
   assert.deepEqual(await page.evaluate(() => window.sentMessages.filter(m => m.type === 'agent.defaults.save').at(-1)), { type: 'agent.defaults.save', scope: 'project', role: 'main', field: 'model', value: 'gpt-6-astra' });
-  for (const width of [795, 320]) {
+  assert.equal(await page.locator('#agent-default-fields input[type=range]').count(), 3);
+  await page.locator('#agent-default-fields input[data-role=work]').fill('5');
+  assert.deepEqual(await page.evaluate(() => window.sentMessages.filter(m => m.type === 'agent.defaults.save').at(-1)), { type: 'agent.defaults.save', scope: 'project', role: 'work', field: 'reasoningEffort', value: 'xhigh' });
+  await page.locator('#agent-default-scope').selectOption('global');
+  await page.locator('#agent-default-fields input[data-role=verification]').fill('6');
+  assert.deepEqual(await page.evaluate(() => window.sentMessages.filter(m => m.type === 'agent.defaults.save').at(-1)), { type: 'agent.defaults.save', scope: 'global', role: 'verification', field: 'reasoningEffort', value: 'max' });
+  await page.locator('#settings-tab-general').click();
+  await page.locator('#ui-language').selectOption('ko');
+  await page.locator('#settings-tab-agents').click();
+  for (const width of [795, 566, 320]) {
     await page.setViewportSize({ width, height: 740 });
+    assert.equal(await page.locator('#settings-panel-agents > label > span').evaluate(el => {
+      const range = document.createRange(); range.selectNodeContents(el); return range.getClientRects().length;
+    }), 1, 'Scope label must remain on one line');
+    for (const row of await page.locator('#agent-default-fields .agent-model-row').all()) {
+      const model = await row.locator('select').boundingBox();
+      const effort = await row.locator('input[type=range]').boundingBox();
+      assert.ok(Math.abs(model.y + model.height / 2 - effort.y - effort.height / 2) < 1);
+    }
     assert.equal(await page.locator('#settings-panel-agents').evaluate(el => el.scrollWidth > el.clientWidth + 1), false);
     const control = page.locator('#agent-default-fields select').first();
     assert.equal(await control.evaluate(el => getComputedStyle(el).height), '34px');
     assert.notEqual(await control.evaluate(el => getComputedStyle(el).backgroundColor), 'rgb(255, 255, 255)');
+    await page.locator('#status-settings').evaluate(el => { el.scrollTop = 0; });
+    await page.locator('#settings-panel-agents > label').scrollIntoViewIfNeeded();
     await page.locator('#status-settings').screenshot({ path: path.join(artifactDir, 'defaults-' + width + '.png') });
   }
   await page.locator('#settings-tab-general').click();

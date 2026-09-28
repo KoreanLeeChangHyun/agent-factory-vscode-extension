@@ -3708,11 +3708,26 @@
     }
   }
 
+  function positionQuestionMenu() {
+    if (questionMenu.hidden) return;
+    const anchor = questionButton.getBoundingClientRect();
+    const width = Math.min(440, window.innerWidth - 16);
+    questionMenu.style.width = width + "px";
+    questionMenu.style.left = Math.max(8, Math.min(anchor.right - width, window.innerWidth - width - 8)) + "px";
+    questionMenu.style.bottom = Math.max(8, window.innerHeight - anchor.top + 8) + "px";
+    questionMenu.style.maxHeight = Math.max(48, Math.min(320, anchor.top - 16)) + "px";
+  }
+  window.addEventListener("resize", positionQuestionMenu);
+  const questionPositionObserver = new ResizeObserver(positionQuestionMenu);
+  questionPositionObserver.observe(promptSurface);
+  questionPositionObserver.observe(questionButton);
+
   function openQuestionMenu() {
     closeSettingMenu(false);
     closeSessionMenu(false);
     renderQuestionList();
     questionMenu.hidden = false;
+    positionQuestionMenu();
     questionButton.setAttribute("aria-expanded", "true");
     questionList.querySelector("[data-question-id]")?.focus();
   }
@@ -4757,6 +4772,80 @@
     return Object.fromEntries(["work", "verification"].map(role => [role, Object.fromEntries(
       ["model", "reasoningEffort"].map(field => [field, effectiveAgentValue(role, field) || undefined]))]));
   }
+  function createAgentSettingControl(role, label, field, current, onChange, inheritLabel = "") {
+    const wrapper = document.createElement("label");
+    const fieldLabel = field === "model" ? t("ui.model") : t("ui.reasoning");
+    const caption = document.createElement("span");
+    caption.className = "agent-model-caption";
+    caption.textContent = fieldLabel;
+    wrapper.append(caption);
+    const explicitValues = field === "model" ? [...new Set([...settingOptions.model, current].filter(value => typeof value === "string" && value.length > 0))] : settingOptions.reasoning.filter(Boolean);
+    const values = inheritLabel ? ["", ...explicitValues] : explicitValues;
+    const isReasoning = field === "reasoningEffort";
+    const control = document.createElement(isReasoning ? "input" : "select");
+    control.dataset.role = role;
+    control.dataset.field = field;
+    control.setAttribute("aria-label", label + " " + fieldLabel);
+    const output = document.createElement("span");
+    let slider;
+    let progress;
+    if (isReasoning) {
+      wrapper.classList.add("agent-reasoning-control");
+      output.className = "agent-reasoning-value";
+      control.type = "range";
+      control.min = "0";
+      control.max = String(values.length - 1);
+      control.step = "1";
+      control.value = String(Math.max(0, values.indexOf(current || "")));
+      wrapper.append(output);
+      slider = document.createElement("span");
+      slider.className = "agent-reasoning-slider";
+      progress = document.createElement("progress");
+      progress.max = values.length - 1;
+      progress.setAttribute("aria-hidden", "true");
+      const ticks = document.createElement("span");
+      ticks.className = "agent-reasoning-ticks";
+      ticks.setAttribute("aria-hidden", "true");
+      for (const value of values) {
+        const tick = document.createElement("span");
+        tick.title = value ? reasoningDisplayLabel(value) : inheritLabel;
+        ticks.append(tick);
+      }
+      slider.append(progress, ticks);
+    } else {
+      for (const value of values) {
+        const option = document.createElement("option");
+        option.value = value;
+        option.textContent = value || inheritLabel;
+        option.selected = value === (current || "");
+        control.append(option);
+      }
+    }
+    const selectedValue = () => isReasoning ? values[Number(control.value)] : control.value;
+    const showEffort = () => {
+      if (!isReasoning) return;
+      const value = selectedValue();
+      const ultra = value === "max";
+      wrapper.classList.toggle("is-ultra", ultra);
+      output.textContent = !value && inheritLabel ? inheritLabel : ultra ? "ULTRA" : value && uiLocale() === "en" ? value.toUpperCase() : reasoningDisplayLabel(value);
+      output.title = !value && inheritLabel ? inheritLabel : ultra ? t("ui.ultra.max.reasoning.effort") : reasoningDisplayLabel(value);
+      control.setAttribute("aria-valuetext", value ? reasoningDisplayLabel(value) : inheritLabel);
+      progress.value = Number(control.value);
+    };
+    showEffort();
+    control.disabled = !inheritLabel && currentCapabilities()[isReasoning ? "reasoning" : "model"] !== true;
+    control.addEventListener(isReasoning ? "input" : "change", function () {
+      const value = selectedValue();
+      showEffort();
+      onChange(value);
+    });
+    if (slider) {
+      slider.append(control);
+      wrapper.append(slider);
+    } else wrapper.append(control);
+    return wrapper;
+  }
+
   function renderAgentDefaults() {
     const container = document.getElementById("agent-default-fields");
     const scopeControl = document.getElementById("agent-default-scope");
@@ -4766,26 +4855,28 @@
     scopeControl.querySelector('option[value="project"]').disabled = !settings.projectAvailable;
     const scope = scopeControl.value;
     container.replaceChildren();
+    container.classList.add("aligned-settings");
+    const columns = document.createElement("div");
+    columns.className = "agent-settings-columns";
+    columns.setAttribute("aria-hidden", "true");
+    for (const key of ["ui.agent", "ui.model", "ui.reasoning"]) {
+      const column = document.createElement("span"); column.textContent = t(key); columns.append(column);
+    }
+    container.append(columns);
     for (const role of ["main", "work", "verification"]) {
       const row = document.createElement("div"); row.className = "agent-model-row";
+      row.dataset.agentRole = role;
       const heading = document.createElement("strong"); heading.textContent = t("ui." + role); heading.className = "agent-model-name"; row.append(heading);
       for (const field of ["model", "reasoningEffort"]) {
-        const label = document.createElement("label");
-        const caption = document.createElement("span"); caption.textContent = t(field === "model" ? "ui.model" : "ui.reasoning"); label.append(caption);
         const current = settings[scope]?.[role]?.[field] || "";
-        const input = document.createElement("select");
-        input.setAttribute("aria-label", t("ui." + role) + " " + caption.textContent);
-        const values = field === "model" ? [...new Set(["", ...settingOptions.model, current])] : settingOptions.reasoning;
-        for (const value of values) {
-          const option = document.createElement("option"); option.value = value;
-          option.textContent = value ? (field === "reasoningEffort" ? reasoningDisplayLabel(value) : value) : t(scope === "project" ? "ui.inherited.global" : "ui.inherited.product"); option.selected = value === current; input.append(option);
-        }
-        input.addEventListener("change", () => vscode.postMessage({ type: "agent.defaults.save", scope, role, field, value: input.value }));
-        label.append(input); row.append(label);
+        row.append(createAgentSettingControl(role, t("ui." + role), field, current, value => {
+          vscode.postMessage({ type: "agent.defaults.save", scope, role, field, value });
+        }, t(scope === "project" ? "ui.inherited.global" : "ui.inherited.product")));
       }
       container.append(row);
     }
   }
+
   document.getElementById("agent-default-scope")?.addEventListener("change", renderAgentDefaults);
 
   function renderModelSettings(menu) {
@@ -4814,6 +4905,7 @@
     menu.classList.add("aligned-settings");
     menu.append(header, columns);
     const roles = state.role === "main" ? [["main", t("ui.main")], ["work", t("ui.work")], ["verification", t("ui.verification")]] : [["main", state.role === "work" ? t("ui.work") : t("ui.verification")]];
+    let initialized = false;
     for (const [role, label] of roles) {
       const row = document.createElement("div");
       row.className = "agent-model-row";
@@ -4825,107 +4917,24 @@
       legend.textContent = label;
       row.append(legend);
       for (const field of ["model", "reasoningEffort"]) {
-        const current = role === "main" ? (field === "model" ? state.model : state.reasoning) : state.agentModels?.[role]?.[field];
-        const wrapper = document.createElement("label");
-        const fieldLabel = field === "model" ? t("ui.model") : t("ui.reasoning");
-        const caption = document.createElement("span");
-        caption.className = "agent-model-caption";
-        caption.textContent = fieldLabel;
-        wrapper.append(caption);
-        const values = field === "model" ? [...new Set(["", ...settingOptions.model, current].filter(value => typeof value === "string"))] : settingOptions.reasoning;
-        const isReasoning = field === "reasoningEffort";
-        const control = document.createElement(isReasoning ? "input" : "select");
-        control.dataset.role = role;
-        control.dataset.field = field;
-        control.setAttribute("aria-label", label + " " + fieldLabel);
-        const output = document.createElement("span");
-        let slider;
-        let progress;
-        if (isReasoning) {
-          wrapper.classList.add("agent-reasoning-control");
-          output.className = "agent-reasoning-value";
-          control.type = "range";
-          control.min = "0";
-          control.max = String(values.length - 1);
-          control.step = "1";
-          control.value = String(Math.max(0, values.indexOf(current || "")));
-          wrapper.append(output);
-          slider = document.createElement("span");
-          slider.className = "agent-reasoning-slider";
-          progress = document.createElement("progress");
-          progress.max = values.length - 1;
-          progress.setAttribute("aria-hidden", "true");
-          const ticks = document.createElement("span");
-          ticks.className = "agent-reasoning-ticks";
-          ticks.setAttribute("aria-hidden", "true");
-          for (const value of values) {
-            const tick = document.createElement("span");
-            tick.title = reasoningDisplayLabel(value);
-            ticks.append(tick);
-          }
-          slider.append(progress, ticks);
-        } else {
-          for (const value of values) {
-            const option = document.createElement("option");
-            option.value = value;
-            option.textContent = value || t("ui.use.parent.setting");
-            option.selected = value === (current || "");
-            control.append(option);
-          }
+        const own = role === "main" ? (field === "model" ? state.model : state.reasoning) : state.agentModels?.[role]?.[field];
+        const current = own || effectiveAgentValue(role, field) || (field === "model" ? state.model || settingOptions.model.find(Boolean) || "" : state.reasoning || "medium");
+        if (!own && current) {
+          if (role === "main") state[field === "model" ? "model" : "reasoning"] = current;
+          else state.agentModels = { ...state.agentModels, [role]: { ...state.agentModels?.[role], [field]: current } };
+          initialized = true;
         }
-        const selectedValue = () => isReasoning ? values[Number(control.value)] : control.value;
-        const showEffort = () => {
-          if (!isReasoning) return;
-          const value = selectedValue();
-          const ultra = value === "max";
-          wrapper.classList.toggle("is-ultra", ultra);
-          output.textContent = ultra ? "ULTRA" : value && uiLocale() === "en" ? value.toUpperCase() : reasoningDisplayLabel(value);
-          output.title = ultra ? t("ui.ultra.max.reasoning.effort") : reasoningDisplayLabel(value);
-          control.setAttribute("aria-valuetext", reasoningDisplayLabel(value));
-          progress.value = Number(control.value);
-        };
-        showEffort();
-        control.disabled = currentCapabilities()[isReasoning ? "reasoning" : "model"] !== true;
-        control.addEventListener(isReasoning ? "input" : "change", function () {
-          const value = selectedValue();
-          showEffort();
-          if (role === "main") state[isReasoning ? "reasoning" : "model"] = value;
-          else {
-            state.agentModels = { ...state.agentModels, [role]: { ...state.agentModels?.[role], [field]: value || undefined } };
-          }
+        row.append(createAgentSettingControl(role, label, field, current, value => {
+          if (role === "main") state[field === "reasoningEffort" ? "reasoning" : "model"] = value;
+          else state.agentModels = { ...state.agentModels, [role]: { ...state.agentModels?.[role], [field]: value || undefined } };
           updateModeControls();
           persist();
           saveComposerSettings();
-        });
-        if (slider) {
-          slider.append(control);
-          wrapper.append(slider);
-        } else wrapper.append(control);
-        const source = document.createElement("span");
-        source.className = "agent-setting-source";
-        const meta = document.createElement("span"); meta.className = "agent-setting-meta";
-        const reset = document.createElement("button");
-        reset.type = "button"; reset.className = "agent-setting-reset"; reset.textContent = "↶";
-        reset.title = t("ui.use.parent.setting"); reset.setAttribute("aria-label", t("ui.use.parent.setting"));
-        reset.disabled = control.disabled;
-        const inherited = state.agentDefaults?.sources?.[inheritedAgentRole(role)]?.[field] || "product";
-        const updateSource = () => {
-          const own = role === "main" ? (isReasoning ? state.reasoning : state.model) : state.agentModels?.[role]?.[field];
-          reset.hidden = !own;
-          source.textContent = (own ? t("ui.chat.override") : t("ui.inherited." + inherited)) + ": " + (effectiveAgentValue(role, field) || t("ui.default"));
-        };
-        updateSource();
-        control.addEventListener(isReasoning ? "input" : "change", updateSource);
-        reset.addEventListener("click", () => {
-          control.value = isReasoning ? "0" : "";
-          control.dispatchEvent(new Event(isReasoning ? "input" : "change"));
-        });
-        meta.append(source, reset);
-        wrapper.append(meta);
-        row.append(wrapper);
+        }));
       }
       menu.append(row);
     }
+    if (initialized) { persist(); saveComposerSettings(); }
   }
 
   function renderGeneralSettings() {

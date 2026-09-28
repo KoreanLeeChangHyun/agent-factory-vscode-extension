@@ -998,8 +998,7 @@ button {
   display: none;
 }
 
-.session-menu,
-.question-menu {
+.session-menu {
   /* Anchor wide lists to the composer action row, not the small trigger. */
   left: 0;
   right: auto;
@@ -2875,16 +2874,17 @@ html[data-af-hidden="true"] *::after {
 .sudo-panel button:disabled { opacity: .5; }
 
 /* Scoped agent defaults share the chat role layout. */
-#agent-default-fields .agent-model-row label { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+
 #agent-default-fields select { width: 100%; min-width: 0; }
 #model-menu .agent-model-caption { white-space: normal; overflow-wrap: anywhere; }
 #settings-panel-agents { padding: 8px 4px; }
-#settings-panel-agents > label { display: flex; align-items: center; gap: 16px; font-size: 12px; }
-#agent-default-scope { width: 160px; }
+#settings-panel-agents > label { display: grid; grid-template-columns: max-content minmax(0, 1fr); align-items: center; gap: 16px; font-size: 12px; }
+#settings-panel-agents > label > span { white-space: nowrap; }
+#agent-default-scope { width: 100%; min-width: 0; }
 #settings-panel-agents > p { margin: 14px 0; color: var(--vscode-descriptionForeground); font-size: 11px; line-height: 1.6; }
 #agent-default-fields .agent-model-row { padding: 16px 0; border-top: 1px solid var(--vscode-panel-border, #ffffff15); }
-#agent-default-fields label > span { font-size: 11px; color: var(--vscode-descriptionForeground); }
-#model-menu .agent-model-row > label { grid-template-rows: 16px 34px auto; align-self: start; }
+
+:is(#model-menu, #agent-default-fields) .agent-model-row > label { grid-template-rows: 16px 34px auto; align-self: start; }
 #model-menu .agent-setting-meta { grid-row: 3; display: flex; align-items: start; gap: 4px; min-height: 24px; }
 #model-menu .agent-setting-source { flex: 1; min-width: 0; padding-top: 4px; font-size: 10px; line-height: 1.5; color: var(--vscode-descriptionForeground); overflow-wrap: anywhere; }
 #model-menu .agent-setting-reset { flex: 0 0 22px; height: 22px; padding: 0; border: 0; border-radius: 4px; color: var(--vscode-descriptionForeground); background: transparent; font-size: 17px; cursor: pointer; }
@@ -2892,9 +2892,9 @@ html[data-af-hidden="true"] *::after {
 #model-menu .agent-setting-reset:hover { color: var(--vscode-foreground); background: var(--vscode-toolbar-hoverBackground, #ffffff10); }
 #model-menu .agent-setting-reset:focus-visible { outline: 1px solid var(--vscode-focusBorder); }
 @media (max-width: 480px) {
-  #model-menu .agent-reasoning-value { grid-row: 1; justify-self: end; }
-  #model-menu .agent-reasoning-control > .agent-model-caption { grid-row: 1; grid-column: 1; }
-  #model-menu .agent-reasoning-value { grid-column: 1; }
+  :is(#model-menu, #agent-default-fields) .agent-reasoning-value { grid-row: 1; justify-self: end; }
+  :is(#model-menu, #agent-default-fields) .agent-reasoning-control > .agent-model-caption { grid-row: 1; grid-column: 1; }
+  :is(#model-menu, #agent-default-fields) .agent-reasoning-value { grid-column: 1; }
 }
 
 .worktree-menu { width: min(300px, calc(100vw - 32px)); min-width: 0; left: 0; right: auto; }
@@ -2911,3 +2911,8 @@ html[data-af-hidden="true"] *::after {
 .contract-list-entry + .contract-list-entry { border-top: 1px solid var(--vscode-panel-border, #454545); }
 .contract-list-title { font-weight: 600; overflow-wrap: anywhere; }
 .contract-list-metadata { font-size: 11px; color: var(--vscode-descriptionForeground); overflow-wrap: anywhere; }
+
+.question-menu { position: fixed; box-sizing: border-box; right: auto; min-width: 0; max-width: none; padding: 6px; overflow-x: hidden; }
+.question-menu .question-row { grid-template-columns: minmax(0, 1fr) 30px; gap: 8px; padding-right: 4px; }
+.question-menu .question-item { min-height: 36px; box-sizing: border-box; align-items: center; padding: 8px 10px; }
+.question-menu .question-copy { display: inline-flex; align-items: center; justify-content: center; padding: 0; }

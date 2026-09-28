@@ -334,6 +334,31 @@ async function main() {
       await page.keyboard.press('Enter');
       assert.deepEqual(await page.evaluate(() => window.sentMessages.at(-1)), { type: 'message.copy', text });
       assert.deepEqual(errors, []);
+      await page.locator('#question-button').click();
+      const artifact = path.join(root, 'out/question-menu'); fs.mkdirSync(artifact, { recursive: true });
+      for (const width of [795, 494, 320]) {
+        await page.setViewportSize({ width, height: 600 });
+        await page.evaluate(() => new Promise(requestAnimationFrame));
+        const anchor = await page.locator('#question-button').boundingBox();
+        const menu = await page.locator('#question-menu').boundingBox();
+        const left = Math.max(8, Math.min(anchor.x + anchor.width - menu.width, width - menu.width - 8));
+        assert.ok(Math.abs(menu.x - left) < 2);
+        assert.ok(Math.abs(anchor.y - menu.y - menu.height - 8) < 2);
+        assert.ok(menu.x >= 8 && menu.x + menu.width <= width - 8 && menu.y >= 0);
+        for (const row of await page.locator('.question-row').all()) {
+          const item = await row.locator('.question-item').boundingBox();
+          const copy = await row.locator('.question-copy').boundingBox();
+          assert.ok(Math.abs(item.y + item.height / 2 - copy.y - copy.height / 2) < 1);
+          assert.ok(copy.x - item.x - item.width >= 7);
+        }
+        await page.screenshot({ path: path.join(artifact, `aligned-${width}.png`) });
+      }
+      await page.locator('.question-row').filter({ has: page.locator('[data-question-id="copy-question"]') }).locator('.question-copy').click();
+      assert.deepEqual(await page.evaluate(() => window.sentMessages.at(-1)), { type: 'message.copy', text });
+      await page.keyboard.press('Escape');
+      assert.equal(await page.locator('#question-menu').isVisible(), false);
+      assert.equal(await page.locator('#question-button').evaluate(el => el === document.activeElement), true);
+      assert.deepEqual(errors, []);
       console.log('Question copy checks passed');
       return;
     }
