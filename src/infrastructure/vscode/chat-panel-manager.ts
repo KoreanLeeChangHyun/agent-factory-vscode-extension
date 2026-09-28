@@ -736,19 +736,21 @@ export class ChatPanelManager implements vscode.Disposable {
         }
         return;
       }
+      case "notes.folder":
       case "notes.list":
       case "notes.save": {
         this.noteStore ??= new NoteStore(this.context.globalState, this.context.workspaceState);
         try {
-          if (message.type === "notes.list") {
-            await this.post(managed.panel, { type: "notes.list.result", scope: message.scope, notes: await this.noteStore.list(message.scope) });
+          if (message.type === "notes.list" || message.type === "notes.folder") {
+            if (message.type === "notes.folder") await this.noteStore.createFolder(message.scope, message.folder);
+            await this.post(managed.panel, { type: "notes.list.result", scope: message.scope, notes: await this.noteStore.list(message.scope), folders: await this.noteStore.folders(message.scope) });
           } else {
             const note = await this.noteStore.save(message.scope, message.note);
             await this.post(managed.panel, { type: "notes.save.result", scope: message.scope, id: note.id, note });
           }
         } catch (error) {
           const detail = error instanceof Error ? error.message : String(error);
-          await this.post(managed.panel, message.type === "notes.list"
+          await this.post(managed.panel, (message.type === "notes.list" || message.type === "notes.folder")
             ? { type: "notes.list.result", scope: message.scope, notes: [], error: detail }
             : { type: "notes.save.result", scope: message.scope, id: message.note.id, error: detail });
         }

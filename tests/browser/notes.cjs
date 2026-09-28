@@ -2,11 +2,13 @@ const assert = require('node:assert/strict');
 async function checkNotes(page) {
   await page.evaluate(() => {
     const records = { global: {}, workspace: {} };
+    const folders = { global: [], workspace: [] };
     const original = window.sentMessages.push.bind(window.sentMessages);
     window.sentMessages.push = function (message) {
       original(message);
       const emit = data => setTimeout(() => window.dispatchEvent(new MessageEvent('message', { data })), 0);
-      if (message.type === 'notes.list') emit({ type: 'notes.list.result', scope: message.scope, notes: Object.values(records[message.scope]) });
+      if (message.type === 'notes.list') emit({ type: 'notes.list.result', scope: message.scope, notes: Object.values(records[message.scope]), folders: folders[message.scope] });
+      if (message.type === 'notes.folder') { folders[message.scope].push(message.folder); emit({ type:'notes.list.result', scope:message.scope, notes:Object.values(records[message.scope]), folders:folders[message.scope] }); }
       if (message.type === 'notes.save') {
         if (window.noteReject) { window.noteReject = false; emit({ type: 'notes.save.result', scope: message.scope, id: message.note.id, error: 'Conflict' }); return; }
         const note = { ...message.note, revision: message.note.revision + 1, updatedAt: new Date().toISOString() };
@@ -19,6 +21,9 @@ async function checkNotes(page) {
   const bounds = () => page.locator('#timeline').evaluate(el => ({ width: el.clientWidth, left: el.getBoundingClientRect().left }));
   const before = await bounds();
   await page.locator('#notes-toggle').click();
+  assert.equal(await page.locator('#notes-tab-workspace').getAttribute('aria-selected'), 'true');
+  await page.locator('#notes-tab-global').click();
+  assert.equal(await page.evaluate(() => localStorage.getItem('agentFactory.notes.scope')), 'global');
   assert.equal(await page.locator('.notes-header-actions #notes-new').isVisible(), true);
   const newButton = await page.locator('#notes-new').boundingBox();
   const closeButton = await page.locator('#notes-close').boundingBox();
@@ -74,6 +79,22 @@ async function checkNotes(page) {
   await page.locator('#notes-save-copy').click();
   await page.waitForFunction(() => document.querySelector('#notes-status').textContent === 'Saved');
   assert.equal(await page.evaluate(() => Object.values(window.noteRecords.workspace).length), 2);
+  await page.locator('#notes-back').click();
+  await page.locator('#notes-folder-name').fill('Projects');
+  await page.locator('#notes-folder-form button').click();
+  await page.waitForSelector('[data-folder="Projects"]');
+  const note = page.locator('[data-note-id]').first();
+  const id = await note.getAttribute('data-note-id');
+  await note.dragTo(page.locator('[data-folder="Projects"]'));
+  await page.waitForFunction(id => window.noteRecords.workspace[id].folder === 'Projects', id);
+  await page.locator('[data-folder="Projects"]').click();
+  assert.equal(await page.locator('[data-note-id]').count(), 1);
+  await page.locator('.notes-entry select').selectOption('');
+  await page.waitForFunction(id => window.noteRecords.workspace[id].folder === '', id);
+  await page.locator('#notes-breadcrumb button').first().click();
+  assert.equal(await page.locator('[data-note-id]').count(), 2);
+  await page.locator('#notes-panel').screenshot({ path: '/tmp/af-notes-folders.png' });
+
   await page.keyboard.press('Escape');
   assert.equal(await page.locator('#notes-panel').isVisible(), false);
   await page.screenshot({ path: '/tmp/af-notes-closed.png' });
@@ -88,6 +109,9 @@ async function checkNotes(page) {
   await page.locator('#notes-close').click();
   assert.deepEqual(await bounds(), narrow);
   assert.equal(await page.evaluate(() => window.sentMessages.some(m => m.type === 'chat.send' || m.type === 'run.cancel')), false);
+  await page.reload();
+  await page.locator('#notes-toggle').click();
+  assert.equal(await page.locator('#notes-tab-workspace').getAttribute('aria-selected'), 'true');
   console.log('Notes: autosave, scopes, reopen, draft insertion, Escape and unchanged chat width passed.');
 }
 module.exports = { checkNotes };

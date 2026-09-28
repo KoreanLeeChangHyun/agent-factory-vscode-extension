@@ -578,7 +578,10 @@
   const notesPanel = document.getElementById("notes-panel");
   const notesToggle = document.getElementById("notes-toggle");
   const notesScopeTabs = Array.from(document.querySelectorAll("[data-notes-scope]"));
-  let selectedNotesScope = "global";
+  let selectedNotesScope = saved?.notesScope === "global" ? "global" : "workspace";
+  try { const cached = localStorage.getItem("agentFactory.notes.scope"); if (cached === "global" || cached === "workspace") selectedNotesScope = cached; } catch { /* Persisted Webview state is the fallback. */ }
+  let selectedNoteFolder = "", noteRecords = [], noteFolders = [], noteMoving = null;
+
   const notesTitle = document.getElementById("notes-title");
   const notesBody = document.getElementById("notes-body");
   const notesStatus = document.getElementById("notes-status");
@@ -623,8 +626,11 @@
     document.getElementById("notes-content").setAttribute("aria-labelledby", "notes-tab-" + selectedNotesScope);
   }
   function selectNotesScope(tab) {
-    if (noteSending || noteDirty || tab.disabled || tab.dataset.notesScope === selectedNotesScope) return;
+    if (noteSending || noteMoving || noteDirty || tab.disabled || tab.dataset.notesScope === selectedNotesScope) return;
     selectedNotesScope = tab.dataset.notesScope;
+    selectedNoteFolder = "";
+    try { localStorage.setItem("agentFactory.notes.scope", selectedNotesScope); } catch { /* Webview state is also saved. */ }
+    persist();
     renderNotesScope();
     loadNotes();
   }
@@ -641,8 +647,9 @@
     });
   }
   document.getElementById("notes-new").addEventListener("click", function () {
+    if (noteMoving) return;
     if (noteSending || noteDirty) return;
-    noteDraft = { scope: selectedNotesScope, id: crypto.randomUUID(), title: "", body: "", revision: 0 };
+    noteDraft = { folder: selectedNoteFolder, scope: selectedNotesScope, id: crypto.randomUUID(), title: "", body: "", revision: 0 };
     noteDirty = true;
     noteFailed = false;
     renderNoteEditor();
@@ -729,25 +736,76 @@
     vscode.postMessage({ type: "notes.save", scope, note });
     refreshNoteControls();
   }
+  document.getElementById("notes-folder-form").addEventListener("submit", event => {
+    event.preventDefault();
+    const input = document.getElementById("notes-folder-name");
+    if (!input.value.trim() || noteMoving) return;
+    vscode.postMessage({type: "notes.folder", scope: selectedNotesScope, folder: [selectedNoteFolder, input.value.trim()].filter(Boolean).join("/")});
+    input.value = "";
+  });
+  function moveNote(id, folder) {
+    const note = noteRecords.find(n => n.id === id);
+    if (!note || noteMoving || noteDraft || (note.folder || "") === folder) return;
+    noteMoving = {id, scope: selectedNotesScope};
+    notesStatus.textContent = t("notes.saving");
+    vscode.postMessage({type: "notes.save", scope: selectedNotesScope, note: {...note, folder}});
+  }
+  function folderDropTarget(element, folder) {
+    element.addEventListener("dragover", event => {
+      if (!event.dataTransfer.types.includes("application/x-agent-factory-note")) return;
+      event.preventDefault(); event.stopPropagation(); event.dataTransfer.dropEffect = "move"; element.classList.add("notes-drop-target");
+    });
+    element.addEventListener("dragleave", () => element.classList.remove("notes-drop-target"));
+    element.addEventListener("drop", event => {
+      event.preventDefault(); event.stopPropagation(); element.classList.remove("notes-drop-target");
+      moveNote(event.dataTransfer.getData("application/x-agent-factory-note"), folder);
+    });
+  }
+  function renderNoteFolders() {
+    const list = document.getElementById("notes-list"), crumbs = document.getElementById("notes-breadcrumb");
+    list.replaceChildren(); crumbs.replaceChildren();
+    const root = document.createElement("button"); root.type = "button"; root.textContent = t("notes.folder.root");
+    root.addEventListener("click", () => {selectedNoteFolder = ""; renderNoteFolders();}); folderDropTarget(root, ""); crumbs.append(root);
+    let parent = "";
+    for (const part of selectedNoteFolder.split("/").filter(Boolean)) {
+      parent = [parent, part].filter(Boolean).join("/"); const path = parent;
+      const button = document.createElement("button"); button.type = "button"; button.textContent = part;
+      button.addEventListener("click", () => {selectedNoteFolder = path; renderNoteFolders();}); folderDropTarget(button,path); crumbs.append(button);
+    }
+    for (const folder of noteFolders.filter(f => f.split("/").slice(0,-1).join("/") === selectedNoteFolder)) {
+      const button = document.createElement("button"); button.type = "button"; button.className = "notes-folder"; button.textContent = "▸ " + folder.split("/").at(-1); button.dataset.folder = folder;
+      button.addEventListener("click", () => {selectedNoteFolder = folder; renderNoteFolders();}); folderDropTarget(button,folder); list.append(button);
+    }
+    for (const note of noteRecords.filter(n => (n.folder || "") === selectedNoteFolder)) {
+      const row = document.createElement("div"); row.className = "notes-entry";
+      const button = document.createElement("button"); button.type = "button"; button.textContent = note.title || t("notes.untitled"); button.draggable = true; button.dataset.noteId = note.id;
+      button.addEventListener("dragstart", event => {event.dataTransfer.setData("application/x-agent-factory-note", note.id); event.dataTransfer.effectAllowed = "move";});
+      button.addEventListener("click", () => {if(noteMoving) return; noteDraft = {...note, scope:selectedNotesScope}; noteDirty = false; renderNoteEditor(); notesBody.focus();});
+      row.append(button);
+      if (noteFolders.length) {
+        const move = document.createElement("select"); move.setAttribute("aria-label",t("notes.folder.move"));
+        for (const folder of ["", ...noteFolders]) {const option = document.createElement("option"); option.value = folder; option.textContent = folder || t("notes.folder.root"); move.append(option);}
+        move.value = note.folder || ""; move.addEventListener("change", () => moveNote(note.id,move.value)); row.append(move);
+      }
+      list.append(row);
+    }
+    if (!list.childElementCount) list.textContent = t("notes.empty");
+  }
   function receiveNotes(message) {
     if (message.type === "notes.list.result") {
       if (message.scope !== selectedNotesScope || noteDraft) return;
       const list = document.getElementById("notes-list");
       list.replaceChildren();
       notesStatus.textContent = message.error ? t("notes.failed", message.error) : "";
-      if (!message.notes.length && !message.error) list.textContent = t("notes.empty");
-      for (const note of message.notes) {
-        const button = document.createElement("button");
-        button.type = "button";
-        button.textContent = note.title || t("notes.untitled");
-        button.addEventListener("click", function () {
-          noteDraft = { ...note, scope: message.scope };
-          noteDirty = false;
-          renderNoteEditor();
-          notesBody.focus();
-        });
-        list.append(button);
-      }
+      if (message.error) return;
+      noteRecords = message.notes; noteFolders = message.folders || [];
+      renderNoteFolders();
+      return;
+    }
+    if (noteMoving && message.scope === noteMoving.scope && message.id === noteMoving.id) {
+      noteMoving = null;
+      if (message.error) { notesStatus.textContent = t("notes.failed", message.error); renderNoteFolders(); }
+      else loadNotes();
       return;
     }
     if (!noteSending || message.scope !== noteSending.scope || message.id !== noteSending.id) return;
@@ -5444,6 +5502,7 @@
     const next = persistenceSnapshot({
       startedMessageIds: state.startedMessageIds,
       pendingRequests: state.pendingRequests,
+      notesScope: selectedNotesScope,
       noteDraft: noteDraft && (noteDirty || noteSending) ? { ...noteDraft } : null,
       panelId: state.panelId,
       agentId: state.agentId,

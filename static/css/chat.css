@@ -2667,8 +2667,9 @@ select:focus-visible,
 @media (prefers-reduced-motion: reduce) { .task-flow-step::before { animation: none !important; } }
 
 .task-history { min-width: 0; border-top: 1px solid var(--vscode-menu-separatorBackground, var(--vscode-panel-border)); margin-top: 5px; padding-top: 5px; }
-.task-history > summary { list-style: none; cursor: pointer; }
-.task-history > summary svg { width: 16px; height: 16px; flex-shrink: 0; fill: none; stroke: currentColor; stroke-width: 1.7; }
+.task-history > summary { list-style: none; cursor: pointer; align-items: center; gap: 10px; }
+.task-history > summary svg { width: 16px; height: 16px; flex-shrink: 0; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
+.task-history > summary .history-category-icon { width: 18px; height: 18px; flex: 0 0 18px; }
 .task-history > summary .chevron-icon { margin-left: auto; }
 .task-history[open] > summary .chevron-icon { transform: rotate(90deg); }
 .task-history > summary::-webkit-details-marker { display: none; }
@@ -2989,3 +2990,23 @@ table.interview-options td:first-child {
   #unit-create-dialog select::picker(select) { width: anchor-size(width); box-sizing: border-box; }
   #unit-create-dialog option { overflow-wrap: anywhere; white-space: normal; }
 }
+
+/* Notes folders retain the compact panel layout and keyboard alternatives to dragging. */
+#notes-folder-form { display: flex; gap: 6px; margin: 12px 0; }
+#notes-folder-name { min-width: 0; flex: 1; padding: 6px 8px; background: var(--vscode-input-background); color: var(--vscode-input-foreground); border: 1px solid var(--vscode-input-border, #444); border-radius: 4px; }
+#notes-folder-form button { flex: none; white-space: nowrap; }
+#notes-breadcrumb { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 8px; }
+#notes-breadcrumb button { background: transparent; color: var(--vscode-descriptionForeground); border: 0; padding: 5px; }
+.notes-entry { display: flex; gap: 6px; align-items: center; }
+.notes-entry > button { min-width: 0; flex: 1; overflow-wrap: anywhere; }
+.notes-entry > select { max-width: 40%; min-width: 0; background: var(--vscode-dropdown-background); color: var(--vscode-dropdown-foreground); border: 1px solid var(--vscode-dropdown-border, #444); border-radius: 4px; }
+#notes-list .notes-folder { text-align: left; font-weight: 600; }
+#notes-panel .notes-drop-target { outline: 2px solid var(--vscode-focusBorder); background: var(--vscode-list-hoverBackground); }
+/* Status and queued count share a baseline instead of reserving two mostly empty rows. */
+.composer-status-row { align-items: flex-end; gap: 4px 8px; }
+.composer-status-row > .run-status { flex: 1 1 180px; min-width: 0; }
+.composer-status-row > .input-feedback:not([hidden]) { flex: 1 0 100%; }
+
+/* Anchor compact progress to the composer edge, including when queue controls are taller. */
+.composer-status-row > .run-status:not(.is-expanded),
+.composer-status-row > .pending-queue-toggle { margin-bottom: 4px; }

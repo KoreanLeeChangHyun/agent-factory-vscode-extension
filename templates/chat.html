@@ -30,7 +30,7 @@
             <button id="notes-tab-workspace" type="button" role="tab" aria-selected="false" aria-controls="notes-content" tabindex="-1" data-notes-scope="workspace" data-i18n="notes.workspace">Workspace</button>
           </div>
           <div id="notes-content" role="tabpanel" aria-labelledby="notes-tab-global">
-          <div id="notes-list-view"><div id="notes-list"></div></div>
+          <div id="notes-list-view"><form id="notes-folder-form"><input id="notes-folder-name" aria-label="Folder name" data-i18n-aria-label="notes.folder.name" placeholder="Folder name" data-i18n-placeholder="notes.folder.name" required /><button type="submit" data-i18n="notes.folder.add">New folder</button></form><div id="notes-breadcrumb"></div><div id="notes-list"></div></div>
           <div id="notes-editor" hidden>
             <button id="notes-back" type="button" data-i18n="notes.back">Back to list</button>
             <input id="notes-title" type="text" aria-label="Title" placeholder="Title" data-i18n-aria-label="notes.note.title" data-i18n-placeholder="notes.note.title" />
@@ -228,7 +228,7 @@
                 <div id="submission-options"></div>
                 <details id="contract-list" class="task-history" hidden>
                   <summary class="setting-option" role="menuitem" title="Contracts" aria-label="Contracts" data-i18n-title="contracts.title" data-i18n-aria-label="contracts.title" aria-controls="contract-list-list">
-                    <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M4 5v5h5M4 10a8 8 0 1 1 1 8M12 7v5l3 2"></path></svg>
+                    <svg class="history-category-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9M14 3v6h6M14 3l6 6M8 13h8M8 17h5"></path></svg>
                     <span data-i18n="contracts.title">Contracts</span>
                     <svg class="chevron-icon" viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="m6 4 4 4-4 4"></path></svg>
                   </summary>
@@ -236,7 +236,7 @@
                 </details>
                 <details id="task-history" class="task-history" hidden>
                   <summary class="setting-option" role="menuitem" title="Task history" aria-label="Task history" data-i18n-title="flow.history" data-i18n-aria-label="flow.history" aria-controls="task-history-list">
-                    <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M4 5v5h5M4 10a8 8 0 1 1 1 8M12 7v5l3 2"></path></svg>
+                    <svg class="history-category-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="m4 7 1.5 1.5L8 6M11 7h9m-16 6 1.5 1.5L8 12M11 13h9M5 19h2m4 0h9"></path></svg>
                     <span data-i18n="flow.history">Task history</span>
                     <svg class="chevron-icon" viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="m6 4 4 4-4 4"></path></svg>
                   </summary>
@@ -244,7 +244,7 @@
                 </details>
                 <details id="conversation-history" class="task-history">
                   <summary class="setting-option" role="menuitem" aria-controls="conversation-history-list">
-                    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 4h16v12H9l-5 4Z"></path></svg>
+                    <svg class="history-category-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M5 4h14a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H9l-6 3V6a2 2 0 0 1 2-2Zm2 5h10M7 13h6"></path></svg>
                     <span data-i18n="ui.conversation.history">Conversation history</span>
                     <svg class="chevron-icon" viewBox="0 0 16 16" aria-hidden="true"><path d="m6 4 4 4-4 4"></path></svg>
                   </summary>

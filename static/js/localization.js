@@ -110,6 +110,10 @@
   "worktree.created.notice": {"en": "This conversation now works in its isolated worktree.", "ko": "이 대화는 격리된 워크트리에서 작업합니다."},
 
   "notes.resize": {"en":"Resize notes", "ko":"노트 너비 조절"},
+  "notes.folder.name": {"en":"Folder name", "ko":"폴더 이름"},
+  "notes.folder.add": {"en":"New folder", "ko":"폴더 추가"},
+  "notes.folder.root": {"en":"All notes", "ko":"전체 노트"},
+  "notes.folder.move": {"en":"Move to folder", "ko":"폴더로 이동"},
   "notes.title": {"en": "Notes", "ko": "노트"},
   "notes.scope": {"en": "Storage scope", "ko": "저장 범위"},
   "notes.global": {"en": "Global", "ko": "글로벌"},

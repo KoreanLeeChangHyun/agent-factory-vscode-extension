@@ -1,3 +1,4 @@
+import { validNoteFolder } from "../infrastructure/vscode/note-store";
 import { validAgentValue } from "../core/config/agent-settings";
 import { parseAgentPermissions } from "../common/types/agent-permissions";
 import { parseAgentModels } from "../common/types/agent-models";
@@ -11,7 +12,7 @@ const clientMessageTypes = new Set([
   "agent.defaults.save",
   "client.ready",
   "worktree.create", "worktree.merge", "worktree.refresh", "worktree.repositories",
-  "notes.list",
+  "notes.list", "notes.folder",
   "notes.save",
   "bots.configure",
   "bot.talk",
@@ -154,6 +155,8 @@ export function parseClientMessage(value: unknown): ClientMessage | undefined {
     case "attachment.remove":
       if (typeof value.id !== "string" || !/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(value.id)) return undefined;
       return { type: value.type, id: value.id };
+    case "notes.folder":
+      return (value.scope === "global" || value.scope === "workspace") && validNoteFolder(value.folder) && value.folder ? { type: value.type, scope: value.scope, folder: value.folder } : undefined;
     case "notes.list":
       if (value.scope !== "global" && value.scope !== "workspace") return undefined;
       return { type: value.type, scope: value.scope };
@@ -161,7 +164,8 @@ export function parseClientMessage(value: unknown): ClientMessage | undefined {
       if (value.scope !== "global" && value.scope !== "workspace") return undefined;
       const note = value.note as Record<string, unknown> | undefined;
       if (!note || typeof note.id !== "string" || !/^[A-Za-z0-9_-]+$/.test(note.id) || typeof note.title !== "string" || typeof note.body !== "string" || !Number.isSafeInteger(note.revision) || Number(note.revision) < 0) return undefined;
-      return { type: value.type, scope: value.scope, note: { id: note.id, title: note.title, body: note.body, revision: Number(note.revision) } };
+      if (!validNoteFolder(note.folder ?? "")) return undefined;
+      return { type: value.type, scope: value.scope, note: { folder: (note.folder as string) || "", id: note.id, title: note.title, body: note.body, revision: Number(note.revision) } };
     }
     case "agent.defaults.save":
       if ((value.scope !== "global" && value.scope !== "project") ||
