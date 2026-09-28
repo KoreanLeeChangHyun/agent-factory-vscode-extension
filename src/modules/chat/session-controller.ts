@@ -15,6 +15,8 @@ export interface SessionControllerEvents {
   readonly onQueueChanged?: (count: number) => void;
   readonly onBeforeQueueDrain?: () => Promise<void>;
   readonly onAssistantText: (text: string, phase?: "commentary" | "final", runId?: string, localization?: LocalizedMessage) => void;
+  /** Appends generated text to a live preview identified by run, stream and provider block id. */
+  readonly onAssistantDelta?: (delta: { readonly runId: string; readonly stream: "commentary" | "final"; readonly id: string; readonly text: string }) => void;
   readonly onProgress: (text: string) => void;
   readonly onUsage: (usedTokens: number, contextWindowTokens: number, weeklyUsedPercent?: number) => void;
   readonly onActivity: (activity: {
@@ -532,6 +534,8 @@ Answer the Human's current question without cancelling these workflows. For task
             this.events.onAssistantText(update.text, "commentary", runId);
             lastCommentary = update.text;
           }
+        } else if (update.kind === "delta") {
+          this.events.onAssistantDelta?.({ runId, stream: update.stream, id: update.id, text: update.text });
         } else if (update.kind === "status") {
           this.events.onProgress(update.text);
         } else if (update.kind === "goal") {

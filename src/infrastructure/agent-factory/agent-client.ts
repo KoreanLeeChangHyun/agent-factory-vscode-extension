@@ -109,6 +109,8 @@ export interface RunUpdates {
 
 export type RunUpdate =
   | { readonly kind: "commentary"; readonly text: string }
+  /** Live preview of text still being generated; the complete commentary or final result supersedes it. */
+  | { readonly kind: "delta"; readonly stream: "commentary" | "final"; readonly id: string; readonly text: string }
   | { readonly kind: "status"; readonly text: string }
   | { readonly kind: "goal"; readonly goal: NativeGoal | null; readonly error?: string }
   | {
@@ -1455,6 +1457,12 @@ async function progressUpdates(line: string, projectRoot: string, ownResultPath:
   if (event.type === "goal.updated") return [{ kind: "goal", goal: readNativeGoal(event.goal) }];
   if (event.type === "goal.error") return [{ kind: "goal", goal: null, error: typeof event.message === "string" ? event.message : localize("ui.goal.status.needs.attention") }];
   if (event.type === "goal.continuing") return [statusUpdate(localize("ui.the.goal.is.active.codex.will.continue.with.the.next.turn"))];
+  if (event.type === "native.delta") {
+    return (event.stream === "commentary" || event.stream === "final") && typeof event.id === "string"
+      && typeof event.text === "string" && event.text
+      ? [{ kind: "delta", stream: event.stream, id: event.id, text: event.text }]
+      : [];
+  }
   if (event.type === "native.commentary") {
     return typeof event.text === "string" && event.text.trim()
       ? [{ kind: "commentary", text: event.text }, statusUpdate(localize("ui.working"))]

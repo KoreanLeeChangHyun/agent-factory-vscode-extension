@@ -1331,6 +1331,9 @@ Read the exact stored child result/receipt and existing workflow status for repo
         onAssistantText: (responseText, phase, runId, localization) => {
           void this.post(managed.panel, { type: "chat.assistant", text: responseText, phase, runId, ...(localization ? { localization: { text: localization } } : {}) });
         },
+        onAssistantDelta: (delta) => {
+          void this.post(managed.panel, { type: "chat.delta", ...delta });
+        },
         onDecision: (runId, canApprove) => {
           void this.post(managed.panel, { type: "decision.pending", runId, canApprove });
         },

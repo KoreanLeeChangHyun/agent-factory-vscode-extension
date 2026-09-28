@@ -1560,7 +1560,7 @@
       case "chat.assistant":
         if (typeof message.text === "string" && message.text) {
           if (message.runId && state.timeline.some(function (entry) {
-            return entry.type === "assistant" && entry.runId === message.runId && entry.text === message.text &&
+            return entry.type === "assistant" && !entry.streaming && entry.runId === message.runId && entry.text === message.text &&
               entry.phase === (message.phase === "commentary" ? "commentary" : "final");
           })) break;
           if (isDuplicateCancellation(state.timeline.at(-1), { ...message, type: "assistant" })) break;
@@ -1570,11 +1570,25 @@
             for (const flow of incomingFlows) snapshots.set(flow.id, flow);
             state.taskFlows = [...snapshots.values()].slice(-100);
           }
-          state.timeline.push({ type: "assistant", id: createId(), text: message.text, localization: message.localization?.text, runId: message.runId, phase: message.phase === "commentary" ? "commentary" : "final" });
+          const complete = { type: "assistant", id: createId(), text: message.text, localization: message.localization?.text, runId: message.runId, phase: message.phase === "commentary" ? "commentary" : "final" };
+          const preview = liveAssistantPreview(complete);
+          if (preview >= 0) state.timeline.splice(preview, 1, complete);
+          else state.timeline.push(complete);
+          if (complete.phase === "final") dropLivePreviews(complete.runId);
           scheduleTimelineRender();
           renderRunStatus();
           renderWorkLoopPanel();
           persist(false);
+        }
+        break;
+      case "chat.delta":
+        if (typeof message.runId === "string" && typeof message.id === "string" && typeof message.text === "string" && message.text &&
+            (message.stream === "commentary" || message.stream === "final")) {
+          const key = message.runId + "\u0000" + message.stream + "\u0000" + message.id;
+          const entry = state.timeline.find(function (item) { return item.streaming && item.streamKey === key; });
+          if (entry) entry.text += message.text;
+          else state.timeline.push({ type: "assistant", id: createId(), text: message.text, runId: message.runId, phase: message.stream, streaming: true, streamKey: key });
+          scheduleTimelineRender();
         }
         break;
       case "bots.updated":
@@ -1630,6 +1644,7 @@
           state.runStartedAt = Date.now();
         } else if (!state.running) {
           state.runStartedAt = undefined;
+          dropLivePreviews();
         }
         updateRunControls();
         scheduleTimelineRender();
@@ -1905,6 +1920,22 @@
       if (type === "user" || (type === "assistant" && event.phase !== "commentary")) index.latestTurn = event;
     }
     return index;
+  }
+
+  // A complete message supersedes the oldest live preview of the same run and phase whose text it extends.
+  function liveAssistantPreview(complete) {
+    const normalize = function (text) { return String(text || "").replace(/\s+/g, " ").trim(); };
+    const full = normalize(complete.text);
+    return state.timeline.findIndex(function (entry) {
+      return entry.streaming && entry.runId === complete.runId && entry.phase === complete.phase &&
+        (complete.phase === "final" || full.startsWith(normalize(entry.text)));
+    });
+  }
+
+  function dropLivePreviews(runId) {
+    const before = state.timeline.length;
+    state.timeline = state.timeline.filter(function (entry) { return !entry.streaming || (runId !== undefined && entry.runId !== runId); });
+    if (state.timeline.length !== before) scheduleTimelineRender();
   }
 
   function upsertActivity(id, category, phase, text, diff, title, output) {
@@ -5285,7 +5316,7 @@
         return persisted;
       }),
       taskFlows: currentTaskFlows().slice(-100),
-      timeline: state.timeline.slice(-200).map(function (event) {
+      timeline: state.timeline.filter(function (event) { return !event.streaming; }).slice(-200).map(function (event) {
         if (!Array.isArray(event.attachments)) return event;
         return {
           ...event,

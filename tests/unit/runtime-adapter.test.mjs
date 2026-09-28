@@ -675,6 +675,17 @@ test("runtime client invokes official commands and reads the bounded managed res
   assert.equal(commentaryUpdates[1].text, "Working");
 
   await writeFile(eventsPath, [
+    { type: "native.delta", stream: "commentary", id: "msg:1", text: "Work" },
+    { type: "native.delta", stream: "final", id: "toolu", text: "결과" },
+    { type: "native.delta", stream: "reasoning", id: "x", text: "hidden" },
+    { type: "native.delta", stream: "final", id: "toolu", text: "" }
+  ].map(JSON.stringify).join("\n") + "\n");
+  assert.deepEqual((await client.updates("main-test", "run-fake", 0)).updates, [
+    { kind: "delta", stream: "commentary", id: "msg:1", text: "Work" },
+    { kind: "delta", stream: "final", id: "toolu", text: "결과" }
+  ]);
+
+  await writeFile(eventsPath, [
     { type: "item.started", item: { id: "compact-1", type: "contextCompaction" } },
     { type: "item.completed", item: { id: "compact-1", type: "contextCompaction" } }
   ].map(JSON.stringify).join("\n") + "\n");
@@ -1110,6 +1121,31 @@ test("runtime reads reject symlink ancestors and arbitrary result paths", async 
   await assert.rejects(readFile(join(root, ".agent-factory")), { code: "ENOENT" });
 });
 
+
+test("session controller forwards live deltas with their run before the complete output", async function () {
+  const { ChatSessionController } = await importTypeScript("src/modules/chat/session-controller.ts");
+  const order = [];
+  const runtime = {
+    async submit(agentId) { return { agentId, runId: "delta-run" }; },
+    async updates() { return { cursor: 2, updates: [
+      { kind: "delta", stream: "final", id: "toolu", text: "fin" },
+      { kind: "delta", stream: "final", id: "toolu", text: "al" }
+    ] }; },
+    async status() { return { status: "completed" }; },
+    async result() { return { status: "completed", text: "final" }; }
+  };
+  const controller = new ChatSessionController(runtime, {
+    onBound() {}, onRunningChanged() {}, onProgress() {}, onActivity() {}, onError() {},
+    onAssistantDelta(delta) { order.push(delta); },
+    onAssistantText(text, phase, runId) { order.push({ text, phase, runId }); }
+  }, undefined, { pollIntervalMs: 0, maxPolls: 1 });
+  await controller.send("request", [], { fast: false, goalMode: false });
+  assert.deepEqual(order, [
+    { runId: "delta-run", stream: "final", id: "toolu", text: "fin" },
+    { runId: "delta-run", stream: "final", id: "toolu", text: "al" },
+    { text: "final", phase: "final", runId: "delta-run" }
+  ]);
+});
 
 test("session controller emits complete commentary once and marks final output", async function () {
   const { ChatSessionController } = await importTypeScript("src/modules/chat/session-controller.ts");
@@ -1686,16 +1722,17 @@ test("cancellation summaries are shown once on restore and live delivery without
     assert.deepEqual(Array.from(context.result), events);
   }
   const handler = script.slice(script.indexOf('      case "chat.assistant":'), script.indexOf('      case "run.state":'));
+  const previewHelpers = script.slice(script.indexOf("  // A complete message supersedes"), script.indexOf("  function upsertActivity("));
   Object.assign(context, {
     state: { timeline: [{ ...notice, text: summary + "\nprovider: diagnostic" }] },
     message: { ...final, type: "chat.assistant" },
     createId: () => "new", renderTimeline() {}, scheduleTimelineRender() {}, renderRunStatus() {}, renderWorkLoopPanel() {},
     extractTaskFlows: () => ({ flows: [] }), persist() {}
   });
-  runInNewContext('switch (message.type) {\n' + handler + '\n}', context);
+  runInNewContext(previewHelpers + 'switch (message.type) {\n' + handler + '\n}', context);
   assert.equal(context.state.timeline.length, 1);
   context.message = { ...partial, type: "chat.assistant" };
-  runInNewContext('switch (message.type) {\n' + handler + '\n}', context);
+  runInNewContext(previewHelpers + 'switch (message.type) {\n' + handler + '\n}', context);
   assert.equal(context.state.timeline.length, 2);
   assert.equal(context.state.timeline[1].text, partial.text);
 });

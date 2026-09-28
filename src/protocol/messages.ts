@@ -191,6 +191,7 @@ export type HostMessage =
   | { readonly type: "decision.pending"; readonly runId: string | null; readonly canApprove?: boolean }
   | { readonly type: "chat.human-decision"; readonly submission?: MessageSubmission; readonly text: string }
   | { readonly type: "chat.assistant"; readonly localization?: { readonly text?: import("../common/localization").LocalizedMessage }; readonly text: string; readonly phase?: "commentary" | "final"; readonly runId?: string }
+  | { readonly type: "chat.delta"; readonly runId: string; readonly stream: "commentary" | "final"; readonly id: string; readonly text: string }
   | { readonly type: "image.resolved"; readonly href: string; readonly src?: string }
   | { readonly type: "run.progress"; readonly text: string }
   | {
