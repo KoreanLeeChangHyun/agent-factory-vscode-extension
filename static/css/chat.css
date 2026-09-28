@@ -207,6 +207,20 @@ button {
   margin-bottom: 0;
 }
 
+/* Live previews split finished blocks from the growing tail; keep the parts layout-transparent. */
+.markdown-preview-part {
+  display: contents;
+}
+
+.markdown-preview-part:first-child > :first-child {
+  margin-top: 0;
+}
+
+.markdown-preview-part:last-child > :last-child,
+.markdown-preview-part:has(+ .markdown-preview-part:empty) > :last-child {
+  margin-bottom: 0;
+}
+
 .markdown-body h1,
 .markdown-body h2,
 .markdown-body h3,

@@ -636,7 +636,8 @@ async function main() {
     await skillCard.locator('summary').first().click();
     assert.equal(await skillCard.locator('.syntax-code').first().isVisible(), true);
     await emit({ type: 'run.activity', id: 'skill-reference-card', category: 'command', phase: 'failed', text: 'cat /home/test/.codex/plugins/cache/agent-factory/agent-factory/1.0.0/skills/convention/references/communication.md', output: 'read failed' });
-    assert.equal(await skillCard.locator('summary').first().getAttribute('title'), 'Failed');
+    // The failed update renders on the next frame; wait for it instead of racing the render.
+    await page.waitForFunction(() => document.querySelector('[data-id="skill-reference-card"] .skill-read-card summary')?.getAttribute('title') === 'Failed');
     assert.equal(await skillCard.locator('details').first().getAttribute('open'), '');
     const managedSubmit = 'python3 skills/agent/scripts/exec.py submit --agent work-card --role work --message "Update UI"';
     await emit({ type: 'run.activity', id: 'managed-submit', category: 'command', phase: 'completed', text: managedSubmit, output: '{"agentId":"work-card","runId":"run-card"}' });

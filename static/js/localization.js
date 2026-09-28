@@ -10,7 +10,6 @@
   "ui.settings.scope": {"en": "Scope", "ko": "설정 범위"},
   "ui.project.defaults": {"en": "Project", "ko": "프로젝트"},
   "ui.global.defaults": {"en": "Global", "ko": "글로벌"},
-  "ui.agent.defaults.help": {"en": "Priority: Chat > Project > Global. Values set at a narrower scope take precedence.", "ko": "우선순위: 채팅 > 프로젝트 > 글로벌. 좁은 범위에서 지정한 값이 우선합니다."},
   "ui.use.parent.setting": {"en": "Inherit defaults", "ko": "기본값 상속"},
   "ui.chat.override": {"en": "This chat", "ko": "현재 채팅"},
   "ui.inherited.project": {"en": "Inherited from project", "ko": "프로젝트에서 상속"},

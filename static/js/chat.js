@@ -1586,9 +1586,13 @@
             (message.stream === "commentary" || message.stream === "final")) {
           const key = message.runId + "\u0000" + message.stream + "\u0000" + message.id;
           const entry = state.timeline.find(function (item) { return item.streaming && item.streamKey === key; });
-          if (entry) entry.text += message.text;
-          else state.timeline.push({ type: "assistant", id: createId(), text: message.text, runId: message.runId, phase: message.stream, streaming: true, streamKey: key });
-          scheduleTimelineRender();
+          if (entry) {
+            entry.text += message.text;
+            schedulePreviewRender(entry);
+          } else {
+            state.timeline.push({ type: "assistant", id: createId(), text: message.text, runId: message.runId, phase: message.stream, streaming: true, streamKey: key });
+            scheduleTimelineRender();
+          }
         }
         break;
       case "bots.updated":
@@ -1930,6 +1934,87 @@
       return entry.streaming && entry.runId === complete.runId && entry.phase === complete.phase &&
         (complete.phase === "final" || full.startsWith(normalize(entry.text)));
     });
+  }
+
+  // Growing previews re-render only their own content once per frame instead of the whole timeline.
+  const pendingPreviews = new Set();
+  let previewFrame;
+  function schedulePreviewRender(entry) {
+    pendingPreviews.add(entry);
+    if (previewFrame !== undefined || document.hidden) return;
+    previewFrame = requestAnimationFrame(function () {
+      previewFrame = undefined;
+      let rendered = false;
+      for (const item of pendingPreviews) {
+        const element = messageElements.get(item.id);
+        const key = element && messageRenderKeys.get(element);
+        const content = element && element.querySelector(":scope > .message-content");
+        if (!content || !key || !state.timeline.includes(item)) {
+          scheduleTimelineRender();
+          continue;
+        }
+        renderPreviewMarkdown(content, item.text, item);
+        key[0] = eventVersion(item);
+        rendered = true;
+      }
+      pendingPreviews.clear();
+      if (rendered && state.autoScroll && followLatest) timeline.scrollTop = timeline.scrollHeight;
+    });
+  }
+
+  // Previews skip syntax highlighting, image resolution and structured extraction; the complete message does them once.
+  // Finished blocks (before the last blank line outside a code fence) render once; only the growing tail re-renders,
+  // so a long answer costs O(new text) per frame instead of O(whole answer).
+  const previewCaches = new WeakMap();
+  function renderPreviewMarkdown(container, text, entry) {
+    if (!markdown) {
+      container.textContent = text;
+      return;
+    }
+    let cache = entry && previewCaches.get(entry);
+    if (!cache || cache.container !== container || !text.startsWith(cache.stableText)) {
+      container.classList.add("markdown-body");
+      const stable = document.createElement("div");
+      const tail = document.createElement("div");
+      stable.className = tail.className = "markdown-preview-part";
+      container.replaceChildren(stable, tail);
+      cache = { container, stable, tail, stableText: "" };
+      if (entry) previewCaches.set(entry, cache);
+    }
+    const boundary = stablePreviewBoundary(text, cache.stableText.length);
+    if (boundary > cache.stableText.length) {
+      cache.stable.append(...previewFragment(text.slice(cache.stableText.length, boundary)).childNodes);
+      cache.stableText = text.slice(0, boundary);
+    }
+    cache.tail.replaceChildren(...previewFragment(text.slice(boundary)).childNodes);
+  }
+
+  function stablePreviewBoundary(text, from) {
+    let boundary = from;
+    let fenced = false;
+    let lineStart = from;
+    while (lineStart < text.length) {
+      const lineEnd = text.indexOf("\n", lineStart);
+      if (lineEnd < 0) break;
+      const line = text.slice(lineStart, lineEnd);
+      if (/^ {0,3}(```|~~~)/.test(line)) fenced = !fenced;
+      else if (!fenced && !line.trim() && lineStart > from) boundary = lineEnd + 1;
+      lineStart = lineEnd + 1;
+    }
+    return boundary;
+  }
+
+  function previewFragment(text) {
+    const fragment = document.createElement("div");
+    fragment.innerHTML = markdown.render(text);
+    for (const img of fragment.querySelectorAll("img[src]")) {
+      if (/^(?:file:\/\/|\/|\.\.?\/)/i.test(img.getAttribute("src"))) img.removeAttribute("src");
+    }
+    for (const link of fragment.querySelectorAll("a")) {
+      link.target = "_blank";
+      link.rel = "noopener noreferrer";
+    }
+    return fragment;
   }
 
   function dropLivePreviews(runId) {
@@ -2489,6 +2574,8 @@
         const text = document.createElement("span");
         text.textContent = localizedText(event.text, event.localization);
         content.append(mark, text);
+      } else if (event.type === "assistant" && event.streaming) {
+        renderPreviewMarkdown(content, event.text, event);
       } else if (event.type === "assistant") {
         const taskContent = extractTaskFlows(localizedText(event.text, event.localization));
         const extracted = event.phase !== "commentary" && globalThis.agentFactoryExecutionReferences

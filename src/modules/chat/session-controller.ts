@@ -518,7 +518,11 @@ Answer the Human's current question without cancelling these workflows. For task
     // Observation duration is not an execution deadline. Long-running work remains attached.
     const maxPolls = this.options.maxPolls ?? Number.POSITIVE_INFINITY;
     const interval = this.options.pollIntervalMs ?? 250;
-    const statusPollStride = this.options.pollIntervalMs === undefined ? 3 : 1;
+    // While text is streaming, poll faster so previews track the runtime's ~80 ms flushes.
+    const streamingInterval = this.options.pollIntervalMs ?? 60;
+    // Status is authoritative but costlier than reading new events; check it on a time budget, not per poll.
+    const statusIntervalMs = this.options.pollIntervalMs === undefined ? 750 : 0;
+    let lastStatusAt = Number.NEGATIVE_INFINITY;
     let cursor = 0;
     let lastCommentary: string | undefined;
     // Activities whose completion event never arrives (e.g. a cancelled compaction) must not keep spinning.
@@ -528,14 +532,29 @@ Answer the Human's current question without cancelling these workflows. For task
       const updates = await this.runtime.updates(agentId, runId, cursor);
       if (this.disposed) return;
       cursor = updates.cursor;
+      let streaming = false;
+      let pendingDelta: { runId: string; stream: "commentary" | "final"; id: string; text: string } | undefined;
+      const flushDelta = () => {
+        if (pendingDelta) this.events.onAssistantDelta?.(pendingDelta);
+        pendingDelta = undefined;
+      };
       for (const update of updates.updates) {
+        if (update.kind === "delta") {
+          streaming = true;
+          // Merge consecutive fragments of one block into a single webview message.
+          if (pendingDelta && pendingDelta.stream === update.stream && pendingDelta.id === update.id) pendingDelta.text += update.text;
+          else {
+            flushDelta();
+            pendingDelta = { runId, stream: update.stream, id: update.id, text: update.text };
+          }
+          continue;
+        }
+        flushDelta();
         if (update.kind === "commentary") {
           if (update.text.trim() && update.text !== lastCommentary) {
             this.events.onAssistantText(update.text, "commentary", runId);
             lastCommentary = update.text;
           }
-        } else if (update.kind === "delta") {
-          this.events.onAssistantDelta?.({ runId, stream: update.stream, id: update.id, text: update.text });
         } else if (update.kind === "status") {
           this.events.onProgress(update.text);
         } else if (update.kind === "goal") {
@@ -550,7 +569,9 @@ Answer the Human's current question without cancelling these workflows. For task
           this.events.onActivity(activity);
         }
       }
-      if (poll % statusPollStride === 0) {
+      flushDelta();
+      if (Date.now() - lastStatusAt >= statusIntervalMs) {
+        lastStatusAt = Date.now();
         const status = await this.runtime.status(agentId, runId);
         if (this.disposed) return;
         this.events.onStatusObserved?.(status.status);
@@ -600,7 +621,7 @@ Answer the Human's current question without cancelling these workflows. For task
           return;
         }
       }
-      await delay(interval);
+      await delay(streaming ? streamingInterval : interval);
     }
     throw new Error(localize("ui.timed.out.checking.agent.factory.run.status.check.the.run.in.the.runtime.records"));
   }

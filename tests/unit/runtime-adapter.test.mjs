@@ -1127,9 +1127,11 @@ test("session controller forwards live deltas with their run before the complete
   const order = [];
   const runtime = {
     async submit(agentId) { return { agentId, runId: "delta-run" }; },
-    async updates() { return { cursor: 2, updates: [
+    async updates() { return { cursor: 4, updates: [
+      { kind: "delta", stream: "commentary", id: "m:1", text: "Look" },
       { kind: "delta", stream: "final", id: "toolu", text: "fin" },
-      { kind: "delta", stream: "final", id: "toolu", text: "al" }
+      { kind: "delta", stream: "final", id: "toolu", text: "al" },
+      { kind: "status", text: "Working" }
     ] }; },
     async status() { return { status: "completed" }; },
     async result() { return { status: "completed", text: "final" }; }
@@ -1140,9 +1142,10 @@ test("session controller forwards live deltas with their run before the complete
     onAssistantText(text, phase, runId) { order.push({ text, phase, runId }); }
   }, undefined, { pollIntervalMs: 0, maxPolls: 1 });
   await controller.send("request", [], { fast: false, goalMode: false });
+  // Consecutive fragments of one block arrive as one merged message.
   assert.deepEqual(order, [
-    { runId: "delta-run", stream: "final", id: "toolu", text: "fin" },
-    { runId: "delta-run", stream: "final", id: "toolu", text: "al" },
+    { runId: "delta-run", stream: "commentary", id: "m:1", text: "Look" },
+    { runId: "delta-run", stream: "final", id: "toolu", text: "final" },
     { text: "final", phase: "final", runId: "delta-run" }
   ]);
 });
@@ -1732,7 +1735,7 @@ test("cancellation summaries are shown once on restore and live delivery without
   runInNewContext(previewHelpers + 'switch (message.type) {\n' + handler + '\n}', context);
   assert.equal(context.state.timeline.length, 1);
   context.message = { ...partial, type: "chat.assistant" };
-  runInNewContext(previewHelpers + 'switch (message.type) {\n' + handler + '\n}', context);
+  runInNewContext('switch (message.type) {\n' + handler + '\n}', context);
   assert.equal(context.state.timeline.length, 2);
   assert.equal(context.state.timeline[1].text, partial.text);
 });

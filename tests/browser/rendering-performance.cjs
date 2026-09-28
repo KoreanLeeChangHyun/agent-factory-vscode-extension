@@ -58,6 +58,7 @@ async function checkRenderingPerformance(page) {
     for (let i = 0; i < 100; i++) window.dispatchEvent(new MessageEvent('message', { data: { type: 'context.usage', usedTokens: 1000 + i, contextWindowTokens: 10000 } }));
   });
   report.statusNodeRetained = await page.evaluate(() => window.perfStatus === document.querySelector('[data-item-id="status"]') && document.activeElement === window.perfStatus);
+  Object.assign(report, await checkStreamingPreview(page, session, metrics));
   report.usageBotMutations = await page.evaluate(() => window.perfBotMutations);
   const details = page.locator('[data-id="perf-199"] .terminal-output-details');
   report.closedOutputNodes = await details.locator('pre').count();
@@ -86,11 +87,40 @@ async function checkRenderingPerformance(page) {
     assert.ok(report.managed <= 30, 'Only changed commands are analyzed');
     assert.ok(report.initialOutputSpans < 2000, 'Previews have bounded ANSI DOM');
     assert.ok(report.serializedCharacters < 10000, 'Render keys do not serialize unchanged message bodies');
+    assert.equal(report.streamStableHistory, true, 'Streaming previews leave history DOM untouched');
+    assert.equal(report.streamPreviewRetained, true, 'Streaming previews update one element in place');
     await checkBotLifecycle(page);
   }
   if (process.env.AF_RENDERING_REPORT) fs.writeFileSync(process.env.AF_RENDERING_REPORT, JSON.stringify(report, null, 2));
   console.log(JSON.stringify(report));
   await session.detach();
+}
+
+// 300 fragments (~25 KB of Markdown with code) against 200 history messages, one fragment per frame.
+async function checkStreamingPreview(page, session, metrics) {
+  const chunk = 'Streaming **markdown** with `code` and a [link](https://example.com).\n\n```js\nconst value = 1;\n```\n\n';
+  const before = await metrics();
+  const wall = await page.evaluate(async chunk => {
+    window.perfStableMessage = document.querySelector('[data-id="perf-180"]');
+    const post = data => window.dispatchEvent(new MessageEvent('message', { data }));
+    const frame = () => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+    const start = performance.now();
+    post({ type: 'chat.delta', runId: 'perf-run', stream: 'final', id: 'perf-block', text: chunk });
+    await frame();
+    window.perfPreview = document.querySelector('.message-final:last-of-type');
+    for (let i = 1; i < 300; i++) {
+      post({ type: 'chat.delta', runId: 'perf-run', stream: 'final', id: 'perf-block', text: chunk });
+      await frame();
+    }
+    return performance.now() - start;
+  }, chunk);
+  const after = await metrics();
+  const retained = await page.evaluate(() => ({
+    stable: window.perfStableMessage === document.querySelector('[data-id="perf-180"]'),
+    preview: Boolean(window.perfPreview) && window.perfPreview.isConnected && window.perfPreview.querySelectorAll('pre').length === 300
+  }));
+  return { streamWallMs: wall, streamTaskMs: (after.TaskDuration - before.TaskDuration) * 1000,
+    streamStableHistory: retained.stable, streamPreviewRetained: retained.preview };
 }
 
 async function checkBotLifecycle(page) {
