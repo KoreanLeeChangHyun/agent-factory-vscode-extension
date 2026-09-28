@@ -1824,6 +1824,8 @@ select:focus-visible,
 .status-settings-button svg { width: 16px; height: 16px; }
 .status-settings-button:hover { background: var(--vscode-toolbar-hoverBackground); }
 .status-settings {
+  --settings-control-height: 34px;
+  --settings-row-height: 54px;
   /* Stay outside the shell's three grid tracks and above its 22px footer. */
   display: flex;
   flex-direction: column;
@@ -1835,8 +1837,9 @@ select:focus-visible,
   max-width: 560px;
   margin-left: auto;
   min-height: 0;
-  height: min(55vh, calc(100% - 38px));
-  max-height: min(55vh, calc(100% - 38px));
+  box-sizing: border-box;
+  height: min(520px, calc(100% - 38px));
+  max-height: calc(100% - 38px);
   overflow: hidden;
   padding: 8px;
   border-radius: 8px;
@@ -1938,7 +1941,7 @@ select:focus-visible,
 #status-settings-close { display: grid; place-items: center; width: 24px; height: 24px; padding: 3px; border: 0; border-radius: 4px; background: transparent; color: var(--vscode-foreground); }
 .status-settings button svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
 .status-settings button:hover { background: var(--vscode-button-secondaryHoverBackground); }
-.status-settings #status-reset {
+.status-settings :is(#status-reset, #shortcuts-reset) {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -1953,13 +1956,13 @@ select:focus-visible,
   padding: 5px 10px;
   white-space: nowrap;
 }
-.status-settings #status-reset:hover {
+.status-settings :is(#status-reset, #shortcuts-reset):hover {
   background: var(--vscode-button-secondaryHoverBackground, #ffffff14);
   color: var(--vscode-foreground);
 }
-.status-settings #status-reset:active { background: var(--vscode-toolbar-activeBackground, #ffffff20); }
-.status-settings #status-reset:focus-visible { outline: 2px solid var(--vscode-focusBorder, var(--af-color-accent)); outline-offset: 2px; }
-.status-settings #status-reset svg { width: 14px; height: 14px; flex: 0 0 14px; }
+.status-settings :is(#status-reset, #shortcuts-reset):active { background: var(--vscode-toolbar-activeBackground, #ffffff20); }
+.status-settings :is(#status-reset, #shortcuts-reset):focus-visible { outline: 2px solid var(--vscode-focusBorder, var(--af-color-accent)); outline-offset: 2px; }
+.status-settings :is(#status-reset, #shortcuts-reset) svg { width: 14px; height: 14px; flex: 0 0 14px; }
 .status-settings button:disabled { opacity: 0.5; cursor: default; }
 .status-settings :focus-visible, .status-settings-button:focus-visible {
   outline: 1px solid var(--af-color-accent);
@@ -2059,7 +2062,7 @@ select:focus-visible,
 
 /* One shared popover keeps all delegated model overrides visible together. */
 .agent-settings-control { position: static; }
-.agent-model-menu { width: min(460px, calc(100vw - 32px)); min-width: 0; max-width: calc(100vw - 32px); max-height: min(480px, calc(100vh - 180px)); overflow-y: auto; padding: 14px; border-radius: 12px; gap: 0; }
+.agent-model-menu { position: absolute; box-sizing: border-box; left: 0; top: auto; bottom: calc(100% + 6px); width: min(460px, calc(100vw - 24px)); min-width: 0; max-width: calc(100vw - 24px); max-height: calc(100dvh - 24px); overflow-y: auto; padding: 14px; border-radius: 12px; gap: 0; }
 .agent-settings-heading { display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px; }
 .agent-settings-heading > strong { font-size: 14px; font-weight: 600; }
 .agent-settings-close { display: grid; place-items: center; width: 26px; height: 26px; padding: 4px; border: 0; border-radius: 5px; background: transparent; color: var(--vscode-descriptionForeground); cursor: pointer; }
@@ -2071,9 +2074,9 @@ select:focus-visible,
 .agent-model-name { font-size: 12px; font-weight: 500; overflow-wrap: anywhere; }
 .agent-model-row label { min-width: 0; }
 .agent-model-caption { display: none; }
-:is(.agent-model-menu, #general-permissions, .general-language, #image-converter, #unit-create-dialog) select { box-sizing: border-box; width: 100%; min-width: 0; height: 34px; padding: 0 9px; border-radius: 6px; font: inherit; font-size: 12px; color: var(--vscode-dropdown-foreground, var(--vscode-foreground)); background: var(--vscode-dropdown-background, var(--vscode-editor-background)); border: 1px solid var(--vscode-dropdown-border, var(--vscode-panel-border, #ffffff20)); cursor: pointer; }
-:is(.agent-model-menu, #general-permissions, .general-language, #image-converter, #unit-create-dialog) select:hover:not(:disabled) { border-color: var(--vscode-descriptionForeground); }
-:is(.agent-model-menu, #general-permissions, .general-language, #image-converter, #unit-create-dialog) select {
+:is(.agent-model-menu, #settings-panel-bot, #settings-panel-keyboard, #general-permissions, .general-language, #image-converter, #unit-create-dialog) select { box-sizing: border-box; width: 100%; min-width: 0; height: var(--settings-control-height, 34px); padding: 0 9px; border-radius: 6px; font: inherit; font-size: 12px; color: var(--vscode-dropdown-foreground, var(--vscode-foreground)); background: var(--vscode-dropdown-background, var(--vscode-editor-background)); border: 1px solid var(--vscode-dropdown-border, var(--vscode-panel-border, #ffffff20)); cursor: pointer; }
+:is(.agent-model-menu, #settings-panel-bot, #settings-panel-keyboard, #general-permissions, .general-language, #image-converter, #unit-create-dialog) select:hover:not(:disabled) { border-color: var(--vscode-descriptionForeground); }
+:is(.agent-model-menu, #settings-panel-bot, #settings-panel-keyboard, #general-permissions, .general-language, #image-converter, #unit-create-dialog) select {
   appearance: none;
   padding-inline: 12px 32px;
   background-image: linear-gradient(45deg, transparent 50%, currentColor 50%), linear-gradient(135deg, currentColor 50%, transparent 50%);
@@ -2082,17 +2085,17 @@ select:focus-visible,
   background-repeat: no-repeat;
 }
 @media (forced-colors: active) {
-  :is(.agent-model-menu, #general-permissions, .general-language, #image-converter, #unit-create-dialog) select { appearance: auto; background-image: none; }
+  :is(.agent-model-menu, #settings-panel-bot, #settings-panel-keyboard, #general-permissions, .general-language, #image-converter, #unit-create-dialog) select { appearance: auto; background-image: none; }
 }
-:is(.agent-model-menu, #general-permissions, .general-language, #image-converter, #unit-create-dialog) select:disabled { opacity: .5; cursor: default; }
-:is(.agent-model-menu, #general-permissions, .general-language, #image-converter, #unit-create-dialog) option { color: var(--vscode-dropdown-foreground, var(--vscode-foreground)); background: var(--vscode-dropdown-background, var(--vscode-editor-background)); }
+:is(.agent-model-menu, #settings-panel-bot, #settings-panel-keyboard, #general-permissions, .general-language, #image-converter, #unit-create-dialog) select:disabled { opacity: .5; cursor: default; }
+:is(.agent-model-menu, #settings-panel-bot, #settings-panel-keyboard, #general-permissions, .general-language, #image-converter, #unit-create-dialog) option { color: var(--vscode-dropdown-foreground, var(--vscode-foreground)); background: var(--vscode-dropdown-background, var(--vscode-editor-background)); }
 /* Keep native selection and keyboard behavior while styling the open picker. */
 @supports (appearance: base-select) {
-  :is(.agent-model-menu, #general-permissions, .general-language, #image-converter, #unit-create-dialog) select,
-  :is(.agent-model-menu, #general-permissions, .general-language, #image-converter, #unit-create-dialog) select::picker(select) { appearance: base-select; }
-  :is(.agent-model-menu, #general-permissions, .general-language, #image-converter, #unit-create-dialog) select { align-items: center; }
-  :is(.agent-model-menu, #general-permissions, .general-language, #image-converter, #unit-create-dialog) select::picker-icon { display: none; }
-  :is(.agent-model-menu, #general-permissions, .general-language, #image-converter, #unit-create-dialog) select::picker(select) {
+  :is(.agent-model-menu, #settings-panel-bot, #settings-panel-keyboard, #general-permissions, .general-language, #image-converter, #unit-create-dialog) select,
+  :is(.agent-model-menu, #settings-panel-bot, #settings-panel-keyboard, #general-permissions, .general-language, #image-converter, #unit-create-dialog) select::picker(select) { appearance: base-select; }
+  :is(.agent-model-menu, #settings-panel-bot, #settings-panel-keyboard, #general-permissions, .general-language, #image-converter, #unit-create-dialog) select { align-items: center; }
+  :is(.agent-model-menu, #settings-panel-bot, #settings-panel-keyboard, #general-permissions, .general-language, #image-converter, #unit-create-dialog) select::picker-icon { display: none; }
+  :is(.agent-model-menu, #settings-panel-bot, #settings-panel-keyboard, #general-permissions, .general-language, #image-converter, #unit-create-dialog) select::picker(select) {
     min-width: 144px;
     max-width: calc(100vw - 24px);
     max-height: min(300px, 60vh);
@@ -2107,7 +2110,7 @@ select:focus-visible,
     font: inherit;
     font-size: 12px;
   }
-  :is(.agent-model-menu, #general-permissions, .general-language, #image-converter, #unit-create-dialog) option {
+  :is(.agent-model-menu, #settings-panel-bot, #settings-panel-keyboard, #general-permissions, .general-language, #image-converter, #unit-create-dialog) option {
     display: flex;
     align-items: center;
     gap: 12px;
@@ -2118,14 +2121,14 @@ select:focus-visible,
     background: transparent;
     cursor: pointer;
   }
-  :is(.agent-model-menu, #general-permissions, .general-language, #image-converter, #unit-create-dialog) option:checked { background: color-mix(in srgb, var(--af-color-accent) 15%, transparent); }
-  :is(.agent-model-menu, #general-permissions, .general-language, #image-converter, #unit-create-dialog) option:hover,
-  :is(.agent-model-menu, #general-permissions, .general-language, #image-converter, #unit-create-dialog) option:focus-visible {
+  :is(.agent-model-menu, #settings-panel-bot, #settings-panel-keyboard, #general-permissions, .general-language, #image-converter, #unit-create-dialog) option:checked { background: color-mix(in srgb, var(--af-color-accent) 15%, transparent); }
+  :is(.agent-model-menu, #settings-panel-bot, #settings-panel-keyboard, #general-permissions, .general-language, #image-converter, #unit-create-dialog) option:hover,
+  :is(.agent-model-menu, #settings-panel-bot, #settings-panel-keyboard, #general-permissions, .general-language, #image-converter, #unit-create-dialog) option:focus-visible {
     background: var(--vscode-list-hoverBackground, #ffffff12);
     outline: 1px solid var(--af-color-accent);
     outline-offset: -1px;
   }
-  :is(.agent-model-menu, #general-permissions, .general-language, #image-converter, #unit-create-dialog) option::checkmark { order: 1; margin-inline-start: auto; color: var(--af-color-accent); }
+  :is(.agent-model-menu, #settings-panel-bot, #settings-panel-keyboard, #general-permissions, .general-language, #image-converter, #unit-create-dialog) option::checkmark { order: 1; margin-inline-start: auto; color: var(--af-color-accent); }
 }
 .agent-permissions-row { margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--vscode-panel-border, #ffffff20); }
 .agent-permissions-heading { display: flex; justify-content: space-between; align-items: center; margin-bottom: 9px; gap: 8px; }
@@ -2140,7 +2143,7 @@ select:focus-visible,
   .agent-settings-heading { margin-bottom: 4px; }
 }
 
-:is(.agent-model-menu, #general-permissions, .general-language, #image-converter, #unit-create-dialog) select:focus {
+:is(.agent-model-menu, #settings-panel-bot, #settings-panel-keyboard, #general-permissions, .general-language, #image-converter, #unit-create-dialog) select:focus {
   outline: none;
 }
 
@@ -2582,8 +2585,15 @@ select:focus-visible,
 .settings-panel[hidden], .factory-bot[hidden] { display: none; }
 .settings-option { display: flex; align-items: center; gap: 8px; margin: 14px 4px 6px; }
 .settings-shortcuts { margin: 8px 4px; }
-.settings-shortcuts > div { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; padding: 10px 0; }
-.settings-shortcuts dd { margin: 0; }
+.settings-shortcuts > div { display: grid; grid-template-columns: minmax(0, 1fr) minmax(180px, 220px); align-items: center; gap: 8px 16px; padding: 10px 0; }
+.settings-shortcuts dt { min-width: 0; overflow-wrap: anywhere; }
+.settings-shortcuts > div { box-sizing: border-box; min-height: var(--settings-row-height); }
+.settings-shortcuts dd { margin: 0; min-width: 0; text-align: right; }
+#settings-panel-keyboard select:focus-visible { outline: 1px solid var(--vscode-focusBorder); outline-offset: 2px; }
+@media (max-width: 420px) {
+  .settings-shortcuts > div { grid-template-columns: minmax(0, 1fr); gap: 6px; }
+  .settings-shortcuts dd { text-align: left; }
+}
 .settings-shortcuts kbd { font: inherit; padding: 2px 4px; border: 1px solid var(--vscode-widget-border, var(--vscode-panel-border)); border-radius: 3px; }
 .factory-bot[data-animations="false"] * { animation: none !important; }
 
@@ -2786,9 +2796,9 @@ select:focus-visible,
 /* Companion care and explicitly requested Luna conversation. */
 .bot-menu { position: fixed; z-index: 25; display: grid; gap: 4px; width: 180px; max-width: calc(100vw - 16px); max-height: calc(100vh - 16px); overflow-y: auto; padding: 10px; border: 1px solid var(--vscode-panel-border, #454545); border-radius: 10px; background: var(--vscode-editorWidget-background, #252526); box-shadow: 0 4px 16px #0006; }
 .bot-menu[hidden], .bot-menu small[hidden] { display: none; }
-.bot-menu > button { display: flex; align-items: center; gap: 8px; padding: 7px 9px; text-align: left; border: 0; border-radius: 5px; color: var(--vscode-foreground); background: transparent; cursor: pointer; }
+.bot-menu > button, .companion-actions > button { display: flex; align-items: center; gap: 8px; padding: 7px 9px; text-align: left; border: 0; border-radius: 5px; color: var(--vscode-foreground); background: transparent; cursor: pointer; }
 .bot-menu > button > svg { width: 18px; height: 18px; flex: 0 0 18px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
-.bot-menu > button:hover:not(:disabled), .bot-menu > button:focus-visible { background: var(--vscode-toolbar-hoverBackground); outline: 1px solid var(--vscode-focusBorder); }
+.bot-menu > button:hover:not(:disabled), .bot-menu > button:focus-visible, .companion-actions > button:hover:not(:disabled), .companion-actions > button:focus-visible { background: var(--vscode-toolbar-hoverBackground); outline: 1px solid var(--vscode-focusBorder); }
 .bot-menu > button:disabled { opacity: .5; cursor: default; }
 .bot-menu > small { color: var(--vscode-descriptionForeground); }
 .bot-care-stats { display: grid; gap: 7px; padding: 6px 0 10px; }
@@ -2801,14 +2811,22 @@ select:focus-visible,
 .bot-prompt-actions { display: flex; gap: 8px; }
 .bot-prompt-actions button { padding: 5px 10px; border: 1px solid var(--vscode-button-border, transparent); border-radius: 4px; background: var(--vscode-button-background); color: var(--vscode-button-foreground); cursor: pointer; }
 .bot-prompt-actions button:disabled { opacity: .5; cursor: default; }
+/* Full-size settings actions use the same height as selectors. Navigation icons
+   and multiline editors retain their own geometry. */
+.status-settings :is(#status-reset, #shortcuts-reset, #bot-prompt-save, #bot-prompt-reset) {
+  box-sizing: border-box;
+  min-height: var(--settings-control-height);
+  height: var(--settings-control-height);
+  line-height: 18px;
+}
+.status-settings select { height: var(--settings-control-height); }
+.status-settings .settings-option { box-sizing: border-box; min-height: var(--settings-control-height); }
 .bot-speech { position: fixed; z-index: 26; box-sizing: border-box; width: 300px; max-width: calc(100vw - 16px); max-height: calc(100vh - 16px); overflow: auto; padding: 12px; border: 1px solid var(--vscode-panel-border, #454545); border-radius: 12px 12px 4px 12px; background: var(--vscode-editorWidget-background, #252526); color: var(--vscode-foreground); box-shadow: 0 4px 16px #0004; }
 .bot-speech[hidden], .bot-speech button[hidden] { display: none; }
-#bot-speech-text { white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.5; max-height: 6em; overflow: hidden; padding-right: 16px; }
-.bot-speech[data-expanded="true"] #bot-speech-text { max-height: none; }
+#bot-speech-text { white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.5; overflow: auto; padding-right: 16px; }
 .bot-speech button { color: inherit; background: transparent; border: 0; cursor: pointer; }
 .bot-speech button:focus-visible { outline: 1px solid var(--vscode-focusBorder); }
 #bot-speech-close { position: absolute; top: 4px; right: 4px; font-size: 18px; }
-#bot-speech-expand { margin-top: 8px; text-decoration: underline; }
 
 .task-flow-open { grid-column: 1 / -1; justify-self: start; max-width: 100%; white-space: normal; }
 
@@ -2914,11 +2932,15 @@ html[data-af-hidden="true"] *::after {
 
 #agent-default-fields select { width: 100%; min-width: 0; }
 #model-menu .agent-model-caption { white-space: normal; overflow-wrap: anywhere; }
-.agent-scope-row { display: grid; grid-template-columns: max-content minmax(0, 1fr); align-items: center; gap: 16px; font-size: 12px; }
-.agent-scope-row > span { white-space: nowrap; }
-#agent-default-scope { width: 100%; min-width: 0; }
-:is(.agent-scope-priority, #agent-defaults-content > p) { margin: 10px 0; color: var(--vscode-descriptionForeground); font-size: 11px; line-height: 1.6; }
-#agent-default-fields .agent-model-row { padding: 16px 0; border-top: 1px solid var(--vscode-panel-border, #ffffff15); }
+/* The scope selector shares the heading row: title, scope, close. Its label is for assistive technology. */
+.agent-settings-heading { gap: 10px; }
+.agent-settings-heading > strong { white-space: nowrap; }
+.agent-scope-row { display: block; flex: 0 1 140px; min-width: 0; margin-inline-start: auto; font-size: 12px; }
+.agent-scope-row > span { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+#model-menu .agent-scope-row #agent-default-scope { width: 100%; min-width: 0; height: 28px; }
+#agent-defaults-content > p { margin: 10px 0; color: var(--vscode-descriptionForeground); font-size: 11px; line-height: 1.6; }
+/* Scope wrappers share the model menu grid and row spacing. */
+#model-menu #agent-defaults-content, #model-menu #agent-default-fields { display: contents; }
 
 :is(#model-menu, #agent-default-fields) .agent-model-row > label { grid-template-rows: 16px 34px auto; align-self: start; }
 #model-menu .agent-setting-meta { grid-row: 3; display: flex; align-items: start; gap: 4px; min-height: 24px; }
@@ -3005,7 +3027,7 @@ table.interview-options td:first-child {
 .agent-preset-controls input { color: var(--vscode-input-foreground); background: var(--vscode-input-background); border: 1px solid var(--vscode-input-border, transparent); border-radius: 4px; padding: 6px 8px; }
 .agent-preset-controls button { padding: 6px 10px; }
 
-/* Notes folders retain the compact panel layout and keyboard alternatives to dragging. */
+/* Notes folders retain the compact panel layout with drag-and-drop movement. */
 #notes-folder-form { display: flex; gap: 6px; margin: 12px 0; }
 #notes-folder-name { min-width: 0; flex: 1; padding: 6px 8px; background: var(--vscode-input-background); color: var(--vscode-input-foreground); border: 1px solid var(--vscode-input-border, #444); border-radius: 4px; }
 #notes-folder-form button { flex: none; white-space: nowrap; }
@@ -3013,8 +3035,12 @@ table.interview-options td:first-child {
 #notes-breadcrumb button { background: transparent; color: var(--vscode-descriptionForeground); border: 0; padding: 5px; }
 .notes-entry { display: flex; gap: 6px; align-items: center; }
 .notes-entry > button { min-width: 0; flex: 1; overflow-wrap: anywhere; }
-.notes-entry > select { max-width: 40%; min-width: 0; background: var(--vscode-dropdown-background); color: var(--vscode-dropdown-foreground); border: 1px solid var(--vscode-dropdown-border, #444); border-radius: 4px; }
 #notes-list .notes-folder { text-align: left; font-weight: 600; }
+.notes-branch { min-width: 0; }
+.notes-branch > summary { cursor: pointer; padding: 6px 4px; border-radius: 4px; overflow-wrap: anywhere; }
+.notes-branch > summary:hover { background: var(--vscode-list-hoverBackground); }
+.notes-branch > summary[aria-current="true"] { background: var(--vscode-list-inactiveSelectionBackground); }
+.notes-children { display: grid; gap: 6px; margin: 4px 0 4px 9px; padding-left: 12px; border-left: 1px solid var(--vscode-panel-border); }
 #notes-panel .notes-drop-target { outline: 2px solid var(--vscode-focusBorder); background: var(--vscode-list-hoverBackground); }
 /* Status and queued count share a baseline instead of reserving two mostly empty rows. */
 .composer-status-row { align-items: flex-end; gap: 4px 8px; }
@@ -3024,3 +3050,187 @@ table.interview-options td:first-child {
 /* Anchor compact progress to the composer edge, including when queue controls are taller. */
 .composer-status-row > .run-status:not(.is-expanded),
 .composer-status-row > .pending-queue-toggle { margin-bottom: 4px; }
+
+/* Shared SD companion: the generated sheets stay intact; only the viewport changes. */
+.factory-bot.sd-companion { display: flex; align-items: center; justify-content: center; width: 76px; height: 90px; border-radius: 12px; background: transparent; overflow: visible; }
+.factory-bot.sd-companion > svg { display: none; }
+.companion-sprite { display: block; width: 100%; height: 100%; border-radius: inherit; --companion-source: url("../images/companion/emotions-transparent.png"); background-image: var(--companion-source); background-size: 400% 300%; background-repeat: no-repeat; transform-origin: 50% 90%; }
+.companion-sprite[data-sheet="activities"] { --companion-source: url("../images/companion/activities-transparent.png"); background-image: var(--companion-source); background-size: 200% 200%; }
+.companion-reaction { position: absolute; right: 92px; bottom: calc(100% + 10px); max-width: min(230px, 60vw); padding: 8px 12px; border: 1px solid var(--vscode-panel-border); border-radius: 12px; background: var(--vscode-editorWidget-background); color: var(--vscode-foreground); z-index: 4; pointer-events: none; font-size: 12px; }
+.companion-actions { display: grid; gap: 2px; }
+.companion-actions > button { font: inherit; width: 100%; }
+.factory-bot.sd-companion[data-animations="true"][data-interaction="pet"] .companion-sprite { animation: companion-nuzzle 1s ease-in-out infinite; }
+.factory-bot.sd-companion[data-animations="true"][data-interaction="praise"] .companion-sprite,
+.factory-bot.sd-companion[data-animations="true"][data-interaction="play"] .companion-sprite,
+.factory-bot.sd-companion[data-animations="true"][data-interaction="call"] .companion-sprite { animation: companion-hop 800ms ease-in-out 2; }
+@keyframes companion-nuzzle { 0%,100% { transform: rotate(-3deg); } 50% { transform: rotate(3deg) scale(.98); } }
+@keyframes companion-hop { 0%,100% { transform: translateY(0); } 50% { transform: translateY(-5px); } }
+:root[data-af-hidden="true"] .companion-sprite { animation: none !important; }
+@media (prefers-reduced-motion: reduce) { .companion-sprite { animation: none !important; } }
+
+.factory-bot.sd-companion[hidden] { display: none; }
+
+/* Float the companion above the composer without reserving transcript height. */
+.composer-topline { position: relative; display: flex; align-items: flex-end; gap: 8px; }
+.composer-status-column { flex: 1 1 0; min-width: 0; }
+.composer-topline:has(.companion-dock:not([hidden])) .composer-status-column { padding-right: 80px; }
+.companion-dock { position: absolute; right: 8px; bottom: 0; z-index: 0; display: flex; align-items: flex-end; justify-content: flex-end; gap: 4px; max-width: calc(100% - 8px); pointer-events: none; }
+.companion-dock[hidden] { display: none; }
+/* Keep the mascot below the isolated composer and its open menus. */
+.companion-dock .factory-bot { position: relative; right: auto; bottom: auto; z-index: 0; flex: 0 0 36px; order: 2; pointer-events: auto; }
+.companion-dock .factory-bot.sd-companion { width: 72px; height: 68px; flex: 0 0 72px; overflow: hidden; border-radius: 0; }
+.companion-dock .companion-sprite { position: absolute; border-radius: 0; }
+.companion-dock .companion-reaction { position: static; max-width: min(220px, 25vw); min-width: 0; overflow-wrap: anywhere; order: 1; margin-bottom: 4px; pointer-events: auto; }
+.composer-status-column .input-feedback { padding-right: 0; }
+.composer-status-column .pending-queue-toggle { margin-right: 0; }
+
+.companion-sprite[data-sheet="idle"] { --companion-source: url("../images/companion/idle-animation.png"); background-image: var(--companion-source); }
+
+/* Compact companion care card: status, six actions, then conversation. */
+.bot-menu { width: 256px; box-sizing: border-box; padding: 14px; gap: 10px; border-radius: 14px; }
+.bot-menu > strong { font-size: 13px; }
+.bot-care-stats { padding: 10px; gap: 8px; border-radius: 8px; background: var(--vscode-input-background, #ffffff08); }
+.bot-care-stats label { grid-template-columns: 58px 1fr 24px; }
+.bot-care-stats meter { height: 6px; appearance: none; }
+.bot-care-stats meter::-webkit-meter-bar { background: var(--vscode-progressBar-background, #888); opacity: .75; border: 0; border-radius: 8px; }
+.bot-care-stats meter::-webkit-meter-optimum-value { background: var(--vscode-charts-green, #72bb8b); border-radius: 8px; }
+.bot-care-stats small { margin-top: 2px; }
+.bot-menu .companion-actions { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; }
+.bot-menu .companion-actions > button { flex-direction: column; justify-content: center; gap: 6px; min-width: 0; min-height: 58px; padding: 8px 3px; text-align: center; font-size: 11px; line-height: 1.4; background: var(--vscode-button-secondaryBackground, #ffffff0a); }
+.bot-menu .companion-actions > button:hover:not(:disabled) { background: var(--vscode-button-secondaryHoverBackground, #ffffff18); }
+.bot-menu .companion-actions > button:disabled { opacity: .4; cursor: default; }
+.bot-menu .companion-actions svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
+.bot-menu #bot-talk { justify-content: center; padding: 9px; background: var(--vscode-button-background, #007acc); color: var(--vscode-button-foreground, #fff); font: inherit; font-size: 12px; }
+.bot-menu #bot-talk:hover:not(:disabled) { background: var(--vscode-button-hoverBackground, #168ad1); }
+.bot-menu #bot-talk:disabled { background: var(--vscode-button-secondaryBackground, #ffffff10); color: var(--vscode-descriptionForeground); opacity: .7; }
+
+.companion-sprite[data-sheet="work-food"] { --companion-source: url("../images/companion/work-food-animation.png"); background-image: var(--companion-source); }
+
+.settings-shortcuts > [hidden] { display: none; }
+
+#companion-reaction { position: fixed; right: auto; bottom: auto; width: max-content; max-width: min(280px, calc(100vw - 16px)); box-sizing: border-box; overflow: auto; overflow-wrap: anywhere; z-index: 26; }
+
+/* Packaged builds keep the original vector Factory Bot. */
+.companion-dock .factory-bot:not(.sd-companion) { position: relative; right: auto; bottom: auto; flex: 0 0 36px; }
+.factory-bot:not(.sd-companion) .companion-sprite { display: none; background-image: none; }
+.bot-menu .companion-actions > button[hidden] { display: none; }
+
+/* Compact bot settings keep the prompt and save actions in view. */
+#settings-panel-bot:not([hidden]) { display: flex; flex-direction: column; gap: 8px; }
+#settings-panel-bot > * { flex-shrink: 0; }
+.bot-settings-selectors { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 12px; }
+.bot-settings-selectors > div { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.bot-settings-toggles { display: flex; flex-wrap: wrap; gap: 8px 16px; }
+#settings-panel-bot .settings-option { margin: 0; gap: 6px; }
+#settings-panel-bot .status-settings-hint { margin: 0; line-height: 1.45; }
+#settings-panel-bot .status-settings-hint:empty { display: none; }
+#settings-panel-bot #bot-prompt { flex: 1 1 120px; min-height: 90px; resize: none; }
+@media (max-width: 420px) {
+  .bot-settings-selectors { grid-template-columns: minmax(0, 1fr); gap: 8px; }
+}
+@supports (appearance: base-select) {
+  #settings-panel-bot select::picker(select) {
+    box-sizing: border-box;
+    width: anchor-size(width);
+    min-width: anchor-size(width);
+    inset: auto;
+    top: anchor(bottom);
+    left: anchor(left);
+    margin: 4px 0;
+    position-try-fallbacks: flip-block;
+  }
+  #settings-panel-bot select { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  #settings-panel-bot option { white-space: nowrap; min-width: 0; }
+}
+
+/* Recorded shortcuts: select an action, press keys, then confirm. */
+.shortcut-group { margin: 12px 0 4px; }
+.shortcut-group[hidden] { display: none; }
+.shortcut-group > h3 { margin: 0 4px; padding-bottom: 4px; font-size: 11px; font-weight: 600; letter-spacing: .02em; text-transform: uppercase; color: var(--vscode-descriptionForeground); border-bottom: 1px solid var(--vscode-widget-border, var(--vscode-panel-border, #ffffff20)); }
+.shortcut-group > .settings-shortcuts { margin-top: 0; margin-bottom: 0; }
+#shortcut-bindings .settings-shortcuts > div { grid-template-columns: minmax(0, 1fr) auto; }
+#shortcut-bindings dd { display: flex; align-items: center; justify-content: flex-end; flex-wrap: wrap; gap: 6px; }
+#shortcut-bindings .shortcut-binding { display: inline-flex; align-items: center; min-width: 72px; min-height: 26px; padding: 2px 8px; box-sizing: border-box; justify-content: center; white-space: nowrap; }
+#shortcut-bindings [data-recording] .shortcut-binding { border-color: var(--vscode-focusBorder, var(--af-color-accent)); color: var(--vscode-foreground); }
+#shortcut-bindings [data-recording="listening"] .shortcut-binding { border-style: dashed; color: var(--vscode-descriptionForeground); }
+.status-settings #shortcut-bindings dd > button { display: inline-flex; align-items: center; justify-content: center; min-height: 26px; padding: 3px 9px; border: 1px solid var(--vscode-contrastBorder, color-mix(in srgb, var(--vscode-foreground, #ccc) 16%, transparent)); border-radius: 6px; background: var(--vscode-button-secondaryBackground, #ffffff0a); color: var(--vscode-button-secondaryForeground, var(--vscode-foreground)); font: inherit; font-size: 12px; white-space: nowrap; cursor: pointer; }
+.status-settings #shortcut-bindings dd > .shortcut-confirm:not(:disabled) { border-color: transparent; background: var(--vscode-button-background); color: var(--vscode-button-foreground); }
+.status-settings #shortcut-bindings dd > .shortcut-confirm:hover:not(:disabled) { background: var(--vscode-button-hoverBackground); }
+.status-settings #shortcut-bindings dd > button:focus-visible { outline: 2px solid var(--vscode-focusBorder, var(--af-color-accent)); outline-offset: 2px; }
+@media (max-width: 420px) { #shortcut-bindings .settings-shortcuts > div { grid-template-columns: minmax(0, 1fr); } #shortcut-bindings dd { justify-content: flex-start; } }
+
+.agent-model-name { display: flex; align-items: center; gap: 6px; }
+.agent-role-icon { width: 16px; height: 16px; flex: 0 0 16px; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
+.agent-preset-controls :is(input,button) { height: 34px; box-sizing: border-box; border-radius: 6px; }
+
+/* Keep preset help compact and consistent in both chat and default scopes. */
+#agent-preset-content > p { margin: 8px 0 0; font-size: 11px; line-height: 1.4; color: var(--vscode-descriptionForeground); }
+.agent-preset-controls { margin-top: 8px; gap: 6px 8px; }
+
+@media (max-height: 620px) {
+  .agent-model-menu .agent-settings-heading { margin-bottom: 8px; }
+  .agent-model-menu .agent-model-row { padding-block: 3px; }
+  #agent-preset-content > p { margin-top: 6px; }
+}
+
+#agent-preset-content { border-top: 1px solid var(--vscode-panel-border, #ffffff18); margin-top: 8px; padding-top: 4px; }
+#agent-preset-create { grid-column: 1 / -1; min-width: 0; }
+#agent-preset-create summary { width: fit-content; padding: 5px 0; color: var(--vscode-textLink-foreground, #3794ff); cursor: pointer; list-style: none; font-size: 12px; }
+#agent-preset-create summary::-webkit-details-marker { display: none; }
+#agent-preset-create summary:focus-visible { outline: 1px solid var(--vscode-focusBorder); outline-offset: 2px; }
+.agent-preset-create-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: end; gap: 8px; padding-top: 4px; }
+.agent-preset-controls button { font: inherit; font-size: 12px; border: 1px solid var(--vscode-button-border, #ffffff20); background: var(--vscode-button-secondaryBackground, #333); color: var(--vscode-button-secondaryForeground, #ddd); cursor: pointer; }
+.agent-preset-controls button:disabled { opacity: .45; cursor: default; }
+.agent-preset-controls button:hover:not(:disabled) { background: var(--vscode-button-secondaryHoverBackground, #444); }
+.agent-preset-controls button:focus-visible { outline: 1px solid var(--vscode-focusBorder); outline-offset: 2px; }
+@media (min-width: 400px) and (max-width: 480px) and (max-height: 620px) {
+  .agent-model-menu .agent-model-row { grid-template-columns: 62px minmax(0, 1fr) minmax(0, 1fr); gap: 6px; }
+  .agent-model-menu .agent-model-name { grid-column: auto; }
+}
+
+
+#agent-preset-picker { display: block; flex: 0 1 170px; min-width: 0; margin-inline-start: auto; }
+#agent-preset-picker > span { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+#model-menu #agent-preset-picker select { height: 28px; }
+#model-menu > .agent-scope-row { display: flex; align-items: center; gap: 8px; margin: 0 0 8px; justify-self: end; }
+#model-menu > .agent-scope-row > span { position: static; width: auto; height: auto; clip: auto; font-size: 11px; color: var(--vscode-descriptionForeground); }
+#model-menu > .agent-scope-row #agent-default-scope { width: 120px; }
+.agent-preset-controls { grid-template-columns: auto minmax(0, 1fr); align-items: center; }
+
+/* Keep preset, scope and close on a single row at narrow panel widths. */
+#model-menu > .agent-settings-heading { display: flex; flex-wrap: nowrap; align-items: center; gap: 8px; }
+#model-menu .agent-settings-heading > #agent-preset-picker { flex: 1 1 0; min-width: 0; margin: 0; }
+#model-menu .agent-settings-heading > .agent-scope-row { flex: 1 1 0; min-width: 0; margin: 0; }
+#model-menu .agent-settings-heading > .agent-settings-close { flex: 0 0 auto; }
+#model-menu .agent-settings-heading select { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+/* Group related preset actions without stretching them across the panel. */
+#agent-preset-content .agent-preset-controls { display: flex; flex-wrap: wrap; justify-content: flex-start; align-items: center; gap: 4px 8px; margin-top: 0; }
+#agent-preset-content { padding-top: 8px; }
+#agent-preset-create { flex: 0 0 auto; }
+#agent-preset-create summary { box-sizing: border-box; min-height: 28px; min-width: 24px; padding: 5px 4px; white-space: nowrap; }
+#agent-preset-create[open] { flex-basis: 100%; }
+#agent-preset-create .agent-preset-create-row { padding-top: 4px; }
+#agent-preset-content #agent-preset-apply { height: 28px; padding: 0 8px; white-space: nowrap; }
+
+#agent-preset-content #agent-preset-delete { height: 28px; padding: 0 4px; border: 0; background: transparent; color: var(--vscode-descriptionForeground); }
+
+/* Preset management stays in the compact header; creation opens only on demand. */
+#model-menu .agent-settings-heading { gap: 4px; }
+#model-menu .agent-settings-heading > #agent-preset-picker { flex: 1.2 1 0; }
+#model-menu .agent-settings-heading > .agent-scope-row { flex: 1 1 0; }
+#model-menu #agent-preset-create { position: relative; flex: 0 0 28px; }
+#model-menu .agent-preset-icon { display: flex; align-items: center; justify-content: center; width: 28px; min-width: 28px; height: 28px; padding: 0; border: 0; border-radius: 4px; background: transparent; color: var(--vscode-descriptionForeground); cursor: pointer; box-sizing: border-box; }
+#model-menu .agent-preset-icon:hover { color: var(--vscode-foreground); background: var(--vscode-toolbar-hoverBackground); }
+#model-menu .agent-preset-icon:focus-visible { outline: 1px solid var(--vscode-focusBorder); }
+#model-menu .agent-preset-icon:disabled { opacity: .4; cursor: default; }
+#model-menu .agent-preset-icon svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
+#model-menu #agent-preset-create .agent-preset-create-row { position: absolute; z-index: 5; top: 32px; right: 0; width: min(260px, calc(100vw - 100px)); box-sizing: border-box; padding: 10px; border: 1px solid var(--vscode-panel-border, #444); border-radius: 6px; background: var(--vscode-editorWidget-background, #252526); box-shadow: 0 4px 12px #0005; }
+#model-menu .agent-preset-create-row label { min-width: 0; font-size: 11px; display: grid; gap: 4px; }
+#model-menu #agent-preset-name { width: 100%; min-width: 0; box-sizing: border-box; }
+#model-menu #agent-preset-content { display: contents; }
+#model-menu #agent-preset-content .agent-preset-controls { display: none; }
+#model-menu .agent-preset-create-row :is(input, button) { height: 28px; border-radius: 4px; font: inherit; font-size: 12px; }
+#model-menu #agent-preset-name { padding: 0 7px; color: var(--vscode-input-foreground, #ddd); background: var(--vscode-input-background, #1e1e1e); border: 1px solid var(--vscode-input-border, #444); }
+#model-menu #agent-preset-save { padding: 0 8px; color: var(--vscode-button-foreground, #fff); background: var(--vscode-button-background, #287da0); border: 0; cursor: pointer; }
+#model-menu #agent-preset-save:disabled { opacity: .45; cursor: default; }

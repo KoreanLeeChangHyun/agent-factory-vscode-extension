@@ -1,3 +1,5 @@
+import { isBotModel } from "../modules/chat/bot-model";
+import { COMPANION_ACTIONS, type CompanionAction } from "../modules/chat/companion";
 import { validNoteFolder } from "../infrastructure/vscode/note-store";
 import { validAgentValue } from "../core/config/agent-settings";
 import { parseAgentPermissions } from "../common/types/agent-permissions";
@@ -9,14 +11,16 @@ import type { AttachmentKind, AttachmentReference } from "../common/types/attach
 import type { ClientMessage } from "./messages";
 
 const clientMessageTypes = new Set([
-  "agent.defaults.save", "agent.preset",
+  "agent.defaults.save", "agent.preset", "agent.preset.field",
   "client.ready",
   "worktree.create", "worktree.merge", "worktree.refresh", "worktree.repositories",
   "notes.list", "notes.folder",
   "notes.save",
-  "bots.configure",
+  "bots.configure", "bot.interact",
   "bot.talk",
   "bot.prompt.save",
+  "bot.model.save",
+  "bot.character.save",
   "execution.select",
   "reference.copy",
   "message.copy",
@@ -78,11 +82,17 @@ export function parseClientMessage(value: unknown): ClientMessage | undefined {
     case "worktree.merge":
     case "worktree.refresh":
       return { type: value.type };
+    case "bot.interact":
+      return COMPANION_ACTIONS.includes(value.action as CompanionAction) ? { type: value.type, action: value.action as CompanionAction } : undefined;
     case "bots.configure":
       return typeof value.enabled === "boolean" ? { type: value.type, enabled: value.enabled } : undefined;
+    case "bot.character.save":
+      return value.character === "lumi" || value.character === "factory" ? { type: value.type, character: value.character } : undefined;
+    case "bot.model.save":
+      return isBotModel(value.model) ? { type: value.type, model: value.model } : undefined;
     case "bot.prompt.save":
-      return typeof value.requestId === "string" && /^[a-zA-Z0-9_-]{1,128}$/.test(value.requestId) && typeof value.prompt === "string"
-        ? { type: value.type, requestId: value.requestId, prompt: value.prompt } : undefined;
+      return typeof value.requestId === "string" && /^[a-zA-Z0-9_-]{1,128}$/.test(value.requestId) && typeof value.prompt === "string" && (value.character === undefined || value.character === "lumi" || value.character === "factory")
+        ? { type: value.type, requestId: value.requestId, prompt: value.prompt, character: value.character as "lumi" | "factory" | undefined } : undefined;
     case "bot.talk":
       return typeof value.requestId === "string" && /^[a-zA-Z0-9_-]{1,128}$/.test(value.requestId) &&
         typeof value.text === "string" && value.text.trim().length > 0
@@ -167,8 +177,11 @@ export function parseClientMessage(value: unknown): ClientMessage | undefined {
       if (!validNoteFolder(note.folder ?? "")) return undefined;
       return { type: value.type, scope: value.scope, note: { folder: (note.folder as string) || "", id: note.id, title: note.title, body: note.body, revision: Number(note.revision) } };
     }
+    case "agent.preset.field":
+      if (typeof value.name !== "string" || !value.name.trim() || !["main", "work", "verification"].includes(String(value.role)) || !["model", "reasoningEffort"].includes(String(value.field)) || typeof value.value !== "string" || !validAgentValue(value.field as "model" | "reasoningEffort", value.value)) return undefined;
+      return {type: value.type, name: value.name.trim(), role: value.role as "main" | "work" | "verification", field: value.field as "model" | "reasoningEffort", value: value.value};
     case "agent.preset":
-      if ((value.action !== "save" && value.action !== "apply") || (value.scope !== "global" && value.scope !== "project") || typeof value.name !== "string" || !value.name.trim()) return undefined;
+      if ((value.action !== "save" && value.action !== "apply" && value.action !== "update" && value.action !== "delete") || (value.scope !== "global" && value.scope !== "project" && !(value.scope === "chat" && (value.action === "save" || value.action === "update" || value.action === "delete"))) || typeof value.name !== "string" || !value.name.trim()) return undefined;
       return {type: value.type, action: value.action, scope: value.scope, name: value.name.trim()};
     case "agent.defaults.save":
       if ((value.scope !== "global" && value.scope !== "project") ||

@@ -273,6 +273,25 @@
           ],
           "description": "%agentFactory.mainChat.executionMode.description%"
         },
+        "agentFactory.mainChat.botCharacter": {
+          "type": "string", "enum": ["", "lumi", "factory"], "default": "", "scope": "window",
+          "description": "%agentFactory.mainChat.botCharacter.description%"
+        },
+        "agentFactory.mainChat.lumiPrompt": {
+          "type": "string", "scope": "window",
+          "description": "%agentFactory.mainChat.lumiPrompt.description%"
+        },
+        "agentFactory.mainChat.factoryBotPrompt": {
+          "type": ["string", "null"], "default": null, "scope": "window",
+          "description": "%agentFactory.mainChat.factoryBotPrompt.description%"
+        },
+        "agentFactory.mainChat.botModel": {
+          "type": "string",
+          "default": "",
+          "scope": "window",
+          "pattern": "^(|(?:gpt-|codex-|claude-)[A-Za-z0-9._-]{1,90})$",
+          "description": "%agentFactory.mainChat.botModel.description%"
+        },
         "agentFactory.mainChat.botPrompt": {
           "type": "string",
           "default": "",
@@ -386,7 +405,7 @@
     "typecheck": "tsc --noEmit",
     "test": "node --test tests/unit/*.test.mjs",
     "package": "npm run check && node -e \"require('node:fs').mkdirSync('releases', { recursive: true })\" && node --require ./scripts/node-file-polyfill.cjs ./node_modules/@vscode/vsce/vsce package --allow-missing-repository --out releases",
-    "vscode:prepublish": "npm run build"
+    "vscode:prepublish": "node scripts/build.mjs --release"
   },
   "devDependencies": {
     "@types/node": "^22.10.5",

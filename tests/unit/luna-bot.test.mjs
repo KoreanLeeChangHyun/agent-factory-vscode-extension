@@ -91,7 +91,7 @@ test('Luna reply process uses stdin, isolated temporary files and no retained se
         const child = new EventEmitter(); child.stdin = new EventEmitter();
         child.stdin.end = text => {
           input = text;
-          fs.writeFileSync(args[args.indexOf('--output-last-message') + 1], JSON.stringify({ reply: '안녕하세요!' }));
+          fs.writeFileSync(args[args.indexOf('--output-last-message') + 1], JSON.stringify({ reply: '안녕하세요!', emotion: 'happy' }));
           queueMicrotask(() => child.emit('close', 0));
         };
         return child;
@@ -114,6 +114,15 @@ test('Luna reply process uses stdin, isolated temporary files and no retained se
   assert.equal(fs.existsSync(folder), false);
   await isolated.exports.requestLunaReply(draft, new AbortController().signal, ' \n ');
   assert.ok(input.startsWith(isolated.exports.DEFAULT_BOT_PROMPT));
+  await isolated.exports.requestLunaReply(draft, new AbortController().signal, '', 'gpt-6-sol');
+  assert.equal(invocation.args[invocation.args.indexOf('--model') + 1], 'gpt-6-sol');
+  assert.equal(invocation.args.includes('model_reasoning_effort="none"'), false);
+  await assert.rejects(isolated.exports.requestLunaReply(draft, new AbortController().signal, '', '--bad'));
+  const turn = await isolated.exports.requestLunaTurn(draft, new AbortController().signal, '', '', [{ role: 'user', content: 'Remember Ada' }]);
+  assert.equal(turn.emotion, 'happy');
+  assert.ok(input.includes('Remember Ada'));
+  assert.ok(input.includes('reply and emotion'));
+
 });
 
 test('cancelled talk releases its slot without a late answer clearing the newer request', async () => {
@@ -136,4 +145,41 @@ test('each conversation receives its selected prompt without changing active req
   const second = bot.talk('next', '새 프롬프트');
   assert.equal(calls[1].prompt, '새 프롬프트');
   calls[1].resolve('reply'); await second;
+});
+
+test('selected model is forwarded to the conversation', async () => {
+  let received;
+  const bot = new LunaBot(undefined, async (_text, _signal, _prompt, model) => { received = model; return 'ok'; });
+  await bot.talk('hello', '', 'claude-haiku-4-5-20251001');
+  assert.equal(received, 'claude-haiku-4-5-20251001');
+});
+
+ test('conversation turns preserve history and validate model emotion', async () => {
+  const { parseBotTurn } = module.exports;
+  assert.equal(parseBotTurn('{"reply":"Hello","emotion":"shy"}').emotion, 'shy');
+  for (const emotion of [undefined, 'invalid', '<script>']) {
+    assert.throws(() => parseBotTurn(JSON.stringify({ reply: 'Hello', emotion })));
+  }
+  const history = [{ role: 'user', content: 'My name is Ada' }, { role: 'assistant', content: 'Hello Ada' }];
+  let received;
+  const bot = new LunaBot(undefined, async (_text, _signal, _prompt, _model, turns) => {
+    received = turns;
+    return { reply: 'Ada', emotion: 'happy' };
+  });
+  assert.equal(await bot.talk('What is my name?', '', '', history), 'Ada');
+  assert.equal(received, history);
+  assert.equal(bot.lastEmotion, 'happy');
+});
+
+test('streamed text is suppressed after cancellation and is not treated as a final reply', async () => {
+  let publish, finish;
+  const seen = [];
+  const bot = new LunaBot(undefined, (_text, _signal, _prompt, _model, _history, partial) => {
+    publish = partial; return new Promise(resolve => { finish = resolve; });
+  });
+  const pending = bot.talk('hello', '', '', [], text => seen.push(text));
+  publish('first'); bot.cancelTalk(); publish('late');
+  finish({ reply: 'final', emotion: 'happy' });
+  await assert.rejects(pending);
+  assert.deepEqual(seen, ['first']);
 });

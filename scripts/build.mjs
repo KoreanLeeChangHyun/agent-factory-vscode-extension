@@ -31,6 +31,7 @@ const syntaxOptions = {
 
 const options = {
   entryPoints: ["src/extension.ts"],
+  define: { __AF_RELEASE__: String(process.argv.includes("--release")) },
   bundle: true,
   outfile: "dist/extension.js",
   external: ["vscode"],

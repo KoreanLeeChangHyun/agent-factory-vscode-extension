@@ -679,3 +679,43 @@ for (const decisionKind of [undefined, 'clarification']) {
     assert.equal(sent.length, 2);
   });
 }
+
+test('reset refreshes uncertain Goal once, awaits recovery and keeps concurrent sends behind reset', async () => {
+  const terminal = deferred();
+  const calls = [];
+  let resets = 0;
+  const controller = new ChatSessionController(runtime({
+    async resetConversation() {
+      calls.push('reset');
+      if (++resets === 1) throw new Error('goal_state_uncertain: Refresh or resolve the uncertain Goal state before clearing the conversation');
+      return { conversationId: 'conversation-new', startedAt: 'now' };
+    },
+    async goal(agent, action) { calls.push(action); return { accepted: { agentId: agent, runId: 'refresh-run' } }; },
+    async status(_agent, run) { if (run === 'refresh-run') await terminal.promise; return { status: 'completed' }; },
+    async send(agentId, text) { calls.push('send'); return { agentId, runId: text }; }
+  }), events(), 'main-existing', { pollIntervalMs: 0 });
+  const reset = controller.resetConversation();
+  await tick();
+  await assert.rejects(controller.resetConversation());
+  const send = controller.send('next', [], {});
+  await tick();
+  assert.deepEqual(calls, ['reset', 'refresh']);
+  terminal.resolve();
+  assert.equal((await reset).conversationId, 'conversation-new');
+  await send;
+  assert.deepEqual(calls, ['reset', 'refresh', 'reset', 'send']);
+});
+
+test('reset preserves runtime refusal after refresh and does not retry unrelated failures', async () => {
+  for (const failure of ['session_busy', 'transport disconnected', 'goal_state_uncertain']) {
+    let resets = 0, refreshes = 0;
+    const controller = new ChatSessionController(runtime({
+      async resetConversation() { resets++; throw new Error(resets === 1 ? failure : 'goal_active'); },
+      async goal() { refreshes++; return { goal: { status: 'active' } }; }
+    }), events(), 'main-existing');
+    await assert.rejects(controller.resetConversation(), new RegExp(failure === 'goal_state_uncertain' ? 'goal_active' : failure));
+    assert.equal(refreshes, failure === 'goal_state_uncertain' ? 1 : 0);
+    assert.equal(resets, failure === 'goal_state_uncertain' ? 2 : 1);
+    assert.equal(controller.conversationResetBlockedReason, undefined);
+  }
+});

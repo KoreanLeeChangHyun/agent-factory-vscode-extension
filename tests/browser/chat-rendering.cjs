@@ -68,7 +68,7 @@ async function main() {
         response.writeHead(404).end();
         return;
       }
-      response.setHeader('Content-Type', target.endsWith('.css') ? 'text/css' : target.endsWith('.svg') ? 'image/svg+xml' : 'text/javascript');
+      response.setHeader('Content-Type', target.endsWith('.css') ? 'text/css' : target.endsWith('.svg') ? 'image/svg+xml' : target.endsWith('.png') ? 'image/png' : 'text/javascript');
       response.end(fs.readFileSync(target));
     } else response.writeHead(404).end();
   });
@@ -94,6 +94,12 @@ async function main() {
       }, postMessage(message) { window.sentMessages.push(message); } });
     }, fixture);
     await page.goto('http://127.0.0.1:' + server.address().port);
+    if (process.argv.includes('--companion-only') || process.argv.includes('--companion-care-only')) {
+      await require('./companion.cjs').checkCompanion(page, { careOnly: process.argv.includes('--companion-care-only') });
+      assert.deepEqual(errors, []);
+      console.log('Companion browser checks passed');
+      return;
+    }
     if (process.argv.includes('--contracts-only')) {
       await require('./contracts.cjs').checkContracts(page);
       assert.deepEqual(errors, []);
@@ -410,6 +416,178 @@ async function main() {
       await checkGeneralSettings(page);
       assert.deepEqual(errors, []);
       console.log('General settings permissions, language switching/restoration, source preservation and layout passed.');
+      return;
+    }
+    if (process.argv.includes('--shortcuts-only')) {
+      await page.evaluate(() => window.postMessage({ type: 'host.initialize', panelId: 'shortcuts', role: 'main', runtimeAvailable: true, capabilities: { submit: { model: true }, send: { model: true } } }, '*'));
+      await page.evaluate(() => new Promise(requestAnimationFrame));
+      await page.locator('#status-settings-button').click();
+      await page.locator('#settings-tab-keyboard').click();
+      const record = async (action, keys) => {
+        await page.locator('[data-shortcut-action="' + action + '"] .shortcut-change').click();
+        assert.equal(await page.locator('[data-shortcut-action="' + action + '"]').getAttribute('data-recording'), 'listening');
+        await page.keyboard.press(keys);
+      };
+      await record('send', 'Control+Enter');
+      assert.equal(await page.locator('#shortcut-send').getAttribute('data-binding'), 'Mod+Enter');
+      assert.equal(await page.evaluate(() => document.activeElement.className), 'shortcut-confirm', 'Recorded keys wait for confirmation');
+      await page.keyboard.press('Enter');
+      assert.equal(await page.locator('#shortcut-send').getAttribute('data-binding'), 'Mod+Enter');
+      assert.equal(await page.locator('[data-shortcut-action="send"]').getAttribute('data-recording'), null);
+      await record('bot', 'Control+Enter');
+      assert.equal(await page.locator('[data-shortcut-action="bot"] .shortcut-confirm').isDisabled(), true);
+      assert.match(await page.locator('#shortcuts-status').textContent(), /already|이미/i);
+      await page.keyboard.press('Escape');
+      assert.equal(await page.locator('#shortcut-bot').getAttribute('data-binding'), 'Mod+Shift+Enter');
+      await record('botFeed', 'KeyF');
+      assert.match(await page.locator('#shortcuts-status').textContent(), /Ctrl|Alt/);
+      assert.equal(await page.locator('[data-shortcut-action="botFeed"]').getAttribute('data-recording'), 'listening', 'Unmodified letters are rejected');
+      await page.keyboard.press('Alt+Shift+F');
+      await page.locator('[data-shortcut-action="botFeed"] .shortcut-confirm').click();
+      assert.equal(await page.locator('#shortcut-botFeed').getAttribute('data-binding'), 'Alt+Shift+F');
+      await record('botMenu', 'Alt+KeyB');
+      await page.locator('[data-shortcut-action="botMenu"] .shortcut-cancel').click();
+      assert.equal(await page.locator('#shortcut-botMenu').getAttribute('data-binding'), 'Alt+Shift+B');
+      const groups = await page.locator('#shortcut-bindings .shortcut-group:not([hidden]) > h3').allTextContents();
+      assert.deepEqual(groups.length >= 4, true, JSON.stringify(groups));
+      assert.equal(await page.locator('[data-shortcut-group="workflow"] [data-shortcut-action="submitWork"]').count(), 1, 'Menu actions are grouped');
+      for (const [action, keys] of [['submitInterview', 'Alt+Shift+I'], ['openConversationHistory', 'Alt+Shift+H']]) {
+        await record(action, keys);
+        await page.keyboard.press('Enter');
+        assert.equal(await page.locator('#shortcut-' + action).getAttribute('data-binding'), keys);
+      }
+      await page.keyboard.press('Escape');
+      await page.locator('#prompt').fill('shortcut test');
+      const count = () => page.evaluate(() => window.sentMessages.filter(m => m.type === 'chat.send').length);
+      const before = await count();
+      await page.locator('#prompt').press('Enter');
+      assert.equal(await count(), before);
+      assert.match(await page.locator('#prompt').inputValue(), /\n/);
+      await page.locator('#prompt').dispatchEvent('keydown', { key: 'Enter', ctrlKey: true, isComposing: true, bubbles: true });
+      assert.equal(await count(), before);
+      await page.locator('#prompt').dispatchEvent('keydown', { key: 'Enter', ctrlKey: true, repeat: true, bubbles: true });
+      assert.equal(await count(), before);
+      await page.locator('#prompt').press('Control+Enter');
+      assert.equal(await count(), before + 1);
+      await page.locator('#status-settings-button').click();
+      await page.locator('#settings-tab-keyboard').click();
+      await record('newLine', 'Alt+Enter');
+      await page.keyboard.press('Enter');
+      await record('close', 'Alt+KeyQ');
+      await page.keyboard.press('Enter');
+      await record('settingsTabNext', 'Alt+ArrowDown');
+      await page.keyboard.press('Enter');
+      await record('focusNext', 'Alt+KeyN');
+      await page.keyboard.press('Enter');
+      const focused = () => page.evaluate(() => (document.activeElement.closest('[data-shortcut-action]')?.dataset.shortcutAction || '') + ':' + document.activeElement.className);
+      const beforeTab = await focused();
+      await page.keyboard.press('Tab');
+      assert.equal(await focused(), beforeTab, 'Replaced Tab no longer moves focus');
+      await page.keyboard.press('Alt+KeyN');
+      assert.notEqual(await focused(), beforeTab, 'Rebound focus shortcut moves focus');
+      assert.equal(await page.locator('#shortcut-close').getAttribute('data-binding'), 'Alt+Q');
+      await page.locator('#settings-tab-keyboard').focus();
+      await page.keyboard.press('ArrowRight');
+      assert.equal(await page.locator('#settings-tab-keyboard').getAttribute('aria-selected'), 'true', 'Replaced default tab key no longer switches');
+      await page.keyboard.press('Alt+ArrowDown');
+      assert.equal(await page.locator('#settings-tab-general').getAttribute('aria-selected'), 'true', 'Rebound tab key switches');
+      await page.keyboard.press('Escape');
+      assert.equal(await page.locator('#status-settings').isVisible(), true, 'Replaced Esc no longer closes');
+      await page.keyboard.press('Alt+KeyQ');
+      assert.equal(await page.locator('#status-settings').isVisible(), false, 'Rebound close shortcut closes settings');
+      await page.locator('#prompt').fill('a');
+      await page.locator('#prompt').press('End');
+      await page.locator('#prompt').press('Shift+Enter');
+      assert.equal(await page.locator('#prompt').inputValue(), 'a', 'Replaced Shift+Enter no longer inserts a line');
+      await page.locator('#prompt').press('Alt+Enter');
+      assert.equal(await page.locator('#prompt').inputValue(), 'a\n', 'Rebound new line inserts a line');
+      await page.locator('#prompt').fill('interview shortcut');
+      await page.locator('#prompt').press('Alt+Shift+I');
+      assert.equal(await count(), before + 2, 'Submission shortcuts send through the chosen menu action');
+      assert.match(JSON.stringify(await page.evaluate(() => window.sentMessages.filter(m => m.type === 'chat.send').at(-1))), /interview/);
+      await page.keyboard.press('Alt+Shift+H');
+      assert.equal(await page.locator('#conversation-history').evaluate(el => el.open), true, 'History shortcut opens conversation history');
+      assert.match(await page.locator('#submission-menu [data-workflow="interview"]').getAttribute('title'), /Alt/);
+      await page.keyboard.press('Alt+KeyQ');
+      assert.equal(await page.locator('#conversation-history').evaluate(el => el.open), false, 'Rebound close shortcut collapses the open list first');
+      await page.keyboard.press('Alt+KeyQ');
+      assert.equal(await page.locator('#submission-menu').isVisible(), false, 'Rebound close shortcut closes menus');
+      await page.waitForFunction(() => window.saved.shortcuts?.send === 'Mod+Enter' && window.saved.shortcuts?.botFeed === 'Alt+Shift+F');
+      const persisted = await page.evaluate(() => window.saved);
+      await page.evaluate(saved => sessionStorage.setItem('submission-restoration-fixture', JSON.stringify(saved)), persisted);
+      await page.reload();
+      assert.equal(await page.locator('#shortcut-send').getAttribute('data-binding'), 'Mod+Enter');
+      assert.equal(await page.locator('#shortcut-bot').getAttribute('data-binding'), 'Mod+Shift+Enter');
+      assert.equal(await page.locator('#shortcut-botFeed').getAttribute('data-binding'), 'Alt+Shift+F');
+      await page.locator('#status-settings-button').click();
+      await page.locator('#settings-tab-keyboard').click();
+      await page.locator('#shortcuts-reset').click();
+      assert.equal(await page.locator('#shortcut-send').getAttribute('data-binding'), 'Enter');
+      assert.equal(await page.locator('#shortcut-bot').getAttribute('data-binding'), 'Mod+Shift+Enter');
+      assert.equal(await page.locator('#shortcut-botFeed').getAttribute('data-binding'), 'Alt+Shift+1');
+      assert.equal(await page.locator('#shortcut-submitWork').getAttribute('data-binding'), 'Alt+Shift+W');
+      assert.equal(await page.locator('#shortcut-close').getAttribute('data-binding'), 'Escape');
+      assert.equal(await page.locator('#shortcut-newLine').getAttribute('data-binding'), 'Shift+Enter');
+      assert.deepEqual(errors, []);
+      const controlHeights = await page.evaluate(() => ['status-reset', 'shortcuts-reset', 'bot-prompt-save', 'bot-prompt-reset', 'ui-language', 'bot-character'].map(id => [id, getComputedStyle(document.getElementById(id)).height]));
+      assert.ok(controlHeights.every(([, height]) => height === '34px'), JSON.stringify(controlHeights));
+      const rowHeights = await page.locator('.settings-shortcuts > div').evaluateAll(rows => rows.filter(row => !row.hidden).map(row => row.getBoundingClientRect().height));
+      assert.ok(rowHeights.every(height => Math.abs(height - 54) < 1), JSON.stringify(rowHeights));
+      const panelHeights = [];
+      for (const name of ['general', 'status', 'bot', 'keyboard']) {
+        await page.locator('#settings-tab-' + name).click();
+        panelHeights.push((await page.locator('#status-settings').boundingBox()).height);
+      }
+      assert.ok(panelHeights.every(height => height === panelHeights[0]), JSON.stringify(panelHeights));
+      const screenshots = process.env.AF_SHORTCUT_SCREENSHOTS;
+      for (const width of [560, 320]) {
+        await page.setViewportSize({ width, height: 600 });
+        const geometry = await page.locator('#settings-panel-keyboard').evaluate(el => {
+          const button = el.querySelector('.shortcut-change'); const style = getComputedStyle(button);
+          return { overflow: el.scrollWidth > el.clientWidth + 1, radius: style.borderRadius, background: style.backgroundColor };
+        });
+        assert.equal(geometry.overflow, false);
+        assert.equal(geometry.radius, '6px');
+        assert.notEqual(geometry.background, 'rgb(255, 255, 255)');
+        if (screenshots) { fs.mkdirSync(screenshots, { recursive: true }); await page.locator('#settings-panel-keyboard').evaluate(el => { el.scrollTop = 0; }); await page.locator('#status-settings').screenshot({ path: path.join(screenshots, 'shortcuts-' + width + '-top.png') }); await page.locator('#settings-panel-keyboard').evaluate(el => { el.scrollTop = el.scrollHeight; }); await page.locator('#status-settings').screenshot({ path: path.join(screenshots, 'shortcuts-' + width + '.png') }); }
+      }
+      console.log('Shortcut behavior and themed layout at 560px/320px passed.');
+      return;
+    }
+    if (process.argv.includes('--model-lock-only')) {
+      const emit = async message => { await page.evaluate(value => window.postMessage(value, '*'), message); await page.evaluate(() => new Promise(requestAnimationFrame)); };
+      const caps = { model: true, reasoning: true };
+      await emit({ type: 'host.initialize', panelId: 'lock', role: 'main', resetConversation: true, conversationId: 'conversation-lock', runtimeAvailable: true, model: 'gpt-one', capabilities: { submit: caps, send: { ...caps, sessionProvider: 'codex' } } });
+      await emit({ type: 'models.list', models: ['gpt-one', 'gpt-two', 'claude-one', 'antigravity/claude-test', 'gemini-test', 'antigravity/gpt-test'] });
+      await page.locator('#model-button').click();
+      const model = page.locator('#model-menu select[data-role="main"][data-field="model"]');
+      const tabs = page.locator('#model-menu .agent-model-row[data-agent-role="main"] .model-vendor-tab');
+      assert.equal(await model.isDisabled(), false);
+      await emit({ type: 'chat.started', id: 'accepted-lock', text: 'hello', attachments: [] });
+      assert.equal(await model.isDisabled(), false);
+      await model.selectOption('gpt-two');
+      assert.equal(await page.evaluate(() => window.saved.model), 'gpt-two');
+      assert.equal(await tabs.nth(0).isDisabled(), false);
+      assert.equal(await tabs.nth(1).isDisabled(), true);
+      assert.equal(await model.locator('option[value="antigravity/gpt-test"]').evaluate(el => el.disabled), true);
+      assert.equal(await page.locator('#model-menu select[data-role="work"][data-field="model"]').isDisabled(), false);
+      await emit({ type: 'conversation.cleared', conversationId: 'conversation-new-lock' });
+      assert.equal(await tabs.nth(1).isDisabled(), false, 'Reset unlocks providers even before capability refresh');
+      await tabs.nth(1).evaluate(el => el.click());
+      await model.selectOption('antigravity/claude-test');
+      await emit({ type: 'capabilities.updated', capabilities: { submit: caps, send: { ...caps, sessionProvider: 'antigravity' } } });
+      await emit({ type: 'chat.started', id: 'accepted-agy', text: 'next', attachments: [] });
+      assert.equal(await model.locator('option[value="claude-one"]').evaluate(el => el.disabled), true);
+      assert.equal(await tabs.nth(2).isDisabled(), false);
+      await tabs.nth(2).evaluate(el => el.click());
+      await model.selectOption('gemini-test');
+      assert.equal(await page.evaluate(() => window.saved.model), 'gemini-test', 'Different vendors on one provider remain selectable');
+      await page.keyboard.press('Escape');
+      await page.locator('#prompt').fill('same provider send');
+      await page.locator('#prompt').press('Enter');
+      await page.waitForFunction(() => window.sentMessages.some(m => m.type === 'chat.send' && m.execution.model === 'gemini-test'));
+      assert.deepEqual(errors, []);
+      console.log('Same-provider model changes, cross-provider lock, reset and dispatch passed.');
       return;
     }
     if (process.argv.includes('--agent-models-only')) {

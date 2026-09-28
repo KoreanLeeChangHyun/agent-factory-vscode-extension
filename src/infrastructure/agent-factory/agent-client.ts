@@ -308,7 +308,7 @@ export class AgentFactoryClient implements AgentRuntimeClient {
   public async goal(agentId: string, action: GoalAction): Promise<{ goal?: NativeGoal | null; accepted?: RunAcceptance; error?: string }> {
     const document = await this.command(["goal", "--project-root", this.projectRoot, "--agent", agentId, action]);
     if (document.kind === "ack") {
-      if (action !== "reopen") throw new Error(localize("ui.agent.factory.goal.control.accepted.an.unexpected.run"));
+      if (action === "get") throw new Error(localize("ui.agent.factory.goal.control.accepted.an.unexpected.run"));
       return { accepted: readAcceptance(document, agentId) };
     }
     if (document.kind === "goal-control") return {};

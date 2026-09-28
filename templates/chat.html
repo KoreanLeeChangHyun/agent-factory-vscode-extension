@@ -46,7 +46,8 @@
       </div>
 
       <section class="composer-region" aria-label="Compose message" data-i18n-aria-label="ui.compose.message">
-        <div class="composer-status-row">
+        <div class="composer-topline"><div class="composer-status-column">
+<div class="composer-status-row">
           <div id="run-status" class="run-status" role="status" aria-live="polite" hidden>
             <button id="run-status-toggle" class="run-status-toggle" type="button" aria-expanded="false" aria-controls="run-details">
               <span class="run-status-pulse" aria-hidden="true"></span>
@@ -73,11 +74,10 @@
           </button>
         </div>
         <section id="pending-message-queue" aria-label="Queued messages" hidden data-i18n-aria-label="ui.queued.messages"></section>
-        <div class="composer">
-          <div id="drop-overlay" class="drop-overlay" hidden>
-            <strong data-i18n="ui.drop.files.or.folders.to.attach">Drop files or folders to attach</strong>
-          </div>
-          <button type="button" id="factory-bot" hidden aria-haspopup="dialog" aria-expanded="false" aria-controls="bot-menu" class="factory-bot" data-state="idle" aria-label="Factory Bot · Ready" title="Factory Bot · Ready" data-i18n-title="ui.factory.bot.ready" data-i18n-aria-label="ui.factory.bot.ready">
+        </div>
+        <div id="companion-dock" class="companion-dock" hidden>
+          <button type="button" id="factory-bot" hidden aria-haspopup="dialog" aria-expanded="false" aria-controls="bot-menu" class="factory-bot sd-companion" data-state="idle" aria-label="Factory Bot · Ready" title="Factory Bot · Ready" data-i18n-title="ui.factory.bot.ready" data-i18n-aria-label="ui.factory.bot.ready">
+            <span class="companion-sprite" aria-hidden="true"></span>
             <svg viewBox="0 0 40 40" aria-hidden="true" focusable="false">
               <ellipse class="bot-shadow" cx="20" cy="37" rx="10" ry="2"/>
               <g class="bot-body">
@@ -116,6 +116,13 @@
               </g>
             </svg>
           </button>
+          <div id="companion-reaction" class="companion-reaction" role="status" aria-live="polite" hidden></div>
+</div>
+        </div>
+        <div class="composer">
+          <div id="drop-overlay" class="drop-overlay" hidden>
+            <strong data-i18n="ui.drop.files.or.folders.to.attach">Drop files or folders to attach</strong>
+          </div>
           <div id="bot-menu" class="bot-menu" role="dialog" aria-label="Bot actions" data-i18n-aria-label="bot.actions" hidden>
             <strong data-i18n="bot.actions">Bot actions</strong>
             <div class="bot-care-stats">
@@ -124,16 +131,20 @@
               <label><span data-i18n="bot.energy">Energy</span><meter id="bot-energy" min="0" max="100" value="80"></meter><output id="bot-energy-value">80</output></label>
               <small id="bot-care-growth"></small>
             </div>
+            <div class="companion-actions">
+              <button type="button" data-companion-action="pet"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 13V8a2 2 0 0 1 4 0v4-7a2 2 0 0 1 4 0v7-5a2 2 0 0 1 4 0v6-2a2 2 0 0 1 4 0v5c0 4-3 6-7 6h-1c-3 0-5-2-7-5l-3-4q-1-2 1-3l3 3"/></svg><span data-i18n="bot.pet">Pet</span></button>
+              <button type="button" data-companion-action="praise"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m12 3 3 6 7 1-5 5 1 7-6-3-6 3 1-7-5-5 7-1Z"/></svg><span data-i18n="bot.praise">Praise</span></button>
+              <button type="button" data-companion-action="call"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 10v4h3l9 5V5l-9 5Zm3 4 2 6m10-12q3 4 0 8"/></svg><span data-i18n="bot.call">Call</span></button>
             <button type="button" data-bot-action="feed"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M3 12h18q-1 8-9 8t-9-8Zm4 9h10M15 9l3-6m0 0q-2-2-3 0t1 3M6 7h.01m4 1h.01"/></svg><span data-i18n="bot.feed">Feed the bot</span></button>
             <button type="button" data-bot-action="play"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M9 5h.01M9 8l-3 4 5 3-3 6m3-6 5 5m-5-9 5-2 2-5M4 6l2 2"/></svg><span data-i18n="bot.play">Play together</span></button>
             <button type="button" data-bot-action="sleep"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M18 3A9 9 0 1 0 21 16 8 8 0 0 1 18 3ZM3 3h5L3 8h5"/></svg><span data-i18n="bot.sleep">Sleep</span></button>
+            </div>
             <button id="bot-talk" type="button" disabled><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M4 4h16v12H9l-5 4Zm4 5h8m-8 3h5"/></svg><span data-i18n="bot.talk">Talk to the bot</span></button>
             <small id="bot-menu-note" data-i18n="bot.busy" hidden>Available when the bot is idle.</small>
           </div>
           <div id="bot-speech" class="bot-speech" hidden>
             <button id="bot-speech-close" type="button" aria-label="Close reply" data-i18n-aria-label="bot.reply.close">×</button>
             <div id="bot-speech-text" role="status" aria-live="polite"></div>
-            <button id="bot-speech-expand" type="button" aria-expanded="false" aria-controls="bot-speech-text" hidden data-i18n="bot.reply.expand">Expand reply</button>
           </div>
           <div id="attachment-list" class="attachment-list" aria-label="Attachments" data-i18n-aria-label="ui.attachments"></div>
           <div class="prompt-surface">
@@ -187,15 +198,19 @@
                 <div id="agent-scope-parts" hidden>
                   <label id="agent-scope-row" class="agent-scope-row"><span data-i18n="ui.settings.scope">Scope</span><select id="agent-default-scope"><option value="chat" data-i18n="ui.chat.scope">This chat</option><option value="global" data-i18n="ui.global.defaults">Global</option><option value="project" data-i18n="ui.project.defaults">Project</option></select></label>
                   <div id="agent-defaults-content">
-                    <div class="agent-preset-controls">
-                      <label><span data-i18n="preset.saved">Saved sets</span><select id="agent-preset-select"></select></label>
-                      <button id="agent-preset-apply" type="button" data-i18n="preset.apply">Apply set</button>
-                      <label><span data-i18n="preset.name">New set name</span><input id="agent-preset-name" type="text" /></label>
-                      <button id="agent-preset-save" type="button" data-i18n="preset.save">Save current scope</button>
+                    <div id="agent-preset-content"><div class="agent-preset-controls">
+                      <label id="agent-preset-picker"><span data-i18n="preset.saved">Saved sets</span><select id="agent-preset-select"></select></label>
+                      <button id="agent-preset-delete" class="agent-preset-icon" type="button" aria-label="Delete set" title="Delete set" data-i18n-aria-label="preset.delete" data-i18n-title="preset.delete"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6h18M9 6V3h6v3M5 6l1 15h12l1-15M10 10v7m4-7v7"/></svg></button>
+                      <details id="agent-preset-create">
+                        <summary class="agent-preset-icon" aria-label="New set" title="New set" data-i18n-aria-label="preset.new" data-i18n-title="preset.new"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg></summary>
+                        <div class="agent-preset-create-row">
+                          <label><span data-i18n="preset.name">New set name</span><input id="agent-preset-name" type="text" /></label>
+                          <button id="agent-preset-save" type="button" data-i18n="preset.save.short">Save</button>
+                        </div>
+                      </details>
                     </div>
-                    <p class="setting-description" data-i18n="preset.help">Save this scope’s models and reasoning, including inherited values. Apply to the selected scope; chat overrides remain unchanged.</p>
                     <p id="agent-preset-status" role="status" hidden></p>
-                    <div id="agent-default-fields"></div>
+                    </div><div id="agent-default-fields"></div>
                   </div>
                 </div>
               </div>
@@ -313,14 +328,20 @@
         </div>
         </div>
         <div id="settings-panel-bot" class="settings-panel" role="tabpanel" aria-labelledby="settings-tab-bot" hidden>
-          <label class="settings-option"><input id="bots-disabled" type="checkbox"><span data-i18n="ui.disable.all.bots">Turn off all bots</span></label>
-          <label class="settings-option"><input id="bot-visible" type="checkbox" checked><span data-i18n="ui.show.bot">Show bot</span></label>
-          <p class="status-settings-hint" data-i18n="ui.show.the.companion.above.the.message.box.this.only.changes.its.visibility">Show the companion above the message box. This only changes its visibility.</p>
-          <label class="settings-option"><input id="bot-animations" type="checkbox" checked><span data-i18n="ui.animate.bot">Animate bot</span></label>
-          <p class="status-settings-hint" data-i18n="ui.your.system.s.reduced.motion.preference.takes.priority.these.preferences.are.saved.for.this.chat">Your system’s reduced motion preference takes priority. These preferences are saved for this chat.</p>
-          <label for="bot-prompt" data-i18n="bot.prompt.label">Luna bot prompt</label>
-          <textarea id="bot-prompt" rows="5" aria-describedby="bot-prompt-hint" spellcheck="false"></textarea>
-          <p id="bot-prompt-hint" class="status-settings-hint" data-i18n="bot.prompt.hint">Applies to future bot conversations in all chats. Leave empty to use the default.</p>
+          <div class="bot-settings-selectors">
+            <div><label for="bot-character" data-i18n="bot.character.select">Choose bot</label>
+              <select id="bot-character"><option value="lumi" data-i18n="bot.name.lumi">Lumi</option><option value="factory" data-i18n="bot.name.factory">Factory Bot</option></select></div>
+            <div><label for="bot-model" data-i18n="bot.model.label">Conversation model</label>
+              <select id="bot-model" aria-describedby="bot-model-status"></select></div>
+          </div>
+          <p id="bot-current-character" hidden></p>
+          <p id="bot-model-status" class="status-settings-hint" role="status"></p>
+          <div class="bot-settings-toggles">
+            <label class="settings-option"><input id="bots-disabled" type="checkbox"><span data-i18n="ui.disable.all.bots">Turn off all bots</span></label>
+            <label class="settings-option"><input id="bot-visible" type="checkbox" checked><span data-i18n="ui.show.bot">Show bot</span></label>
+            <label class="settings-option"><input id="bot-animations" type="checkbox" checked><span data-i18n="ui.animate.bot">Animate bot</span></label>
+          </div>
+          <textarea id="bot-prompt" rows="5" spellcheck="false"></textarea>
           <div class="bot-prompt-actions">
             <button id="bot-prompt-save" type="button" disabled data-i18n="bot.prompt.save">Save</button>
             <button id="bot-prompt-reset" type="button" data-i18n="bot.prompt.reset">Use default</button>
@@ -329,13 +350,9 @@
         </div>
         <div id="settings-panel-keyboard" class="settings-panel" role="tabpanel" aria-labelledby="settings-tab-keyboard" tabindex="0" hidden>
           <p class="status-settings-hint" data-i18n="ui.keyboard.controls.in.this.chat">Keyboard controls in this chat</p>
-          <dl class="settings-shortcuts">
-            <div><dt data-i18n="ui.send.message">Send message</dt><dd><kbd>Enter</kbd></dd></div>
-            <div><dt data-i18n="ui.new.line">New line</dt><dd><kbd>Shift</kbd> + <kbd>Enter</kbd></dd></div>
-            <div><dt data-i18n="ui.close.settings.or.an.open.menu">Close settings or an open menu</dt><dd><kbd>Esc</kbd></dd></div>
-            <div><dt data-i18n="ui.move.between.controls">Move between controls</dt><dd><kbd>Tab</kbd> / <kbd>Shift</kbd> + <kbd>Tab</kbd></dd></div>
-            <div><dt data-i18n="ui.switch.settings.tabs">Switch settings tabs</dt><dd><kbd>←</kbd> / <kbd>→</kbd></dd></div>
-          </dl>
+          <div id="shortcut-bindings"></div>
+          <button id="shortcuts-reset" type="button" data-i18n="ui.shortcuts.reset">Restore default shortcuts</button>
+          <p id="shortcuts-status" class="status-settings-hint" role="status" aria-live="polite" data-i18n="ui.shortcuts.scope">Saved for this chat.</p>
         </div>
         <span id="status-announcement" role="status" aria-live="polite"></span>
       </section>

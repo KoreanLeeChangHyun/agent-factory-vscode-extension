@@ -109,8 +109,13 @@ test('store reads each scope separately and writes only the selected scope', asy
     if(key===failureKey){failureKey=undefined;throw new Error('preset write failed');}
     presetWrites.push([key,value,target]);presetValues[key]={...presetValues[key],[target===1?'globalValue':'workspaceFolderValue']:value};
   }});
+  await Promise.all([store.ensureAgentPresets(memory),store.ensureAgentPresets(memory)]);
+  assert.equal(store.readAgentDefaults(memory).presets.filter(p=>p.isDefault).length,1);
+  await store.useAgentPreset(memory,'update','chat','Default',{main:{model:'gpt-6-sol'}});
+  await store.ensureAgentPresets(memory);
+  assert.equal(store.readAgentDefaults(memory).presets.find(p=>p.isDefault).settings.main.model,'gpt-6-sol');
   await store.useAgentPreset(memory,'save','global','Quality');
-  assert.equal(store.readAgentDefaults(memory).presets[0].settings.main.model,'gpt-6-astra');
+  assert.equal(store.readAgentDefaults(memory).presets.find(p=>p.name==='Quality').settings.main.model,'gpt-6-astra');
   await assert.rejects(store.useAgentPreset(memory,'save','global','Quality'),/already exists/);
   presetValues['main.model'].globalValue='changed-after-save';
   presetValues['verification.model']={workspaceFolderValue:'stale'};
@@ -126,11 +131,46 @@ test('store reads each scope separately and writes only the selected scope', asy
   await assert.rejects(store.useAgentPreset(memory,'apply','global','missing'),/no longer exists/);
   globalThis.__agentConfigFixture.workspace.workspaceFolders=[];
   await assert.rejects(store.useAgentPreset(memory,'apply','project','Quality'),/Open a project/);
+  await store.useAgentPreset(memory,'save','chat','Chat',{main:{model:'gpt-6-sol',reasoningEffort:'high'},work:{model:'gpt-6-astra'}});
+  assert.equal(store.readAgentDefaults(memory).presets.find(p=>p.name==='Chat').settings.main.model,'gpt-6-sol');
+  await store.useAgentPreset(memory,'update','chat','Chat',{main:{model:'gpt-6-astra',reasoningEffort:'low'}});
+  assert.equal(store.readAgentDefaults(memory).presets.filter(p=>p.name==='Chat').length,1);
+  assert.equal(store.readAgentDefaults(memory).presets.find(p=>p.name==='Chat').settings.main.reasoningEffort,'low');
+  await assert.rejects(store.useAgentPreset(memory,'update','chat','missing',{}),/no longer exists/);
+  await Promise.all([
+    store.updateAgentPresetField(memory,'Chat','main','model','gpt-6-sol'),
+    store.updateAgentPresetField(memory,'Chat','work','reasoningEffort','high')
+  ]);
+  assert.equal(store.readAgentDefaults(memory).presets.find(p=>p.name==='Chat').settings.main.model,'gpt-6-sol');
+  assert.equal(store.readAgentDefaults(memory).presets.find(p=>p.name==='Chat').settings.work.reasoningEffort,'high');
+  await store.updateAgentPresetField(memory,'Chat','main','model','');
+  assert.equal(store.readAgentDefaults(memory).presets.find(p=>p.name==='Chat').settings.main.model,undefined);
+  await assert.rejects(store.updateAgentPresetField(memory,'missing','main','model','gpt-6-sol'),/no longer exists/);
+  const beforeDelete=structuredClone(presetValues);
+  await store.useAgentPreset(memory,'delete','chat','Chat');
+  assert.equal(store.readAgentDefaults(memory).presets.some(p=>p.name==='Chat'),false);
+  assert.deepEqual(presetValues,beforeDelete,'Deleting a set preserves applied configuration');
+  await assert.rejects(store.useAgentPreset(memory,'delete','chat','Chat'),/no longer exists/);
+  await store.useAgentPreset(memory,'delete','global','Default');
+  await store.ensureAgentPresets(memory);
+  assert.equal(store.readAgentDefaults(memory).presets.some(p=>p.isDefault),false,'Deleted default must not return');
+  for (const preset of store.readAgentDefaults(memory).presets) await store.useAgentPreset(memory,'delete','chat',preset.name);
+  await store.ensureAgentPresets(memory);
+  assert.deepEqual(store.readAgentDefaults(memory).presets,[]);
+  await store.useAgentPreset(memory,'save','chat',' Fresh ',{});
+  assert.equal(store.readAgentDefaults(memory).presets[0].name,'Fresh');
+
   delete globalThis.__agentConfigFixture;
 });
 
 test('preset messages validate scope, action and names',()=>{
+  assert.deepEqual(parseClientMessage({type:'agent.preset.field',name:'A',role:'work',field:'reasoningEffort',value:'high'}),{type:'agent.preset.field',name:'A',role:'work',field:'reasoningEffort',value:'high'});
+  assert.equal(parseClientMessage({type:'agent.preset.field',name:'A',role:'invalid',field:'model',value:'gpt-6-sol'}),undefined);
   const good={type:'agent.preset',action:'save',scope:'global',name:'Quality'};
   assert.deepEqual(parseClientMessage(good),good);
-  for(const change of [{action:'remove'},{scope:'chat'},{name:''},{name:'   '},{name:4}])assert.equal(parseClientMessage({...good,...change}),undefined);
+  assert.deepEqual(parseClientMessage({...good,scope:'chat'}),{...good,scope:'chat'});
+  assert.equal(parseClientMessage({...good,scope:'chat',action:'apply'}),undefined);
+  assert.equal(parseClientMessage({...good,scope:'chat',action:'update'}).action,'update');
+  assert.equal(parseClientMessage({...good,scope:'chat',action:'delete'}).action,'delete');
+  for(const change of [{action:'remove'},{scope:'bad'},{name:''},{name:'   '},{name:4}])assert.equal(parseClientMessage({...good,...change}),undefined);
 });

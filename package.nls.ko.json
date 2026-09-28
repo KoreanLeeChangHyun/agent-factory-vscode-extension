@@ -1,4 +1,9 @@
 {
+  "agentFactory.mainChat.botCharacter.description": "전체 채팅에서 사용할 봇입니다.",
+  "agentFactory.mainChat.lumiPrompt.description": "루미 전용 프롬프트입니다. 비우면 루미 기본값을 사용합니다.",
+  "agentFactory.mainChat.factoryBotPrompt.description": "팩토리봇 전용 프롬프트입니다. 설정 전까지 기존 봇 프롬프트를 보존합니다.",
+
+  "agentFactory.mainChat.botModel.description": "봇 공통 대화 모델입니다. 비워두면 Codex Luna를 사용하고 Codex 미설치 시 Claude Haiku로 대체합니다.",
   "agentFactory.mainChat.botPrompt.description": "루나 봇 대화 프롬프트입니다. 비워두면 기본값을 사용하며 다음 봇 대화부터 적용됩니다.",
   "agentFactory.mainChat.open.title": "메인 에이전트 채팅 추가",
   "agentFactory.mainChat.resume.title": "Agent Factory: 메인 에이전트 재개",

@@ -3,7 +3,7 @@ export const AGENT_ROLES = ["main", "work", "verification"] as const;
 export const AGENT_FIELDS = ["model", "reasoningEffort"] as const;
 export type AgentDefaults = Partial<Record<typeof AGENT_ROLES[number], AgentModelSetting>>;
 export interface AgentDefaultsSnapshot {
-  presets?: { name: string; settings: AgentDefaults }[];
+  presets?: { name: string; settings: AgentDefaults; isDefault?: boolean }[];
   global: AgentDefaults;
   project: AgentDefaults;
   effective: AgentDefaults;

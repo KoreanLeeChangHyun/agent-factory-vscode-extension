@@ -1,7 +1,14 @@
 **
 !dist/extension.js
-!static/**
+!static/*
+!static/css/**
+!static/js/**
+!static/vendor/**
+!static/images/*
 !templates/**
 !package.json
 !README.md
 !package.nls*.json
+
+# Local-only character artwork must never ship in a VSIX.
+static/images/companion/**

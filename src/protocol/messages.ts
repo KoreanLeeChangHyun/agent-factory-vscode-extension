@@ -13,9 +13,11 @@ export interface MessageSubmission {
 }
 
 export type ClientMessage =
+  | { readonly type: "agent.preset.field"; readonly name: string; readonly role: "main" | "work" | "verification"; readonly field: "model" | "reasoningEffort"; readonly value: string }
+  | { readonly type: "bot.interact"; readonly action: import("../modules/chat/companion").CompanionAction }
   | { readonly type: "contract.open"; readonly id: string }
   | { readonly type: "contracts.request" }
-  | { readonly type: "agent.preset"; readonly action: "save" | "apply"; readonly scope: "global" | "project"; readonly name: string }
+  | { readonly type: "agent.preset"; readonly action: "save" | "apply" | "update" | "delete"; readonly scope: "global" | "project" | "chat"; readonly name: string }
   | { readonly type: "agent.defaults.save"; readonly scope: "global" | "project"; readonly role: "main" | "work" | "verification"; readonly field: "model" | "reasoningEffort"; readonly value: string }
   | { readonly type: "worktree.create"; readonly repository: string; readonly name: string; readonly base: string }
   | { readonly type: "worktree.merge" | "worktree.refresh" | "worktree.repositories" }
@@ -24,7 +26,9 @@ export type ClientMessage =
   | { readonly type: "notes.save"; readonly scope: import("../infrastructure/vscode/note-store").NoteScope; readonly note: Omit<import("../infrastructure/vscode/note-store").Note, "updatedAt"> }
   | { readonly type: "bots.configure"; readonly enabled: boolean }
   | { readonly type: "bot.talk"; readonly requestId: string; readonly text: string }
-  | { readonly type: "bot.prompt.save"; readonly requestId: string; readonly prompt: string }
+  | { readonly type: "bot.character.save"; readonly character: "lumi" | "factory" }
+  | { readonly type: "bot.model.save"; readonly model: string }
+  | { readonly type: "bot.prompt.save"; readonly requestId: string; readonly prompt: string; readonly character?: "lumi" | "factory" }
   | { readonly type: "client.ready" }
   | { readonly type: "execution.select"; readonly mode: import("../infrastructure/agent-factory/agent-client").ExecutionMode }
   | { readonly type: "message.copy"; readonly text: string }
@@ -92,6 +96,7 @@ export type ClientMessage =
     };
 
 export type HostMessage =
+  | { readonly type: "agent.preset.field.result"; readonly error?: string }
   | { readonly type: "contracts.list"; readonly contracts: readonly import("../infrastructure/filesystem/contracts").ContractEntry[]; readonly error?: string }
   | { readonly type: "agent.preset.result"; readonly error?: string }
   | { readonly type: "agent.defaults"; readonly settings: import("../core/config/agent-settings").AgentDefaultsSnapshot }
@@ -105,7 +110,9 @@ export type HostMessage =
   | { readonly type: "worktree.updated"; readonly value?: import("../infrastructure/agent-factory/agent-client").ConversationWorktree; readonly busy?: boolean; readonly supported?: boolean }
   | { readonly type: "notes.list.result"; readonly folders?: readonly string[]; readonly scope: import("../infrastructure/vscode/note-store").NoteScope; readonly notes: readonly import("../infrastructure/vscode/note-store").Note[]; readonly error?: string }
   | { readonly type: "notes.save.result"; readonly scope: import("../infrastructure/vscode/note-store").NoteScope; readonly id: string; readonly note?: import("../infrastructure/vscode/note-store").Note; readonly error?: string }
-  | { readonly type: "bots.updated"; readonly enabled: boolean; readonly botPrompt?: string }
+  | { readonly type: "bot.companion"; readonly companion: import("../modules/chat/companion").CompanionState; readonly working: number; readonly outcome?: "completed" | "failed"; readonly outcomeUntil: number }
+  | { readonly type: "bots.updated"; readonly enabled: boolean; readonly botCharacter?: "lumi" | "factory"; readonly localCompanionAvailable?: boolean; readonly botDefaultPrompt?: string; readonly botModel?: string; readonly botPrompt?: string }
+  | { readonly type: "bot.model.saved"; readonly model: string; readonly failed?: boolean }
   | { readonly type: "bot.prompt.saved"; readonly requestId: string; readonly prompt?: string; readonly failed?: boolean }
   | { readonly type: "chat.rejected"; readonly id: string }
   | { readonly type: "chat.started"; readonly submission?: MessageSubmission; readonly id: string; readonly text: string; readonly attachments: readonly AttachmentReference[] }
@@ -126,7 +133,9 @@ export type HostMessage =
       readonly capabilities?: { readonly submit: import("../infrastructure/agent-factory/agent-client").ExecutionCapabilities; readonly send: import("../infrastructure/agent-factory/agent-client").ExecutionCapabilities };
       readonly running: boolean;
       readonly botsEnabled?: boolean;
-      readonly botPrompt?: string;
+      readonly botsAvailable?: boolean;
+      readonly companionAvailable?: boolean;
+      readonly botCharacter?: "lumi" | "factory"; readonly localCompanionAvailable?: boolean; readonly botDefaultPrompt?: string; readonly botModel?: string; readonly botPrompt?: string;
       readonly statusItems: readonly StatusItemId[];
       readonly model?: string;
       readonly agentModels?: AgentModels;
@@ -219,7 +228,8 @@ export type HostMessage =
       readonly running: boolean;
     }
   | { readonly type: "bot.mood"; readonly unavailable?: boolean; readonly mood?: "calm" | "curious" | "cheerful" | "focused" }
-  | { readonly type: "bot.reply"; readonly requestId: string; readonly text?: string; readonly failed?: boolean }
+  | { readonly type: "bot.reply.partial"; readonly requestId: string; readonly text: string }
+  | { readonly type: "bot.reply"; readonly emotion?: "calm" | "happy" | "shy" | "love" | "surprised" | "playful" | "sleepy"; readonly requestId: string; readonly text?: string; readonly failed?: boolean }
   | { readonly type: "run.observed"; readonly status: string }
   | { readonly type: "queue.updated"; readonly count: number }
   | {

@@ -105,12 +105,45 @@ export class ChatSessionController {
     const blocked = this.conversationResetBlockedReason;
     if (blocked) throw new Error(blocked);
     if (!this.agentId) throw new Error(localize("ui.send.a.message.before.clearing.this.conversation"));
-    const reset = this.runtime.resetConversation(this.agentId);
+    const reset = this.resetConversationWithGoalRefresh(this.agentId);
     this.conversationResetInFlight = reset;
     try {
       return await reset;
     } finally {
       if (this.conversationResetInFlight === reset) this.conversationResetInFlight = undefined;
+    }
+  }
+
+  private async resetConversationWithGoalRefresh(agentId: string): Promise<{ readonly conversationId: string; readonly startedAt: string }> {
+    try {
+      return await this.runtime.resetConversation(agentId);
+    } catch (error) {
+      // Refresh only this recoverable refusal. Never repeat an ambiguously accepted reset.
+      if (!/goal_state_uncertain|Refresh or resolve the uncertain Goal state before clearing the conversation/.test(errorMessage(error))) throw error;
+      const observation = await this.runtime.goal(agentId, "refresh");
+      if (observation.error) throw new Error(observation.error);
+      if (observation.accepted) {
+        this.currentRunId = observation.accepted.runId;
+        this.currentRunAgentId = observation.accepted.agentId;
+        this.busy = true;
+        this.events.onRunningChanged(true);
+        try {
+          await this.pollUntilTerminal(observation.accepted.agentId, observation.accepted.runId);
+          if (!this.disposed) {
+            this.currentRunId = undefined;
+            this.currentRunAgentId = undefined;
+          }
+        } finally {
+          this.busy = false;
+          this.events.onRunningChanged(false);
+        }
+      } else if (!("goal" in observation)) {
+        // A live owner only queued the refresh; its state is not yet confirmed.
+        throw error;
+      }
+      if (this.disposed || this.cancelRequested || this.pendingDecisionRunId || this.currentRunId) throw error;
+      // Runtime rechecks active Goals, runs, children and decisions under its lock.
+      return await this.runtime.resetConversation(agentId);
     }
   }
 

@@ -134,7 +134,9 @@ test("action menu sends supported drafts without persisting a selection during e
     persist() { calls.push("persist"); }, saveComposerSettings() { calls.push("save"); }, closeSettingMenu() {}
   };
   const renderer = script.slice(script.indexOf("  function renderSubmissionMenu("), script.indexOf("  function handleSettingMenuKeydown("));
-  runInNewContext(renderer + '\nrenderSettingMenu("task", menu);', context);
+  const shortcutCatalog = script.slice(script.indexOf("  const submitShortcut ="), script.indexOf("  const legacyShortcuts ="));
+  Object.assign(context, { t: key => key, shortcuts: {}, shortcutLabel: String, shortcutAria: String });
+  runInNewContext(shortcutCatalog + renderer + '\nrenderSettingMenu("task", menu);', context);
   const actionOptions = () => menu.children.flatMap(group => group.children.filter(item => item.dataset.action));
   const options = actionOptions().filter(item => item.dataset.goal !== "true");
   assert.deepEqual(options.map(item => item.dataset.action), ["direct", "direct", "direct", "direct", "direct", "work", "work-verification"]);

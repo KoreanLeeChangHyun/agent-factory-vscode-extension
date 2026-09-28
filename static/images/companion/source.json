@@ -1,0 +1,35 @@
+{
+  "generator": "built-in image_gen",
+  "reference": "Human-provided SD fox character images; approved generated concept sheets",
+  "activitiesSource": "exec-828caa2a-00d2-49ba-8e9c-0ec26819ae44.png",
+  "emotionsSource": "exec-415bc1d4-c121-4ac6-8d63-9b2e1060dc9d.png",
+  "layout": {
+    "activities": "2 columns x 2 rows: idle, working, complete, rest",
+    "emotions": "4 columns x 3 rows: happy, angry, crying, surprise; shy, love, playful, proud; confused, determined, afraid, sleepy"
+  },
+  "rendering": "CSS source rectangles over transparent PNGs; original RGB pixels preserved",
+  "backgroundRemoval": {
+    "model": "isnet-anime",
+    "runtime": "rembg 2.0.85 / ONNX CPU",
+    "method": "Per-frame model alpha masks; restore disconnected illustrated accents using connected components; original RGB retained",
+    "outputs": [
+      "activities-transparent.png",
+      "emotions-transparent.png"
+    ]
+  },
+  "idleAnimation": {
+    "generator": "built-in image_gen",
+    "source": "exec-779d11e4-a5d5-4bec-9681-60c6ba91bb1b.png",
+    "output": "idle-animation.png",
+    "layout": "2 x 2: open eyes, closed eyes, left ear tilt, right ear tilt",
+    "transparency": "Generated alpha preserved",
+    "playback": "6.83 second idle cycle; 150ms blink; 240ms ear poses; disabled for reduced motion, hidden view, interactions, work and sleep"
+  },
+  "workFoodAnimation": {
+    "source": "exec-b3e029ad-c0d6-4711-b29c-052c7c6035bb.png",
+    "output": "work-food-animation.png",
+    "layout": "2x2: top typing pair, bottom spoon-to-mouth pair",
+    "transparency": "Generated alpha preserved",
+    "playback": "320ms typing frames; 650ms eating frames during feed reaction; respects reduced motion and visibility"
+  }
+}

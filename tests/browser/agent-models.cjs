@@ -124,9 +124,12 @@ async function checkAgentModels(page) {
   assert.equal(await page.locator('#model-menu #agent-default-fields .agent-model-row').count(), 3);
   for (const width of [795, 566, 320]) {
     await page.setViewportSize({ width, height: 740 });
-    assert.equal(await page.locator('#agent-scope-row > span').evaluate(el => {
-      const range = document.createRange(); range.selectNodeContents(el); return range.getClientRects().length;
-    }), 1, 'Scope label must remain on one line');
+    // The scope selector shares the heading row with the title and close button.
+    const [heading, scope, close] = await Promise.all(['.agent-settings-heading > strong', '#agent-default-scope', '.agent-settings-close'].map(s => page.locator('#model-menu ' + s).boundingBox()));
+    for (const box of [scope, close]) assert.ok(Math.abs(box.y + box.height / 2 - heading.y - heading.height / 2) < 2, JSON.stringify([width, heading, box]));
+    assert.ok(heading.x + heading.width <= scope.x && scope.x + scope.width <= close.x, JSON.stringify([width, heading, scope, close]));
+    assert.equal(await page.locator('#model-menu').getByText('우선순위', { exact: false }).count(), 0);
+    assert.equal(await page.locator('#model-menu .agent-settings-heading > strong').evaluate(el => { const r = document.createRange(); r.selectNodeContents(el); return r.getClientRects().length; }), 1, 'Title stays on one line');
     for (const row of await page.locator('#agent-default-fields .agent-model-row').all()) {
       const model = await row.locator('select').boundingBox();
       const effort = await row.locator('input[type=range]').boundingBox();
@@ -168,20 +171,21 @@ async function checkAgentModels(page) {
 }
 
 async function checkModelVendorTabs(page, emit) {
-  // Vendor tabs group the catalog; a vendor served by several CLIs names each route.
+  // Vendor tabs filter the catalog; route suffixes replace redundant group headings.
   await page.locator('#model-button').click();
   await emit({ type: 'models.list', models: ['gpt-5.6-sol', 'claude-opus-5-5', 'antigravity/claude-sonnet-4-6', 'gemini-3.8-flash', 'antigravity/gpt-oss-120b-medium'] });
   const row = page.locator('#model-menu .agent-model-row[data-agent-role="main"]');
   const model = row.locator('select[data-field="model"]');
   const tabs = row.locator('.model-vendor-tab');
-  const visible = () => model.evaluate(el => [...el.options].filter(o => !o.hidden && !o.parentElement.hidden).map(o => o.value));
+  // Check native popup contents, not CSS visibility: other vendors must be absent.
+  const visible = () => model.evaluate(el => [...el.options].map(o => o.value));
   assert.deepEqual(await tabs.allTextContents(), ['OpenAI', 'Anthropic', 'Google']);
   assert.equal(await tabs.nth(0).getAttribute('aria-selected'), 'true');
   assert.deepEqual(await visible(), ['gpt-5.6-sol', 'antigravity/gpt-oss-120b-medium']);
   await tabs.nth(1).click();
   assert.equal(await tabs.nth(1).getAttribute('aria-selected'), 'true');
   assert.deepEqual(await visible(), ['claude-opus-5-5', 'antigravity/claude-sonnet-4-6']);
-  assert.deepEqual(await model.evaluate(el => [...el.querySelectorAll('optgroup')].filter(g => !g.hidden).map(g => g.label)), ['Claude Code', 'Antigravity']);
+  assert.equal(await model.locator('optgroup').count(), 0);
   assert.equal(await model.locator('option[value="antigravity/claude-sonnet-4-6"]').textContent(), 'claude-sonnet-4-6 · Antigravity');
   await model.selectOption('antigravity/claude-sonnet-4-6');
   // A tab click opens the native picker; close it as a click outside would.
@@ -205,7 +209,12 @@ async function checkModelVendorTabs(page, emit) {
   await emit({ type: 'capabilities.updated', capabilities: { submit: capability, send: { ...capability, sessionProvider: 'antigravity' } } });
   if (!await page.locator('#model-menu').isVisible()) await page.locator('#model-button').click();
   await row.locator('.model-vendor-tab').nth(1).click();
-  const disabled = await model.evaluate(el => Object.fromEntries([...el.options].map(o => [o.value, o.disabled])));
+  const disabled = {};
+  for (const index of [0, 1, 2]) {
+    await tabs.nth(index).evaluate(el => el.click());
+    Object.assign(disabled, await model.evaluate(el => Object.fromEntries([...el.options].map(o => [o.value, o.disabled]))));
+  }
+  await tabs.nth(1).evaluate(el => el.click());
   assert.deepEqual(disabled, { 'gpt-5.6-sol': true, 'antigravity/gpt-oss-120b-medium': false, 'claude-opus-5-5': true,
     'antigravity/claude-sonnet-4-6': false, 'gemini-3.8-flash': false });
   // Close the picker the tab click opened so the screenshots show the resting layout.

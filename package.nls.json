@@ -1,4 +1,9 @@
 {
+  "agentFactory.mainChat.botCharacter.description": "Bot character used across chats.",
+  "agentFactory.mainChat.lumiPrompt.description": "Lumi prompt. Empty uses Lumi’s default.",
+  "agentFactory.mainChat.factoryBotPrompt.description": "Factory Bot prompt. Until configured, preserves the legacy bot prompt.",
+
+  "agentFactory.mainChat.botModel.description": "Shared bot conversation model. Empty uses Codex Luna with Claude Haiku fallback when Codex is not installed.",
   "agentFactory.mainChat.botPrompt.description": "Prompt for Luna companion conversations. Leave empty to use the default. Applies to the next bot message.",
   "agentFactory.mainChat.open.title": "Add Main Agent Chat",
   "agentFactory.mainChat.resume.title": "Agent Factory: Resume Main Agent",

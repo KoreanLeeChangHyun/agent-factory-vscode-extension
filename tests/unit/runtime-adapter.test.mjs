@@ -1103,7 +1103,7 @@ test("Goal control rejects unsupported actions and preserves long objectives", a
   assert.equal(parseClientMessage({ ...message, execution: { ...message.execution, goal: false } }), undefined);
 });
 
-test("runtime acceptance rejects malformed run identities and Goal acknowledgements for non-reopen actions", async () => {
+test("runtime acceptance validates identities and permits managed Goal recovery runs", async () => {
   const { AgentFactoryClient } = await importTypeScript("src/infrastructure/agent-factory/agent-client.ts");
   const client = new AgentFactoryClient("/unused/exec.py", "/workspace");
   client.capabilities = async () => ({
@@ -1113,7 +1113,10 @@ test("runtime acceptance rejects malformed run identities and Goal acknowledgeme
   client.command = async () => ({ kind: "ack", status: "accepted", agentId: "main-exact", runId: "../outside" });
   await assert.rejects(client.submit("main-exact", "task", {}), /acceptance response/);
   client.command = async () => ({ kind: "ack", status: "accepted", agentId: "main-exact", runId: "run-exact" });
-  await assert.rejects(client.goal("main-exact", "refresh"), /unexpected run/);
+  for (const action of ["refresh", "pause", "cancel", "disable", "reopen"]) {
+    assert.equal((await client.goal("main-exact", action)).accepted.runId, "run-exact");
+  }
+  await assert.rejects(client.goal("main-exact", "get"), /unexpected run/);
 });
 
 test("Goal controls use the bound session and report backend errors", async () => {

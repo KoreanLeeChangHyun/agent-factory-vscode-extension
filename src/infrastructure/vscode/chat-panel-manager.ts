@@ -1,11 +1,16 @@
+import { mergeAgentSettings } from "../../core/config/agent-settings";
+import { BOT_DEFAULT_PROMPTS, resolveBotPrompt } from "../../modules/chat/bot-prompts";
+import { isBotModel } from "../../modules/chat/bot-model";
+import { localCompanionAvailable } from "../../modules/chat/bot-build-policy";
+import { restoreCompanion, interactCompanion } from "../../modules/chat/companion";
 import { workUnitContextText, workUnitBranch } from "./work-unit-context";
 import { unitGit, validateUnitBranch, directBranchEvidence } from "./work-unit-git";
 import { openContractPanel } from "./contract-panel";
 import { listContracts } from "../filesystem/contracts";
-import { readAgentDefaults, saveAgentDefault, useAgentPreset } from "./agent-settings-store";
+import { readAgentDefaults, saveAgentDefault, updateAgentPresetField, useAgentPreset, ensureAgentPresets } from "./agent-settings-store";
 import { readMarkdownImage } from "./markdown-image";
 import { localize, describeLocalizedMessage } from "../../common/localization";
-import { LunaBot, type BotContext } from "../codex/luna-bot";
+import { LunaBot, type BotContext, type BotMessage } from "../codex/luna-bot";
 import { taskExecution } from "../../modules/chat/task-selection";
 import { homedir } from "node:os";
 import { extname, isAbsolute, join, resolve } from "node:path";
@@ -352,6 +357,7 @@ export class ChatPanelManager implements vscode.Disposable {
         managed.lunaBot?.dispose();
         if (managed.agentRefreshTimer) clearTimeout(managed.agentRefreshTimer);
         this.panels.delete(state.panelId);
+        this.broadcastCompanion();
         this.notifyAgents();
         if (this.activePanelId === state.panelId) {
           this.activePanelId = undefined;
@@ -376,6 +382,7 @@ export class ChatPanelManager implements vscode.Disposable {
       panel.webview.html = await this.templates.render(panel.webview);
     } catch (error) {
       this.panels.delete(state.panelId);
+      this.broadcastCompanion();
       panel.webview.html = fallbackHtml(error);
     }
   }
@@ -465,8 +472,10 @@ export class ChatPanelManager implements vscode.Disposable {
         managed.themeSignature = undefined;
         await this.refreshTheme(managed);
         const connection = await this.connectRuntime();
+        await ensureAgentPresets(this.context.globalState);
         await this.post(managed.panel, { type: "agent.defaults", settings: readAgentDefaults(this.context.globalState) });
         const capabilities = connection.available ? await connection.client.capabilities(managed.state.agentId, this.effectiveModel(managed)) : undefined;
+        this.broadcastCompanion();
         let runtimeConversationId: string | undefined;
         if (managed.state.agentId && connection.available) {
           runtimeConversationId = (await connection.client.listSessions())
@@ -500,7 +509,10 @@ export class ChatPanelManager implements vscode.Disposable {
           running: managed.controller?.running ?? Boolean(managed.state.agentId && connection.available),
           statusItems: this.statusItems(),
           botsEnabled: this.botsEnabled(),
-          botPrompt: this.botPrompt(),
+          botsAvailable: true,
+          companionAvailable: this.botCharacter() === "lumi",
+          localCompanionAvailable, botCharacter: this.botCharacter(),
+          botModel: this.botModel(), botDefaultPrompt: BOT_DEFAULT_PROMPTS[this.botCharacter()], botPrompt: resolveBotPrompt(this.botCharacter(), this.botPrompt()),
           model: managed.state.model,
           agentModels: managed.state.agentModels,
           agentPermissions: managed.state.agentPermissions,
@@ -604,10 +616,23 @@ export class ChatPanelManager implements vscode.Disposable {
           await this.post(managed.panel, { type: "host.notice", level: "warning", text: localize("ui.this.request.has.already.been.answered.or.has.expired.reply.directly.in.the.current.conversation") });
         }
         return;
+      case "agent.preset.field": {
+        try {
+          await updateAgentPresetField(this.context.globalState, message.name, message.role, message.field, message.value);
+          await this.post(managed.panel, {type: "agent.preset.field.result"});
+          for (const panel of this.panels.values()) await this.refreshAgentDefaults(panel);
+        } catch (cause) {
+          await this.post(managed.panel, {type: "agent.preset.field.result", error: cause instanceof Error ? cause.message : String(cause)});
+        }
+        return;
+      }
       case "agent.preset": {
         let error: string | undefined;
         try {
-          await useAgentPreset(this.context.globalState, message.action, message.scope, message.name);
+          await useAgentPreset(this.context.globalState, message.action, message.scope, message.name, mergeAgentSettings(
+            readAgentDefaults().effective, managed.state.agentModels ?? {},
+            {[managed.state.role ?? "main"]: {model: managed.state.model, reasoningEffort: managed.state.reasoning}}
+          ));
         } catch (cause) { error = cause instanceof Error ? cause.message : String(cause); }
         finally {
           await this.post(managed.panel, {type: "agent.preset.result", ...(error ? {error} : {})});
@@ -828,6 +853,15 @@ export class ChatPanelManager implements vscode.Disposable {
       case "attachment.remove":
         await this.mutateImages(managed, () => this.removeImageAttachment(managed, message.id));
         return;
+      case "bot.interact":
+        if (this.botCharacter() !== "lumi" || !this.botsEnabled()) return;
+        this.companionWrite = this.companionWrite.catch(() => {}).then(async () => {
+          const next = interactCompanion(this.companionState(), message.action);
+          await this.context.globalState.update("agentFactory.companion.v1", next);
+          this.broadcastCompanion();
+        });
+        await this.companionWrite;
+        return;
       case "bots.configure":
         await this.saveBots(message.enabled);
         return;
@@ -837,24 +871,72 @@ export class ChatPanelManager implements vscode.Disposable {
           return;
         }
         const bot = managed.lunaBot ??= new LunaBot();
-        try {
-          const text = await bot.talk(message.text, this.botPrompt());
-          if (!managed.disposed && this.botsEnabled() && managed.lunaBot === bot)
-            await this.post(managed.panel, { type: "bot.reply", requestId: message.requestId, text });
-        } catch {
-          if (!managed.disposed && this.botsEnabled() && managed.lunaBot === bot)
-            await this.post(managed.panel, { type: "bot.reply", requestId: message.requestId, failed: true });
-        }
+        const character = this.botCharacter();
+        const prompt = resolveBotPrompt(character, this.botPrompt());
+        const model = this.botModel();
+        const conversation = this.botConversationWrite.catch(() => {}).then(async () => {
+          try {
+            if (managed.disposed || !this.botsEnabled() || managed.lunaBot !== bot) return;
+            if (character === "lumi") {
+              this.companionWrite = this.companionWrite.catch(() => {}).then(async () => {
+                await this.context.globalState.update("agentFactory.companion.v1", interactCompanion(this.companionState(), "call"));
+                this.broadcastCompanion();
+              });
+              await this.companionWrite;
+            }
+            const key = "agentFactory.botConversation.v1." + character;
+            const history = this.context.globalState.get<BotMessage[]>(key, []);
+            const text = await bot.talk(message.text, prompt, model, history, partial => {
+              if (!managed.disposed && this.botsEnabled() && managed.lunaBot === bot)
+                void this.post(managed.panel, { type: "bot.reply.partial", requestId: message.requestId, text: partial });
+            });
+            if (managed.disposed || !this.botsEnabled() || managed.lunaBot !== bot) return;
+            await this.context.globalState.update(key, [...history,
+              { role: "user", content: message.text }, { role: "assistant", content: text }]);
+            if (!managed.disposed && this.botsEnabled() && managed.lunaBot === bot)
+              await this.post(managed.panel, { type: "bot.reply", requestId: message.requestId, text, emotion: bot.lastEmotion });
+          } catch {
+            if (!managed.disposed && this.botsEnabled() && managed.lunaBot === bot)
+              await this.post(managed.panel, { type: "bot.reply", requestId: message.requestId, failed: true });
+          }
+        });
+        this.botConversationWrite = conversation.catch(() => {});
+        await conversation;
         return;
       }
-      case "bot.prompt.save": {
+      case "bot.character.save": {
+        if (message.character === "lumi" && !localCompanionAvailable) return;
         const write = this.botsWrite.then(() => vscode.workspace.getConfiguration("agentFactory.mainChat")
-          .update("botPrompt", message.prompt, vscode.ConfigurationTarget.Global));
+          .update("botCharacter", message.character, vscode.ConfigurationTarget.Global));
+        this.botsWrite = write.then(() => {}, () => {});
+        try { await write; } catch { /* Restore the persisted selection in every panel. */ }
+        await this.refreshBots();
+        this.broadcastCompanion();
+        return;
+      }
+      case "bot.model.save": {
+        const write = this.botsWrite.then(() => vscode.workspace.getConfiguration("agentFactory.mainChat")
+          .update("botModel", message.model, vscode.ConfigurationTarget.Global));
         this.botsWrite = write.then(() => {}, () => {});
         try {
           await write;
           await this.refreshBots();
-          await this.post(managed.panel, { type: "bot.prompt.saved", requestId: message.requestId, prompt: message.prompt });
+          await this.post(managed.panel, { type: "bot.model.saved", model: this.botModel() });
+        } catch {
+          await this.post(managed.panel, { type: "bot.model.saved", model: this.botModel(), failed: true });
+        }
+        return;
+      }
+      case "bot.prompt.save": {
+        const character = message.character ?? this.botCharacter();
+        const customPrompt = message.prompt === BOT_DEFAULT_PROMPTS[character] ? "" : message.prompt;
+        const write = this.botsWrite.then(() => vscode.workspace.getConfiguration("agentFactory.mainChat")
+          .update(character === "lumi" ? "lumiPrompt" : "factoryBotPrompt", customPrompt, vscode.ConfigurationTarget.Global));
+        this.botsWrite = write.then(() => {}, () => {});
+        try {
+          await write;
+          await this.refreshBots();
+          await this.post(managed.panel, { type: "bot.prompt.saved", requestId: message.requestId, prompt: resolveBotPrompt(character, customPrompt) });
         } catch {
           await this.post(managed.panel, { type: "bot.prompt.saved", requestId: message.requestId, failed: true });
         }
@@ -1163,6 +1245,7 @@ Read the exact stored child result/receipt and existing workflow status for repo
 
   private async refreshAgentDefaults(managed: ManagedPanel): Promise<void> {
     if (managed.disposed) return;
+    await ensureAgentPresets(this.context.globalState);
     await this.post(managed.panel, { type: "agent.defaults", settings: readAgentDefaults(this.context.globalState) });
     const model = this.effectiveModel(managed);
     const connection = await this.connectRuntime();
@@ -1326,6 +1409,7 @@ Read the exact stored child result/receipt and existing workflow status for repo
           if (running) managed.botContext = "working";
           else if (managed.botContext === "working") managed.botContext = "idle";
           this.reactBot(managed);
+          this.broadcastCompanion();
           managed.runningTitle?.setRunning(running);
           void this.post(managed.panel, { type: "run.state", running });
           this.scheduleAgentList(managed, !running);
@@ -1368,7 +1452,12 @@ Read the exact stored child result/receipt and existing workflow status for repo
           void this.post(managed.panel, { type: "goal.updated", goal, error });
         },
         onStatusObserved: (status) => {
-          if (status === "completed" || status === "failed") managed.botContext = status;
+          if (status === "completed" || status === "failed") {
+            managed.botContext = status;
+            this.companionOutcome = status;
+            this.companionOutcomeUntil = Date.now() + 4000;
+          }
+          this.broadcastCompanion();
           void this.post(managed.panel, { type: "run.observed", status });
           this.scheduleAgentList(managed);
         },
@@ -1924,6 +2013,23 @@ Read the exact stored child result/receipt and existing workflow status for repo
     });
   }
 
+  private companionOutcome?: "completed" | "failed";
+  private companionOutcomeUntil = 0;
+  private botConversationWrite: Promise<void> = Promise.resolve();
+  private companionWrite: Promise<void> = Promise.resolve();
+  private companionInitial = restoreCompanion(undefined);
+  private companionState() {
+    return restoreCompanion(this.context.globalState.get("agentFactory.companion.v1", this.companionInitial));
+  }
+  private broadcastCompanion(): void {
+    if (this.botCharacter() !== "lumi" || !this.botsEnabled()) return;
+    const companion = this.companionState();
+    const working = [...this.panels.values()].filter(panel => panel.botContext === "working").length;
+    for (const panel of this.panels.values()) {
+      if (!panel.disposed) void this.post(panel.panel, { type: "bot.companion", companion, working, outcome: this.companionOutcome, outcomeUntil: this.companionOutcomeUntil });
+    }
+  }
+
   private botsWrite: Promise<void> = Promise.resolve();
 
   private saveBots(enabled: boolean): Promise<void> {
@@ -1941,9 +2047,23 @@ Read the exact stored child result/receipt and existing workflow status for repo
   private botsEnabled(): boolean {
     return vscode.workspace.getConfiguration("agentFactory.mainChat").get<boolean>("botsEnabled", true);
   }
+  private botModel(): string {
+    const value = vscode.workspace.getConfiguration("agentFactory.mainChat").get<unknown>("botModel", "");
+    return isBotModel(value) ? value : "";
+  }
+
+  private botCharacter(): "lumi" | "factory" {
+    const value = vscode.workspace.getConfiguration("agentFactory.mainChat").get<string>("botCharacter", "");
+    return localCompanionAvailable && value !== "factory" ? "lumi" : "factory";
+  }
+
   private botPrompt(): string {
-    const value = vscode.workspace.getConfiguration("agentFactory.mainChat").get<unknown>("botPrompt", "");
-    return typeof value === "string" ? value : "";
+    const config = vscode.workspace.getConfiguration("agentFactory.mainChat");
+    const character = this.botCharacter();
+    const value = config.get<unknown>(character === "lumi" ? "lumiPrompt" : "factoryBotPrompt");
+    if (typeof value === "string") return value;
+    const legacy = character === "factory" ? config.get<unknown>("botPrompt", "") : "";
+    return typeof legacy === "string" ? legacy : "";
   }
 
   public async refreshBots(): Promise<void> {
@@ -1953,7 +2073,7 @@ Read the exact stored child result/receipt and existing workflow status for repo
         managed.lunaBot?.dispose();
         managed.lunaBot = undefined;
       }
-      return this.post(managed.panel, { type: "bots.updated", enabled, botPrompt: this.botPrompt() });
+      return this.post(managed.panel, { type: "bots.updated", enabled, botCharacter: this.botCharacter(), localCompanionAvailable, botModel: this.botModel(), botDefaultPrompt: BOT_DEFAULT_PROMPTS[this.botCharacter()], botPrompt: resolveBotPrompt(this.botCharacter(), this.botPrompt()) });
     }));
   }
 
