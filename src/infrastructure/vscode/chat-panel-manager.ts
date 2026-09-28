@@ -1413,7 +1413,9 @@ Read the exact stored child result/receipt and existing workflow status for repo
       const shown = previous?.shown && !completed;
       if (["main", "master"].includes(evidence.branch) && !shown) {
         await this.context.globalState.update(key, { shown: true, operations: evidence.operations });
-        await vscode.window.showInformationMessage(localize("unit.direct.notice", evidence.branch));
+        // This is an informational notice, not a submission approval. VS Code
+        // resolves it on dismissal; holding the shared chain would stall all sends.
+        void vscode.window.showInformationMessage(localize("unit.direct.notice", evidence.branch)).then(undefined, () => {});
       } else await this.context.globalState.update(key, { shown: Boolean(shown), operations: evidence.operations });
     } catch { /* Without Git evidence, do not infer a completed push or merge. */ }
   }

@@ -3,6 +3,10 @@ import { createRequire } from "node:module";
 import { runInNewContext } from "node:vm";
 import test from "node:test";
 import { build } from "esbuild";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { execFileSync } from "node:child_process";
 
 const require = createRequire(import.meta.url);
 const output = await build({
@@ -46,6 +50,43 @@ runInNewContext(output.outputFiles[0].text, {
   process, setTimeout, clearTimeout,
   global: { Date },
   require: name => name === "vscode" ? vscode : require(name)
+});
+
+test("default branch notice does not hold chat submissions until dismissal", async () => {
+  const root = await mkdtemp(join(tmpdir(), "af-notice-"));
+  const originalNotice = vscode.window.showInformationMessage;
+  let dismiss, timer;
+  const notice = new Promise(resolve => { dismiss = resolve; });
+  const stored = new Map(), sent = [];
+  let notices = 0;
+  try {
+    execFileSync("git", ["init", "-b", "main", root]);
+    execFileSync("git", ["-C", root, "-c", "user.name=Test", "-c", "user.email=test@example.invalid", "commit", "--allow-empty", "-m", "fixture"]);
+    vscode.window.showInformationMessage = () => { notices++; return notice; };
+    const manager = new module.exports.ChatPanelManager({ globalState: {
+      get(key) { return stored.get(key); }, async update(key, value) { stored.set(key, value); }
+    } }, {}, () => [], async () => ({ available: false }));
+    manager.refreshWorktree = async () => {};
+    manager.sendChat = async (_managed, text) => { sent.push(text); };
+    const managed = {
+      state: { role: "main", agentId: "main-notice" }, worktree: { workingDirectory: root },
+      panel: { webview: { async postMessage() { return true; } } }
+    };
+    const sends = ["first", "second"].map(text => manager.handleMessage(managed, {
+      type: "chat.send", id: text, text, attachments: [], execution: { fast: false, goal: false }
+    }));
+    await Promise.race([Promise.all(sends), new Promise((_, reject) => {
+      timer = setTimeout(() => reject(new Error("Submissions waited for notice dismissal")), 2000);
+    })]);
+    assert.deepEqual(sent, ["first", "second"]);
+    assert.equal(notices, 1);
+    assert.equal([...stored.values()][0].shown, true);
+  } finally {
+    clearTimeout(timer);
+    dismiss();
+    vscode.window.showInformationMessage = originalNotice;
+    await rm(root, { recursive: true, force: true });
+  }
 });
 
 test("conversation transition finishes while the completion notification remains open", async () => {

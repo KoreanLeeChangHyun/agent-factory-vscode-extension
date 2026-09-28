@@ -1954,7 +1954,21 @@ async function checkManagedComponents(path: string): Promise<void> {
   }
 }
 
+class ManagedFileReplacedError extends Error {}
+
 async function readManagedBytes(path: string, limit: number, start = 0, identity?: string): Promise<Buffer> {
+  // Runtime JSON snapshots are published by atomic rename. Reopen and validate
+  // a replacement instead of breaking polling on this ordinary writer race.
+  // Incremental event reads must retain their original inode/offset binding.
+  for (let attempt = 0; ; attempt++) {
+    try { return await readManagedBytesOnce(path, limit, start, identity); }
+    catch (error) {
+      if (!(error instanceof ManagedFileReplacedError) || identity !== undefined || start !== 0 || attempt >= 2) throw error;
+    }
+  }
+}
+
+async function readManagedBytesOnce(path: string, limit: number, start = 0, identity?: string): Promise<Buffer> {
   await checkManagedComponents(path);
   const file = await openFile(path, fsConstants.O_RDONLY | fsConstants.O_NOFOLLOW | fsConstants.O_NONBLOCK);
   try {
@@ -1977,9 +1991,12 @@ async function readManagedBytes(path: string, limit: number, start = 0, identity
       offset += part.bytesRead;
     }
     const after = await lstat(path);
-    if (start + offset > limit || after.size > limit || after.isSymbolicLink() || before.dev !== after.dev || before.ino !== after.ino
+    if (start + offset > limit || after.size > limit || !after.isFile() || after.isSymbolicLink()
         || await realpath(path) !== resolve(path)) {
       throw new Error(localize("ui.the.agent.factory.file.was.replaced.while.being.read"));
+    }
+    if (before.dev !== after.dev || before.ino !== after.ino) {
+      throw new ManagedFileReplacedError(localize("ui.the.agent.factory.file.was.replaced.while.being.read"));
     }
     return bytes.subarray(0, offset);
   } finally {

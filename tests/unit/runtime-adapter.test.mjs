@@ -1,4 +1,6 @@
 import { createHash } from "node:crypto";
+import { createRequire } from "node:module";
+import * as fsPromises from "node:fs/promises";
 import assert from "node:assert/strict";
 import { appendFile, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -15,6 +17,65 @@ function agentsRoot(root) {
   const id = "project-" + createHash("sha256").update(root).digest("hex").slice(0, 32);
   return join(runtimeTestHome, "projects", id, "agents");
 }
+
+test("managed snapshots recover atomic replacement without accepting unsafe paths or stale event offsets", async t => {
+  const output = await build({ entryPoints: ['src/infrastructure/agent-factory/agent-client.ts'],
+    bundle: true, format: 'cjs', platform: 'node', write: false });
+  const require = createRequire(import.meta.url), module = { exports: {} };
+  const root = await mkdtemp(join(tmpdir(), 'af-read-replacement-'));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const path = join(root, 'state.json'), outside = join(root, 'outside.json');
+  await writeFile(outside, JSON.stringify({ status: 'outside' }));
+  let target = path, remaining = 0, mode = 'regular', opens = 0, closes = 0;
+  const fs = { ...fsPromises, async open(name, flags) {
+    const file = await fsPromises.open(name, flags);
+    if (name !== target) return file;
+    opens++;
+    const read = file.read.bind(file), close = file.close.bind(file);
+    let changed = false;
+    file.close = async () => { closes++; return close(); };
+    file.read = async (...args) => {
+      const result = await read(...args);
+      if (!changed && remaining > 0) {
+        changed = true; remaining--;
+        const replacement = name + '.tmp';
+        if (mode === 'symlink') await symlink(outside, replacement);
+        else await writeFile(replacement, mode === 'oversized' ? 'x'.repeat(256 * 1024 + 1) : JSON.stringify({ status: 'completed' }));
+        await fsPromises.rename(replacement, name);
+      }
+      return result;
+    };
+    return file;
+  } };
+  runInNewContext(output.outputFiles[0].text, { module, exports: module.exports, Buffer, URL, process,
+    setTimeout, clearTimeout, console, require: name => name === 'node:fs/promises' ? fs : require(name) });
+  const client = new module.exports.AgentFactoryClient('/unused', root);
+  for (const replacements of [1, 2]) {
+    await writeFile(path, JSON.stringify({ status: 'running' }));
+    remaining = replacements; opens = closes = 0;
+    assert.equal((await client.cachedRunState(path)).status, 'completed');
+    assert.equal(opens, replacements + 1);
+    assert.equal(closes, opens);
+    assert.equal((await client.cachedRunState(path)).status, 'completed');
+  }
+  for (mode of ['regular', 'symlink', 'oversized']) {
+    await rm(path, { force: true });
+    await writeFile(path, JSON.stringify({ status: 'running' }));
+    remaining = 10; opens = closes = 0;
+    await assert.rejects(client.cachedRunState(path), /replaced|unsafe/i);
+    assert.equal(opens, mode === 'regular' ? 3 : 1);
+    assert.equal(closes, opens);
+  }
+  mode = 'regular'; remaining = 1; opens = closes = 0;
+  const directory = join(root, 'agents', 'main-one', 'runs', 'run-one');
+  await mkdir(directory, { recursive: true });
+  target = join(directory, 'events.jsonl');
+  await writeFile(target, '{}\n');
+  client.location = async () => ({ agentsRoot: join(root, 'agents') });
+  await assert.rejects(client.updates('main-one', 'run-one', 0), /replaced/i);
+  assert.equal(opens, 1);
+  assert.equal(closes, 1);
+});
 
 
 test("conversation history restores ordered durable messages and honors reset boundaries", async (t) => {
