@@ -1689,6 +1689,10 @@
     "en": "Check run status and resume queue",
     "ko": "실행 상태 확인 및 대기열 재개"
   },
+  "ui.stop.current.run.and.send.queued.messages.now": {
+    "en": "Stop current run · Send queued now",
+    "ko": "현재 실행 중단 · 대기 메시지 지금 보내기"
+  },
   "ui.submission.unconfirmed.restore.to.input": {
     "en": "Submission unconfirmed · Restore to input",
     "ko": "제출 미확인 · 입력창으로 복원"

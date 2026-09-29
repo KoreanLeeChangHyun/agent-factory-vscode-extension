@@ -4,7 +4,7 @@ import { runUiInNewContext as runInNewContext } from '../support/ui-localization
 import test from 'node:test';
 
 const script = await readFile(new URL('../../static/js/chat.js', import.meta.url), 'utf8');
-const submitSource = script.slice(script.indexOf('  function submit('), script.indexOf('  function cancelRun()'))
+const submitSource = script.slice(script.indexOf('  function submit('), script.indexOf('  function cancelRun('))
   // submit() resolves delegated model settings through these helpers.
   + script.slice(script.indexOf('  function inheritedAgentRole('), script.indexOf('  function createAgentSettingControl('));
 const actions = ['work', 'plan', 'verification', 'plan-work', 'work-verification', 'plan-work-verification'];
@@ -81,7 +81,7 @@ test('stop request gives synchronous feedback, stays running, and coalesces repe
     renderRunStatus() { events.push('render'); },
     renderStatusBar() {},
   };
-  const cancel = script.slice(script.indexOf('  function cancelRun()'), script.indexOf('  function isDuplicateCancellation('));
+  const cancel = script.slice(script.indexOf('  function cancelRun('), script.indexOf('  function isDuplicateCancellation('));
   runInNewContext(cancel + ';cancelRun();cancelRun();', context);
   assert.deepEqual(events, ['run.cancel', 'render']);
   assert.equal(context.state.running, true);

@@ -4,7 +4,7 @@ import { runUiInNewContext as runInNewContext } from "../support/ui-localization
 import test from "node:test";
 
 const script = await readFile(new URL("../../static/js/chat.js", import.meta.url), "utf8");
-const submit = script.slice(script.indexOf("  function submit("), script.indexOf("  function cancelRun()"))
+const submit = script.slice(script.indexOf("  function submit("), script.indexOf("  function cancelRun("))
   // submit() resolves delegated model settings through these helpers.
   + script.slice(script.indexOf('  function inheritedAgentRole('), script.indexOf('  function createAgentSettingControl('));
 const controls = script.slice(script.indexOf("  function updateSendButton()"), script.indexOf("  function updateRunControls()"));

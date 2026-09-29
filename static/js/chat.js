@@ -1840,7 +1840,8 @@
         return;
       }
       event.preventDefault();
-      cancelRun();
+      // A fresh press retries a cancellation that did not stop the run.
+      if (!event.repeat) cancelRun(true);
     }
   });
 
@@ -2696,8 +2697,8 @@
     }
   }
 
-  function cancelRun() {
-    if (!state.running || state.cancellationRequested) {
+  function cancelRun(retry = false) {
+    if (!state.running || (state.cancellationRequested && !retry)) {
       return;
     }
     state.cancellationRequested = true;
@@ -5865,6 +5866,15 @@
       resume.textContent = t("ui.check.run.status.and.resume.queue");
       resume.onclick = function () { vscode.postMessage({ type: "queue.resume" }); };
       nodes.push(resume);
+    }
+    if (pending.some(function (item) { return !item.rejected; }) && state.running && !state.pendingDecisionRunId) {
+      // Stopping the current run dispatches the queue next; unlike Escape it always retries.
+      const sendNow = queue.querySelector("[data-queue-send-now]") || document.createElement("button");
+      sendNow.dataset.queueSendNow = "true";
+      sendNow.type = "button";
+      sendNow.textContent = t("ui.stop.current.run.and.send.queued.messages.now");
+      sendNow.onclick = function () { cancelRun(true); };
+      nodes.push(sendNow);
     }
     const ids = new Set(pending.map(function (item) { return item.id; }));
     for (const id of pendingQueueRows.keys()) {

@@ -132,6 +132,27 @@ test('explicit stop targets only the current run and preserves queued requests',
   assert.deepEqual(sent, ['first', 'second']);
 });
 
+test('repeated stop retries cancellation and a terminal refusal still drains the queue', async () => {
+  const stopped = deferred(), cancelled = [], sent = [], errors = [];
+  const controller = new ChatSessionController(runtime({
+    async send(agentId, text) { sent.push(text); return { agentId, runId: text }; },
+    async status(_agentId, runId) { if (runId === 'first') await stopped.promise; return { status: 'completed' }; },
+    async result(_agentId, runId) { return { status: runId === 'first' ? 'cancelled' : 'completed', text: '' }; },
+    async cancel(...args) {
+      cancelled.push(args);
+      if (cancelled.length === 2) { stopped.resolve(); throw new Error('run_terminal: run is already terminal'); }
+    }
+  }), events({ onError(text) { errors.push(text); } }), 'main-existing', { pollIntervalMs: 0 });
+  const first = controller.send('first', [], {}); await tick();
+  const second = controller.send('second', [], {});
+  await controller.cancel();
+  assert.equal(controller.queueLength, 1);
+  await controller.cancel(); await Promise.all([first, second]);
+  assert.deepEqual(cancelled, [['main-existing', 'first'], ['main-existing', 'first']]);
+  assert.deepEqual(sent, ['first', 'second']);
+  assert.equal(errors.some(text => /terminal/.test(text)), false);
+});
+
 test('conversation reset requires an idle controller and preserves the Agent binding', async () => {
   const resets = [];
   const controller = new ChatSessionController(runtime({

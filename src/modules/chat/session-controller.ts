@@ -539,6 +539,8 @@ Answer the Human's current question without cancelling these workflows. For task
       const agentId = this.currentRunAgentId;
       const runId = this.currentRunId;
       const request = this.runtime.cancel(agentId, runId).catch((error) => {
+        // A run that already ended needs no stop; polling observes it and drains the queue.
+        if (/run_terminal|already terminal/.test(errorMessage(error))) return;
         this.cancelRequested = false;
         this.events.onError(errorMessage(error));
       });
