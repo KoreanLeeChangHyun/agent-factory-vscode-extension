@@ -677,7 +677,8 @@ test("runtime client invokes official commands and reads the bounded managed res
       { kind: "activity", id: "mcp-1", category: "tool", phase: "started", text: "codex/list_mcp_resources" },
       { kind: "status", text: "Running connected tool" },
       { kind: "status", text: "Finalizing response" },
-      { kind: "usage", usedTokens: 39300, contextWindowTokens: 258400, weeklyUsedPercent: 3 }
+      { kind: "usage", usedTokens: 39300, contextWindowTokens: 258400, weeklyUsedPercent: 3 },
+      { kind: "accountLimits", limits: { provider: "codex", weeklyUsedPercent: 3 } }
     ]
   });
   await appendFile(eventsPath, '{"type":"turn.completed"');
@@ -847,7 +848,9 @@ test("runtime client refreshes changed context usage during a turn and forces th
     updates: [
       { kind: "status", text: "Main Agent is analyzing the request" },
       { kind: "usage", usedTokens: 10_000, contextWindowTokens: 258_400, weeklyUsedPercent: 12.5,
-        weeklyResetsAt: 1_790_953_200, fiveHourUsedPercent: 25, fiveHourResetsAt: 1_790_506_200 }
+        weeklyResetsAt: 1_790_953_200, fiveHourUsedPercent: 25, fiveHourResetsAt: 1_790_506_200 },
+      { kind: "accountLimits", limits: { provider: "codex", weeklyUsedPercent: 12.5, weeklyResetsAt: 1_790_953_200,
+        fiveHourUsedPercent: 25, fiveHourResetsAt: 1_790_506_200 } }
     ]
   });
   await appendFile(rolloutPath, tokenCount(20_000, {
@@ -858,7 +861,10 @@ test("runtime client refreshes changed context usage during a turn and forces th
   now = 1_000;
   assert.deepEqual(await client.updates("main-test", "run-live", 1), {
     cursor: 1,
-    updates: [{ kind: "usage", usedTokens: 20_000, contextWindowTokens: 258_400, fiveHourUsedPercent: 25 }]
+    updates: [
+      { kind: "usage", usedTokens: 20_000, contextWindowTokens: 258_400, fiveHourUsedPercent: 25 },
+      { kind: "accountLimits", limits: { provider: "codex", fiveHourUsedPercent: 25 } }
+    ]
   });
 
   await appendFile(rolloutPath, tokenCount(30_000, {
@@ -877,13 +883,28 @@ test("runtime client refreshes changed context usage during a turn and forces th
   const claudeRunRoot = join(agentsRoot(projectRoot), "main-test/runs/run-claude");
   await mkdir(claudeRunRoot, { recursive: true });
   await writeFile(join(claudeRunRoot, "state.json"), JSON.stringify({
+    provider: "claude",
     contextUsage: { usedTokens: 40_000, contextWindowTokens: 1_000_000, weeklyUsedPercent: 19, fiveHourUsedPercent: 25,
       weeklyResetsAt: 1_790_953_200, fiveHourResetsAt: 1_790_506_200 }
   }));
   await writeFile(join(claudeRunRoot, "events.jsonl"), JSON.stringify({ type: "turn.started" }) + "\n");
-  assert.deepEqual((await client.updates("main-test", "run-claude", 0)).updates.at(-1),
+  assert.deepEqual((await client.updates("main-test", "run-claude", 0)).updates.slice(-2), [
     { kind: "usage", usedTokens: 40_000, contextWindowTokens: 1_000_000, weeklyUsedPercent: 19, weeklyResetsAt: 1_790_953_200,
-      fiveHourUsedPercent: 25, fiveHourResetsAt: 1_790_506_200 });
+      fiveHourUsedPercent: 25, fiveHourResetsAt: 1_790_506_200 },
+    { kind: "accountLimits", limits: { provider: "claude", weeklyUsedPercent: 19, weeklyResetsAt: 1_790_953_200,
+      fiveHourUsedPercent: 25, fiveHourResetsAt: 1_790_506_200 } }
+  ]);
+  // Account limits arrive before the run records context tokens, and repeat only when they change.
+  const limitsOnlyRoot = join(agentsRoot(projectRoot), "main-test/runs/run-claude-limits");
+  await mkdir(limitsOnlyRoot, { recursive: true });
+  await writeFile(join(limitsOnlyRoot, "state.json"), JSON.stringify({
+    provider: "claude", contextUsage: { fiveHourUsedPercent: 80, fiveHourResetsAt: 1_790_709_600 }
+  }));
+  await writeFile(join(limitsOnlyRoot, "events.jsonl"), JSON.stringify({ type: "turn.started" }) + "\n");
+  assert.deepEqual((await client.updates("main-test", "run-claude-limits", 0)).updates.at(-1),
+    { kind: "accountLimits", limits: { provider: "claude", fiveHourUsedPercent: 80, fiveHourResetsAt: 1_790_709_600 } });
+  now += 1_000;
+  assert.ok(!(await client.updates("main-test", "run-claude-limits", 1)).updates.some(update => update.kind === "accountLimits"));
 });
 
 test("session controller binds once, sends later turns, and retains attachment references", async function () {

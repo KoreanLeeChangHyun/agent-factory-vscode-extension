@@ -32,8 +32,18 @@ interface ContextUsage {
   readonly fiveHourResetsAt?: number;
 }
 
+/** Latest account-wide limit windows reported by one provider, independent of any chat's context. */
+export interface AccountLimits {
+  readonly provider: string;
+  readonly weeklyUsedPercent?: number;
+  readonly fiveHourUsedPercent?: number;
+  readonly weeklyResetsAt?: number;
+  readonly fiveHourResetsAt?: number;
+}
+
 interface ContextUsageSnapshot {
   readonly checkedAt: number;
+  readonly limitsSignature?: string;
   readonly rolloutPath?: string;
   readonly signature?: string;
   readonly nextLookupAt?: number;
@@ -127,6 +137,7 @@ export type RunUpdate =
       readonly weeklyResetsAt?: number;
       readonly fiveHourResetsAt?: number;
     }
+  | { readonly kind: "accountLimits"; readonly limits: AccountLimits }
   | {
       readonly kind: "activity";
       readonly id: string;
@@ -714,8 +725,9 @@ When a command needs sudo and the Human has requested it, use python3 ${JSON.str
     for (const line of newLines) {
       updates.push(...await progressUpdates(line, typeof runWorkingDirectory === "string" ? runWorkingDirectory : this.projectRoot, join(dirname(path), "result.md")));
     }
-    const usage = await this.readContextUsageUpdate(agentId, runId, newLines.some(isTurnCompletedLine));
+    const { usage, limits } = await this.readContextUsageUpdate(agentId, runId, newLines.some(isTurnCompletedLine));
     if (usage) updates.push({ kind: "usage", ...usage });
+    if (limits) updates.push({ kind: "accountLimits", limits });
     return { cursor: lines.length, updates };
   }
 
@@ -723,11 +735,11 @@ When a command needs sudo and the Human has requested it, use python3 ${JSON.str
     agentId: string,
     runId: string,
     force: boolean
-  ): Promise<ContextUsage | undefined> {
+  ): Promise<{ readonly usage?: ContextUsage; readonly limits?: AccountLimits }> {
     const key = `${agentId}/${runId}`;
     const previous = this.contextUsageSnapshots.get(key);
     const checkedAt = this.now();
-    if (!force && previous && checkedAt - previous.checkedAt < CONTEXT_USAGE_REFRESH_INTERVAL_MS) return undefined;
+    if (!force && previous && checkedAt - previous.checkedAt < CONTEXT_USAGE_REFRESH_INTERVAL_MS) return {};
 
     let rolloutPath = previous?.rolloutPath;
     if (!rolloutPath && (force || checkedAt >= (previous?.nextLookupAt ?? 0))) {
@@ -740,13 +752,21 @@ When a command needs sudo and the Human has requested it, use python3 ${JSON.str
         signature = `${info.dev}:${info.ino}:${info.size}:${info.mtimeMs}:${info.ctimeMs}`;
       } catch { rolloutPath = undefined; }
     }
-    const usage = rolloutPath && (force || signature !== previous?.signature)
-      ? await readLatestTokenCount(rolloutPath).catch(() => undefined)
+    let usage: ContextUsage | undefined;
+    let limits: AccountLimits | undefined;
+    if (rolloutPath && (force || signature !== previous?.signature)) {
+      usage = await readLatestTokenCount(rolloutPath).catch(() => undefined);
+      limits = usage && accountLimits("codex", usage);
+    } else if (!rolloutPath) {
       // Claude runs have no Codex rollout; the runtime records their context usage in the run state.
-      : rolloutPath ? undefined : await this.readRecordedContextUsage(agentId, runId);
+      ({ usage, limits } = await this.readRecordedContextUsage(agentId, runId));
+    }
+    const limitsSignature = limits ? JSON.stringify(limits) : previous?.limitsSignature;
+    if (limits && limitsSignature === previous?.limitsSignature) limits = undefined;
     const latestUsage = usage ?? previous?.usage;
     this.contextUsageSnapshots.set(key, {
       checkedAt,
+      ...(limitsSignature ? { limitsSignature } : {}),
       nextLookupAt: rolloutPath ? 0 : (previous?.nextLookupAt && previous.nextLookupAt > checkedAt
         ? previous.nextLookupAt : checkedAt + 10_000),
       ...(signature ? { signature } : {}),
@@ -759,28 +779,32 @@ When a command needs sudo and the Human has requested it, use python3 ${JSON.str
         previous.usage.weeklyUsedPercent === usage.weeklyUsedPercent &&
         previous.usage.fiveHourUsedPercent === usage.fiveHourUsedPercent &&
         previous.usage.weeklyResetsAt === usage.weeklyResetsAt &&
-        previous.usage.fiveHourResetsAt === usage.fiveHourResetsAt)) return undefined;
-    return usage;
+        previous.usage.fiveHourResetsAt === usage.fiveHourResetsAt)) return { limits };
+    return { usage, limits };
   }
 
-  private async readRecordedContextUsage(agentId: string, runId: string): Promise<ContextUsage | undefined> {
+  private async readRecordedContextUsage(
+    agentId: string,
+    runId: string
+  ): Promise<{ readonly usage?: ContextUsage; readonly limits?: AccountLimits }> {
     try {
       const statePath = await this.managedPath(agentId, "runs", runId, "state.json");
       const info = await lstat(statePath);
-      if (!info.isFile() || info.size > 256 * 1024) return undefined;
+      if (!info.isFile() || info.size > 256 * 1024) return {};
       const state = readRecordOrUndefined(JSON.parse((await readManagedBytes(statePath, 256 * 1024)).toString("utf8")));
       const recorded = readRecordOrUndefined(state?.contextUsage);
       const usedTokens = readTokenCount(recorded?.usedTokens);
       const contextWindowTokens = readTokenCount(recorded?.contextWindowTokens);
-      if (usedTokens === undefined || contextWindowTokens === undefined) return undefined;
-      return {
-        usedTokens,
-        contextWindowTokens,
+      const windows = {
         ...usageWindow("weekly", readUsedPercent(recorded?.weeklyUsedPercent), readResetsAt(recorded?.weeklyResetsAt)),
         ...usageWindow("fiveHour", readUsedPercent(recorded?.fiveHourUsedPercent), readResetsAt(recorded?.fiveHourResetsAt))
       };
+      // Limits are account-wide, so they are reported even before the run records context tokens.
+      const limits = typeof state?.provider === "string" ? accountLimits(state.provider, windows) : undefined;
+      if (usedTokens === undefined || contextWindowTokens === undefined) return { limits };
+      return { usage: { usedTokens, contextWindowTokens, ...windows }, limits };
     } catch {
-      return undefined;
+      return {};
     }
   }
 
@@ -1684,6 +1708,15 @@ function usageWindow(
     ...(usedPercent !== undefined ? { [`${name}UsedPercent`]: usedPercent } : {}),
     ...(resetsAt !== undefined ? { [`${name}ResetsAt`]: resetsAt } : {})
   };
+}
+
+function accountLimits(provider: string, usage: Partial<ContextUsage>): AccountLimits | undefined {
+  const limits = {
+    provider,
+    ...usageWindow("weekly", usage.weeklyUsedPercent, usage.weeklyResetsAt),
+    ...usageWindow("fiveHour", usage.fiveHourUsedPercent, usage.fiveHourResetsAt)
+  };
+  return Object.keys(limits).length > 1 ? limits : undefined;
 }
 
 function readResetsAt(value: unknown): number | undefined {

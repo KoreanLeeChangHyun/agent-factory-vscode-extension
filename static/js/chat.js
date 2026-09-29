@@ -1955,6 +1955,10 @@
         renderAgentPresets();
         break;
       }
+      case "usage.accounts":
+        accountUsage = message.accounts && typeof message.accounts === "object" ? message.accounts : {};
+        renderAccountUsage();
+        break;
       case "agent.defaults":
         state.agentDefaults = message.settings;
         renderAgentDefaults();
@@ -5661,8 +5665,50 @@
     statusSettings.hidden = false;
     statusSettingsButton.setAttribute("aria-expanded", "true");
     renderStatusCatalog();
+    renderAccountUsage();
     statusSettings.querySelector('[role="tab"][aria-selected="true"]')?.focus();
   });
+  let accountUsage = {};
+  // Gemini (Antigravity) reports no account limits, so its section explains the absence instead of showing blanks.
+  const usageProviders = [["codex", "Codex"], ["claude", "Claude"], ["antigravity", "Gemini"]];
+  function renderAccountUsage() {
+    const root = document.getElementById("account-usage");
+    if (!root || statusSettings.hidden) return;
+    const groups = usageProviders.map(function ([id, name]) {
+      const group = document.createElement("section");
+      group.className = "usage-group";
+      const heading = document.createElement("h3");
+      heading.textContent = name;
+      group.append(heading);
+      const report = accountUsage[id];
+      const note = text => { const p = document.createElement("p"); p.className = "usage-note"; p.textContent = text; group.append(p); };
+      if (id === "antigravity") { note(t("ui.usage.not.provided")); return group; }
+      if (!report || typeof report !== "object") { note(t("ui.usage.not.reported")); return group; }
+      const list = document.createElement("dl");
+      list.className = "settings-shortcuts";
+      const row = (label, value) => {
+        const item = document.createElement("div");
+        const term = document.createElement("dt");
+        const detail = document.createElement("dd");
+        term.textContent = label;
+        detail.textContent = value;
+        item.append(term, detail);
+        list.append(item);
+      };
+      for (const [key, label] of [["fiveHour", t("ui.usage.five.hour")], ["weekly", t("ui.usage.weekly")]]) {
+        const used = safePercentOrUndefined(report[key + "UsedPercent"]);
+        const resetsAt = safeResetsAtOrUndefined(report[key + "ResetsAt"]);
+        if (used === undefined && resetsAt === undefined) continue;
+        row(label, t("ui.usage.left") + (used === undefined ? "—" : formatPercent(100 - used)) + " · " + t("ui.usage.resets") + formatResetsAt(resetsAt));
+      }
+      if (Number.isFinite(report.reportedAt)) {
+        row(t("ui.usage.reported"), new Date(report.reportedAt).toLocaleString(uiLocale(), { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" }));
+      }
+      group.append(list);
+      return group;
+    });
+    root.replaceChildren(...groups);
+  }
   const settingsTabs = [...statusSettings.querySelectorAll("[data-settings-tab]")];
   function selectSettingsTab(tab) {
     renderAgentDefaults();
@@ -5673,6 +5719,7 @@
       document.getElementById(item.getAttribute("aria-controls")).hidden = !selected;
     }
     renderStatusCatalog();
+    renderAccountUsage();
     tab.focus();
   }
   for (const tab of settingsTabs) {

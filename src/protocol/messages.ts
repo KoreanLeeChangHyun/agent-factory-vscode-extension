@@ -95,7 +95,17 @@ export type ClientMessage =
       readonly items: readonly StatusItemId[];
     };
 
+/** Latest account-wide limit windows reported by a provider; resets are Unix seconds, reportedAt is epoch ms. */
+export interface AccountUsage {
+  readonly fiveHourUsedPercent?: number;
+  readonly fiveHourResetsAt?: number;
+  readonly weeklyUsedPercent?: number;
+  readonly weeklyResetsAt?: number;
+  readonly reportedAt: number;
+}
+
 export type HostMessage =
+  | { readonly type: "usage.accounts"; readonly accounts: Readonly<Record<string, AccountUsage>> }
   | { readonly type: "agent.preset.field.result"; readonly error?: string }
   | { readonly type: "contracts.list"; readonly contracts: readonly import("../infrastructure/filesystem/contracts").ContractEntry[]; readonly error?: string }
   | { readonly type: "agent.preset.result"; readonly error?: string }

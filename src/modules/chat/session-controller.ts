@@ -5,7 +5,7 @@ import { withBusinessMode } from "../../common/types/business-mode";
 import { randomUUID } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import type { AttachmentReference } from "../../common/types/attachment";
-import type { AgentRuntimeClient, ExecutionOptions, NativeGoal, GoalAction } from "../../infrastructure/agent-factory/agent-client";
+import type { AgentRuntimeClient, ExecutionOptions, NativeGoal, GoalAction, AccountLimits } from "../../infrastructure/agent-factory/agent-client";
 
 const TERMINAL_STATES = new Set(["completed", "needs-human-decision", "failed", "cancelled"]);
 
@@ -22,6 +22,7 @@ export interface SessionControllerEvents {
     usedTokens: number, contextWindowTokens: number, weeklyUsedPercent?: number, fiveHourUsedPercent?: number,
     weeklyResetsAt?: number, fiveHourResetsAt?: number
   ) => void;
+  readonly onAccountLimits?: (limits: AccountLimits) => void;
   readonly onActivity: (activity: {
     readonly id: string;
     readonly category: "command" | "file" | "tool";
@@ -598,6 +599,8 @@ Answer the Human's current question without cancelling these workflows. For task
         } else if (update.kind === "usage") {
           this.events.onUsage(update.usedTokens, update.contextWindowTokens, update.weeklyUsedPercent, update.fiveHourUsedPercent,
             update.weeklyResetsAt, update.fiveHourResetsAt);
+        } else if (update.kind === "accountLimits") {
+          this.events.onAccountLimits?.(update.limits);
         } else {
           lastCommentary = undefined;
           const activity = { ...update, id: `${runId}:${update.id}` };

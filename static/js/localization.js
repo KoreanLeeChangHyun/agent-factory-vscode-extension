@@ -557,6 +557,38 @@
     "en": "Weekly remaining",
     "ko": "남은 주간 사용량"
   },
+  "ui.usage": {
+    "en": "Usage",
+    "ko": "사용량"
+  },
+  "ui.usage.five.hour": {
+    "en": "5-hour",
+    "ko": "5시간"
+  },
+  "ui.usage.weekly": {
+    "en": "Weekly",
+    "ko": "주간"
+  },
+  "ui.usage.left": {
+    "en": "Left ",
+    "ko": "잔여 "
+  },
+  "ui.usage.resets": {
+    "en": "Resets ",
+    "ko": "갱신 "
+  },
+  "ui.usage.reported": {
+    "en": "Last reported",
+    "ko": "최근 보고"
+  },
+  "ui.usage.not.reported": {
+    "en": "No usage has been reported yet. It appears after a run with this provider.",
+    "ko": "아직 보고된 사용량이 없습니다. 이 공급자로 실행하면 표시됩니다."
+  },
+  "ui.usage.not.provided": {
+    "en": "Antigravity does not report account usage limits.",
+    "ko": "Antigravity는 계정 사용량 한도를 제공하지 않습니다."
+  },
   "ui.five.hour.reset": {
     "en": "5-hour reset",
     "ko": "5시간 갱신 시각"

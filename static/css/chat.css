@@ -3448,10 +3448,14 @@ table.interview-options td:first-child {
 }
 
 /* Recorded shortcuts: select an action, press keys, then confirm. */
-.shortcut-group { margin: 12px 0 4px; }
+.shortcut-group, .usage-group { margin: 12px 0 4px; }
 .shortcut-group[hidden] { display: none; }
-.shortcut-group > h3 { margin: 0 4px; padding-bottom: 4px; font-size: 11px; font-weight: 600; letter-spacing: .02em; text-transform: uppercase; color: var(--vscode-descriptionForeground); border-bottom: 1px solid var(--vscode-widget-border, var(--vscode-panel-border, #ffffff20)); }
-.shortcut-group > .settings-shortcuts { margin-top: 0; margin-bottom: 0; }
+.shortcut-group > h3, .usage-group > h3 { margin: 0 4px; padding-bottom: 4px; font-size: 11px; font-weight: 600; letter-spacing: .02em; text-transform: uppercase; color: var(--vscode-descriptionForeground); border-bottom: 1px solid var(--vscode-widget-border, var(--vscode-panel-border, #ffffff20)); }
+.shortcut-group > .settings-shortcuts, .usage-group > .settings-shortcuts { margin-top: 0; margin-bottom: 0; }
+/* Account limits: provider-reported remaining share and refill time, kept on one line. */
+#account-usage .settings-shortcuts > div { grid-template-columns: minmax(0, 1fr) auto; }
+#account-usage dd { white-space: nowrap; font-variant-numeric: tabular-nums; }
+#account-usage .usage-note { margin: 6px 4px; color: var(--vscode-descriptionForeground); }
 #shortcut-bindings .settings-shortcuts > div { grid-template-columns: minmax(0, 1fr) auto; }
 #shortcut-bindings dd { display: flex; align-items: center; justify-content: flex-end; flex-wrap: wrap; gap: 6px; }
 #shortcut-bindings .shortcut-binding { display: inline-flex; align-items: center; min-width: 72px; min-height: 26px; padding: 2px 8px; box-sizing: border-box; justify-content: center; white-space: nowrap; }

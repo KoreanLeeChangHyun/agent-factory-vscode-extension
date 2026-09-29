@@ -32,10 +32,10 @@ import {
   type ChatPanelState,
   type ComposerPreferences
 } from "../../modules/chat/chat-state";
-import type { HostMessage } from "../../protocol/messages";
+import type { AccountUsage, HostMessage } from "../../protocol/messages";
 import { parseClientMessage } from "../../protocol/validator";
 import type { ChatTemplateRenderer } from "./chat-template-renderer";
-import type { AgentRuntimeClient } from "../agent-factory/agent-client";
+import type { AccountLimits, AgentRuntimeClient } from "../agent-factory/agent-client";
 import { readProviderModels } from "../agent-factory/model-catalog";
 import { ChatSessionController } from "../../modules/chat/session-controller";
 import { saveConvertedImage } from "./converted-image-store";
@@ -83,6 +83,7 @@ interface ManagedPanel {
 }
 
 const COMPOSER_PREFERENCES_KEY = "agentFactory.mainChat.composerPreferences";
+const ACCOUNT_USAGE_KEY = "agentFactory.accountUsage.v1";
 const AGENT_REFRESH_INTERVAL_MS = 2_000;
 const AGENT_IDLE_VISIBLE_REFRESH_INTERVAL_MS = 5_000;
 const AGENT_IDLE_HIDDEN_REFRESH_INTERVAL_MS = 15_000;
@@ -474,6 +475,7 @@ export class ChatPanelManager implements vscode.Disposable {
         const connection = await this.connectRuntime();
         await ensureAgentPresets(this.context.globalState);
         await this.post(managed.panel, { type: "agent.defaults", settings: readAgentDefaults(this.context.globalState) });
+        await this.post(managed.panel, { type: "usage.accounts", accounts: this.accountUsage() });
         const capabilities = connection.available ? await connection.client.capabilities(managed.state.agentId, this.effectiveModel(managed)) : undefined;
         this.broadcastCompanion();
         let runtimeConversationId: string | undefined;
@@ -1454,6 +1456,7 @@ Read the exact stored child result/receipt and existing workflow status for repo
           managed.state = { ...managed.state, contextUsedTokens: usedTokens, contextWindowTokens, ...limits };
           void this.post(managed.panel, { type: "context.usage", usedTokens, contextWindowTokens, ...limits });
         },
+        onAccountLimits: (limits) => void this.recordAccountLimits(limits),
         onActivity: (activity) => {
           void this.post(managed.panel, { type: "run.activity", ...activity });
         },
@@ -2032,6 +2035,20 @@ Read the exact stored child result/receipt and existing workflow status for repo
   private companionState() {
     return restoreCompanion(this.context.globalState.get("agentFactory.companion.v1", this.companionInitial));
   }
+  private accountUsage(): Readonly<Record<string, AccountUsage>> {
+    return this.context.globalState.get<Record<string, AccountUsage>>(ACCOUNT_USAGE_KEY, {});
+  }
+
+  /** Keeps each provider's latest reported windows so every chat shows account limits, not just the active run. */
+  private async recordAccountLimits({ provider, ...windows }: AccountLimits): Promise<void> {
+    const accounts = this.accountUsage();
+    const next = { ...accounts, [provider]: { ...accounts[provider], ...windows, reportedAt: Date.now() } };
+    await this.context.globalState.update(ACCOUNT_USAGE_KEY, next);
+    for (const panel of this.panels.values()) {
+      if (!panel.disposed) void this.post(panel.panel, { type: "usage.accounts", accounts: next });
+    }
+  }
+
   private broadcastCompanion(): void {
     if (this.botCharacter() !== "lumi" || !this.botsEnabled()) return;
     const companion = this.companionState();

@@ -328,3 +328,29 @@ test("catalog dragging uses vertical insertion and cancelled dragging clears the
   context.target.handlers.drop(event);
   assert.deepEqual(sent.at(-1).items, ['queue', 'project', 'branch']);
 });
+
+test("Usage settings list each provider's remaining share and refill time", () => {
+  const make = () => ({ children: [], textContent: "", className: "",
+    append(...nodes) { this.children.push(...nodes); }, replaceChildren(...nodes) { this.children = nodes; } });
+  const root = make();
+  const context = {
+    document: { createElement: make, getElementById: id => id === "account-usage" ? root : undefined },
+    statusSettings: { hidden: false }, Date, Number
+  };
+  runInNewContext([
+    section('  let accountUsage = {};', '  const settingsTabs ='),
+    section('  function formatPercent(', '  function renderContextStatus('),
+    section('  function safePercentOrUndefined(', '  function normalizeSettingValue(')
+  ].join('\n') + '\nglobalThis.setUsage = value => { accountUsage = value; };', context);
+  const later = Date.now() + 2 * 60 * 60 * 1000;
+  context.setUsage({ claude: { fiveHourUsedPercent: 80, fiveHourResetsAt: later / 1000, weeklyUsedPercent: 41, reportedAt: Date.now() } });
+  runInNewContext('renderAccountUsage()', context);
+  const text = node => [node.textContent, ...node.children.map(text)].join(' ');
+  const [codex, claude, gemini] = root.children;
+  assert.match(text(codex.children[0]), /Codex/);
+  assert.match(text(codex), /No usage has been reported yet/);
+  assert.match(text(claude), /5-hour.*Left 20% · Resets .*\d{2}:\d{2}/);
+  assert.match(text(claude), /Weekly.*Left 59% · Resets —/);
+  assert.match(text(claude), /Last reported/);
+  assert.match(text(gemini), /Gemini.*does not report account usage limits/);
+});

@@ -321,6 +321,7 @@
         <div class="settings-tabs" role="tablist" aria-label="Settings categories" data-i18n-aria-label="ui.settings.categories">
           <button id="settings-tab-general" type="button" role="tab" aria-selected="true" aria-controls="settings-panel-general" data-settings-tab="general" data-i18n="ui.general">General</button>
           <button id="settings-tab-status" type="button" role="tab" aria-selected="false" tabindex="-1" aria-controls="settings-panel-status" data-settings-tab="status" data-i18n="ui.status.bar">Status bar</button>
+          <button id="settings-tab-usage" type="button" role="tab" aria-selected="false" tabindex="-1" aria-controls="settings-panel-usage" data-settings-tab="usage" data-i18n="ui.usage">Usage</button>
           <button id="settings-tab-bot" type="button" role="tab" aria-selected="false" aria-controls="settings-panel-bot" data-settings-tab="bot" tabindex="-1" data-i18n="ui.bot">Bot</button>
           <button id="settings-tab-keyboard" type="button" role="tab" aria-selected="false" aria-controls="settings-panel-keyboard" data-settings-tab="keyboard" tabindex="-1" data-i18n="ui.keyboard.shortcuts">Keyboard shortcuts</button>
         </div>
@@ -336,6 +337,9 @@
             <span data-i18n="ui.restore.defaults">Restore defaults</span>
           </button>
         </div>
+        </div>
+        <div id="settings-panel-usage" class="settings-panel" role="tabpanel" aria-labelledby="settings-tab-usage" tabindex="0" hidden>
+          <div id="account-usage"></div>
         </div>
         <div id="settings-panel-bot" class="settings-panel" role="tabpanel" aria-labelledby="settings-tab-bot" hidden>
           <div class="bot-settings-selectors">
