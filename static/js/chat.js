@@ -123,7 +123,7 @@
 
   const modelMenu = document.getElementById("model-menu");
   const fastModeButton = document.getElementById("fast-mode-button");
-  const businessModeNames = () => ({ normal: t("ui.normal"), contract: t("ui.contract"), interview: t("ui.interview"), planning: t("ui.planning"), design: t("ui.design"), migration: t("ui.migration"), lessons: t("ui.lessons") });
+  const businessModeNames = () => ({ normal: t("ui.normal"), contract: t("ui.contract"), interview: t("ui.interview"), planning: t("ui.planning"), design: t("ui.design"), migration: t("ui.migration"), lessons: t("ui.lessons"), pipeline: t("ui.pipeline") });
   const taskModeNames = () => ({ plan: t("ui.plan"), verification: t("ui.verification"), direct: t("ui.direct"), work: t("ui.work"), "plan-work": t("ui.plan.work"), "work-verification": t("ui.work.verification"), "plan-work-verification": t("ui.plan.work.verification") });
   let nativeGoal = null;
   let goalError;
@@ -471,6 +471,7 @@
     submitShortcut("submitContract", "workflow", "Alt+Shift+C", () => t("ui.contract"), "direct", "contract", false),
     submitShortcut("submitWork", "workflow", "Alt+Shift+W", () => t("ui.work"), "work", "normal", false),
     submitShortcut("submitWorkVerification", "workflow", "Alt+Shift+V", () => t("submission.work.verification.label"), "work-verification", "normal", false),
+    submitShortcut("submitPipeline", "workflow", "Alt+Shift+D", () => businessModeNames().pipeline, "direct", "pipeline", false),
     submitShortcut("submitGoal", "workflow", "Alt+Shift+G", () => t("ui.goal"), "direct", "normal", true),
     { id: "openContracts", group: "history", fallback: "Alt+Shift+K", history: "contract-list", label: () => t("contracts.title") },
     { id: "openTaskHistory", group: "history", fallback: "Alt+Shift+T", history: "task-history", label: () => t("flow.history") },
@@ -2741,6 +2742,7 @@
       : workflow === "interview" ? t("submission.interview.request")
       : workflow === "migration" ? t("submission.migration.request")
       : workflow === "lessons" ? t("submission.lessons.request")
+      : workflow === "pipeline" ? t("submission.pipeline.request")
       : action === "work" ? t("submission.work.request")
       : action === "work-verification" ? t("submission.work.verification.request") : "";
     const userText = choiceAnswer ?? (prompt.value.trim() || contextualRequest);
@@ -3382,7 +3384,7 @@
   function renderSubmission(content, submission) {
     if (!submission || typeof submission !== "object") return;
     const actions = { work: t("ui.work"), plan: t("ui.plan"), verification: t("ui.verification"), "plan-work": t("ui.plan.work.f294a9"), "work-verification": t("ui.work.verification.6a0009"), "plan-work-verification": t("ui.plan.work.verification.d02a66") };
-    const workflows = { contract: t("ui.contract"), interview: t("ui.interview"), planning: t("ui.planning"), design: t("ui.design"), migration: t("ui.migration"), lessons: t("ui.lessons") };
+    const workflows = { contract: t("ui.contract"), interview: t("ui.interview"), planning: t("ui.planning"), design: t("ui.design"), migration: t("ui.migration"), lessons: t("ui.lessons"), pipeline: t("ui.pipeline") };
     const labels = [Object.hasOwn(workflows, submission.businessMode) ? workflows[submission.businessMode] : undefined, Object.hasOwn(actions, submission.taskMode) ? actions[submission.taskMode] : undefined, submission.goal === true ? t("ui.goal") : undefined].filter(Boolean);
     if (submission.backgroundContinuation === true) labels.unshift(t("ui.background.continuation.label"));
     if (labels.length) {
@@ -6648,6 +6650,7 @@
     const groups = [
       [t("ui.document.main"), ["submitPlanning", "submitInterview", "submitMigration", "submitLessons"].map(entry)],
       [t("ui.task.workflow"), ["submitContract", "submitWork", "submitWorkVerification"].map(entry)],
+      [t("ui.deploy.group"), [entry("submitPipeline")]],
       [t("ui.goal"), [entry("submitGoal")]]
     ];
     for (const [title, entries] of groups) {
@@ -6690,6 +6693,7 @@
       contract: "M12 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14M7 7h3M7 11h2m3 6 1-4L20 6l3 3-7 7-4 1Zm6-9 3 3",
       migration: "M4 4h10v16H4ZM8 8h12m-3-3 3 3-3 3M8 16h12m-3-3 3 3-3 3",
       lessons: "M5 3h14v18H5ZM8 8l2 2 5-5M8 14h8M8 17h6",
+      pipeline: "M4 6h5v5H4Zm11 7h5v5h-5ZM9 8.5h3a2 2 0 0 1 2 2v2.5m-2-2 2 2 2-2",
       planning: "M5 3h14v18H5ZM8 7h2m3 0h3M8 12h2m3 0h3M8 17h2m3 0h3",
       design: "M3 3h6v6H3Zm12 12h6v6h-6ZM9 6h9v9M6 9v9h9"
     };

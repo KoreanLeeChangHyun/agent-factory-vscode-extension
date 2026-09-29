@@ -139,8 +139,8 @@ test("action menu sends supported drafts without persisting a selection during e
   runInNewContext(shortcutCatalog + renderer + '\nrenderSettingMenu("task", menu);', context);
   const actionOptions = () => menu.children.flatMap(group => group.children.filter(item => item.dataset.action));
   const options = actionOptions().filter(item => item.dataset.goal !== "true");
-  assert.deepEqual(options.map(item => item.dataset.action), ["direct", "direct", "direct", "direct", "direct", "work", "work-verification"]);
-  assert.deepEqual(options.map(item => item.dataset.workflow), ["planning", "interview", "migration", "lessons", "contract", "normal", "normal"]);
+  assert.deepEqual(options.map(item => item.dataset.action), ["direct", "direct", "direct", "direct", "direct", "work", "work-verification", "direct"]);
+  assert.deepEqual(options.map(item => item.dataset.workflow), ["planning", "interview", "migration", "lessons", "contract", "normal", "normal", "pipeline"]);
   assert.ok(options.every(item => !item.disabled));
   options.find(item => item.dataset.action === "work").handlers.click();
   assert.equal(context.state.taskMode, "work");

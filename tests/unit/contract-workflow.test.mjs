@@ -91,3 +91,15 @@ for (const mode of ['migration', 'lessons']) {
     assert.equal(restored.submission.guidance, guided.slice(request.length));
   });
 }
+
+test('pipeline guidance creates a dispatchable workflow without dispatching it', () => {
+  const guided = withBusinessMode('Set up deploys', 'pipeline');
+  assert.ok(BUSINESS_MODES.includes('pipeline'));
+  assert.match(guided, /workflow_dispatch/);
+  assert.match(guided, /never contain AI co-author trailers/);
+  assert.match(guided, /Do not dispatch or publish a release unless the Human separately requests it/);
+  assert.match(guided, /Reuse and extend an existing release workflow/);
+  const restored = historyPresentation(guided, 'direct', false);
+  assert.equal(restored.text, 'Set up deploys');
+  assert.equal(restored.submission.businessMode, 'pipeline');
+});

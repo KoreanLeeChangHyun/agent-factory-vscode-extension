@@ -77,7 +77,7 @@ async function checkOneShotComposer(page) {
   await page.keyboard.press('Escape');
   assert.equal(await page.locator('#submission-button').evaluate(e => e === document.activeElement), true);
   for (const [action, workflow] of [
-    ['direct', 'interview'], ['direct', 'migration'], ['direct', 'lessons']
+    ['direct', 'interview'], ['direct', 'migration'], ['direct', 'lessons'], ['direct', 'pipeline']
   ]) {
     await page.locator('#prompt').fill('   ');
     const beforeEmpty = await count();
