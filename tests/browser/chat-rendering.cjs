@@ -80,7 +80,8 @@ async function main() {
     });
     const page = await browser.newPage({ viewport: { width: 795, height: 900 } });
     const errors = [];
-    page.on('pageerror', error => { errors.push(error.message); console.error('Browser page error:', error.message); });
+    const pageErrors = [];
+    page.on('pageerror', error => { errors.push(error.message); pageErrors.push(error.message); console.error('Browser page error:', error.message); });
     page.on('console', message => { if (message.type() === 'error') errors.push(message.text()); });
     await page.addInitScript(events => {
       window.saved = JSON.parse(sessionStorage.getItem("submission-restoration-fixture") || "null") || { timeline: events };
@@ -94,6 +95,8 @@ async function main() {
       }, postMessage(message) { window.sentMessages.push(message); } });
     }, fixture);
     await page.goto('http://127.0.0.1:' + server.address().port);
+    // A startup exception (e.g. a TDZ access) stops chat.js entirely; fail here instead of timing out in a later check.
+    assert.deepEqual(pageErrors, [], 'chat.js threw during startup');
     if (process.argv.includes('--companion-only') || process.argv.includes('--companion-care-only')) {
       await require('./companion.cjs').checkCompanion(page, { careOnly: process.argv.includes('--companion-care-only') });
       assert.deepEqual(errors, []);
