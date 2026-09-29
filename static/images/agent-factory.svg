@@ -1,5 +1,14 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="Agent Factory">
-  <rect width="64" height="64" rx="14" fill="#0080e8"/>
-  <path fill="#fff" d="M11 51V25.5l12 7v-7l12 7v-7l9 5.3V15h9v36H11Z"/>
-  <path fill="#0080e8" d="M17 39h5v5h-5zm10 0h5v5h-5zm10 0h5v5h-5zm9-18h5v4h-5zM46 29h5v15h-5z"/>
+  <defs>
+    <linearGradient id="af-bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#3aa0ff"/>
+      <stop offset="1" stop-color="#0058c0"/>
+    </linearGradient>
+  </defs>
+  <rect width="64" height="64" rx="15" fill="url(#af-bg)"/>
+  <g fill="#fff" transform="translate(10 10) scale(.6875)">
+    <path fill-rule="evenodd" d="M6 56V40l14-9v9l14-9v9l14-9V14h8v42Zm6-10v4h5v-4Zm11 0v4h5v-4Zm11 0v4h5v-4Z"/>
+    <circle cx="52" cy="7" r="3.5"/>
+    <path d="M13 12l2.4 6.6L22 21l-6.6 2.4L13 30l-2.4-6.6L4 21l6.6-2.4Z"/>
+  </g>
 </svg>

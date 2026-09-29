@@ -376,7 +376,10 @@ test("chat panel restoration preserves composer settings and context usage", asy
     workLoopMode: true,
     contextUsedTokens: 39_300,
     contextWindowTokens: 1_050_000,
-    weeklyUsedPercent: 12.5
+    weeklyUsedPercent: 12.5,
+    fiveHourUsedPercent: 40,
+    weeklyResetsAt: 1_790_953_200,
+    fiveHourResetsAt: -1
   }), {
     panelId: "panel-one",
     title: "Main Agent",
@@ -389,7 +392,9 @@ test("chat panel restoration preserves composer settings and context usage", asy
     businessMode: "normal",
     contextUsedTokens: 39_300,
     contextWindowTokens: 1_050_000,
-    weeklyUsedPercent: 12.5
+    fiveHourUsedPercent: 40,
+    weeklyUsedPercent: 12.5,
+    weeklyResetsAt: 1_790_953_200
   });
 });
 
@@ -821,8 +826,8 @@ test("runtime client refreshes changed context usage during a turn and forces th
     }
   }) + "\n";
   await writeFile(rolloutPath, tokenCount(10_000, {
-    primary: { used_percent: 25, window_minutes: 300 },
-    secondary: { used_percent: 12.5, window_minutes: 10_080 }
+    primary: { used_percent: 25, window_minutes: 300, resets_at: 1_790_506_200 },
+    secondary: { used_percent: 12.5, window_minutes: 10_080, resets_at: 1_790_953_200 }
   }));
   let now = 0;
   const client = new AgentFactoryClient(
@@ -838,7 +843,8 @@ test("runtime client refreshes changed context usage during a turn and forces th
     cursor: 1,
     updates: [
       { kind: "status", text: "Main Agent is analyzing the request" },
-      { kind: "usage", usedTokens: 10_000, contextWindowTokens: 258_400, weeklyUsedPercent: 12.5 }
+      { kind: "usage", usedTokens: 10_000, contextWindowTokens: 258_400, weeklyUsedPercent: 12.5,
+        weeklyResetsAt: 1_790_953_200, fiveHourUsedPercent: 25, fiveHourResetsAt: 1_790_506_200 }
     ]
   });
   await appendFile(rolloutPath, tokenCount(20_000, {
@@ -849,7 +855,7 @@ test("runtime client refreshes changed context usage during a turn and forces th
   now = 1_000;
   assert.deepEqual(await client.updates("main-test", "run-live", 1), {
     cursor: 1,
-    updates: [{ kind: "usage", usedTokens: 20_000, contextWindowTokens: 258_400 }]
+    updates: [{ kind: "usage", usedTokens: 20_000, contextWindowTokens: 258_400, fiveHourUsedPercent: 25 }]
   });
 
   await appendFile(rolloutPath, tokenCount(30_000, {
@@ -868,11 +874,13 @@ test("runtime client refreshes changed context usage during a turn and forces th
   const claudeRunRoot = join(agentsRoot(projectRoot), "main-test/runs/run-claude");
   await mkdir(claudeRunRoot, { recursive: true });
   await writeFile(join(claudeRunRoot, "state.json"), JSON.stringify({
-    contextUsage: { usedTokens: 40_000, contextWindowTokens: 1_000_000, weeklyUsedPercent: 19 }
+    contextUsage: { usedTokens: 40_000, contextWindowTokens: 1_000_000, weeklyUsedPercent: 19, fiveHourUsedPercent: 25,
+      weeklyResetsAt: 1_790_953_200, fiveHourResetsAt: 1_790_506_200 }
   }));
   await writeFile(join(claudeRunRoot, "events.jsonl"), JSON.stringify({ type: "turn.started" }) + "\n");
   assert.deepEqual((await client.updates("main-test", "run-claude", 0)).updates.at(-1),
-    { kind: "usage", usedTokens: 40_000, contextWindowTokens: 1_000_000, weeklyUsedPercent: 19 });
+    { kind: "usage", usedTokens: 40_000, contextWindowTokens: 1_000_000, weeklyUsedPercent: 19, weeklyResetsAt: 1_790_953_200,
+      fiveHourUsedPercent: 25, fiveHourResetsAt: 1_790_506_200 });
 });
 
 test("session controller binds once, sends later turns, and retains attachment references", async function () {

@@ -1,3 +1,4 @@
+import { disposeCodexConnections } from "./infrastructure/agent-factory/codex-connection-host";
 import { localize, setHostLanguage } from "./common/localization";
 import * as vscode from "vscode";
 import { bootstrap } from "./core/bootstrap";
@@ -115,6 +116,7 @@ async function start(context: vscode.ExtensionContext, services: ActivationServi
 }
 
 export function deactivate(): void {
+  disposeCodexConnections();
   // VS Code disposes subscriptions registered on the extension context.
 }
 

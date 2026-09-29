@@ -55,7 +55,7 @@ test('host initialization behavior clears a stale Webview boundary before applyi
     messageViewStates: new Map(), currentTaskFlows: () => [], scheduleTimelineRender() {},
     state, message, document: { body: { dataset: {} } },
     currentCapabilities: () => ({}), appendNotice() {}, safeCount: value => value,
-    safeCountOrUndefined: value => value, safePercentOrUndefined: value => value,
+    safeCountOrUndefined: value => value, safePercentOrUndefined: value => value, safeResetsAtOrUndefined: value => value,
     normalizeModel: value => value, normalizeSettingValue: value => value,
     normalizeStatusItems: value => value, updateModeControls() {}, renderTimeline() {},
     receiveBotPrompt() {},
@@ -79,7 +79,7 @@ test('matching conversation boundary retains history and accepts current usage',
   const state = { conversationId: 'conversation-current', timeline: [{ type: 'assistant', text: 'current' }], pendingRequests: [], startedMessageIds: [], workUnits: {}, childAgents: [] };
   const message = { type: 'host.initialize', panelId: 'panel', title: 'Main', role: 'main', projectName: 'project', runtimeAvailable: true, conversationId: 'conversation-current', resetConversation: false, capabilities: { send: {} }, running: false, fastMode: false, queueCount: 0, contextUsedTokens: 25, contextWindowTokens: 100, weeklyUsedPercent: 10, statusItems: [] };
   const context = {
-    messageViewStates: new Map(), currentTaskFlows: () => [], scheduleTimelineRender() {}, state, message, document: { body: { dataset: {} } }, currentCapabilities: () => ({}), appendNotice() {}, safeCount: value => value, safeCountOrUndefined: value => value, safePercentOrUndefined: value => value, normalizeModel: value => value, normalizeSettingValue: value => value, normalizeStatusItems: value => value, updateModeControls() {}, renderTimeline() {}, renderStatusBar() {}, renderStatusCatalog() {}, updateRunControls() {}, receiveBotPrompt() {}, persist() {}, vscode: { postMessage() {} }, settingOptions: { reasoning: [] }, Date };
+    messageViewStates: new Map(), currentTaskFlows: () => [], scheduleTimelineRender() {}, state, message, document: { body: { dataset: {} } }, currentCapabilities: () => ({}), appendNotice() {}, safeCount: value => value, safeCountOrUndefined: value => value, safePercentOrUndefined: value => value, safeResetsAtOrUndefined: value => value, normalizeModel: value => value, normalizeSettingValue: value => value, normalizeStatusItems: value => value, updateModeControls() {}, renderTimeline() {}, renderStatusBar() {}, renderStatusCatalog() {}, updateRunControls() {}, receiveBotPrompt() {}, persist() {}, vscode: { postMessage() {} }, settingOptions: { reasoning: [] }, Date };
   runInNewContext(`let nativeGoal = null; let goalError; let followLatest = true;\n${resetHelper}\nswitch (message.type) {\n${handler}\n}`, context);
   assert.equal(state.timeline.length, 1);
   assert.equal(state.contextUsedTokens, 25);
@@ -117,22 +117,22 @@ test('clear boundary retains a racing optimistic request for chat.started promot
 test('clear immediately shows progress, retains large history and ignores repeat clicks', () => {
   const helper = script.slice(script.indexOf('  function setConversationClearing('), script.indexOf('  function resetConversationState()'));
   const posted = [];
-  const clear = { setAttribute() {} };
-  const status = {};
+  const attributes = {};
+  const clear = { setAttribute(name, value) { attributes[name] = value; } };
   const timeline = Array.from({ length: 10000 }, (_, id) => ({ id, text: 'retained' }));
   const state = { role: 'main', agentId: 'main', timeline };
-  const context = { state, conversationClearStatus: status, document: { getElementById: () => clear },
+  const context = { state, document: { getElementById: () => clear },
     t: key => key, vscode: { postMessage: message => posted.push(message) }, updateSendButton() {} };
   runInNewContext(`let conversationClearing = false; ${helper}\nupdateConversationClearControl();`, context);
   clear.onclick();
   clear.onclick();
   assert.equal(posted.length, 1);
   assert.equal(clear.disabled, true);
-  assert.equal(status.hidden, false);
-  assert.equal(status.textContent, 'ui.clearing.conversation');
+  assert.equal(attributes['aria-busy'], 'true');
+  assert.equal(clear.title, 'ui.clearing.conversation');
   assert.equal(state.timeline, timeline);
   runInNewContext('setConversationClearing(false)', context);
   assert.equal(clear.disabled, false);
-  assert.equal(status.hidden, true);
+  assert.equal(attributes['aria-busy'], 'false');
   assert.equal(state.timeline, timeline);
 });

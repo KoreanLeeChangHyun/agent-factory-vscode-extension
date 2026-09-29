@@ -148,7 +148,10 @@ export type HostMessage =
       readonly taskMode?: import("../modules/chat/task-selection").TaskSelection;
       readonly contextUsedTokens?: number;
       readonly contextWindowTokens?: number;
+      readonly fiveHourUsedPercent?: number;
       readonly weeklyUsedPercent?: number;
+      readonly fiveHourResetsAt?: number;
+      readonly weeklyResetsAt?: number;
       readonly queueCount: number;
       readonly conversationId?: string;
       readonly resetConversation?: boolean;
@@ -211,7 +214,10 @@ export type HostMessage =
       readonly type: "context.usage";
       readonly usedTokens: number;
       readonly contextWindowTokens: number;
+      readonly fiveHourUsedPercent?: number;
       readonly weeklyUsedPercent?: number;
+      readonly fiveHourResetsAt?: number;
+      readonly weeklyResetsAt?: number;
     }
   | {
       readonly type: "run.activity";

@@ -18,7 +18,10 @@ export interface SessionControllerEvents {
   /** Appends generated text to a live preview identified by run, stream and provider block id. */
   readonly onAssistantDelta?: (delta: { readonly runId: string; readonly stream: "commentary" | "final"; readonly id: string; readonly text: string }) => void;
   readonly onProgress: (text: string) => void;
-  readonly onUsage: (usedTokens: number, contextWindowTokens: number, weeklyUsedPercent?: number) => void;
+  readonly onUsage: (
+    usedTokens: number, contextWindowTokens: number, weeklyUsedPercent?: number, fiveHourUsedPercent?: number,
+    weeklyResetsAt?: number, fiveHourResetsAt?: number
+  ) => void;
   readonly onActivity: (activity: {
     readonly id: string;
     readonly category: "command" | "file" | "tool";
@@ -593,7 +596,8 @@ Answer the Human's current question without cancelling these workflows. For task
         } else if (update.kind === "goal") {
           this.events.onGoal?.(update.goal, update.error);
         } else if (update.kind === "usage") {
-          this.events.onUsage(update.usedTokens, update.contextWindowTokens, update.weeklyUsedPercent);
+          this.events.onUsage(update.usedTokens, update.contextWindowTokens, update.weeklyUsedPercent, update.fiveHourUsedPercent,
+            update.weeklyResetsAt, update.fiveHourResetsAt);
         } else {
           lastCommentary = undefined;
           const activity = { ...update, id: `${runId}:${update.id}` };

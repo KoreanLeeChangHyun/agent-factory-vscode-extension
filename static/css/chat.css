@@ -56,9 +56,12 @@ button {
   --af-cli-failure: var(--vscode-terminal-ansiRed, #f38ba8);
   --af-cli-addition: var(--vscode-terminal-ansiGreen, #a6e3a1);
   --af-cli-deletion: var(--vscode-terminal-ansiRed, #f38ba8);
-  --af-cli-addition-background: color-mix(in srgb, var(--vscode-terminal-ansiGreen, #32b56c) 18%, var(--af-cli-background));
-  --af-cli-deletion-background: color-mix(in srgb, var(--vscode-terminal-ansiRed, #ff3824) 20%, var(--af-cli-background));
+  --af-cli-addition-background: color-mix(in srgb, var(--vscode-terminal-ansiGreen, #32b56c) 11%, var(--af-cli-background));
+  --af-cli-deletion-background: color-mix(in srgb, var(--vscode-terminal-ansiRed, #ff3824) 12%, var(--af-cli-background));
   --af-cli-hunk: var(--vscode-terminal-ansiCyan, #94e2d5);
+  --af-cli-heading: var(--vscode-terminal-ansiBrightBlue, #89b4fa);
+  --af-cli-strong: var(--vscode-terminal-ansiYellow, #f9e2af);
+  --af-cli-emphasis: var(--vscode-terminal-ansiMagenta, #cba6f7);
   color: var(--af-cli-foreground);
   background: var(--af-cli-background);
   display: flex;
@@ -87,11 +90,49 @@ button {
   display: none;
 }
 
+.hero-mark {
+  position: relative;
+  display: grid;
+  width: 104px;
+  height: 104px;
+  margin-bottom: 16px;
+  place-items: center;
+}
+
+.hero-glow {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  background: radial-gradient(circle, color-mix(in srgb, var(--vscode-button-background, #0e7fe8) 16%, transparent) 0%, transparent 70%);
+}
+
+.hero-orbit {
+  position: absolute;
+  inset: 0;
+  border: 1px dashed color-mix(in srgb, var(--vscode-button-background, #0e7fe8) 30%, transparent);
+  border-radius: 50%;
+  animation: compaction-spin 14s linear infinite;
+}
+
+.hero-spark {
+  position: absolute;
+  top: -3px;
+  left: calc(50% - 3px);
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--vscode-button-background, #0e7fe8);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .hero-orbit { animation: none !important; }
+}
+
 .brand-mark {
+  position: relative;
   display: block;
-  width: 42px;
-  height: 42px;
-  margin-bottom: 18px;
+  width: 64px;
+  height: 64px;
 }
 
 .empty-state h1 {
@@ -104,6 +145,24 @@ button {
 .empty-state p {
   margin: 10px 0 15px;
   color: var(--vscode-descriptionForeground);
+}
+
+.hero-flow {
+  display: flex;
+  align-items: center;
+  margin: 4px 0 0;
+  padding: 0;
+  list-style: none;
+  color: var(--vscode-descriptionForeground);
+  font-size: 12px;
+  opacity: .8;
+}
+
+.hero-flow li { white-space: nowrap; }
+.hero-flow li + li::before {
+  content: "→";
+  margin: 0 8px;
+  opacity: .6;
 }
 
 .message {
@@ -227,10 +286,34 @@ button {
 .markdown-body h4,
 .markdown-body h5,
 .markdown-body h6 {
-  margin: 1em 0 0.5em;
+  margin: 1.1em 0 0.5em;
   color: var(--af-cli-foreground);
   font-size: 1em;
-  line-height: inherit;
+  font-weight: 600;
+  line-height: 1.35;
+}
+
+/* Text carries the highlight colour; containers stay neutral. */
+.markdown-body :is(h1, h2, h3, h4) { color: var(--af-cli-heading); }
+.markdown-body strong { color: var(--af-cli-strong); font-weight: 600; }
+.markdown-body :is(h1, h2, h3, h4, h5, h6, th) strong { color: inherit; }
+.markdown-body em { color: var(--af-cli-emphasis); }
+.markdown-body blockquote strong { color: inherit; }
+
+/* Keep the terminal rhythm but let section levels stay distinguishable. */
+.markdown-body h1 { font-size: 1.3em; }
+.markdown-body h2 { font-size: 1.15em; }
+.markdown-body h3 { font-size: 1.05em; }
+
+.markdown-body h1,
+.markdown-body h2 {
+  padding-bottom: 0.25em;
+  border-bottom: 1px solid color-mix(in srgb, var(--vscode-panel-border) 70%, transparent);
+}
+
+.markdown-body h5,
+.markdown-body h6 {
+  color: var(--af-cli-muted);
 }
 
 .markdown-body p,
@@ -248,7 +331,90 @@ button {
 }
 
 .markdown-body li + li {
-  margin-top: 0;
+  margin-top: 0.2em;
+}
+
+/* Nested lists and loose-list paragraphs must not open full paragraph gaps inside an item. */
+.markdown-body li > ul,
+.markdown-body li > ol {
+  margin: 0.2em 0 0;
+}
+
+.markdown-body li > p {
+  margin: 0 0 0.4em;
+}
+
+.markdown-body li > p:last-child {
+  margin-bottom: 0;
+}
+
+.markdown-body li::marker {
+  color: var(--af-cli-muted);
+}
+
+.markdown-body hr {
+  height: 0;
+  margin: 1.2em 0;
+  border: 0;
+  border-top: 1px solid var(--vscode-panel-border);
+}
+
+.markdown-body img {
+  max-width: 100%;
+  height: auto;
+}
+
+.markdown-body del {
+  color: var(--af-cli-muted);
+}
+
+.markdown-body :is(th, td).align-center { text-align: center; }
+.markdown-body :is(th, td).align-right { text-align: right; }
+
+.markdown-body mark {
+  padding: 0 0.15em;
+  border-radius: 2px;
+  color: inherit;
+  background: color-mix(in srgb, var(--af-cli-strong) 30%, transparent);
+}
+
+.markdown-body :is(sub, sup) { font-size: 0.75em; line-height: 0; }
+
+.markdown-body .math-block {
+  margin: 0 0 1em;
+  overflow-x: auto;
+  text-align: center;
+}
+
+.markdown-body .math-block math { font-size: 1.15em; }
+.markdown-body .math-inline math { font-size: 1.05em; }
+
+/* Unrendered or invalid TeX stays readable as source. */
+.markdown-body :is(.math-inline, .math-block)[data-tex],
+.markdown-body .math-error {
+  color: var(--af-cli-code);
+  font-family: var(--vscode-editor-font-family, monospace);
+}
+
+.markdown-body .mermaid-diagram {
+  margin: 0 0 1em;
+  padding: 12px;
+  overflow-x: auto;
+  border: 1px solid color-mix(in srgb, var(--vscode-panel-border) 60%, transparent);
+  border-radius: 4px;
+  background: var(--vscode-textCodeBlock-background, color-mix(in srgb, var(--af-cli-foreground) 5%, transparent));
+  text-align: center;
+}
+
+.markdown-body .mermaid-diagram img { max-width: 100%; height: auto; }
+
+.markdown-body kbd {
+  padding: 0 0.35em;
+  border: 1px solid var(--vscode-panel-border);
+  border-bottom-width: 2px;
+  border-radius: 3px;
+  font-family: var(--vscode-editor-font-family, monospace);
+  font-size: 0.9em;
 }
 
 .markdown-body a {
@@ -263,16 +429,20 @@ button {
 
 .markdown-body code {
   color: var(--af-cli-code);
-  padding: 0;
-  background: transparent;
+  padding: 0.05em 0.3em;
+  border-radius: 3px;
+  background: var(--vscode-textCodeBlock-background, color-mix(in srgb, var(--af-cli-foreground) 8%, transparent));
   font-family: var(--vscode-editor-font-family, monospace);
   font-size: 1em;
 }
 
 .markdown-body pre {
-  padding: 0 0 0 2ch;
+  padding: 0.6em 0.9em;
   overflow-x: auto;
-  background: transparent;
+  border: 1px solid color-mix(in srgb, var(--vscode-panel-border) 60%, transparent);
+  border-radius: 4px;
+  background: var(--vscode-textCodeBlock-background, color-mix(in srgb, var(--af-cli-foreground) 5%, transparent));
+  line-height: 1.45;
 }
 
 .markdown-body pre code {
@@ -283,7 +453,7 @@ button {
 }
 
 .markdown-body blockquote {
-  padding-left: 12px;
+  padding: 0.1em 0 0.1em 12px;
   border-left: 3px solid var(--vscode-textBlockQuote-border);
   color: var(--af-cli-muted);
 }
@@ -305,6 +475,16 @@ button {
 .markdown-body th {
   background: var(--vscode-editorWidget-background);
   font-weight: 600;
+}
+
+.markdown-body tbody tr:nth-child(even) td {
+  background: color-mix(in srgb, var(--af-cli-foreground) 3%, transparent);
+}
+
+.markdown-body th code,
+.markdown-body td code {
+  background: transparent;
+  padding: 0;
 }
 
 /* Cells wrap only between words, never inside identifiers or Korean words; wide tables scroll instead.
@@ -361,7 +541,10 @@ button {
   min-width: 0;
 }
 
-.terminal-command-prompt { color: var(--af-cli-foreground); }
+.terminal-command-prompt { color: var(--af-cli-muted); }
+/* The state label is text-coloured only; the command itself stays syntax highlighted. */
+.message[data-phase="failed"] .terminal-command-prompt { color: var(--af-cli-failure); }
+.message[data-phase="started"] .terminal-command-prompt { color: var(--af-cli-link); }
 
 .terminal-command-context { color: inherit; font: inherit; }
 
@@ -371,7 +554,12 @@ button {
   max-height: calc(1.5em * 3);
   overflow: hidden;
   white-space: pre-wrap;
-  overflow-wrap: anywhere;
+  /* Wrapped and continued lines hang under the command, not under the state label. */
+  padding-left: 2ch;
+  text-indent: -2ch;
+  /* Long commands break between arguments, not inside flags or paths. */
+  overflow-wrap: break-word;
+  word-break: normal;
 }
 
 .bash-command-text.is-expanded {
@@ -529,21 +717,27 @@ button {
 }
 
 @keyframes compaction-spin { to { transform: rotate(360deg); } }
+#conversation-clear-button[aria-busy="true"] svg { animation: compaction-spin 900ms linear infinite; }
 @media (prefers-reduced-motion: reduce) {
-  .message-compaction .compaction-indicator { animation: none !important; }
+  .message-compaction .compaction-indicator,
+  #conversation-clear-button[aria-busy="true"] svg { animation: none !important; }
 }
 
 .message-notice[data-level="warning"] {
-  --notice-color: var(--vscode-editorWarning-foreground);
+  --notice-color: var(--vscode-editorWarning-foreground, #cca700);
 }
 
 .message-notice[data-level="error"] {
-  --notice-color: var(--vscode-editorError-foreground);
+  --notice-color: var(--vscode-editorError-foreground, #f14c4c);
 }
 
 .notice-mark {
   color: var(--notice-color);
   font-weight: 700;
+}
+
+.message-notice:is([data-level="warning"], [data-level="error"]) .message-content {
+  color: color-mix(in srgb, var(--notice-color) 75%, var(--af-cli-foreground));
 }
 
 .composer-region {
@@ -1657,6 +1851,10 @@ select:focus-visible,
   overflow-wrap: anywhere;
 }
 
+.message[data-phase="failed"] .terminal-command-output {
+  color: color-mix(in srgb, var(--af-cli-failure) 70%, var(--af-cli-foreground));
+}
+
 .terminal-output-preview {
   max-height: 4.5em;
   overflow: hidden;
@@ -1667,7 +1865,10 @@ select:focus-visible,
 .terminal-output-details[hidden] { display: none; }
 
 .terminal-output-details { margin-left: 2ch; }
-.terminal-output-details summary { cursor: pointer; color: var(--af-cli-muted); }
+.terminal-output-details summary { cursor: pointer; color: var(--af-cli-muted); font-size: 0.92em; }
+.terminal-output-details summary:hover { color: var(--af-cli-foreground); }
+.terminal-output-details[open] > summary { margin-bottom: 2px; }
+.terminal-output-block.is-empty .terminal-command-output { font-style: italic; opacity: 0.7; }
 .terminal-output-details .terminal-command-output { margin-left: 0; }
 
 .git-diff-inline {
@@ -1720,6 +1921,9 @@ select:focus-visible,
   --af-cli-addition: var(--vscode-terminal-ansiGreen, #18712c);
   --af-cli-deletion: var(--vscode-terminal-ansiRed, #b42318);
   --af-cli-hunk: var(--vscode-terminal-ansiCyan, #087e8b);
+  --af-cli-heading: var(--vscode-terminal-ansiBlue, #1f5fbf);
+  --af-cli-strong: var(--vscode-terminal-ansiYellow, #8a5a00);
+  --af-cli-emphasis: var(--vscode-terminal-ansiMagenta, #8839a8);
 }
 
 .vscode-high-contrast .timeline,
@@ -1763,40 +1967,138 @@ select:focus-visible,
 .decision-actions button:disabled { opacity: 0.5; cursor: default; }
 
 .markdown-body .execution-references {
-  padding: 0;
+  gap: 0;
+  padding: 4px 0;
   margin: 12px 0 0;
+  border: 1px solid var(--vscode-panel-border);
+  border-radius: 6px;
+  background: var(--vscode-editorWidget-background);
   list-style: none;
 }
-.execution-reference { display: flex; min-width: 0; align-items: center; gap: 6px; }
-.execution-reference-main { flex: 1; min-width: 0; }
+.markdown-body .execution-reference + .execution-reference { margin-top: 0; }
+.execution-reference { display: flex; min-width: 0; align-items: center; gap: 6px; padding-right: 6px; }
+.execution-reference-main {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  align-items: baseline;
+  gap: 10px;
+  padding: 3px 10px;
+}
+.execution-reference-main .agent-role {
+  flex: 0 0 9em;
+  padding: 0;
+  color: var(--vscode-descriptionForeground);
+  background: transparent;
+  font-size: 11px;
+}
+.execution-reference-id { font-family: var(--vscode-editor-font-family, monospace); font-size: 12px; }
+.execution-reference-copy { height: 20px; padding: 0 6px; color: var(--vscode-descriptionForeground); font-size: 11px; }
+.execution-reference-copy:hover { color: var(--vscode-foreground); }
 .execution-reference-main:not(button) { cursor: text; }
 .execution-reference-main:not(button):hover { color: inherit; background: transparent; }
 .execution-reference-id { overflow-wrap: anywhere; user-select: text; }
 .execution-reference-copy { flex: none; }
 
 .managed-agent-card {
+  --af-card-accent: var(--vscode-panel-border);
   border: 1px solid var(--vscode-panel-border);
-  border-radius: 8px;
-  padding: 10px 12px;
+  border-radius: 6px;
+  padding: 9px 12px 10px;
   background: var(--vscode-editorWidget-background);
   min-width: 0;
 }
-.managed-agent-heading { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
-.managed-agent-status, .managed-agent-progress { color: var(--vscode-descriptionForeground); font-size: 12px; }
-.managed-agent-identity { margin: 5px 0; overflow-wrap: anywhere; font-size: 11px; color: var(--vscode-descriptionForeground); user-select: text; }
-.managed-agent-open { margin-top: 8px; }
+/* Card borders and backgrounds stay grey; only the status tag and its text carry the state colour. */
+.managed-agent-card[data-status="running"],
+.managed-agent-card[data-status="active"],
+.managed-agent-card[data-status="starting"],
+.managed-agent-card[data-status="accepted"],
+.managed-agent-card[data-status="queued"] { --af-card-accent: var(--vscode-progressBar-background, #0e7fe8); }
+.managed-agent-card[data-status="completed"] { --af-card-accent: var(--af-cli-success, var(--vscode-testing-iconPassed, #3fb950)); }
+.managed-agent-card[data-status="failed"],
+.managed-agent-card[data-status="runtime-error"] { --af-card-accent: var(--af-cli-failure, var(--vscode-errorForeground)); }
+.managed-agent-card[data-status="needs-human-decision"] { --af-card-accent: var(--vscode-editorWarning-foreground, #cca700); }
+.managed-agent-card[data-status="cancelled"],
+.managed-agent-card[data-status="cancelling"] { --af-card-accent: var(--af-cli-muted, var(--vscode-descriptionForeground)); }
+
+.managed-agent-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-width: 0; }
+.managed-agent-heading > strong { min-width: 0; overflow-wrap: anywhere; color: var(--af-cli-heading, var(--vscode-foreground)); }
+.managed-agent-status {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 5px;
+  padding: 1px 8px;
+  border: 1px solid color-mix(in srgb, var(--af-card-accent) 45%, transparent);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--af-card-accent) 14%, transparent);
+  color: color-mix(in srgb, var(--af-card-accent) 70%, var(--vscode-foreground));
+  font-size: 11px;
+  line-height: 16px;
+  white-space: nowrap;
+}
+.managed-agent-status::before {
+  width: 6px;
+  height: 6px;
+  flex: none;
+  border-radius: 50%;
+  background: var(--af-card-accent);
+  content: "";
+}
+.managed-agent-card:is([data-status="running"], [data-status="active"], [data-status="starting"]) .managed-agent-status::before {
+  animation: managed-agent-pulse 1.4s ease-in-out infinite;
+}
+@keyframes managed-agent-pulse { 50% { opacity: 0.3; } }
+@media (prefers-reduced-motion: reduce) {
+  .managed-agent-card .managed-agent-status::before { animation: none !important; }
+}
+.managed-agent-progress { margin-top: 2px; color: var(--vscode-descriptionForeground); font-size: 12px; }
+.managed-agent-identity {
+  margin: 5px 0 0;
+  overflow-wrap: anywhere;
+  color: var(--vscode-descriptionForeground);
+  font-family: var(--vscode-editor-font-family, monospace);
+  font-size: 11px;
+  user-select: text;
+}
+.managed-agent-open {
+  display: inline-flex;
+  width: auto;
+  height: 24px;
+  margin-top: 8px;
+  padding: 0 10px;
+  border: 1px solid var(--vscode-button-border, color-mix(in srgb, var(--vscode-foreground) 25%, transparent));
+  border-radius: 4px;
+  background: var(--vscode-button-secondaryBackground, transparent);
+  color: var(--vscode-button-secondaryForeground, var(--vscode-foreground));
+  font-size: 12px;
+  cursor: pointer;
+}
+.managed-agent-open:hover { background: var(--vscode-button-secondaryHoverBackground, var(--vscode-toolbar-hoverBackground)); }
+.managed-agent-open:focus-visible { outline: 1px solid var(--vscode-focusBorder); outline-offset: 1px; }
 .managed-agent-details { margin-top: 8px; }
-.managed-agent-details > summary { cursor: pointer; color: var(--vscode-descriptionForeground); font-size: 12px; }
+.managed-agent-details > summary,
+.managed-agent-card .skill-read-details > summary { cursor: pointer; color: var(--vscode-descriptionForeground); font-size: 12px; }
+.managed-agent-details > summary:hover,
+.skill-read-details > summary:hover { color: var(--vscode-foreground); }
 .managed-agent-details > div { margin-top: 8px; }
-.managed-agent-card[data-status="running"] .managed-agent-status { color: var(--vscode-progressBar-background, var(--vscode-foreground)); }
-.managed-agent-card[data-status="failed"] .managed-agent-status { color: var(--vscode-errorForeground); }
-.command-error-summary { color: var(--vscode-errorForeground); overflow-wrap: anywhere; white-space: pre-wrap; }
+.managed-agent-card .skill-read-details { margin-top: 4px; }
+.command-error-summary {
+  margin-top: 6px;
+  padding: 5px 8px;
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--vscode-errorForeground) 10%, transparent);
+  color: var(--vscode-errorForeground);
+  font-family: var(--vscode-editor-font-family, monospace);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
 
 .skill-read-document { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; list-style-position: inside; }
-.skill-read-document strong { color: var(--vscode-foreground); }
+.skill-read-document strong { color: var(--af-cli-strong, var(--vscode-foreground)); }
 .skill-read-document span { color: var(--af-cli-muted); }
 .skill-read-details > summary { cursor: pointer; color: var(--af-cli-muted); }
-
 /* Keep customization reachable when all fields are hidden or the bar overflows. */
 .status-footer {
   display: flex;
@@ -3047,7 +3349,9 @@ table.interview-options td:first-child {
 .composer-status-row > .run-status { flex: 1 1 180px; min-width: 0; }
 .composer-status-row > .input-feedback:not([hidden]) { flex: 1 0 100%; }
 
-/* Anchor compact progress to the composer edge, including when queue controls are taller. */
+/* Compact progress overlays the composer edge without resizing the conversation. */
+.composer-status-row { position: relative; }
+.composer-status-row:not(:has(> :not(.run-status):not([hidden]))) > .run-status:not(.is-expanded) { position: absolute; bottom: 4px; left: 0; width: 100%; margin-bottom: 0; }
 .composer-status-row > .run-status:not(.is-expanded),
 .composer-status-row > .pending-queue-toggle { margin-bottom: 4px; }
 

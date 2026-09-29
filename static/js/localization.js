@@ -64,7 +64,10 @@
   "claude.plugin.marketplace.conflict": {"en": "A Claude Code marketplace named agent-factory points to a different source. Remove it or point it at {0}, then retry. Nothing was overwritten.", "ko": "agent-factory라는 이름의 Claude Code 마켓플레이스가 다른 소스를 가리킵니다. 제거하거나 {0}으로 바꾼 뒤 다시 시도하세요. 기존 설정은 덮어쓰지 않았습니다."},
   "claude.plugin.warning": {"en": "The Agent Factory Claude Code plugin could not be installed or updated; Codex features are unaffected. {0}", "ko": "Agent Factory Claude Code 플러그인을 설치하거나 갱신하지 못했습니다. Codex 기능에는 영향이 없습니다. {0}"},
   "sudo.unavailable": {"en":"Administrator command handoff is unavailable: {0}", "ko":"관리자 명령 전달을 사용할 수 없습니다: {0}"},
-  "ui.clearing.conversation": {"en":"Clearing conversation… Previous records are being retained.", "ko":"대화를 초기화하고 있습니다… 이전 기록은 보존됩니다."},
+  "ui.hero.tagline": {"en":"Plan, build and verify with your agent team.", "ko":"에이전트 팀과 함께 기획하고, 만들고, 검증하세요."},
+  "ui.hero.main": {"en":"Main", "ko":"메인"},
+  "ui.hero.flow": {"en":"Main → Work → Verification", "ko":"메인 → 작업 → 검증"},
+  "ui.clearing.conversation": {"en":"Clearing conversation…", "ko":"대화를 초기화하고 있습니다…"},
   "attachment.convert.heading": {"en":"Convert image", "ko":"이미지 형식 변환"},
   "attachment.convert.source": {"en":"Original file", "ko":"원본 파일"},
   "attachment.convert.destination": {"en":"Save location", "ko":"저장 위치"},
@@ -530,6 +533,22 @@
     "en": "Content window tokens",
     "ko": "컨텍스트 크기"
   },
+  "ui.five.hour.usage": {
+    "en": "5-hour usage",
+    "ko": "5시간 사용량"
+  },
+  "ui.five.hour.remaining": {
+    "en": "5-hour remaining",
+    "ko": "남은 5시간 사용량"
+  },
+  "ui.latest.reported.usage.percentage.of.the.5.hour.account.limit.if.available": {
+    "en": "Latest reported usage percentage of the 5-hour account limit, if available",
+    "ko": "제공되는 경우 최근 보고된 계정의 5시간 한도 사용 비율"
+  },
+  "ui.100.minus.five.hour.usage.an.absolute.token.count.is.not.provided": {
+    "en": "100% minus 5-hour usage; an absolute token count is not provided",
+    "ko": "100%에서 5시간 사용량을 뺀 값이며, 절대 토큰 수는 제공되지 않습니다"
+  },
   "ui.weekly.usage": {
     "en": "Weekly usage",
     "ko": "주간 사용량"
@@ -537,6 +556,22 @@
   "ui.weekly.remaining": {
     "en": "Weekly remaining",
     "ko": "남은 주간 사용량"
+  },
+  "ui.five.hour.reset": {
+    "en": "5-hour reset",
+    "ko": "5시간 갱신 시각"
+  },
+  "ui.five.hour.reset.description": {
+    "en": "When the 5-hour account limit next refills, as last reported by the provider, if available",
+    "ko": "제공되는 경우 공급자가 최근 보고한 계정 5시간 한도의 다음 갱신 시각"
+  },
+  "ui.weekly.reset": {
+    "en": "Weekly reset",
+    "ko": "주간 갱신 시각"
+  },
+  "ui.weekly.reset.description": {
+    "en": "When the 7-day account limit next refills, as last reported by the provider, if available",
+    "ko": "제공되는 경우 공급자가 최근 보고한 계정 7일 한도의 다음 갱신 시각"
   },
   "ui.total.agent.calls": {
     "en": "Total agent calls",
@@ -1362,6 +1397,7 @@
     "en": "Running",
     "ko": "실행 중"
   },
+  "ui.cancellation.requested": {"en": "Stop requested", "ko": "중단 요청 중"},
   "ui.cancelling": {
     "en": "Cancelling",
     "ko": "취소 중"
@@ -1474,6 +1510,14 @@
     "en": " tokens",
     "ko": " 토큰"
   },
+  "ui.5h.used": {
+    "en": "5h used ",
+    "ko": "5시간 사용 "
+  },
+  "ui.5h.left": {
+    "en": "5h left ",
+    "ko": "5시간 잔여 "
+  },
   "ui.wk.used": {
     "en": "Wk used ",
     "ko": "주간 사용 "
@@ -1481,6 +1525,18 @@
   "ui.wk.left": {
     "en": "Wk left ",
     "ko": "주간 잔여 "
+  },
+  "ui.5h.reset": {
+    "en": "5h resets ",
+    "ko": "5시간 갱신 "
+  },
+  "ui.wk.reset": {
+    "en": "Wk resets ",
+    "ko": "주간 갱신 "
+  },
+  "ui.reset.elapsed": {
+    "en": "passed",
+    "ko": "지남"
   },
   "ui.elapsed": {
     "en": "Elapsed ",

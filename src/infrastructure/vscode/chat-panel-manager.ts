@@ -489,7 +489,10 @@ export class ChatPanelManager implements vscode.Disposable {
             ...(resetConversation ? {
               contextUsedTokens: undefined,
               contextWindowTokens: undefined,
-              weeklyUsedPercent: undefined
+              weeklyUsedPercent: undefined,
+              fiveHourUsedPercent: undefined,
+              weeklyResetsAt: undefined,
+              fiveHourResetsAt: undefined
             } : {})
           };
           if (resetConversation) managed.startedMessages = [];
@@ -525,6 +528,9 @@ export class ChatPanelManager implements vscode.Disposable {
           contextUsedTokens: managed.state.contextUsedTokens,
           contextWindowTokens: managed.state.contextWindowTokens,
           weeklyUsedPercent: managed.state.weeklyUsedPercent,
+          fiveHourUsedPercent: managed.state.fiveHourUsedPercent,
+          weeklyResetsAt: managed.state.weeklyResetsAt,
+          fiveHourResetsAt: managed.state.fiveHourResetsAt,
           pendingMessageIds: [...(managed.pendingMessageIds ?? [])],
           queueCount: managed.controller?.queueLength ?? 0,
           conversationId: runtimeConversationId,
@@ -1339,7 +1345,8 @@ Read the exact stored child result/receipt and existing workflow status for repo
       managed.executionModeExplicit = false;
       managed.state = {
         ...managed.state, agentId, conversationId: selectedSession.conversationId,
-        contextUsedTokens: undefined, contextWindowTokens: undefined, weeklyUsedPercent: undefined
+        contextUsedTokens: undefined, contextWindowTokens: undefined, weeklyUsedPercent: undefined, fiveHourUsedPercent: undefined,
+        weeklyResetsAt: undefined, fiveHourResetsAt: undefined
       };
       await this.post(managed.panel, { type: "execution.updated", mode: managed.executionMode });
       if (managed.disposed) return;
@@ -1397,7 +1404,8 @@ Read the exact stored child result/receipt and existing workflow status for repo
       }
       managed.controller = new ChatSessionController(connection.client, {
         onBound: (agentId) => {
-          managed.state = { ...managed.state, agentId, contextUsedTokens: undefined, contextWindowTokens: undefined, weeklyUsedPercent: undefined };
+          managed.state = { ...managed.state, agentId, contextUsedTokens: undefined, contextWindowTokens: undefined, weeklyUsedPercent: undefined, fiveHourUsedPercent: undefined,
+            weeklyResetsAt: undefined, fiveHourResetsAt: undefined };
           this.rememberAgent(managed.state);
           if (!this.context.workspaceState?.get(`agentFactory.background.${agentId}`)) void this.context.workspaceState?.update(`agentFactory.background.${agentId}`, {});
           void this.post(managed.panel, { type: "execution.updated", mode: managed.executionMode ?? this.defaultExecutionMode() });
@@ -1441,9 +1449,10 @@ Read the exact stored child result/receipt and existing workflow status for repo
         onProgress: (progressText) => {
           void this.post(managed.panel, { type: "run.progress", text: progressText });
         },
-        onUsage: (usedTokens, contextWindowTokens, weeklyUsedPercent) => {
-          managed.state = { ...managed.state, contextUsedTokens: usedTokens, contextWindowTokens, weeklyUsedPercent };
-          void this.post(managed.panel, { type: "context.usage", usedTokens, contextWindowTokens, weeklyUsedPercent });
+        onUsage: (usedTokens, contextWindowTokens, weeklyUsedPercent, fiveHourUsedPercent, weeklyResetsAt, fiveHourResetsAt) => {
+          const limits = { weeklyUsedPercent, fiveHourUsedPercent, weeklyResetsAt, fiveHourResetsAt };
+          managed.state = { ...managed.state, contextUsedTokens: usedTokens, contextWindowTokens, ...limits };
+          void this.post(managed.panel, { type: "context.usage", usedTokens, contextWindowTokens, ...limits });
         },
         onActivity: (activity) => {
           void this.post(managed.panel, { type: "run.activity", ...activity });
@@ -1669,11 +1678,13 @@ Read the exact stored child result/receipt and existing workflow status for repo
         conversationId: reset.conversationId,
         contextUsedTokens: undefined,
         contextWindowTokens: undefined,
-        weeklyUsedPercent: undefined
+        weeklyUsedPercent: undefined,
+        fiveHourUsedPercent: undefined,
+        weeklyResetsAt: undefined,
+        fiveHourResetsAt: undefined
       };
       await this.rememberAgent(managed.state);
       await this.post(managed.panel, { type: "conversation.cleared", conversationId: reset.conversationId });
-      void vscode.window.showInformationMessage(localize("ui.started.a.new.conversation.historical.run.records.were.retained"));
       this.scheduleAgentList(managed, true);
     } catch (error) {
       await this.post(managed.panel, {

@@ -160,6 +160,35 @@ test("live labels distinguish absent values, zero usage, selected model and elap
   assert.equal(run('statusLabel("project")'), 'Home');
 });
 
+test("5-hour used/remaining items are selectable and calculated", () => {
+  const { run, context, sent } = harness();
+  run('setStatusItems(["fiveHour", "fiveHourRemaining"])');
+  assert.deepEqual(sent.at(-1).items, ['fiveHour', 'fiveHourRemaining']);
+  context.state.fiveHourUsedPercent = 25;
+  assert.equal(run('statusLabel("fiveHour")'), '5h used 25%');
+  assert.equal(run('statusLabel("fiveHourRemaining")'), '5h left 75%');
+  context.state.fiveHourUsedPercent = undefined;
+  assert.equal(run('statusLabel("fiveHour")'), '5h used —');
+  assert.equal(run('statusLabel("fiveHourRemaining")'), '5h left —');
+});
+
+test("5-hour and weekly reset items show the provider-reported refill time", () => {
+  const { run, context, sent } = harness();
+  run('setStatusItems(["fiveHourReset", "weeklyReset"])');
+  assert.deepEqual(sent.at(-1).items, ['fiveHourReset', 'weeklyReset']);
+  assert.equal(run('statusItemAvailable("fiveHourReset")'), false);
+  assert.equal(run('statusLabel("fiveHourReset")'), '5h resets —');
+  const later = new Date(Date.now() + 2 * 60 * 60 * 1000);
+  context.state.fiveHourResetsAt = later.getTime() / 1000;
+  assert.equal(run('statusItemAvailable("fiveHourReset")'), true);
+  assert.match(run('statusLabel("fiveHourReset")'), later.toDateString() === new Date().toDateString()
+    ? /^5h resets \d{2}:\d{2}/ : /^5h resets .+\d{2}:\d{2}/);
+  context.state.weeklyResetsAt = (Date.now() + 3 * 24 * 60 * 60 * 1000) / 1000;
+  assert.match(run('statusLabel("weeklyReset")'), /^Wk resets .*\d.*\d{2}:\d{2}/);
+  context.state.weeklyResetsAt = (Date.now() - 1000) / 1000;
+  assert.equal(run('statusLabel("weeklyReset")'), 'Wk resets passed');
+});
+
 test("Content and Weekly used/remaining items are independently selectable and calculated", () => {
   const { run, context, sent } = harness();
   run('setStatusItems(["contextUsed", "context", "weekly", "weeklyRemaining"])');
@@ -271,7 +300,7 @@ test("host initialization replaces stale restored selection, including an intent
     message: { type: 'host.initialize', statusItems: [], runtimeAvailable: true, running: false, role: 'main', model: '', taskMode: 'work', queueCount: 0 },
     normalizeModel: value => value || '', normalizeSettingValue: value => value,
     businessModeNames: { normal: "Normal" },
-    settingOptions: { reasoning: [] }, safePercentOrUndefined: () => undefined,
+    settingOptions: { reasoning: [] }, safePercentOrUndefined: () => undefined, safeResetsAtOrUndefined: () => undefined,
     safeCount: value => Number.isInteger(value) ? value : 0,
     currentTaskFlows: () => [], updateModeControls() {}, renderTimeline() {}, updateRunControls() {}
   });

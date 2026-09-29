@@ -6,12 +6,14 @@ results in VS Code.
 ## 1. Get started
 
 - Requires Python 3.10+ and an available Codex or Claude runtime in the workspace environment.
+  The Antigravity CLI (`agy`) is optional.
 - Official installation guides: [Codex CLI](https://developers.openai.com/codex/cli/) · [Claude Code](https://code.claude.com/docs/en/setup).
 
 1. Run **Agent Factory: Add Main Agent Chat** from the VS Code Command Palette.
 2. Work directly with Main, or submit a task for delegated execution.
 
-- The extension installs the matching Agent Factory companion plugin when needed.
+- The extension installs the matching Agent Factory companion plugin when needed: the Codex
+  plugin, and the Claude Code plugin when the `claude` CLI is available.
 
 ## 2. Core features
 
@@ -76,20 +78,75 @@ results in VS Code.
   rules. Lesson records remain evidence; they do not automatically become accepted
   Specifications or trigger background changes.
 
-## 3. Agent settings
+## 3. Chat workspace
 
-### 3.1. Scope and inheritance
+### 3.1. Message actions
 
-- Use the chat's **Agent settings** dialog to change only that chat.
-- Open **Settings → Agent defaults**, then select **Project** or **Global**, to
-  configure Main, Work and Verification models and reasoning levels.
+- Each message is handled directly by Main by default. Open the submit menu to
+  choose an action for that message only:
+
+  | Group | Actions |
+  | --- | --- |
+  | Document | Document · Main, Document migration, Lessons learned to rules |
+  | Task workflow | Contract, Interview, Planning, Design |
+  | Delegated execution | Work, Plan, Verification, Plan · Work, Work · Verification, Plan · Work · Verification |
+
+- **Goal** and **Fast** toggles apply to the next message when the runtime supports them.
+- Messages sent while Main is running wait in the chat's queue and are sent in order.
+- Attach files, folders, or images to a message.
+
+### 3.2. Chats, agents, and notes
+
+- Each Main chat opens in its own editor tab. The **Agents** sidebar lists chats and
+  their Work and Verification agents; group, rename, archive, and restore them.
+- Earlier conversation history loads page by page, and live assistant previews
+  appear while a run streams.
+- **Notes** keep global or workspace notes in folders beside the chat.
+- Customize keyboard shortcuts in **Settings → Keyboard shortcuts**.
+
+### 3.3. Status bar
+
+- Choose and reorder the items shown below the chat with
+  `agentFactory.mainChat.statusItems`: run status, active agents, project, Git branch,
+  context remaining, and queued messages.
+- Claude runs also report context usage and weekly usage and remaining.
+- 5-hour usage and remaining (`fiveHour`, `fiveHourRemaining`) are available for both Codex
+  and Claude runs when the provider reports the 5-hour limit.
+
+### 3.4. Work Units
+
+- Create a Work Unit to isolate a task in its own Git worktree and branch, managed
+  under `~/.agent-factory`. The new chat receives an editable summary of the
+  requirements and decisions from the current conversation; uncommitted changes
+  stay in the original folder.
+- Review the changed files and merge the work branch into a target branch. After a
+  normal merge, the worktree and branch are cleaned up when safe.
+- When you work directly on `main` or `master`, a notice suggests creating a Work
+  Unit. Turn it off with `agentFactory.workUnits.warnDefaultBranch`.
+
+### 3.5. Companion bots
+
+- Choose **Lumi** or **Factory Bot** as the companion shown above the message box in
+  all chats, and talk to it from the input box.
+- `agentFactory.mainChat.botModel` sets the shared conversation model. When empty,
+  Codex Luna is used, with Claude Haiku as a fallback when Codex is not installed.
+- Customize each bot's prompt, or turn off all bots with
+  `agentFactory.mainChat.botsEnabled`. Your system's reduced-motion preference is respected.
+
+## 4. Agent settings
+
+### 4.1. Scope and inheritance
+
+- Open the chat's **Agent settings** panel to configure Main, Work and Verification
+  models and reasoning levels, and select the scope to edit: **Chat**, **Project**,
+  or **Global**.
 - Each value resolves independently: **chat → project → global → provider default**.
-- **Use parent setting** removes an override. The chat dialog shows each value's
+- **Use parent setting** removes an override. The panel shows each value's
   source and effective setting.
 - Existing chats retain their saved explicit choices. New chats inherit scoped
   defaults; changing one chat does not change defaults for future chats.
 
-### 3.2. Storage and submitted messages
+### 4.2. Storage and submitted messages
 
 | Scope | Storage |
 | --- | --- |
@@ -106,7 +163,18 @@ results in VS Code.
   including queued messages. Later default changes affect future submissions only.
 - Provider and session compatibility checks still apply.
 
-### 3.3. Model selection and sessions
+### 4.3. Presets
+
+- Save the current models and reasoning levels as a named set, then apply, update,
+  or delete it across the global and project scopes. One set can be the default.
+- On first use, unset global models are initialized from the detected runtimes.
+  Explicit settings are preserved.
+
+### 4.4. Model selection and sessions
+
+- The model picker groups models by vendor tabs (**OpenAI**, **Anthropic**, **Google**)
+  and by runtime (Codex, Claude Code, Antigravity) within each vendor. In a started
+  conversation, models from other runtimes are locked.
 
 - When `claude` is available, the model picker offers these identifiers:
 
@@ -122,8 +190,11 @@ results in VS Code.
 - Every execution mode works with Claude. Plan runs in Claude's plan mode and
   continues in the same session.
 - Context usage is shown after each Claude turn.
+- When the Antigravity CLI (`agy`) is signed in, its subscription models are also listed.
+  `gemini-*` models appear by base ID and take the reasoning level as effort; other
+  families appear as `antigravity/<id>`. Antigravity runs are text-only.
 
-### 3.4. Execution permissions
+### 4.5. Execution permissions
 
 - Extension permissions map to Claude tool permissions as follows. These modes
   do not provide an OS sandbox.

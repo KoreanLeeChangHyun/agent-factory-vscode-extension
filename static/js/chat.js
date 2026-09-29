@@ -25,8 +25,15 @@
   function reasoningDisplayLabel(value) { return value ? uiLocale() === "en" ? value : t("ui." + value) : t("ui.default"); }
 
   const markdown = typeof globalThis.markdownit === "function"
-    ? globalThis.markdownit({ html: false, linkify: true, typographer: false })
+    ? globalThis.markdownit({ html: false, linkify: true, typographer: false }).use(markdownMath).use(markdownSafeMarkup)
     : undefined;
+  // Heavy renderers load beside markdown-it only when a message needs them.
+  const vendorBase = document.querySelector('script[src*="markdown-it.min.js"]')?.src;
+  const scriptNonce = document.currentScript?.nonce;
+  const vendorLoads = new Map();
+  const mermaidImages = new Map();
+  let mermaidQueue = Promise.resolve();
+  let mermaidSequence = 0;
   const timeline = document.getElementById("timeline");
   const jumpToBottom = document.getElementById("jump-to-bottom");
   let commandDisclosureObserver;
@@ -114,11 +121,6 @@
     sudoCancel.disabled = false;
   }
 
-  const conversationClearStatus = document.createElement("p");
-  conversationClearStatus.className = "input-feedback";
-  conversationClearStatus.setAttribute("role", "status");
-  conversationClearStatus.hidden = true;
-  inputFeedback.after(conversationClearStatus);
   const modelMenu = document.getElementById("model-menu");
   const fastModeButton = document.getElementById("fast-mode-button");
   const businessModeNames = () => ({ normal: t("ui.normal"), contract: t("ui.contract"), interview: t("ui.interview"), planning: t("ui.planning"), design: t("ui.design"), migration: t("ui.migration"), lessons: t("ui.lessons") });
@@ -284,8 +286,12 @@
     contextRemainingTokens: [t("ui.content.tokens.remaining"), t("ui.content.window.size.minus.current.tokens.used.with.a.minimum.of.0")],
     contextUsedPercent: [t("ui.content.used.percentage"), t("ui.current.usage.as.a.percentage.of.the.content.window")],
     contextWindow: [t("ui.content.window.tokens"), t("ui.model.content.window.size.reported.by.the.runtime")],
+    fiveHour: [t("ui.five.hour.usage"), t("ui.latest.reported.usage.percentage.of.the.5.hour.account.limit.if.available")],
+    fiveHourRemaining: [t("ui.five.hour.remaining"), t("ui.100.minus.five.hour.usage.an.absolute.token.count.is.not.provided")],
+    fiveHourReset: [t("ui.five.hour.reset"), t("ui.five.hour.reset.description")],
     weekly: [t("ui.weekly.usage"), t("ui.latest.reported.usage.percentage.of.the.7.day.account.limit.if.available")],
     weeklyRemaining: [t("ui.weekly.remaining"), t("ui.100.minus.weekly.usage.an.absolute.token.count.is.not.provided")],
+    weeklyReset: [t("ui.weekly.reset"), t("ui.weekly.reset.description")],
     agentsTotal: [t("ui.total.agent.calls"), t("ui.number.of.work.and.verification.agents.called.by.main.agent")],
     goal: [t("ui.goal.status"), t("ui.main.agent.goal.setting.and.latest.reported.goal.status")],
     goalTokens: [t("ui.goal.tokens.used"), t("ui.cumulative.tokens.used.as.reported.by.the.goal")],
@@ -432,6 +438,9 @@
     contextUsedTokens: safeCountOrUndefined(saved?.contextUsedTokens),
     contextWindowTokens: safeCountOrUndefined(saved?.contextWindowTokens),
     weeklyUsedPercent: safePercentOrUndefined(saved?.weeklyUsedPercent),
+    fiveHourUsedPercent: safePercentOrUndefined(saved?.fiveHourUsedPercent),
+    weeklyResetsAt: safeResetsAtOrUndefined(saved?.weeklyResetsAt),
+    fiveHourResetsAt: safeResetsAtOrUndefined(saved?.fiveHourResetsAt),
     runProgress: typeof saved?.runProgress === "string" ? saved.runProgress : "",
     runProgressLocalization: saved?.runProgressLocalization,
     runStartedAt: Number.isFinite(saved?.runStartedAt) ? saved.runStartedAt : undefined,
@@ -1968,6 +1977,7 @@
         state.capabilities = message.capabilities;
         if (currentCapabilities().diagnostic) appendNotice("warning", currentCapabilities().diagnostic);
         state.running = message.running === true;
+        if (!state.running) state.cancellationRequested = false;
         state.model = normalizeModel(message.model);
         state.agentModels = message.agentModels || state.agentModels || {};
         state.reasoning = normalizeSettingValue(message.reasoning, settingOptions.reasoning);
@@ -1979,6 +1989,9 @@
           state.contextUsedTokens = safeCountOrUndefined(message.contextUsedTokens);
           state.contextWindowTokens = safeCountOrUndefined(message.contextWindowTokens);
           state.weeklyUsedPercent = safePercentOrUndefined(message.weeklyUsedPercent);
+          state.fiveHourUsedPercent = safePercentOrUndefined(message.fiveHourUsedPercent);
+          state.weeklyResetsAt = safeResetsAtOrUndefined(message.weeklyResetsAt);
+          state.fiveHourResetsAt = safeResetsAtOrUndefined(message.fiveHourResetsAt);
         }
         state.queueCount = safeCount(message.queueCount);
         if (Array.isArray(message.pendingMessageIds)) {
@@ -2146,7 +2159,12 @@
         closeSudoPanel();
         break;
       case "host.notice":
-        if (message.level === "error") { botOutcome = "failed"; renderFactoryBot(); }
+        if (message.level === "error") {
+          state.cancellationRequested = false;
+          renderRunStatus();
+          renderStatusBar();
+          botOutcome = "failed"; renderFactoryBot();
+        }
         appendNotice(message.level, message.text, message.localization?.text);
         break;
       case "status.updated":
@@ -2173,6 +2191,9 @@
             state.contextUsedTokens = undefined;
             state.contextWindowTokens = undefined;
             state.weeklyUsedPercent = undefined;
+            state.fiveHourUsedPercent = undefined;
+            state.weeklyResetsAt = undefined;
+            state.fiveHourResetsAt = undefined;
             state.workUnitsKnown = false;
             nativeGoal = null;
             goalError = undefined;
@@ -2442,6 +2463,7 @@
           botWaveTimer = undefined;
         }
         state.running = message.running === true;
+        if (!state.running) state.cancellationRequested = false;
         state.runProgress = state.running ? (state.runProgress || t("ui.starting.main.agent")) : "";
         state.runProgressLocalization = globalThis.AgentFactoryI18n.describe(state.runProgress) || state.runProgressLocalization;
         if (state.running && !state.runStartedAt) {
@@ -2515,6 +2537,9 @@
         state.contextUsedTokens = safeCountOrUndefined(message.usedTokens);
         state.contextWindowTokens = safeCountOrUndefined(message.contextWindowTokens);
         state.weeklyUsedPercent = safePercentOrUndefined(message.weeklyUsedPercent);
+        state.fiveHourUsedPercent = safePercentOrUndefined(message.fiveHourUsedPercent);
+        state.weeklyResetsAt = safeResetsAtOrUndefined(message.weeklyResetsAt);
+        state.fiveHourResetsAt = safeResetsAtOrUndefined(message.fiveHourResetsAt);
         renderStatusBar();
         persist(false);
         break;
@@ -2668,10 +2693,13 @@
   }
 
   function cancelRun() {
-    if (!state.running) {
+    if (!state.running || state.cancellationRequested) {
       return;
     }
+    state.cancellationRequested = true;
     vscode.postMessage({ type: "run.cancel" });
+    renderRunStatus();
+    renderStatusBar();
   }
 
   function isDuplicateCancellation(previous, current) {
@@ -2812,6 +2840,7 @@
   function previewFragment(text) {
     const fragment = document.createElement("div");
     fragment.innerHTML = markdown.render(text);
+    renderMath(fragment);
     for (const img of fragment.querySelectorAll("img[src]")) {
       if (/^(?:file:\/\/|\/|\.\.?\/)/i.test(img.getAttribute("src"))) img.removeAttribute("src");
     }
@@ -3650,6 +3679,7 @@
     block.className = "terminal-output-block";
     block.classList.toggle("terminal-output-collapsed", collapsed);
     const text = output || t("ui.no.output");
+    block.classList.toggle("is-empty", !output);
     // Bound preview work by both lines and bytes; full evidence stays available on demand.
     let previewText = text.slice(0, 2048).split("\n").slice(0, 8).join("\n");
     const truncated = previewText.length < text.length;
@@ -4038,7 +4068,202 @@
     finishAssistantMarkdown(container);
   }
 
+  // Math is tokenized before Markdown escapes so TeX backslashes survive; KaTeX renders MathML, which needs no inline styles under the CSP.
+  function markdownMath(md) {
+    const escape = md.utils.escapeHtml;
+    md.block.ruler.before("fence", "math_block", function (state, startLine, endLine, silent) {
+      if (state.sCount[startLine] - state.blkIndent >= 4) return false;
+      const first = state.src.slice(state.bMarks[startLine] + state.tShift[startLine], state.eMarks[startLine]);
+      const close = first.startsWith("$$") ? "$$" : first.startsWith("\\[") ? "\\]" : "";
+      if (!close) return false;
+      let content = first.slice(2).trimEnd();
+      let line = startLine;
+      let closed = content.endsWith(close);
+      if (closed) content = content.slice(0, -2);
+      while (!closed) {
+        if (++line >= endLine) return false;
+        const text = state.src.slice(state.bMarks[line] + state.tShift[line], state.eMarks[line]).trimEnd();
+        closed = text.endsWith(close);
+        content += "\n" + (closed ? text.slice(0, -2) : text);
+      }
+      if (!content.trim()) return false;
+      if (silent) return true;
+      const token = state.push("math_block", "div", 0);
+      token.block = true;
+      token.content = content.trim();
+      token.map = [startLine, line + 1];
+      state.line = line + 1;
+      return true;
+    }, { alt: ["paragraph", "reference", "blockquote", "list"] });
+    md.inline.ruler.before("escape", "math_inline", function (state, silent) {
+      const src = state.src;
+      const start = state.pos;
+      const open = src.startsWith("\\(", start) ? "\\(" : src.startsWith("$$", start) ? "$$" : src[start] === "$" ? "$" : "";
+      if (!open) return false;
+      const close = open === "\\(" ? "\\)" : open;
+      const from = start + open.length;
+      // Currency and shell variables stay text: `$` must hug its content and not close before a digit.
+      if (open === "$" && (!src[from] || /\s/.test(src[from]))) return false;
+      let end = from;
+      while ((end = src.indexOf(close, end)) !== -1) {
+        if (open !== "\\(" && src[end - 1] === "\\") { end += 1; continue; }
+        if (open === "$" && (/\s/.test(src[end - 1]) || /\d/.test(src[end + 1] || ""))) { end += 1; continue; }
+        break;
+      }
+      // Never reach across a code span.
+      if (end === -1 || end === from || src.slice(from, end).includes("`")) return false;
+      if (!silent) {
+        const token = state.push("math_inline", "span", 0);
+        token.content = src.slice(from, end);
+        token.info = open === "$$" ? "display" : "";
+      }
+      state.pos = end + close.length;
+      return true;
+    });
+    md.renderer.rules.math_inline = function (tokens, index) {
+      const token = tokens[index];
+      return '<span class="math-inline"' + (token.info ? ' data-display="true"' : "") + ' data-tex="' + escape(token.content) + '">' + escape(token.content) + "</span>";
+    };
+    md.renderer.rules.math_block = function (tokens, index) {
+      return '<div class="math-block" data-tex="' + escape(tokens[index].content) + '">' + escape(tokens[index].content) + "</div>\n";
+    };
+  }
+
+  // Model HTML stays escaped except attribute-free inline formatting tags, and table alignment
+  // becomes a class because the webview CSP drops inline style attributes.
+  function markdownSafeMarkup(md) {
+    const safeTags = new Set(["u", "mark", "sub", "sup", "kbd", "ins", "del", "s", "small", "br"]);
+    md.inline.ruler.after("escape", "safe_inline_tag", function (state, silent) {
+      if (state.src.charCodeAt(state.pos) !== 0x3C) return false;
+      const match = /^<(\/?)([a-z]+)\s*(\/?)>/i.exec(state.src.slice(state.pos));
+      if (!match) return false;
+      const tag = match[2].toLowerCase();
+      if (!safeTags.has(tag) || (match[1] && tag === "br")) return false;
+      if (!silent) {
+        const token = state.push("safe_inline_tag", tag, 0);
+        token.meta = { closing: Boolean(match[1]) };
+        token.markup = match[0];
+      }
+      state.pos += match[0].length;
+      return true;
+    });
+    md.renderer.rules.safe_inline_tag = function (tokens, index) {
+      const token = tokens[index];
+      return token.tag === "br" ? "<br>" : "<" + (token.meta.closing ? "/" : "") + token.tag + ">";
+    };
+    // Unmatched opening or closing tags fall back to their literal text.
+    md.core.ruler.push("safe_inline_tag_balance", function (state) {
+      for (const block of state.tokens) {
+        if (block.type !== "inline" || !block.children) continue;
+        const open = [];
+        const unmatched = new Set();
+        for (const token of block.children) {
+          if (token.type !== "safe_inline_tag" || token.tag === "br") continue;
+          if (!token.meta.closing) open.push(token);
+          else if (open.length && open[open.length - 1].tag === token.tag) open.pop();
+          else unmatched.add(token);
+        }
+        for (const token of open) unmatched.add(token);
+        for (const token of unmatched) { token.type = "text"; token.content = token.markup; }
+      }
+    });
+    md.core.ruler.push("table_align_class", function (state) {
+      for (const token of state.tokens) {
+        const style = token.attrGet && token.attrGet("style");
+        const align = style && /text-align:(left|center|right)/.exec(style);
+        if (!align) continue;
+        token.attrs = token.attrs.filter(function (attr) { return attr[0] !== "style"; });
+        token.attrJoin("class", "align-" + align[1]);
+      }
+    });
+  }
+
+  function loadVendorScript(file, name) {
+    if (globalThis[name]) return Promise.resolve(globalThis[name]);
+    if (!vendorBase) return Promise.reject(new Error(file));
+    if (!vendorLoads.has(file)) {
+      vendorLoads.set(file, new Promise(function (resolve, reject) {
+        const script = document.createElement("script");
+        script.nonce = scriptNonce;
+        script.src = new URL(file, vendorBase).href;
+        script.onload = function () { globalThis[name] ? resolve(globalThis[name]) : reject(new Error(file)); };
+        script.onerror = function () { vendorLoads.delete(file); reject(new Error(file)); };
+        document.head.append(script);
+      }));
+    }
+    return vendorLoads.get(file);
+  }
+
+  // Unrendered TeX stays visible as source until KaTeX is available; previews render only once it has loaded.
+  function renderMath(root) {
+    const nodes = Array.from(root.querySelectorAll(".math-inline[data-tex], .math-block[data-tex]"));
+    if (!nodes.length) return;
+    const apply = function (katex) {
+      for (const node of nodes) {
+        const tex = node.dataset.tex;
+        if (tex === undefined) continue;
+        try {
+          katex.render(tex, node, { displayMode: node.classList.contains("math-block") || node.dataset.display === "true", output: "mathml", throwOnError: false, strict: "ignore", trust: false });
+          delete node.dataset.tex;
+        } catch {
+          node.classList.add("math-error");
+        }
+      }
+    };
+    if (globalThis.katex) apply(globalThis.katex);
+    else void loadVendorScript("katex.min.js", "katex").then(apply, function () {});
+  }
+
+  // Diagrams become data: SVG images: the document CSP blocks Mermaid's inline <style>, an image document does not.
+  function renderMermaid(root) {
+    for (const code of root.querySelectorAll("pre > code.language-mermaid:not([data-mermaid])")) {
+      const source = code.textContent;
+      code.dataset.mermaid = "pending";
+      const place = function (src) {
+        const pre = code.parentElement;
+        if (!pre || pre.tagName !== "PRE") return;
+        const figure = document.createElement("figure");
+        figure.className = "mermaid-diagram";
+        const image = document.createElement("img");
+        image.alt = source;
+        image.src = src;
+        figure.append(image);
+        pre.replaceWith(figure);
+      };
+      if (mermaidImages.has(source)) { place(mermaidImages.get(source)); continue; }
+      mermaidQueue = mermaidQueue.then(function () {
+        return loadVendorScript("mermaid.min.js", "mermaid");
+      }).then(async function (mermaid) {
+        if (!mermaidImages.has(source)) {
+          const light = document.body.classList.contains("vscode-light") || document.body.classList.contains("vscode-high-contrast-light");
+          mermaid.initialize({ startOnLoad: false, securityLevel: "strict", theme: light ? "default" : "dark", htmlLabels: false, flowchart: { htmlLabels: false }, fontFamily: getComputedStyle(document.body).fontFamily });
+          const { svg } = await mermaid.render("af-mermaid-" + ++mermaidSequence, source);
+          mermaidImages.set(source, svgImageSource(svg));
+        }
+        place(mermaidImages.get(source));
+      }).catch(function () {
+        code.dataset.mermaid = "failed";
+      });
+    }
+  }
+
+  function svgImageSource(markup) {
+    const svg = new DOMParser().parseFromString(markup, "text/html").querySelector("svg");
+    const box = (svg.getAttribute("viewBox") || "").split(/[\s,]+/).map(Number);
+    if (box.length === 4 && box[2] > 0 && box[3] > 0) {
+      svg.setAttribute("width", String(Math.ceil(box[2])));
+      svg.setAttribute("height", String(Math.ceil(box[3])));
+      svg.removeAttribute("style");
+    }
+    const bytes = new TextEncoder().encode(new XMLSerializer().serializeToString(svg));
+    let binary = "";
+    for (let index = 0; index < bytes.length; index += 8192) binary += String.fromCharCode(...bytes.subarray(index, index + 8192));
+    return "data:image/svg+xml;base64," + btoa(binary);
+  }
+
   function finishAssistantMarkdown(container) {
+    renderMath(container);
+    renderMermaid(container);
     for (const img of container.querySelectorAll("img[src]")) {
       const href = img.getAttribute("src");
       if (img.dataset.localImage || !/^(?:file:\/\/|\/|\.\.?\/)/i.test(href)) continue;
@@ -4047,7 +4272,7 @@
       vscode.postMessage({ type: "image.resolve", href });
     }
     for (const code of container.querySelectorAll("pre > code")) {
-      if (code.dataset.highlighted === "true") continue;
+      if (code.dataset.highlighted === "true" || code.dataset.mermaid) continue;
       code.dataset.highlighted = "true";
       const languageClass = Array.from(code.classList).find(function (name) { return name.startsWith("language-"); });
       void applySyntaxHighlighting(code, code.textContent, languageClass ? languageClass.slice(9) : "");
@@ -4073,8 +4298,8 @@
       state.runStartedAt = Date.now();
     }
     const elapsed = Math.max(0, Date.now() - state.runStartedAt);
-    runStatusLabel.textContent = localizedText(state.runProgress, state.runProgressLocalization) || t("ui.working");
-    runStatusLabel.title = localizedText(state.runProgress, state.runProgressLocalization) || t("ui.working");
+    runStatusLabel.textContent = state.cancellationRequested ? t("ui.cancellation.requested") : localizedText(state.runProgress, state.runProgressLocalization) || t("ui.working");
+    runStatusLabel.title = state.cancellationRequested ? t("ui.cancellation.requested") : localizedText(state.runProgress, state.runProgressLocalization) || t("ui.working");
     runElapsed.textContent = formatElapsed(elapsed);
     const elapsedItem = statusBar.querySelector('[data-item-id="elapsed"]');
     if (elapsedItem) {
@@ -5499,7 +5724,10 @@
       case "context": case "contextRemainingTokens": case "contextUsedPercent": return hasUsage && hasWindow;
       case "contextUsed": return hasUsage;
       case "contextWindow": return hasWindow;
+      case "fiveHour": case "fiveHourRemaining": return safePercentOrUndefined(state.fiveHourUsedPercent) !== undefined;
       case "weekly": case "weeklyRemaining": return safePercentOrUndefined(state.weeklyUsedPercent) !== undefined;
+      case "fiveHourReset": return safeResetsAtOrUndefined(state.fiveHourResetsAt) !== undefined;
+      case "weeklyReset": return safeResetsAtOrUndefined(state.weeklyResetsAt) !== undefined;
       case "agents": case "agentsTotal": return main && state.workUnitsKnown;
       case "goalTokens": return main && !goalError && safeCountOrUndefined(nativeGoal?.tokensUsed) !== undefined;
       case "goalTime": return main && !goalError && safeCountOrUndefined(nativeGoal?.timeUsedSeconds) !== undefined;
@@ -5523,7 +5751,7 @@
     const supported = currentCapabilities();
     const labels = {
       agent: state.title,
-      status: state.pendingDecisionRunId ? t("ui.awaiting.input") : state.running ? t("ui.running.73989d") : state.runtimeAvailable ? t("ui.idle") : t("ui.offline"),
+      status: state.cancellationRequested ? t("ui.cancellation.requested") : state.pendingDecisionRunId ? t("ui.awaiting.input") : state.running ? t("ui.running.73989d") : state.runtimeAvailable ? t("ui.idle") : t("ui.offline"),
       role: { main: t("ui.main"), work: t("ui.work"), verification: t("ui.verify") }[state.role],
       agents: main ? state.workUnitsKnown ? t("status.agents", state.workUnits.workActive, state.workUnits.verificationActive) : t("ui.agents") : t("ui.agents.main.only"),
       agentsTotal: main ? t("ui.calls") + (state.workUnitsKnown ? count(state.workUnits.totalCalled) : "—") : t("ui.calls.main.only"),
@@ -5534,8 +5762,12 @@
       contextRemainingTokens: contextRemainingTokensLabel(),
       contextUsedPercent: contextUsedPercentLabel(),
       contextWindow: t("ui.ctx.window") + (state.contextWindowTokens > 0 ? count(state.contextWindowTokens) : "—") + t("ui.tokens"),
+      fiveHour: t("ui.5h.used") + (state.fiveHourUsedPercent === undefined ? "—" : formatPercent(state.fiveHourUsedPercent)),
+      fiveHourRemaining: t("ui.5h.left") + (state.fiveHourUsedPercent === undefined ? "—" : formatPercent(100 - state.fiveHourUsedPercent)),
       weekly: t("ui.wk.used") + (state.weeklyUsedPercent === undefined ? "—" : formatPercent(state.weeklyUsedPercent)),
       weeklyRemaining: t("ui.wk.left") + (state.weeklyUsedPercent === undefined ? "—" : formatPercent(100 - state.weeklyUsedPercent)),
+      fiveHourReset: t("ui.5h.reset") + formatResetsAt(state.fiveHourResetsAt),
+      weeklyReset: t("ui.wk.reset") + formatResetsAt(state.weeklyResetsAt),
       elapsed: state.running && state.runStartedAt ? t("ui.elapsed") + formatElapsed(Math.max(0, Date.now() - state.runStartedAt)) : t("ui.elapsed.54e60c"),
       queue: t("ui.queue") + Math.max(state.queueCount, (state.pendingRequests || []).length),
       runtime: state.runtimeAvailable ? t("ui.runtime.online") : t("ui.runtime.offline"),
@@ -6146,9 +6378,8 @@
   }
 
   function setConversationClearing(busy) {
+    // The clear button spins while clearing; its label carries the status for assistive technology.
     conversationClearing = busy;
-    conversationClearStatus.textContent = busy ? t("ui.clearing.conversation") : "";
-    conversationClearStatus.hidden = !busy;
     updateConversationClearControl();
     updateSendButton();
   }
@@ -6181,6 +6412,9 @@
     state.contextUsedTokens = undefined;
     state.contextWindowTokens = undefined;
     state.weeklyUsedPercent = undefined;
+    state.fiveHourUsedPercent = undefined;
+    state.weeklyResetsAt = undefined;
+    state.fiveHourResetsAt = undefined;
     state.childAgents = [];
     state.workflows = [];
     state.workUnitsKnown = false;
@@ -6425,6 +6659,9 @@
       contextUsedTokens: state.contextUsedTokens,
       contextWindowTokens: state.contextWindowTokens,
       weeklyUsedPercent: state.weeklyUsedPercent,
+      fiveHourUsedPercent: state.fiveHourUsedPercent,
+      weeklyResetsAt: state.weeklyResetsAt,
+      fiveHourResetsAt: state.fiveHourResetsAt,
       runProgress: state.runProgress,
       runProgressLocalization: state.runProgressLocalization,
       runStartedAt: state.runStartedAt,
@@ -6489,6 +6726,17 @@
     return value.toLocaleString(uiLocale(), { maximumFractionDigits: 1 }) + "%";
   }
 
+  // Provider-reported refill time (Unix seconds): time only when it falls today, otherwise date and time.
+  function formatResetsAt(seconds) {
+    if (safeResetsAtOrUndefined(seconds) === undefined) return "—";
+    const date = new Date(seconds * 1000);
+    if (date.getTime() <= Date.now()) return t("ui.reset.elapsed");
+    const time = { hour: "2-digit", minute: "2-digit" };
+    return date.toDateString() === new Date().toDateString()
+      ? date.toLocaleTimeString(uiLocale(), time)
+      : date.toLocaleString(uiLocale(), { month: "numeric", day: "numeric", weekday: "short", ...time });
+  }
+
   function renderContextStatus(item) {
     const compactAt = state.contextWindowTokens;
     const remaining = Math.max(0, compactAt - state.contextUsedTokens);
@@ -6519,6 +6767,10 @@
     return typeof value === "number" && Number.isFinite(value) && value >= 0 && value <= 100
       ? value
       : undefined;
+  }
+
+  function safeResetsAtOrUndefined(value) {
+    return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : undefined;
   }
 
   function normalizeSettingValue(value, allowedValues) {

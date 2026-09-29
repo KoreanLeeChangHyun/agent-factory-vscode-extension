@@ -15,8 +15,18 @@
       <div class="timeline-region">
         <section id="timeline" class="timeline" aria-live="polite" aria-label="Conversation" data-i18n-aria-label="ui.conversation">
           <div id="empty-state" class="empty-state">
-            <img class="brand-mark" src="{{iconUri}}" alt="" aria-hidden="true" />
-            <h1>Agent Factory</h1>
+            <div class="hero-mark" aria-hidden="true">
+              <span class="hero-glow"></span>
+              <span class="hero-orbit"><span class="hero-spark"></span></span>
+              <img class="brand-mark" src="{{iconUri}}" alt="" />
+            </div>
+            <h1 class="hero-title">Agent Factory</h1>
+            <p class="hero-tagline" data-i18n="ui.hero.tagline">Plan, build and verify with your agent team.</p>
+            <ol class="hero-flow" aria-label="Main → Work → Verification" data-i18n-aria-label="ui.hero.flow">
+              <li data-i18n="ui.hero.main">Main</li>
+              <li data-i18n="ui.work">Work</li>
+              <li data-i18n="ui.verification">Verification</li>
+            </ol>
           </div>
         </section>
         <button id="notes-toggle" class="jump-to-bottom notes-toggle" type="button" aria-controls="notes-panel" aria-expanded="false" data-i18n-title="notes.title" data-i18n-aria-label="notes.title" title="Notes" aria-label="Notes">

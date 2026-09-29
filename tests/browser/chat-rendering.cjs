@@ -125,6 +125,14 @@ async function main() {
       assert.deepEqual(errors, []);
       return;
     }
+    if (process.argv.includes('--rich-markdown-only')) {
+      await require('./rich-markdown.cjs').checkRichMarkdown(page);
+      await require('./rich-markdown.cjs').checkSafeMarkup(page);
+      // Mermaid measures labels in the document, where the CSP refuses its inline styles; the rendered image is unaffected.
+      assert.deepEqual(errors.filter(error => !error.startsWith('Refused to apply inline style')), []);
+      console.log('Rich Markdown browser checks passed');
+      return;
+    }
     if (process.argv.includes('--composer-rendering-only')) {
       await require('./composer-rendering.cjs').checkComposerRendering(page);
       assert.deepEqual(errors, []);

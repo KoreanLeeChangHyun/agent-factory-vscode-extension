@@ -1,3 +1,4 @@
+import { codexConnectionEnvironment } from "./codex-connection-host";
 import { ObservedRunCache } from "./observed-run-cache";
 import { localize } from "../../common/localization";
 import { submissionContext } from "./submission-context";
@@ -25,6 +26,10 @@ interface ContextUsage {
   readonly usedTokens: number;
   readonly contextWindowTokens: number;
   readonly weeklyUsedPercent?: number;
+  readonly fiveHourUsedPercent?: number;
+  /** Unix seconds when each account window next refills, as reported by the provider. */
+  readonly weeklyResetsAt?: number;
+  readonly fiveHourResetsAt?: number;
 }
 
 interface ContextUsageSnapshot {
@@ -118,6 +123,9 @@ export type RunUpdate =
       readonly usedTokens: number;
       readonly contextWindowTokens: number;
       readonly weeklyUsedPercent?: number;
+      readonly fiveHourUsedPercent?: number;
+      readonly weeklyResetsAt?: number;
+      readonly fiveHourResetsAt?: number;
     }
   | {
       readonly kind: "activity";
@@ -748,7 +756,10 @@ When a command needs sudo and the Human has requested it, use python3 ${JSON.str
     while (this.contextUsageSnapshots.size > 128) this.contextUsageSnapshots.delete(this.contextUsageSnapshots.keys().next().value!);
     if (!usage || (previous?.usage?.usedTokens === usage.usedTokens &&
         previous.usage.contextWindowTokens === usage.contextWindowTokens &&
-        previous.usage.weeklyUsedPercent === usage.weeklyUsedPercent)) return undefined;
+        previous.usage.weeklyUsedPercent === usage.weeklyUsedPercent &&
+        previous.usage.fiveHourUsedPercent === usage.fiveHourUsedPercent &&
+        previous.usage.weeklyResetsAt === usage.weeklyResetsAt &&
+        previous.usage.fiveHourResetsAt === usage.fiveHourResetsAt)) return undefined;
     return usage;
   }
 
@@ -762,8 +773,12 @@ When a command needs sudo and the Human has requested it, use python3 ${JSON.str
       const usedTokens = readTokenCount(recorded?.usedTokens);
       const contextWindowTokens = readTokenCount(recorded?.contextWindowTokens);
       if (usedTokens === undefined || contextWindowTokens === undefined) return undefined;
-      const weeklyUsedPercent = readUsedPercent(recorded?.weeklyUsedPercent);
-      return { usedTokens, contextWindowTokens, ...(weeklyUsedPercent !== undefined ? { weeklyUsedPercent } : {}) };
+      return {
+        usedTokens,
+        contextWindowTokens,
+        ...usageWindow("weekly", readUsedPercent(recorded?.weeklyUsedPercent), readResetsAt(recorded?.weeklyResetsAt)),
+        ...usageWindow("fiveHour", readUsedPercent(recorded?.fiveHourUsedPercent), readResetsAt(recorded?.fiveHourResetsAt))
+      };
     } catch {
       return undefined;
     }
@@ -1295,12 +1310,19 @@ When a command needs sudo and the Human has requested it, use python3 ${JSON.str
       await this.refreshExecPath(error);
     }
     try {
-      return await runBoundedProcess(this.pythonCommand, [this.execPath, ...arguments_], timeoutMs, maxOutputBytes, pluginRuntimeEnvironment(this.developmentRoot, { ...process.env, ...sudoHandoffEnvironment() }));
+      return await runBoundedProcess(this.pythonCommand, [this.execPath, ...arguments_], timeoutMs, maxOutputBytes, await this.connectionEnvironment(arguments_));
     } catch (error) {
       if (!this.rediscoverExecPath || !isMissingFile(error)) throw error;
       await this.refreshExecPath(error);
-      return runBoundedProcess(this.pythonCommand, [this.execPath, ...arguments_], timeoutMs, maxOutputBytes, pluginRuntimeEnvironment(this.developmentRoot, { ...process.env, ...sudoHandoffEnvironment() }));
+      return runBoundedProcess(this.pythonCommand, [this.execPath, ...arguments_], timeoutMs, maxOutputBytes, await this.connectionEnvironment(arguments_));
     }
+  }
+
+  private async connectionEnvironment(arguments_: readonly string[]): Promise<NodeJS.ProcessEnv> {
+    const environment = pluginRuntimeEnvironment(this.developmentRoot, { ...process.env, ...sudoHandoffEnvironment() });
+    return ["submit", "send"].includes(arguments_[0] ?? "")
+      ? codexConnectionEnvironment(this.pythonCommand, this.execPath, environment)
+      : environment;
   }
 
   private async refreshExecPath(originalError: unknown): Promise<void> {
@@ -1623,11 +1645,13 @@ async function readLatestTokenCount(
       const usedTokens = readTokenCount(lastUsage?.input_tokens);
       const contextWindowTokens = readTokenCount(infoRecord?.model_context_window);
       if (payload?.type === "token_count" && usedTokens !== undefined && contextWindowTokens !== undefined) {
-        const weeklyUsedPercent = readWeeklyUsedPercent(payload.rate_limits);
+        const weekly = readRateLimitWindow(payload.rate_limits, 7 * 24 * 60);
+        const fiveHour = readRateLimitWindow(payload.rate_limits, 5 * 60);
         return {
           usedTokens,
           contextWindowTokens,
-          ...(weeklyUsedPercent !== undefined ? { weeklyUsedPercent } : {})
+          ...usageWindow("weekly", weekly?.usedPercent, weekly?.resetsAt),
+          ...usageWindow("fiveHour", fiveHour?.usedPercent, fiveHour?.resetsAt)
         };
       }
     }
@@ -1637,15 +1661,33 @@ async function readLatestTokenCount(
   }
 }
 
-function readWeeklyUsedPercent(value: unknown): number | undefined {
+function readRateLimitWindow(
+  value: unknown,
+  windowMinutes: number
+): { readonly usedPercent: number; readonly resetsAt?: number } | undefined {
   const rateLimits = readRecordOrUndefined(value);
   for (const key of ["primary", "secondary"] as const) {
     const window = readRecordOrUndefined(rateLimits?.[key]);
-    if (window?.window_minutes !== 7 * 24 * 60) continue;
+    if (window?.window_minutes !== windowMinutes) continue;
     const usedPercent = readUsedPercent(window.used_percent);
-    if (usedPercent !== undefined) return usedPercent;
+    if (usedPercent !== undefined) return { usedPercent, resetsAt: readResetsAt(window.resets_at) };
   }
   return undefined;
+}
+
+function usageWindow(
+  name: "weekly" | "fiveHour",
+  usedPercent: number | undefined,
+  resetsAt: number | undefined
+): Partial<ContextUsage> {
+  return {
+    ...(usedPercent !== undefined ? { [`${name}UsedPercent`]: usedPercent } : {}),
+    ...(resetsAt !== undefined ? { [`${name}ResetsAt`]: resetsAt } : {})
+  };
+}
+
+function readResetsAt(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : undefined;
 }
 
 function readUsedPercent(value: unknown): number | undefined {

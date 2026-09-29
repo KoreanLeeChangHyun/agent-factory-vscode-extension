@@ -71,3 +71,44 @@ for (const action of ['direct', ...actions]) {
     assert.equal(sent.at(-1).attachments[0].id, 'image');
   });
 }
+
+
+test('stop request gives synchronous feedback, stays running, and coalesces repeats', () => {
+  const events = [];
+  const context = {
+    state: { running: true },
+    vscode: { postMessage(message) { events.push(message.type); } },
+    renderRunStatus() { events.push('render'); },
+    renderStatusBar() {},
+  };
+  const cancel = script.slice(script.indexOf('  function cancelRun()'), script.indexOf('  function isDuplicateCancellation('));
+  runInNewContext(cancel + ';cancelRun();cancelRun();', context);
+  assert.deepEqual(events, ['run.cancel', 'render']);
+  assert.equal(context.state.running, true);
+  assert.equal(context.state.cancellationRequested, true);
+  context.state.running = false;
+  runInNewContext(cancel + ';cancelRun();', context);
+  assert.equal(events.length, 2);
+});
+
+test('host termination clears stop feedback and errors allow a retry', () => {
+  const context = {
+    state: { running: true, cancellationRequested: true },
+    message: { running: false },
+    botOutcome: undefined,
+    clearTimeout() {}, dropLivePreviews() {}, updateRunControls() {},
+    scheduleTimelineRender() {}, renderStatusBar() {}, persist() {},
+    renderRunStatus() {}, renderFactoryBot() {}, appendNotice() {},
+  };
+  const terminal = script.slice(script.indexOf('      case "run.state":'), script.indexOf('      case "chat.rejected":'));
+  runInNewContext('switch ("run.state") {' + terminal + '}', context);
+  assert.equal(context.state.running, false);
+  assert.equal(context.state.cancellationRequested, false);
+  context.state.running = true;
+  context.state.cancellationRequested = true;
+  context.message = { level: 'error', text: 'cancel failed' };
+  const notice = script.slice(script.indexOf('      case "host.notice":'), script.indexOf('      case "status.updated":'));
+  runInNewContext('switch ("host.notice") {' + notice + '}', context);
+  assert.equal(context.state.running, true);
+  assert.equal(context.state.cancellationRequested, false);
+});

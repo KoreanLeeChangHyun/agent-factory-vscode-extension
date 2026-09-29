@@ -1,6 +1,36 @@
 const assert = require('node:assert/strict');
 
 async function checkComposerRendering(page) {
+  const viewport = page.viewportSize();
+  const geometry = () => page.evaluate(() => Object.fromEntries(
+    ['#prompt', '.composer', '#timeline', '#notes-panel'].map(selector => {
+      const rect = document.querySelector(selector).getBoundingClientRect();
+      return [selector, { y: rect.y, height: rect.height }];
+    })
+  ));
+  await page.locator('#notes-toggle').click();
+  for (const width of [360, 820, 1280]) {
+    await page.setViewportSize({ width, height: 974 });
+    const empty = await geometry();
+    await page.locator('#prompt').fill('한 줄 입력');
+    await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+    assert.deepEqual(await geometry(), empty, 'One-line drafts retain default heights');
+    await page.evaluate(() => window.postMessage({ type: 'run.state', running: true }, '*'));
+    await page.waitForFunction(() => !document.querySelector('#run-status').hidden);
+    assert.deepEqual(await geometry(), empty, 'Compact run status must not shrink the transcript or notes');
+    const status = await page.locator('#run-status-toggle').boundingBox();
+    assert.ok(status.height > 0 && status.y + status.height <= empty['.composer'].y, 'Status remains above the composer');
+    await page.locator('#prompt').fill('first\nsecond\nthird');
+    await page.waitForFunction(height => document.querySelector('#prompt').getBoundingClientRect().height > height, empty['#prompt'].height);
+    assert.ok((await geometry())['#prompt'].height > empty['#prompt'].height, 'Multiline drafts still grow');
+    await page.locator('#prompt').fill('');
+    await page.waitForFunction(height => document.querySelector('#prompt').getBoundingClientRect().height === height, empty['#prompt'].height);
+    await page.evaluate(() => window.postMessage({ type: 'run.state', running: false }, '*'));
+    await page.waitForFunction(() => document.querySelector('#run-status').hidden);
+    assert.deepEqual(await geometry(), empty, 'Clearing and completing restores the same geometry');
+  }
+  await page.locator('#notes-close').click();
+  await page.setViewportSize(viewport);
   const pendingRequests = Array.from({ length: 100 }, (_, i) => ({
     id: 'queued-' + i, text: 'Queued ' + i, attachments: [], rejected: i === 0,
     execution: { taskMode: 'direct', businessMode: 'normal', model: 'test-model', fast: false }

@@ -24,7 +24,11 @@ export interface ChatPanelState {
   readonly businessMode?: BusinessMode;
   readonly contextUsedTokens?: number;
   readonly contextWindowTokens?: number;
+  readonly fiveHourUsedPercent?: number;
   readonly weeklyUsedPercent?: number;
+  /** Unix seconds when each account window next refills. */
+  readonly fiveHourResetsAt?: number;
+  readonly weeklyResetsAt?: number;
 }
 
 export type ComposerPreferences = Pick<
@@ -76,8 +80,17 @@ export function restoreChatState(
     ...(readCount(value.contextWindowTokens) !== undefined
       ? { contextWindowTokens: readCount(value.contextWindowTokens) }
       : {}),
+    ...(readPercent(value.fiveHourUsedPercent) !== undefined
+      ? { fiveHourUsedPercent: readPercent(value.fiveHourUsedPercent) }
+      : {}),
     ...(readPercent(value.weeklyUsedPercent) !== undefined
       ? { weeklyUsedPercent: readPercent(value.weeklyUsedPercent) }
+      : {}),
+    ...(readResetsAt(value.fiveHourResetsAt) !== undefined
+      ? { fiveHourResetsAt: readResetsAt(value.fiveHourResetsAt) }
+      : {}),
+    ...(readResetsAt(value.weeklyResetsAt) !== undefined
+      ? { weeklyResetsAt: readResetsAt(value.weeklyResetsAt) }
       : {}),
     ...(readNonEmptyString(value.agentId)
       ? { agentId: readNonEmptyString(value.agentId) }
@@ -116,6 +129,10 @@ function readRole(value: unknown): ChatPanelState["role"] {
 
 function readCount(value: unknown): number | undefined {
   return Number.isSafeInteger(value) && Number(value) >= 0 ? Number(value) : undefined;
+}
+
+function readResetsAt(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : undefined;
 }
 
 function readPercent(value: unknown): number | undefined {

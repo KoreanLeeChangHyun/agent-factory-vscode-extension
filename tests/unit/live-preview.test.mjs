@@ -16,7 +16,7 @@ function harness() {
     document: { hidden: false }, requestAnimationFrame(callback) { context.frames.push(callback); return context.frames.length; },
     messageElements: new Map(), messageRenderKeys: new Map(), eventVersion: () => 1, followLatest: false,
     createId: () => "id-" + (id += 1), scheduleTimelineRender() { context.renders += 1; }, renderRunStatus() {}, renderWorkLoopPanel() {},
-    extractTaskFlows: () => ({ flows: [] }), currentTaskFlows: () => [], persist() {}
+    extractTaskFlows: () => ({ flows: [] }), currentTaskFlows: () => [], renderMath() {}, persist() {}
   };
   runInNewContext(helpers + "\nfunction handle(message) { switch (message.type) {\n" + handlers + "\n} }", context);
   return { context, send: message => runInNewContext("handle(" + JSON.stringify(message) + ")", context) };

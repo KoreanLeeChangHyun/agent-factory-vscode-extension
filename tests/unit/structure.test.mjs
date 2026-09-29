@@ -190,7 +190,8 @@ test("status bar includes active Work and Verification counts", function () {
   assert.match(chatStyles, /\.context-token-meter/);
   assert.match(agentClient, /last_token_usage/);
   assert.match(agentClient, /model_context_window/);
-  assert.match(agentClient, /window_minutes !== 7 \* 24 \* 60/);
+  assert.match(agentClient, /readRateLimitWindow\(payload\.rate_limits, 7 \* 24 \* 60\)/);
+  assert.match(agentClient, /readRateLimitWindow\(payload\.rate_limits, 5 \* 60\)/);
   assert.match(chatScript, /agents: main \? state\.workUnitsKnown \? t\("status\.agents", state\.workUnits\.workActive, state\.workUnits\.verificationActive\)/);
   assert.match(template, /id="agents-menu"[^>]*aria-label="Called work and verification agents"/);
   assert.match(chatScript, /type: "agents\.request"/);
