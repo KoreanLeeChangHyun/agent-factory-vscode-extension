@@ -25,7 +25,11 @@ on:
         description: Publish
         default: false
         type: boolean
-jobs: {}
+jobs:
+  release:
+    env:
+      GH_TOKEN: \${{ secrets.RELEASE_TOKEN }}
+      OTHER: \${{ secrets.GITHUB_TOKEN }}
 `;
 
 test('parses workflow_dispatch inputs in block, list and scalar forms', () => {
@@ -42,7 +46,7 @@ test('parses workflow_dispatch inputs in block, list and scalar forms', () => {
   assert.equal(deploy.parseDispatchInputs('name: none\n'), undefined);
 });
 
-const workflow = { id: 7, name: 'Joint release', path: '.github/workflows/release.yml', inputs: [
+const workflow = { id: 7, name: 'Joint release', path: '.github/workflows/release.yml', missingSecrets: [], inputs: [
   { name: 'version', type: 'string', description: '', required: true, suggestion: '1.0.21' },
   { name: 'channel', type: 'choice', description: '', required: false, options: ['stable', 'beta'] },
   { name: 'execute', type: 'boolean', description: '', required: false, default: 'false' }
@@ -75,6 +79,7 @@ test('detects dispatchable workflows and suggests the next project version', asy
       { id: 9, name: 'Old', path: '.github/workflows/old.yml', state: 'disabled_manually' },
       { id: 10, name: 'Dependency Graph', path: 'dynamic/dependabot', state: 'active' }
     ]);
+    if (args[0] === 'secret') return JSON.stringify([{ name: 'UNRELATED' }]);
     if (args[0] === 'api') return Buffer.from('on:\n  push:\n').toString('base64');
     throw new Error('unexpected ' + args.join(' '));
   };
@@ -84,6 +89,7 @@ test('detects dispatchable workflows and suggests the next project version', asy
   assert.deepEqual(target.workflows.map(w => w.id), [7]);
   assert.equal(target.workflows[0].inputs[0].suggestion, '1.0.21');
   assert.equal(target.workflows[0].inputs[1].suggestion, undefined);
+  assert.deepEqual(target.workflows[0].missingSecrets, ['RELEASE_TOKEN']);
   assert.ok(calls.some(call => call.includes('contents/.github/workflows/ci.yml')), 'remote copy read when not checked out');
 });
 
@@ -119,4 +125,18 @@ test('deploy messages are allowlisted and bounded', () => {
     { workflowId: 7, inputs: { v: 1 } }, { workflowId: 7, inputs: { v: 'x'.repeat(1001) } }]) {
     assert.equal(parseClientMessage({ type: 'deploy.run', ...bad }), undefined, JSON.stringify(bad));
   }
+});
+
+test('workflow secrets exclude GITHUB_TOKEN and unknown listings report nothing missing', async () => {
+  assert.deepEqual(deploy.workflowSecrets(RELEASE), ['RELEASE_TOKEN']);
+});
+
+test('token setup stores the gh token through stdin or asks for sign-in', async () => {
+  const written = [];
+  await deploy.setupDeploySecret('/tmp', 'owner/repo', 'RELEASE_TOKEN', async () => 'gho_x\n', async (...args) => { written.push(args); });
+  assert.deepEqual(written, [['owner/repo', 'RELEASE_TOKEN', 'gho_x', '/tmp']]);
+  await assert.rejects(deploy.setupDeploySecret('/tmp', 'owner/repo', 'RELEASE_TOKEN', async () => { throw new Error('not logged in'); }, async () => {}), { code: 'auth-required' });
+  await assert.rejects(deploy.setupDeploySecret('/tmp', 'owner/repo', 'GITHUB_TOKEN', async () => 'x', async () => {}), { code: 'invalid-input' });
+  assert.deepEqual(parseClientMessage({ type: 'deploy.token', secret: 'RELEASE_TOKEN', value: 'leak' }), { type: 'deploy.token', secret: 'RELEASE_TOKEN' });
+  assert.equal(parseClientMessage({ type: 'deploy.token', secret: 'a b' }), undefined);
 });

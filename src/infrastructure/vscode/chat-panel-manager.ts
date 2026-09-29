@@ -41,7 +41,7 @@ import { ChatSessionController } from "../../modules/chat/session-controller";
 import { saveConvertedImage } from "./converted-image-store";
 import { writeNewImageAttachment } from "./image-attachment-store";
 import { SudoBroker } from "./sudo-broker";
-import { DeployError, deployRunStatus, detectDeployTarget, dispatchDeploy, type DeployTarget } from "../github/deploy-workflows";
+import { DeployError, deployRunStatus, detectDeployTarget, dispatchDeploy, setupDeploySecret, type DeployTarget } from "../github/deploy-workflows";
 
 type RuntimeConnection =
   | { readonly available: true; readonly client: AgentRuntimeClient }
@@ -461,6 +461,9 @@ export class ChatPanelManager implements vscode.Disposable {
         return;
       case "deploy.run":
         await this.runDeploy(managed, message.workflowId, message.inputs);
+        return;
+      case "deploy.token":
+        await this.setupDeployToken(managed, message.secret);
         return;
       case "worktree.create":
       case "worktree.merge": {
@@ -1532,6 +1535,31 @@ Read the exact stored child result/receipt and existing workflow status for repo
         : error instanceof DeployError && error.code === "not-github" ? localize("deploy.not.github")
           : localize("deploy.failed", error instanceof Error ? error.message : String(error));
       await this.post(managed.panel, { type: "deploy.targets", error: text });
+    }
+  }
+
+  /** Stores the gh token as the workflow secret; without a gh sign-in, starts the browser sign-in in a terminal. */
+  private async setupDeployToken(managed: ManagedPanel, secret: string): Promise<void> {
+    const detected = managed.deployTarget;
+    if (!detected) {
+      await this.post(managed.panel, { type: "deploy.targets", error: localize("deploy.detect.first") });
+      return;
+    }
+    try {
+      await setupDeploySecret(detected.root, detected.target.repository, secret);
+      await this.post(managed.panel, { type: "host.notice", level: "info", text: localize("deploy.token.saved", secret, detected.target.repository) });
+      this.deployDetections.delete(detected.root);
+      await this.detectDeploy(managed, false);
+    } catch (error) {
+      if (error instanceof DeployError && error.code === "auth-required") {
+        const terminal = vscode.window.createTerminal({ name: "GitHub sign-in", cwd: detected.root });
+        terminal.show();
+        terminal.sendText("gh auth login --hostname github.com --web --git-protocol https --scopes repo,workflow");
+        await this.post(managed.panel, { type: "host.notice", level: "info", text: localize("deploy.token.signin", secret) });
+        return;
+      }
+      await this.post(managed.panel, { type: "deploy.targets", target: detected.target,
+        error: localize("deploy.failed", error instanceof Error ? error.message : String(error)) });
     }
   }
 

@@ -22,6 +22,7 @@ export type ClientMessage =
   | { readonly type: "worktree.create"; readonly repository: string; readonly name: string; readonly base: string }
   | { readonly type: "worktree.merge" | "worktree.refresh" | "worktree.repositories" }
   | { readonly type: "deploy.detect" }
+  | { readonly type: "deploy.token"; readonly secret: string }
   | { readonly type: "deploy.run"; readonly workflowId: number; readonly inputs: Readonly<Record<string, string | boolean>> }
   | { readonly type: "notes.folder"; readonly scope: import("../infrastructure/vscode/note-store").NoteScope; readonly folder: string }
   | { readonly type: "notes.list"; readonly scope: import("../infrastructure/vscode/note-store").NoteScope }

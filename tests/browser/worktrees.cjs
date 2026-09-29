@@ -71,32 +71,34 @@ exports.checkWorktrees = async function (page) {
 exports.checkDeploy = checkDeploy;
 
 async function checkDeploy(page) {
-  const targets = { type: 'deploy.targets', target: { repository: 'owner/repo', ref: 'main', workflows: [{ id: 7, name: 'Joint release', path: '.github/workflows/release.yml', inputs: [
-    { name: 'version', type: 'string', description: 'Release version', required: true, suggestion: '1.0.21' },
-    { name: 'execute', type: 'boolean', description: 'Publish', required: false, default: 'false' }] }] } };
-  await page.evaluate(message => window.postMessage(message, '*'), targets);
+  const workflow = { id: 7, name: 'Joint release', path: '.github/workflows/release.yml', missingSecrets: [], inputs: [
+    { name: 'version', type: 'string', description: 'Release version', required: false, suggestion: '1.0.21' }] };
+  const post = message => page.evaluate(value => window.postMessage(value, '*'), message);
+  await post({ type: 'deploy.targets', target: { repository: 'owner/repo', ref: 'main', workflows: [{ ...workflow, missingSecrets: ['RELEASE_TOKEN'] }] } });
   await page.waitForFunction(() => !document.querySelector('#worktree-picker').hidden);
   await page.locator('#worktree-button').click();
   assert.ok(await page.evaluate(() => window.sentMessages.slice(-3).some(message => message.type === 'deploy.detect')), 'opening the menu refreshes pipelines');
-  await page.evaluate(message => window.postMessage(message, '*'), targets);
-  assert.equal(await page.locator('#worktree-controls').isVisible(), false);
+  await post({ type: 'deploy.targets', target: { repository: 'owner/repo', ref: 'main', workflows: [{ ...workflow, missingSecrets: ['RELEASE_TOKEN'] }] } });
+  assert.ok(await page.locator('#deploy-workflows [data-deploy-secret]').isVisible());
+  assert.ok(await page.locator('#deploy-workflows button:not([data-deploy-secret])').isDisabled(), 'deploy waits for the token');
+  await page.locator('#deploy-workflows [data-deploy-secret]').click();
+  assert.deepEqual(await page.evaluate(() => window.sentMessages.at(-1)), { type: 'deploy.token', secret: 'RELEASE_TOKEN' });
+  await post({ type: 'deploy.targets', target: { repository: 'owner/repo', ref: 'main', workflows: [workflow] } });
+  await page.locator('#worktree-button').click();
+  await post({ type: 'deploy.targets', target: { repository: 'owner/repo', ref: 'main', workflows: [workflow] } });
   assert.equal(await page.locator('#deploy-summary').innerText(), 'owner/repo · main');
   await page.locator('#deploy-workflows button').click();
   assert.ok(await page.locator('#deploy-dialog').isVisible());
+  assert.match(await page.locator('#deploy-target').innerText(), /owner\/repo/);
   const version = page.locator('[data-deploy-input="version"]');
   assert.equal(await version.inputValue(), '1.0.21');
   await version.fill('next');
   await page.locator('#deploy-submit').click();
   assert.ok(await page.locator('#deploy-error').isVisible());
   await version.fill('1.0.21');
-  await page.locator('[data-deploy-input="execute"]').check();
   await page.locator('#deploy-submit').click();
-  assert.ok(await page.locator('#deploy-review').isVisible(), 'review step precedes dispatch');
-  assert.notEqual(await page.evaluate(() => window.sentMessages.at(-1).type), 'deploy.run');
-  assert.match(await page.locator('#deploy-review').innerText(), /owner\/repo · main[\s\S]*1\.0\.21[\s\S]*true/);
-  await page.locator('#deploy-submit').click();
-  assert.deepEqual(await page.evaluate(() => window.sentMessages.at(-1)), { type: 'deploy.run', workflowId: 7, inputs: { version: '1.0.21', execute: true } });
-  await page.evaluate(() => window.postMessage({ type: 'deploy.status', repository: 'owner/repo', run: { id: 2, url: 'https://github.com/owner/repo/actions/runs/2', workflow: 'Joint release', status: 'queued' } }, '*'));
+  assert.deepEqual(await page.evaluate(() => window.sentMessages.at(-1)), { type: 'deploy.run', workflowId: 7, inputs: { version: '1.0.21' } }, 'one confirmation dispatches');
+  await post({ type: 'deploy.status', repository: 'owner/repo', run: { id: 2, url: 'https://github.com/owner/repo/actions/runs/2', workflow: 'Joint release', status: 'queued' } });
   await page.waitForFunction(() => !document.querySelector('#deploy-dialog').open);
   await page.locator('#worktree-button').click();
   assert.match(await page.locator('#deploy-run-link').innerText(), /Joint release/);

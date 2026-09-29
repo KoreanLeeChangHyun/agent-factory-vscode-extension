@@ -3562,6 +3562,3 @@ table.interview-options td:first-child {
 #deploy-dialog button { padding: 7px 16px; border-radius: 6px; cursor: pointer; border: 1px solid var(--vscode-button-border, #454545); background: var(--vscode-button-secondaryBackground, #333); color: var(--vscode-button-secondaryForeground, #fff); }
 #deploy-dialog #deploy-submit { background: var(--vscode-button-background, #007acc); color: var(--vscode-button-foreground, #fff); }
 #deploy-dialog :disabled { opacity: .55; cursor: default; }
-.deploy-review { display: grid; grid-template-columns: max-content 1fr; gap: 6px 14px; margin: 0 0 14px; font-size: 12px; }
-.deploy-review dt { color: var(--vscode-descriptionForeground); }
-.deploy-review dd { margin: 0; overflow-wrap: anywhere; }

@@ -429,12 +429,11 @@
           <div class="unit-create-body">
             <p id="deploy-target"></p>
             <div id="deploy-fields"></div>
-            <dl id="deploy-review" class="deploy-review" hidden></dl>
-            <p id="deploy-review-note" data-i18n="deploy.review.note" hidden>This starts the GitHub Actions workflow with the values above. It may commit, push and publish.</p>
+            <p id="deploy-review-note" data-i18n="deploy.review.note">Deploy starts this GitHub Actions workflow with the values above. It may commit, push and publish.</p>
             <p id="deploy-status" role="status" aria-live="polite"></p>
             <p id="deploy-error" role="alert" hidden></p>
           </div>
-          <footer><button id="deploy-cancel" type="button" data-i18n="unit.cancel">Cancel</button><button id="deploy-back" type="button" data-i18n="deploy.back" hidden>Back</button><button id="deploy-submit" type="submit" data-i18n="deploy.review">Review</button></footer>
+          <footer><button id="deploy-cancel" type="button" data-i18n="unit.cancel">Cancel</button><button id="deploy-submit" type="submit" data-i18n="deploy.confirm">Deploy</button></footer>
         </form>
       </dialog>
     </main>

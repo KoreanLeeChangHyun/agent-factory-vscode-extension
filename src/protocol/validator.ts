@@ -14,7 +14,7 @@ const clientMessageTypes = new Set([
   "agent.defaults.save", "agent.preset", "agent.preset.field",
   "client.ready",
   "worktree.create", "worktree.merge", "worktree.refresh", "worktree.repositories",
-  "deploy.detect", "deploy.run",
+  "deploy.detect", "deploy.run", "deploy.token",
   "notes.list", "notes.folder",
   "notes.save",
   "bots.configure", "bot.interact",
@@ -81,6 +81,8 @@ export function parseClientMessage(value: unknown): ClientMessage | undefined {
       return { type: value.type, repository: value.repository as string, name: value.name as string, base: value.base as string };
     case "deploy.detect":
       return { type: value.type };
+    case "deploy.token":
+      return typeof value.secret === "string" && /^[A-Za-z_][A-Za-z0-9_]{0,99}$/.test(value.secret) ? { type: value.type, secret: value.secret } : undefined;
     case "deploy.run": {
       if (!Number.isSafeInteger(value.workflowId) || (value.workflowId as number) <= 0 || !isRecord(value.inputs)) return undefined;
       const entries = Object.entries(value.inputs);

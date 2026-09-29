@@ -1,4 +1,4 @@
-import { execFile } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
 import { readdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { runtimeEnvironment } from "../agent-factory/process-environment";
@@ -20,6 +20,8 @@ export interface DeployWorkflow {
   readonly name: string;
   readonly path: string;
   readonly inputs: readonly DeployInput[];
+  /** Repository secrets the workflow references that are not configured yet. */
+  readonly missingSecrets: readonly string[];
 }
 
 /** GitHub deployment pipelines the current project can start manually. */
@@ -40,7 +42,7 @@ export interface DeployRun {
 export type GhRunner = (arguments_: readonly string[], cwd: string) => Promise<string>;
 
 export class DeployError extends Error {
-  constructor(readonly code: "gh-missing" | "not-github" | "invalid-input" | "unknown-workflow" | "run-not-found", message: string) {
+  constructor(readonly code: "gh-missing" | "not-github" | "invalid-input" | "unknown-workflow" | "run-not-found" | "auth-required", message: string) {
     super(message);
     this.name = "DeployError";
   }
@@ -218,18 +220,59 @@ export async function detectDeployTarget(root: string, gh: GhRunner = runGh): Pr
   const listed = JSON.parse(await gh(["workflow", "list", "-R", repository, "--json", "id,name,path,state"], root)) as
     { id: number; name: string; path: string; state: string }[];
   const suggestion = nextPatch(await projectVersion(root));
+  let configured: Set<string> | null | undefined;
+  const configuredSecrets = async () => {
+    if (configured === undefined) {
+      try { configured = new Set((JSON.parse(await gh(["secret", "list", "-R", repository, "--json", "name"], root)) as { name: string }[]).map(item => item.name)); }
+      catch { configured = null; } // Listing needs admin rights; unknown is not reported as missing.
+    }
+    return configured;
+  };
   const workflows: DeployWorkflow[] = [];
   for (const workflow of listed) {
     if (workflow.state !== "active" || !/^\.github\/workflows\/[^/]+\.ya?ml$/.test(workflow.path)) continue;
     const source = await workflowSource(root, repository, ref, workflow.path, gh);
     const inputs = source === undefined ? undefined : parseDispatchInputs(source);
     if (!inputs) continue;
+    const referenced = workflowSecrets(source ?? "");
+    const known = referenced.length ? await configuredSecrets() : null;
     workflows.push({
       id: workflow.id, name: workflow.name, path: workflow.path,
+      missingSecrets: known ? referenced.filter(name => !known.has(name)) : [],
       inputs: inputs.map(input => input.type === "string" && /version/i.test(input.name) && !input.default && suggestion ? { ...input, suggestion } : input)
     });
   }
   return { repository, ref, workflows };
+}
+
+/** Secret names a workflow references, excluding the always-present GITHUB_TOKEN. */
+export function workflowSecrets(source: string): string[] {
+  const names = [...source.matchAll(/\bsecrets\.([A-Za-z_][A-Za-z0-9_]*)/g)].map(match => match[1] ?? "");
+  return [...new Set(names.filter(name => name && name !== "GITHUB_TOKEN"))];
+}
+
+export type SecretWriter = (repository: string, name: string, value: string, cwd: string) => Promise<void>;
+
+const writeSecret: SecretWriter = (repository, name, value, cwd) => new Promise((resolve, reject) => {
+  // The token travels on stdin so it never appears in process arguments.
+  const child = spawn("gh", ["secret", "set", name, "-R", repository], {
+    cwd, env: { ...runtimeEnvironment(), GH_PROMPT_DISABLED: "1", NO_COLOR: "1" }, windowsHide: true, stdio: ["pipe", "ignore", "pipe"]
+  });
+  let stderr = "";
+  child.stderr.on("data", chunk => { stderr += String(chunk); });
+  child.on("error", reject);
+  child.on("close", code => code === 0 ? resolve() : reject(new Error(stderr.trim().slice(0, 2_000) || `gh secret set exited with ${code}`)));
+  child.stdin.end(value);
+});
+
+/** Stores the signed-in gh account's token as a repository secret; auth-required means sign in first. */
+export async function setupDeploySecret(root: string, repository: string, name: string, gh: GhRunner = runGh, write: SecretWriter = writeSecret): Promise<void> {
+  if (!/^[A-Za-z_][A-Za-z0-9_]{0,99}$/.test(name) || name.startsWith("GITHUB_")) throw new DeployError("invalid-input", `Invalid secret name: ${name}`);
+  let token = "";
+  try { token = (await gh(["auth", "token"], root)).trim(); }
+  catch (error) { if (error instanceof DeployError) throw error; }
+  if (!token) throw new DeployError("auth-required", "GitHub CLI is not signed in.");
+  await write(repository, name, token, root);
 }
 
 // ---------------------------------------------------------------- dispatch
