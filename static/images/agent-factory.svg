@@ -6,7 +6,7 @@
     </linearGradient>
   </defs>
   <rect width="64" height="64" rx="15" fill="url(#af-bg)"/>
-  <g fill="#fff" transform="translate(10 10) scale(.6875)">
+  <g fill="#fff" transform="translate(5.7 5.9) scale(.876)">
     <path fill-rule="evenodd" d="M6 56V40l14-9v9l14-9v9l14-9V14h8v42Zm6-10v4h5v-4Zm11 0v4h5v-4Zm11 0v4h5v-4Z"/>
     <circle cx="52" cy="7" r="3.5"/>
     <path d="M13 12l2.4 6.6L22 21l-6.6 2.4L13 30l-2.4-6.6L4 21l6.6-2.4Z"/>
