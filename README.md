@@ -5,8 +5,9 @@ results in VS Code.
 
 ## 1. Get started
 
-- Requires Python 3.10+ and an available Codex or Claude runtime in the workspace environment.
-  The Antigravity CLI (`agy`) is optional.
+- Requires Python 3.10+ and at least one of the Codex CLI, Claude Code or the Antigravity
+  CLI (`agy`, signed in to a Google AI subscription) in the workspace environment.
+  Installed runtimes are detected automatically.
 - Official installation guides: [Codex CLI](https://developers.openai.com/codex/cli/) · [Claude Code](https://code.claude.com/docs/en/setup).
 
 1. Run **Agent Factory: Add Main Agent Chat** from the VS Code Command Palette.
