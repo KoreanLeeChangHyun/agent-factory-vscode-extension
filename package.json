@@ -2,7 +2,7 @@
   "name": "agent-factory-main-chat",
   "displayName": "Agent Factory Main Chat",
   "description": "%extension.description%",
-  "version": "1.0.16",
+  "version": "1.0.17",
   "publisher": "agent-factory",
   "icon": "static/images/agent-factory.png",
   "license": "UNLICENSED",
@@ -278,15 +278,28 @@
           "description": "%agentFactory.mainChat.executionMode.description%"
         },
         "agentFactory.mainChat.botCharacter": {
-          "type": "string", "enum": ["", "lumi", "factory"], "default": "", "scope": "window",
+          "type": "string",
+          "enum": [
+            "",
+            "lumi",
+            "factory"
+          ],
+          "default": "",
+          "scope": "window",
           "description": "%agentFactory.mainChat.botCharacter.description%"
         },
         "agentFactory.mainChat.lumiPrompt": {
-          "type": "string", "scope": "window",
+          "type": "string",
+          "scope": "window",
           "description": "%agentFactory.mainChat.lumiPrompt.description%"
         },
         "agentFactory.mainChat.factoryBotPrompt": {
-          "type": ["string", "null"], "default": null, "scope": "window",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null,
+          "scope": "window",
           "description": "%agentFactory.mainChat.factoryBotPrompt.description%"
         },
         "agentFactory.mainChat.botModel": {

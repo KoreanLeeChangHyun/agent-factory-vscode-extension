@@ -12,7 +12,7 @@ function harness() {
   function element() {
     const classes = new Set();
     const node = {
-      children: [], dataset: {}, handlers: {}, hidden: false, attrs: {},
+      children: [], dataset: {}, handlers: {}, hidden: false, attrs: {}, style: {},
       classList: { add: (...names) => names.forEach(name => classes.add(name)), remove: (...names) => names.forEach(name => classes.delete(name)), contains: name => classes.has(name) },
       setAttribute(name, value) { this.attrs[name] = value; },
       append(...nodes) { this.children.push(...nodes); nodes.forEach(child => { child.parent = this; }); },
@@ -36,7 +36,7 @@ function harness() {
     document: { createElement: element, createElementNS: (_namespace, _tag) => element(), getElementById(id) { if (!nodes.has(id)) nodes.set(id, element()); return nodes.get(id); }, querySelectorAll: () => elements },
     state: { statusItems: ["project", "branch", "queue"], title: "Main", projectName: "fixture-project", branch: "fixture-branch", role: "main", runtimeAvailable: true, workUnitsKnown: true, workUnits: { workActive: 1, verificationActive: 2, totalCalled: 3 }, queueCount: 0 },
     nativeGoal: null, goalError: undefined, taskModeNames: { work: "Work" },
-    conversationWorktree: undefined, worktreeLocationDescription: () => "Workspace", receiveBotPrompt() {},
+    conversationWorktree: undefined, worktreeLocationDescription: () => "Workspace", receiveBotPrompt() {}, receiveBotCharacter() {}, renderBotModels() {}, renderShortcuts() {}, botMenu: { querySelectorAll: () => [] }, factoryBot: { classList: { toggle() {} } },
     currentCapabilities: () => ({ model: true, reasoning: true, fast: true }),
     renderStatusBar() {},
     persist() { persisted.push(clean(context.state.statusItems)); },

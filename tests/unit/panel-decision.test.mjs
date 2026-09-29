@@ -955,7 +955,7 @@ test('global bot setting disposes every companion and prevents inference while p
 
 test('bot talk validates drafts, forwards only their text and reports failure without submitting work', async () => {
   const posted = [], seen = [];
-  const manager = new module.exports.ChatPanelManager({}, {}, () => [], async () => { throw Error('Must not connect task runtime'); });
+  const manager = new module.exports.ChatPanelManager({ globalState: { get: (_key, fallback) => fallback, async update() {} } }, {}, () => [], async () => { throw Error('Must not connect task runtime'); });
   let enabled = true;
   manager.botsEnabled = () => enabled;
   const managed = { state: {}, panel: { webview: { async postMessage(message) { posted.push(message); return true; } } },
@@ -977,36 +977,37 @@ test('bot talk validates drafts, forwards only their text and reports failure wi
   let finish;
   managed.lunaBot.talk = () => new Promise(resolve => { finish = resolve; });
   const pending = manager.handleMessage(managed, { type: 'bot.talk', requestId: 'four', text: 'late' });
+  await new Promise(resolve => setImmediate(resolve));
   managed.disposed = true; finish('late'); await pending;
   assert.equal(posted.length, 0);
 });
 
 test('bot prompt saves globally and is read fresh for subsequent talks; failed save retains config', async () => {
   const original = vscode.workspace.getConfiguration;
-  const config = { botsEnabled: true, botPrompt: 'initial' }, posts = [], calls = [], writes = [];
+  const config = { botsEnabled: true, botCharacter: 'factory', factoryBotPrompt: 'initial' }, posts = [], calls = [], writes = [];
   vscode.workspace.getConfiguration = () => ({
     get: (key, fallback) => config[key] ?? fallback,
     async update(key, value, target) { if (value === 'reject') throw Error('save'); writes.push({ key, value, target }); config[key] = value; }
   });
   try {
-    const manager = new module.exports.ChatPanelManager({}, {}, () => [], async () => { throw Error('not used'); });
+    const manager = new module.exports.ChatPanelManager({ globalState: { get: (_key, fallback) => fallback, async update() {} } }, {}, () => [], async () => { throw Error('not used'); });
     const managed = { state: {}, panel: { webview: { async postMessage(message) { posts.push(message); return true; } } },
       lunaBot: { async talk(text, prompt) { calls.push({ text, prompt }); return 'ok'; } } };
     manager.panels.set('bot-prompt-test', managed);
     await manager.handleMessage(managed, { type: 'bot.prompt.save', requestId: 'save1', prompt: '친절하게\n답변하세요' });
     assert.equal(writes[0].target, vscode.ConfigurationTarget.Global);
-    assert.equal(config.botPrompt, '친절하게\n답변하세요');
-    assert.equal(posts.find(post => post.type === 'bots.updated').botPrompt, config.botPrompt);
+    assert.equal(config.factoryBotPrompt, '친절하게\n답변하세요');
+    assert.equal(posts.find(post => post.type === 'bots.updated').botPrompt, config.factoryBotPrompt);
     assert.equal(posts.at(-1).type, 'bot.prompt.saved');
     await manager.handleMessage(managed, { type: 'bot.talk', requestId: 'talk1', text: 'hello' });
-    assert.deepEqual(calls[0], { text: 'hello', prompt: config.botPrompt });
+    assert.deepEqual(calls[0], { text: 'hello', prompt: config.factoryBotPrompt });
     await manager.handleMessage(managed, { type: 'bot.prompt.save', requestId: 'save2', prompt: 'reject' });
     assert.equal(posts.at(-1).failed, true);
-    assert.equal(config.botPrompt, '친절하게\n답변하세요');
+    assert.equal(config.factoryBotPrompt, '친절하게\n답변하세요');
     await manager.handleMessage(managed, { type: 'bot.prompt.save', requestId: 'save3', prompt: '' });
-    assert.equal(config.botPrompt, '');
+    assert.equal(config.factoryBotPrompt, '');
     await manager.handleMessage(managed, { type: 'bot.talk', requestId: 'talk2', text: 'next' });
-    assert.equal(calls[1].prompt, '');
+    assert.match(calls[1].prompt, /Factory Bot/);
   } finally { vscode.workspace.getConfiguration = original; }
 });
 

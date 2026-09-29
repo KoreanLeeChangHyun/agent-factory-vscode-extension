@@ -261,7 +261,7 @@ test("runtime status stays in the loader while concrete activity updates the tim
   assert.match(chatScript, /case "run\.activity":[\s\S]*upsertActivity\(message\.id, message\.category, message\.phase, message\.text, message\.diff, message\.title, message\.output\)/);
   assert.match(chatScript, /indexedTimeline\(\)\.activities\.get\(id\)/);
   assert.match(chatStyles, /\.message-activity/);
-  assert.match(chatScript, /runStatusLabel\.textContent = localizedText\(state\.runProgress, state\.runProgressLocalization\) \|\| t\("ui\.working"\)/);
+  assert.match(chatScript, /runStatusLabel\.textContent = state\.cancellationRequested \? t\("ui\.cancellation\.requested"\) : localizedText\(state\.runProgress, state\.runProgressLocalization\) \|\| t\("ui\.working"\)/);
 });
 
 test("commands, file changes, tools, and assistant responses have distinct presentation", function () {

@@ -81,7 +81,7 @@ async function fixture(t) {
     __readTheme() { reads++; return readTheme(); }
   });
   const manager = new module.exports.ChatPanelManager(
-    { extensionUri: { fsPath: "/extension" }, globalStorageUri: { fsPath: "/isolated/theme-test-storage" }, globalState: { get: () => undefined } },
+    { extensionUri: { fsPath: "/extension" }, globalStorageUri: { fsPath: "/isolated/theme-test-storage" }, globalState: { get: (_key, fallback) => fallback, async update() {} } },
     { localResourceRoots: [], render: async () => "<html></html>" }, () => [],
     async () => { operations.push("connectRuntime"); return { available: false, diagnostic: "Runtime unavailable in fixture" }; }
   );
