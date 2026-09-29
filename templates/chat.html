@@ -252,6 +252,12 @@
                   <button id="worktree-merge" class="setting-option" role="menuitem" type="button" hidden><span data-i18n="worktree.merge">Merge and return</span></button>
 
                 </div>
+                <div id="deploy-controls" class="deploy-controls" role="group" aria-label="GitHub deploy" data-i18n-aria-label="deploy.title" hidden>
+                  <div class="worktree-heading"><strong data-i18n="deploy.title">GitHub deploy</strong><button id="deploy-refresh" class="icon-button" role="menuitem" type="button" data-i18n-title="deploy.refresh" data-i18n-aria-label="deploy.refresh" title="Refresh" aria-label="Refresh">↻</button></div>
+                  <p id="deploy-summary" class="worktree-summary"></p>
+                  <div id="deploy-workflows" role="group"></div>
+                  <button id="deploy-run-link" class="setting-option" role="menuitem" type="button" hidden></button>
+                </div>
                 </div>
               </div>
               <div class="utility-picker question-picker">
@@ -415,6 +421,20 @@
             <p id="unit-create-error" role="alert" hidden></p>
           </div>
           <footer><button id="unit-create-cancel" type="button" data-i18n="unit.cancel">Cancel</button><button id="unit-create-submit" type="submit" data-i18n="unit.create.submit">Create</button></footer>
+        </form>
+      </dialog>
+      <dialog id="deploy-dialog" aria-labelledby="deploy-title">
+        <form id="deploy-form" novalidate>
+          <header><strong id="deploy-title" data-i18n="deploy.dialog.title">Deploy to GitHub</strong></header>
+          <div class="unit-create-body">
+            <p id="deploy-target"></p>
+            <div id="deploy-fields"></div>
+            <dl id="deploy-review" class="deploy-review" hidden></dl>
+            <p id="deploy-review-note" data-i18n="deploy.review.note" hidden>This starts the GitHub Actions workflow with the values above. It may commit, push and publish.</p>
+            <p id="deploy-status" role="status" aria-live="polite"></p>
+            <p id="deploy-error" role="alert" hidden></p>
+          </div>
+          <footer><button id="deploy-cancel" type="button" data-i18n="unit.cancel">Cancel</button><button id="deploy-back" type="button" data-i18n="deploy.back" hidden>Back</button><button id="deploy-submit" type="submit" data-i18n="deploy.review">Review</button></footer>
         </form>
       </dialog>
     </main>

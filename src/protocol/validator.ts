@@ -14,6 +14,7 @@ const clientMessageTypes = new Set([
   "agent.defaults.save", "agent.preset", "agent.preset.field",
   "client.ready",
   "worktree.create", "worktree.merge", "worktree.refresh", "worktree.repositories",
+  "deploy.detect", "deploy.run",
   "notes.list", "notes.folder",
   "notes.save",
   "bots.configure", "bot.interact",
@@ -78,6 +79,15 @@ export function parseClientMessage(value: unknown): ClientMessage | undefined {
       if (![value.repository, value.name, value.base].every(v => typeof v === "string")) return undefined;
       if (![value.repository, value.name, value.base].every(v => (v as string).trim())) return undefined;
       return { type: value.type, repository: value.repository as string, name: value.name as string, base: value.base as string };
+    case "deploy.detect":
+      return { type: value.type };
+    case "deploy.run": {
+      if (!Number.isSafeInteger(value.workflowId) || (value.workflowId as number) <= 0 || !isRecord(value.inputs)) return undefined;
+      const entries = Object.entries(value.inputs);
+      if (entries.length > 25 || !entries.every(([key, item]) => /^[A-Za-z_][A-Za-z0-9_-]{0,99}$/.test(key) &&
+        (typeof item === "boolean" || (typeof item === "string" && item.length <= 1000)))) return undefined;
+      return { type: value.type, workflowId: value.workflowId as number, inputs: Object.fromEntries(entries) as Record<string, string | boolean> };
+    }
     case "worktree.repositories":
     case "worktree.merge":
     case "worktree.refresh":

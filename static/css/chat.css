@@ -3542,3 +3542,26 @@ table.interview-options td:first-child {
 #model-menu #agent-preset-name { padding: 0 7px; color: var(--vscode-input-foreground, #ddd); background: var(--vscode-input-background, #1e1e1e); border: 1px solid var(--vscode-input-border, #444); }
 #model-menu #agent-preset-save { padding: 0 8px; color: var(--vscode-button-foreground, #fff); background: var(--vscode-button-background, #287da0); border: 0; cursor: pointer; }
 #model-menu #agent-preset-save:disabled { opacity: .45; cursor: default; }
+
+/* GitHub deploy: shares the Work Unit dialog layout. */
+.deploy-controls { margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--vscode-panel-border, #ffffff18); }
+#worktree-controls[hidden] + .deploy-controls { margin-top: 0; padding-top: 0; border-top: 0; }
+.deploy-controls .setting-option { width: 100%; }
+#deploy-dialog { box-sizing: border-box; width: min(600px, calc(100vw - 24px)); max-height: calc(100vh - 24px); padding: 0; color: var(--vscode-foreground); background: var(--vscode-editorWidget-background, #252526); border: 1px solid var(--vscode-widget-border, #454545); border-radius: 12px; box-shadow: 0 16px 48px #0006; }
+#deploy-dialog::backdrop { background: #0007; }
+#deploy-form { display: flex; flex-direction: column; max-height: calc(100vh - 26px); }
+#deploy-dialog header, #deploy-dialog footer { padding: 16px 20px; flex: none; }
+#deploy-dialog header { border-bottom: 1px solid var(--vscode-panel-border, #ffffff18); }
+#deploy-dialog label { display: flex; flex-direction: column; gap: 7px; min-width: 0; margin-bottom: 16px; font-size: 12px; }
+#deploy-dialog label.deploy-checkbox { flex-direction: row; align-items: center; gap: 8px; }
+#deploy-dialog label small { color: var(--vscode-descriptionForeground); }
+#deploy-dialog input:not([type="checkbox"]), #deploy-dialog select { box-sizing: border-box; width: 100%; min-width: 0; font: inherit; color: var(--vscode-input-foreground); background-color: var(--vscode-input-background, #1e1e1e); border: 1px solid var(--vscode-input-border, #454545); border-radius: 6px; padding: 8px 10px; }
+#deploy-dialog p { font-size: 12px; line-height: 1.6; color: var(--vscode-descriptionForeground); overflow-wrap: anywhere; margin: 0 0 12px; }
+#deploy-dialog #deploy-error { color: var(--vscode-errorForeground, #f48771); }
+#deploy-dialog footer { display: flex; justify-content: flex-end; gap: 8px; border-top: 1px solid var(--vscode-panel-border, #ffffff18); }
+#deploy-dialog button { padding: 7px 16px; border-radius: 6px; cursor: pointer; border: 1px solid var(--vscode-button-border, #454545); background: var(--vscode-button-secondaryBackground, #333); color: var(--vscode-button-secondaryForeground, #fff); }
+#deploy-dialog #deploy-submit { background: var(--vscode-button-background, #007acc); color: var(--vscode-button-foreground, #fff); }
+#deploy-dialog :disabled { opacity: .55; cursor: default; }
+.deploy-review { display: grid; grid-template-columns: max-content 1fr; gap: 6px 14px; margin: 0 0 14px; font-size: 12px; }
+.deploy-review dt { color: var(--vscode-descriptionForeground); }
+.deploy-review dd { margin: 0; overflow-wrap: anywhere; }

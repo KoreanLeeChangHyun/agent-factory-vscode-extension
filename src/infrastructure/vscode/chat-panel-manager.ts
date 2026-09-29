@@ -41,6 +41,7 @@ import { ChatSessionController } from "../../modules/chat/session-controller";
 import { saveConvertedImage } from "./converted-image-store";
 import { writeNewImageAttachment } from "./image-attachment-store";
 import { SudoBroker } from "./sudo-broker";
+import { DeployError, deployRunStatus, detectDeployTarget, dispatchDeploy, type DeployTarget } from "../github/deploy-workflows";
 
 type RuntimeConnection =
   | { readonly available: true; readonly client: AgentRuntimeClient }
@@ -64,6 +65,8 @@ interface ManagedPanel {
   queueResumeInFlight?: boolean;
   sessionTransition?: Promise<void>;
   worktree?: import("../agent-factory/agent-client").ConversationWorktree;
+  deployTarget?: { readonly root: string; readonly target: DeployTarget };
+  deployPolling?: boolean;
   disposed?: boolean;
   executionModeExplicit?: boolean;
   executionMode?: import("../agent-factory/agent-client").ExecutionMode;
@@ -453,6 +456,12 @@ export class ChatPanelManager implements vscode.Disposable {
       case "worktree.refresh":
         await this.refreshWorktree(managed);
         return;
+      case "deploy.detect":
+        await this.detectDeploy(managed, false);
+        return;
+      case "deploy.run":
+        await this.runDeploy(managed, message.workflowId, message.inputs);
+        return;
       case "worktree.create":
       case "worktree.merge": {
         if (managed.sessionTransition) return;
@@ -464,6 +473,7 @@ export class ChatPanelManager implements vscode.Disposable {
       }
       case "client.ready":
         await this.ensureSudoBroker(managed);
+        void this.detectDeploy(managed, true);
         managed.lunaBot?.cancelTalk();
         const pendingSudo = this.sudoBroker.challengeFor(managed.state.panelId);
         if (pendingSudo) await this.post(managed.panel, pendingSudo);
@@ -1494,6 +1504,70 @@ Read the exact stored child result/receipt and existing workflow status for repo
     } catch (error) {
       await this.post(managed.panel, { type: "host.notice", level: "error", text: localize("worktree.failed", error instanceof Error ? error.message : String(error)) });
     }
+  }
+
+  private readonly deployDetections = new Map<string, { readonly at: number; readonly result: Promise<DeployTarget> }>();
+
+  /** Finds manually dispatchable GitHub workflows for the chat's project; quiet detection only reports availability. */
+  private async detectDeploy(managed: ManagedPanel, quiet: boolean): Promise<void> {
+    const root = managed.worktree?.workingDirectory ?? vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+    if (!root || (managed.state.role ?? "main") !== "main") {
+      if (!quiet) await this.post(managed.panel, { type: "deploy.targets", error: localize("deploy.no.project") });
+      return;
+    }
+    const cached = this.deployDetections.get(root);
+    const detection = cached && (quiet || Date.now() - cached.at < 5_000) && Date.now() - cached.at < 300_000
+      ? cached : { at: Date.now(), result: detectDeployTarget(root) };
+    this.deployDetections.set(root, detection);
+    try {
+      const target = await detection.result;
+      if (managed.disposed) return;
+      managed.deployTarget = { root, target };
+      await this.post(managed.panel, { type: "deploy.targets", target });
+    } catch (error) {
+      this.deployDetections.delete(root);
+      managed.deployTarget = undefined;
+      if (managed.disposed) return;
+      const text = error instanceof DeployError && error.code === "gh-missing" ? localize("deploy.gh.missing")
+        : error instanceof DeployError && error.code === "not-github" ? localize("deploy.not.github")
+          : localize("deploy.failed", error instanceof Error ? error.message : String(error));
+      await this.post(managed.panel, { type: "deploy.targets", error: text });
+    }
+  }
+
+  private async runDeploy(managed: ManagedPanel, workflowId: number, inputs: Readonly<Record<string, string | boolean>>): Promise<void> {
+    const detected = managed.deployTarget;
+    if (!detected || managed.deployPolling) {
+      await this.post(managed.panel, { type: "deploy.status", error: localize(detected ? "deploy.busy" : "deploy.detect.first") });
+      return;
+    }
+    let run;
+    try {
+      run = await dispatchDeploy(detected.root, detected.target, workflowId, inputs);
+    } catch (error) {
+      await this.post(managed.panel, { type: "deploy.status", error: localize("deploy.failed", error instanceof Error ? error.message : String(error)) });
+      return;
+    }
+    const repository = detected.target.repository;
+    managed.deployPolling = true;
+    await this.post(managed.panel, { type: "deploy.status", run, repository });
+    await this.post(managed.panel, { type: "host.notice", level: "info", text: localize("deploy.started", run.workflow, repository, run.url) });
+    try {
+      while (!managed.disposed && run.status !== "completed") {
+        await new Promise(resolve => setTimeout(resolve, 10_000));
+        if (managed.disposed) return;
+        try {
+          const next = await deployRunStatus(detected.root, repository, run);
+          if (next.status !== run.status || next.conclusion !== run.conclusion) await this.post(managed.panel, { type: "deploy.status", run: next, repository });
+          run = next;
+        } catch { /* transient gh failure: keep polling */ }
+      }
+      if (!managed.disposed) {
+        const success = run.conclusion === "success";
+        await this.post(managed.panel, { type: "host.notice", level: success ? "info" : "error",
+          text: localize(success ? "deploy.succeeded" : "deploy.finished", run.workflow, run.conclusion ?? run.status, run.url) });
+      }
+    } finally { managed.deployPolling = false; }
   }
 
   private async warnDirectBranch(managed: ManagedPanel): Promise<void> {

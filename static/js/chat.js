@@ -220,6 +220,144 @@
   const worktreePositionObserver = new ResizeObserver(positionWorktreeMenu);
   worktreePositionObserver.observe(document.getElementById("worktree-picker"));
   worktreePositionObserver.observe(promptSurface);
+
+  // GitHub deploy: the host detects manually dispatchable workflows; the dialog collects
+  // their declared inputs and requires a review step before anything is dispatched.
+  let deployTarget, deployError = "", deployLoading = false, deployRun, deployRepository = "", deployWorkflow, deployValues, deployBusy = false;
+  const deployDialog = document.getElementById("deploy-dialog");
+  const deployForm = document.getElementById("deploy-form");
+  const deployFields = document.getElementById("deploy-fields");
+  const deployReview = document.getElementById("deploy-review");
+  const deployErrorNode = document.getElementById("deploy-error");
+  const deployStatusNode = document.getElementById("deploy-status");
+  function deployAvailable() { return Boolean(deployTarget?.workflows?.length || deployRun); }
+  function deployActive() { return Boolean(deployRun && deployRun.status !== "completed"); }
+  function deployStateLabel(run) {
+    if (run.status !== "completed") return t("deploy.state.running", run.status);
+    return run.conclusion === "success" ? t("deploy.state.success") : t("deploy.state.failed", run.conclusion || run.status);
+  }
+  function renderDeploy() {
+    const controls = document.getElementById("deploy-controls");
+    if (!controls) return;
+    controls.hidden = state.role !== "main" || (!deployAvailable() && !deployError);
+    const summary = document.getElementById("deploy-summary");
+    summary.textContent = deployLoading ? t("deploy.detecting") : deployError || (deployTarget ? deployTarget.repository + " · " + deployTarget.ref : "");
+    const list = document.getElementById("deploy-workflows");
+    list.replaceChildren();
+    for (const workflow of deployTarget?.workflows || []) {
+      const button = document.createElement("button");
+      button.type = "button"; button.className = "setting-option"; button.setAttribute("role", "menuitem");
+      button.textContent = t("deploy.workflow", workflow.name);
+      button.title = workflow.path;
+      button.disabled = deployActive();
+      button.addEventListener("click", () => openDeploy(workflow));
+      button.addEventListener("keydown", handleSettingMenuKeydown);
+      list.append(button);
+    }
+    const link = document.getElementById("deploy-run-link");
+    link.hidden = !deployRun;
+    if (deployRun) link.textContent = t("deploy.run.link", deployRun.workflow, deployStateLabel(deployRun));
+    document.getElementById("deploy-refresh").disabled = deployLoading;
+  }
+  function requestDeployTargets() {
+    deployLoading = true; deployError = "";
+    renderDeploy();
+    vscode.postMessage({ type: "deploy.detect" });
+  }
+  document.getElementById("deploy-refresh").addEventListener("click", requestDeployTargets);
+  document.getElementById("deploy-refresh").addEventListener("keydown", handleSettingMenuKeydown);
+  document.getElementById("deploy-run-link").addEventListener("click", () => { if (deployRun?.url) vscode.postMessage({ type: "link.open", href: deployRun.url }); });
+  document.getElementById("deploy-run-link").addEventListener("keydown", handleSettingMenuKeydown);
+  function deploySetPhase(review) {
+    deployFields.hidden = review;
+    deployReview.hidden = !review;
+    document.getElementById("deploy-review-note").hidden = !review;
+    document.getElementById("deploy-back").hidden = !review;
+    document.getElementById("deploy-submit").textContent = t(review ? "deploy.confirm" : "deploy.review");
+  }
+  function deploySetBusy(busy) {
+    deployBusy = busy;
+    for (const control of deployForm.querySelectorAll("input, select, button")) control.disabled = busy;
+    deployForm.setAttribute("aria-busy", String(busy));
+  }
+  function openDeploy(workflow) {
+    closeSettingMenu(false);
+    deployWorkflow = workflow; deployValues = undefined;
+    document.getElementById("deploy-target").textContent = t("deploy.target", deployTarget.repository, deployTarget.ref, workflow.name);
+    deployFields.replaceChildren();
+    for (const input of workflow.inputs) {
+      const label = document.createElement("label");
+      const caption = document.createElement("span");
+      caption.textContent = input.name + (input.required ? " *" : "");
+      let control;
+      if (input.type === "boolean") {
+        label.className = "deploy-checkbox";
+        control = document.createElement("input"); control.type = "checkbox";
+        control.checked = input.default === "true";
+      } else if (input.type === "choice") {
+        control = document.createElement("select");
+        for (const value of input.options || []) { const option = document.createElement("option"); option.value = option.textContent = value; control.append(option); }
+        if (input.default) control.value = input.default;
+      } else {
+        control = document.createElement("input");
+        control.type = input.type === "number" ? "number" : "text";
+        control.autocomplete = "off";
+        control.value = input.default ?? input.suggestion ?? "";
+        if (input.suggestion) control.pattern = "\\d+\\.\\d+\\.\\d+";
+      }
+      control.dataset.deployInput = input.name;
+      control.required = input.required && input.type !== "boolean";
+      if (input.type === "boolean") label.append(control, caption); else label.append(caption, control);
+      if (input.description) { const hint = document.createElement("small"); hint.textContent = input.description; label.append(hint); }
+      deployFields.append(label);
+    }
+    deployErrorNode.hidden = true; deployStatusNode.textContent = "";
+    deploySetPhase(false); deploySetBusy(false);
+    deployDialog.showModal();
+    deployFields.querySelector("input, select")?.focus();
+  }
+  function collectDeployValues() {
+    const values = {};
+    for (const control of deployFields.querySelectorAll("[data-deploy-input]")) {
+      values[control.dataset.deployInput] = control.type === "checkbox" ? control.checked : control.value.trim();
+    }
+    return values;
+  }
+  function showDeployReview(values) {
+    deployReview.replaceChildren();
+    const rows = [[t("deploy.repository"), deployTarget.repository + " · " + deployTarget.ref], [t("deploy.pipeline"), deployWorkflow.name],
+      ...Object.entries(values).map(([key, value]) => [key, typeof value === "boolean" ? (value ? "true" : "false") : value || "—"])];
+    for (const [key, value] of rows) {
+      const term = document.createElement("dt"); term.textContent = key;
+      const detail = document.createElement("dd"); detail.textContent = value;
+      deployReview.append(term, detail);
+    }
+    deploySetPhase(true);
+    document.getElementById("deploy-submit").focus();
+  }
+  deployForm.addEventListener("submit", event => {
+    event.preventDefault();
+    if (deployBusy || !deployWorkflow) return;
+    deployErrorNode.hidden = true;
+    if (!deployValues) {
+      for (const control of deployFields.querySelectorAll("[data-deploy-input]")) {
+        if (control.required && !control.value.trim()) { control.focus(); deployErrorNode.textContent = t("deploy.required", control.dataset.deployInput); deployErrorNode.hidden = false; return; }
+        if (control.pattern && control.value && !new RegExp("^(?:" + control.pattern + ")$").test(control.value.trim())) {
+          control.focus(); deployErrorNode.textContent = t("deploy.invalid.version", control.dataset.deployInput); deployErrorNode.hidden = false; return;
+        }
+      }
+      deployValues = collectDeployValues();
+      showDeployReview(deployValues);
+      return;
+    }
+    deploySetBusy(true);
+    deployStatusNode.textContent = t("deploy.dispatching");
+    vscode.postMessage({ type: "deploy.run", workflowId: deployWorkflow.id, inputs: deployValues });
+  });
+  document.getElementById("deploy-back").addEventListener("click", () => { deployValues = undefined; deploySetPhase(false); deployFields.querySelector("input, select")?.focus(); });
+  document.getElementById("deploy-cancel").addEventListener("click", () => deployDialog.close());
+  deployDialog.addEventListener("cancel", event => { if (deployBusy) event.preventDefault(); });
+  deployDialog.addEventListener("close", () => worktreeButton.focus());
   function worktreeLocationDescription() {
     const tree = conversationWorktree?.worktree;
     const isolated = tree && tree.phase !== "merged";
@@ -233,9 +371,11 @@
     const controls = document.getElementById("worktree-controls");
     if (!controls) return;
     const unavailable = !worktreeSupported || state.role !== "main";
-    document.getElementById("worktree-picker").hidden = unavailable;
+    const pickerHidden = state.role !== "main" || (unavailable && !deployAvailable());
+    document.getElementById("worktree-picker").hidden = pickerHidden;
     controls.hidden = unavailable;
-    if (unavailable && openSettingId === "worktree") closeSettingMenu(false);
+    renderDeploy();
+    if (pickerHidden && openSettingId === "worktree") closeSettingMenu(false);
     const tree = conversationWorktree?.worktree;
     const isolated = tree && tree.phase !== "merged";
     worktreeButton.classList.toggle("is-connected", Boolean(isolated));
@@ -2041,6 +2181,22 @@
           unitError.textContent = message.error; unitError.hidden = false;
           if (message.created) document.getElementById("unit-create-submit").disabled = true;
         } else unitDialog.close();
+        break;
+      case "deploy.targets":
+        deployLoading = false;
+        deployTarget = message.target;
+        deployError = message.error || "";
+        renderWorktree();
+        break;
+      case "deploy.status":
+        if (message.error) {
+          if (deployDialog.open) { deploySetBusy(false); deployStatusNode.textContent = ""; deployErrorNode.textContent = message.error; deployErrorNode.hidden = false; }
+          else deployError = message.error;
+        } else if (message.run) {
+          deployRun = message.run; deployRepository = message.repository || deployRepository;
+          if (deployDialog.open) { deploySetBusy(false); deployDialog.close(); }
+        }
+        renderWorktree();
         break;
       case "worktree.repositories": {
         unitRepositories = message.repositories;
@@ -6029,6 +6185,7 @@
     closeQuestionMenu(false);
     openSettingId = setting;
     if (setting === "model") vscode.postMessage({ type: "models.request" });
+    if (setting === "worktree" && state.role === "main") requestDeployTargets();
     const button = settingButton(setting);
     const menu = settingMenu(setting);
     renderSettingMenu(setting, menu);
