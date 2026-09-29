@@ -8,14 +8,14 @@ import { importTypeScript } from "../support/import-typescript.mjs";
 const { ensureAgentFactoryClaudePlugin } = await importTypeScript("src/infrastructure/agent-factory/claude-plugin-dependency.ts");
 const { locateAgentFactoryExec } = await importTypeScript("src/infrastructure/agent-factory/plugin-locator.ts");
 
-function fakeClaude({ installed, marketplaces = [], available = "1.0.17" }) {
+function fakeClaude({ installed, marketplaces = [], available = "1.0.17", omitAvailable = false }) {
   const calls = [];
   const state = { installed, marketplaces };
   const runner = async (_executable, args) => {
     const command = args.join(" ");
     calls.push(command);
     if (command === "plugin list --json") return { stdout: JSON.stringify(state.installed ? [{ id: "agent-factory@agent-factory", version: state.installed, enabled: true }] : []) };
-    if (command === "plugin list --available --json") return { stdout: JSON.stringify({ installed: [], available: [{ pluginId: "agent-factory@agent-factory", version: available }] }) };
+    if (command === "plugin list --available --json") return { stdout: JSON.stringify({ installed: [], available: omitAvailable ? [] : [{ pluginId: "agent-factory@agent-factory", version: available }] }) };
     if (command === "plugin marketplace list --json") return { stdout: JSON.stringify(state.marketplaces) };
     if (command.startsWith("plugin marketplace add")) { state.marketplaces = [{ name: "agent-factory", repo: args[3] }]; return { stdout: "" }; }
     if (command.startsWith("plugin install") || command.startsWith("plugin update")) { state.installed = available; return { stdout: "" }; }
@@ -42,6 +42,22 @@ test("an older plugin is updated after refreshing the catalog", async () => {
   const { runner, calls } = fakeClaude({ installed: "1.0.16", marketplaces: [{ name: "agent-factory", repo: "KoreanLeeChangHyun/agent-factory-claude-plugin" }] });
   await ensureAgentFactoryClaudePlugin("1.0.17", runner);
   assert.deepEqual(calls.filter(call => !call.startsWith("plugin list")), ["plugin marketplace list --json", "plugin marketplace update agent-factory", "plugin update agent-factory@agent-factory"]);
+});
+
+test("installed plugins omitted from available use the refreshed official catalog", async (t) => {
+  const root = await mkdtemp(join(tmpdir(), "af-claude-catalog-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  await mkdir(join(root, ".claude-plugin"));
+  const catalog = join(root, ".claude-plugin/marketplace.json");
+  const marketplaces = [{ name: "agent-factory", repo: "KoreanLeeChangHyun/agent-factory-claude-plugin", installLocation: root }];
+  await writeFile(catalog, JSON.stringify({ name: "agent-factory", plugins: [{ name: "agent-factory", version: "1.0.19" }] }));
+  const updated = fakeClaude({ installed: "1.0.17", available: "1.0.19", omitAvailable: true, marketplaces });
+  await ensureAgentFactoryClaudePlugin("1.0.19", updated.runner);
+  assert.ok(updated.calls.includes("plugin update agent-factory@agent-factory"));
+  // A readable catalog must still enforce the exact required base version.
+  const mismatch = fakeClaude({ installed: "1.0.17", omitAvailable: true, marketplaces });
+  await assert.rejects(ensureAgentFactoryClaudePlugin("1.0.18", mismatch.runner), /does not offer plugin version 1\.0\.18/);
+  assert.ok(!mismatch.calls.includes("plugin update agent-factory@agent-factory"));
 });
 
 test("a foreign marketplace name and a missing version fail without changes", async () => {

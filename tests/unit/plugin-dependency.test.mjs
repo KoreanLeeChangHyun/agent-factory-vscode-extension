@@ -12,11 +12,12 @@ async function importTypeScript(relativePath, mockExtensionImports = false) {
     setup(buildApi) {
       buildApi.onResolve({ filter: /^vscode$/ }, () => ({ path: "vscode", namespace: "mock" }));
       buildApi.onResolve({ filter: /core\/bootstrap$/ }, () => ({ path: "bootstrap", namespace: "mock" }));
-      buildApi.onResolve({ filter: /plugin-dependency$/ }, (args) => ({ path: /claude-plugin-dependency$/.test(args.path) ? "claude-dependency" : "dependency", namespace: "mock" }));
+      buildApi.onResolve({ filter: /plugin-dependency$/ }, (args) => ({ path: /claude-plugin-dependency$/.test(args.path) ? "claude-dependency" : /antigravity-plugin-dependency$/.test(args.path) ? "antigravity-dependency" : "dependency", namespace: "mock" }));
       buildApi.onLoad({ filter: /.*/, namespace: "mock" }, (args) => {
         if (args.path === "vscode") return { contents: "export const ExtensionMode = { Production: 1, Development: 2, Test: 3 }; export const ProgressLocation = { Notification: 15 }; export const window = {};" };
         if (args.path === "bootstrap") return { contents: "export function bootstrap() {}" };
         if (args.path === "claude-dependency") return { contents: "export async function ensureAgentFactoryClaudePlugin() {}" };
+        if (args.path === "antigravity-dependency") return { contents: "export async function ensureAgentFactoryAntigravityPlugin() {} export async function isAntigravityAvailable() { return false; }" };
         return { contents: "export async function ensureAgentFactoryPlugin() {} export function semanticBase(value) { return String(value).split('+')[0]; }" };
       });
     }
@@ -320,6 +321,29 @@ test("activation bootstraps only after dependency success and reports one failur
   assert.equal(events.length, 2);
   assert.match(events[1], /^error:Unable to start Agent Factory\. dependency unavailable/);
   assert.ok(!events.includes("bootstrap"));
+});
+
+test("the Antigravity plugin is ensured after startup and its failure only warns", async () => {
+  const { activate } = await importTypeScript("src/extension.ts", true);
+  const events = [];
+  let release;
+  const antigravity = new Promise(resolve => { release = resolve; });
+  const services = {
+    ensurePlugin: async () => { events.push("ensure"); },
+    ensureAntigravityPlugin: async (version) => { events.push(`antigravity:${version}`); await antigravity; throw new Error("offline"); },
+    showWarningMessage: async (message) => { events.push(`warning:${message}`); },
+    bootstrap: () => { events.push("bootstrap"); },
+    withProgress: async (_options, task) => task({}, {}),
+    showErrorMessage: async (message) => { events.push(`error:${message}`); }
+  };
+  await activate({ extension: { packageJSON: { version: "1.0.19" } } }, services);
+  // Startup does not wait for the optional GitHub install.
+  assert.deepEqual(events, ["ensure", "antigravity:1.0.19", "bootstrap"]);
+  release();
+  await new Promise(resolve => setTimeout(resolve, 0));
+  assert.equal(events.length, 4);
+  assert.match(events[3], /^warning:.*offline/);
+  assert.ok(!events.some(event => event.startsWith("error:")));
 });
 
 test("first activation registers missing official source, installs exact version, then confirms it", async () => {

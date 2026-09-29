@@ -4,6 +4,7 @@ import * as vscode from "vscode";
 import { bootstrap } from "./core/bootstrap";
 import { ensureAgentFactoryPlugin } from "./infrastructure/agent-factory/plugin-dependency";
 import { ensureAgentFactoryClaudePlugin } from "./infrastructure/agent-factory/claude-plugin-dependency";
+import { ensureAgentFactoryAntigravityPlugin, isAntigravityAvailable } from "./infrastructure/agent-factory/antigravity-plugin-dependency";
 import { developmentPluginRoot, validateDevelopmentPlugin } from "./infrastructure/agent-factory/development-plugin";
 import { locateAgentFactoryExec } from "./infrastructure/agent-factory/plugin-locator";
 import { CodexCliNotFoundError, configureClaudeCli, configureCodexCli, resolveClaudeCli, resolveCodexCli } from "./infrastructure/agent-factory/process-environment";
@@ -18,6 +19,8 @@ export interface ActivationServices {
   readonly ensurePlugin: (requiredVersion: string) => Promise<void>;
   /** Installs or updates the matching Claude Code plugin when the Claude CLI is available. */
   readonly ensureClaudePlugin?: (requiredVersion: string) => Promise<void>;
+  /** Installs or updates the matching Antigravity plugin when the agy CLI is available; never blocks startup. */
+  readonly ensureAntigravityPlugin?: (requiredVersion: string) => Promise<void>;
   readonly showWarningMessage?: typeof vscode.window.showWarningMessage;
   /** Claude-only hosts cannot install from the Codex marketplace; they need an already installed plugin. */
   readonly requireInstalledPlugin?: (requiredVersion: string) => Promise<void>;
@@ -97,6 +100,11 @@ async function start(context: vscode.ExtensionContext, services: ActivationServi
         }
         if (!codexAvailable && services.requireInstalledPlugin) await services.requireInstalledPlugin(requiredVersion);
       });
+      if (!developmentRoot && services.ensureAntigravityPlugin) {
+        // Optional host: its GitHub install must not delay or fail the chat's own startup.
+        void services.ensureAntigravityPlugin(requiredVersion).catch(error =>
+          services.showWarningMessage?.(localize("antigravity.plugin.warning", error instanceof Error ? error.message : String(error))));
+      }
       await services.initializeDefaults?.(context, { codex: codexAvailable, claude: claudeAvailable });
     } catch (error) {
       const detail = error instanceof Error ? error.message : localize("ui.an.unknown.error.occurred");
@@ -139,6 +147,9 @@ function defaultActivationServices(): ActivationServices {
     },
     ensurePlugin: ensureAgentFactoryPlugin,
     ensureClaudePlugin: ensureAgentFactoryClaudePlugin,
+    ensureAntigravityPlugin: async (requiredVersion) => {
+      if (await isAntigravityAvailable()) await ensureAgentFactoryAntigravityPlugin(requiredVersion);
+    },
     showWarningMessage: vscode.window.showWarningMessage.bind(vscode.window),
     requireInstalledPlugin: async (requiredVersion) => {
       const configuredPath = vscode.workspace?.getConfiguration("agentFactory.mainChat").get<string>("runtimeExecPath")?.trim();

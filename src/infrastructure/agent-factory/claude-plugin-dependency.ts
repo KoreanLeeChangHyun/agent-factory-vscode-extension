@@ -1,6 +1,8 @@
 import { localize } from "../../common/localization";
 import { PluginDependencyError, runProcess, semanticBase, type ProcessRunner } from "./plugin-dependency";
 import { claudeExecutable } from "./process-environment";
+import { readFile, stat } from "node:fs/promises";
+import { join } from "node:path";
 
 const MARKETPLACE = "agent-factory";
 const PLUGIN_ID = "agent-factory@agent-factory";
@@ -66,7 +68,25 @@ async function availableVersion(runner: ProcessRunner): Promise<string | undefin
   const available = isRecord(value) && Array.isArray(value.available) ? value.available : undefined;
   if (!available) throw new PluginDependencyError(localize("claude.plugin.invalid.output", localize("claude.plugin.list")));
   const match = available.find(record => isRecord(record) && record.pluginId === PLUGIN_ID && typeof record.version === "string");
-  return isRecord(match) ? String(match.version) : undefined;
+  if (isRecord(match)) return String(match.version);
+  // Claude omits installed plugins from `available`, even when an update exists.
+  // Read the refreshed official catalog rather than treating that omission as absence.
+  const marketplaces = parseJson(await run(runner, ["plugin", "marketplace", "list", "--json"], LIST_TIMEOUT_MS, localize("claude.plugin.marketplace.list")));
+  if (!Array.isArray(marketplaces)) throw new PluginDependencyError(localize("claude.plugin.invalid.output", localize("claude.plugin.marketplace.list")));
+  const catalog = marketplaces.find(entry => isRecord(entry) && entry.name === MARKETPLACE);
+  if (!isRecord(catalog) || typeof catalog.installLocation !== "string") return undefined;
+  if (String(catalog.repo ?? catalog.url ?? "").replace(/^https:\/\/github\.com\/|\.git$/g, "") !== OFFICIAL_REPOSITORY) {
+    throw new PluginDependencyError(localize("claude.plugin.marketplace.conflict", OFFICIAL_REPOSITORY));
+  }
+  const path = join(catalog.installLocation, ".claude-plugin", "marketplace.json");
+  const info = await stat(path);
+  if (!info.isFile() || info.size > MAX_OUTPUT_BYTES) throw new PluginDependencyError(localize("claude.plugin.invalid.output", localize("claude.plugin.list")));
+  const metadata = parseJson(await readFile(path, "utf8"));
+  if (!isRecord(metadata) || metadata.name !== MARKETPLACE || !Array.isArray(metadata.plugins)) {
+    throw new PluginDependencyError(localize("claude.plugin.invalid.output", localize("claude.plugin.list")));
+  }
+  const plugin = metadata.plugins.find(entry => isRecord(entry) && entry.name === "agent-factory" && typeof entry.version === "string");
+  return isRecord(plugin) ? String(plugin.version) : undefined;
 }
 
 async function ensureMarketplace(runner: ProcessRunner): Promise<void> {
