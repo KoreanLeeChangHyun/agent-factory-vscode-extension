@@ -3,7 +3,7 @@ import { existsSync } from "node:fs";
 import { readFile, stat } from "node:fs/promises";
 import { join, resolve } from "node:path";
 
-/** F5 supplies this path only to the development host and its child processes. */
+/** The development setting overrides the F5 environment path in the development host. */
 export function developmentPluginRoot(isDevelopment: boolean, environment: NodeJS.ProcessEnv = process.env, configuredRoot?: string): string | undefined {
   if (!isDevelopment) return undefined;
   const root = configuredRoot?.trim() || environment.AGENT_FACTORY_DEV_PLUGIN_ROOT?.trim();

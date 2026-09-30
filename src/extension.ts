@@ -101,22 +101,46 @@ async function start(context: vscode.ExtensionContext, services: ActivationServi
         title: localize("ui.checking.agent.factory.plugin.dependencies"),
         cancellable: false
       }, async () => {
-        if (developmentRoot) return validateDevelopmentPlugin(developmentRoot);
+        if (developmentRoot) {
+          try {
+            await validateDevelopmentPlugin(developmentRoot);
+          } catch (error) {
+            void services.showWarningMessage?.(pluginDependencyWarning(error));
+          }
+          return;
+        }
         // Without any CLI the chat still opens; Settings can set paths and install the plugin later.
         if (!anyProvider) return;
-        if (codexAvailable) await services.ensurePlugin(requiredVersion);
+        if (codexAvailable) {
+          try {
+            await services.ensurePlugin(requiredVersion);
+          } catch (error) {
+            void services.showWarningMessage?.(pluginDependencyWarning(error));
+          }
+        }
         if (claudeAvailable && services.ensureClaudePlugin) {
           try {
             await services.ensureClaudePlugin(requiredVersion);
           } catch (error) {
             // With Codex present the runtime is already installed; the Claude plugin only adds Claude Code skills.
-            if (!codexAvailable) throw error;
             void services.showWarningMessage?.(localize("claude.plugin.warning", error instanceof Error ? error.message : String(error)));
           }
         }
         // Antigravity is the only installer on an agy-only host, so the runtime must wait for it.
-        if (!codexAvailable && !claudeAvailable && services.ensureAntigravityPlugin) await services.ensureAntigravityPlugin(requiredVersion);
-        if (!codexAvailable && services.requireInstalledPlugin) await services.requireInstalledPlugin(requiredVersion);
+        if (!codexAvailable && !claudeAvailable && services.ensureAntigravityPlugin) {
+          try {
+            await services.ensureAntigravityPlugin(requiredVersion);
+          } catch (error) {
+            void services.showWarningMessage?.(pluginDependencyWarning(error));
+          }
+        }
+        if (!codexAvailable && services.requireInstalledPlugin) {
+          try {
+            await services.requireInstalledPlugin(requiredVersion);
+          } catch (error) {
+            void services.showWarningMessage?.(pluginDependencyWarning(error));
+          }
+        }
       });
       if (!anyProvider) void services.showWarningMessage?.(localize("ui.providers.none.detected"));
       if (!developmentRoot && antigravityAvailable && (codexAvailable || claudeAvailable) && services.ensureAntigravityPlugin) {
@@ -144,6 +168,10 @@ async function start(context: vscode.ExtensionContext, services: ActivationServi
     services.bootstrap(context);
     return true;
   }
+}
+
+function pluginDependencyWarning(error: unknown): string {
+  return localize("ui.plugin.dependency.warning", error instanceof Error ? error.message : String(error));
 }
 
 export function deactivate(): void {

@@ -299,6 +299,7 @@
   "ui.sidebar.restore": { "en": "Restore Archived Agent", "ko": "보관한 에이전트 복원" },
   "ui.sidebar.restore.hint": { "en": "Choose an agent to return to the list. Conversation and execution records are preserved.", "ko": "목록에 다시 표시할 에이전트를 선택하세요. 대화·실행 기록은 보존됩니다." },
   "ui.providers.none.detected": {"en":"No Codex, Claude Code or Antigravity CLI was detected. Set a CLI path in Agent Factory chat Settings › Providers.","ko":"Codex, Claude Code, Antigravity CLI를 찾지 못했습니다. Agent Factory 채팅의 설정 › 공급자에서 CLI 경로를 지정하세요."},
+  "ui.plugin.dependency.warning": {"en":"Agent Factory plugin setup needs attention. Chat remains available; adjust the plugin in Settings. {0}","ko":"Agent Factory 플러그인 설정을 확인해 주세요. 채팅은 계속 사용할 수 있으며 설정에서 플러그인을 조정할 수 있습니다. {0}"},
   "ui.providers.none.chat": {"en":"No CLI detected. Set a CLI path in Settings › Providers.","ko":"감지된 CLI가 없습니다. 설정 › 공급자에서 CLI 경로를 지정하세요."},
   "ui.providers": {"en":"CLI","ko":"CLI"},
   "ui.providers.add.path": {"en":"Set another CLI path","ko":"다른 CLI 경로 지정"},

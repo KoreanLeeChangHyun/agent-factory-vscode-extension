@@ -71,11 +71,12 @@ test("development activation uses live local sources and allows a different plug
     ensurePlugin: async () => { assert.fail("development must not install a plugin"); },
     bootstrap: () => { bootstraps++; },
     withProgress: async (_, task) => task(),
+    showWarningMessage: async () => {},
     showErrorMessage: async (message) => { errors.push(message); }
   };
   const context = () => ({ extensionMode: 2, extension: { packageJSON: { version: "1.0.2" } } });
   await activate(context(), services);
-  assert.equal(bootstraps, 0);
+  assert.equal(bootstraps, 1);
   for (const file of [".codex-plugin/plugin.json", "skills/agent/scripts/exec.py",
     ...["agent", "convention", "document"].map(name => `skills/${name}/SKILL.md`)]) {
     await mkdir(dirname(join(root, file)), { recursive: true });
@@ -83,11 +84,11 @@ test("development activation uses live local sources and allows a different plug
       ? JSON.stringify({ name: "agent-factory", version: "1.0.2+codex.dev" }) : "local source");
   }
   await activate(context(), services);
-  assert.equal(bootstraps, 1);
+  assert.equal(bootstraps, 2);
   await writeFile(join(root, ".codex-plugin/plugin.json"), JSON.stringify({ name: "agent-factory", version: "2.0.0" }));
   await activate(context(), services);
-  assert.equal(bootstraps, 2);
-  assert.equal(errors.length, 1);
+  assert.equal(bootstraps, 3);
+  assert.equal(errors.length, 0);
 });
 
 test("production activation ignores an inherited development plugin root", async (t) => {
@@ -319,7 +320,7 @@ test("legacy top-level and plugins-array schemas remain compatible", async () =>
   await dependency.ensureAgentFactoryPlugin("1.0.2", pluginsArray.runner);
 });
 
-test("activation bootstraps only after dependency success and reports one failure", async () => {
+test("activation keeps chat available when plugin setup fails", async () => {
   const { activate } = await importTypeScript("src/extension.ts", true);
   const context = { extension: { packageJSON: { version: "1.0.2" } } };
   const events = [];
@@ -330,6 +331,7 @@ test("activation bootstraps only after dependency success and reports one failur
       events.push(`progress:${options.location}:${options.cancellable}`);
       return task({}, {});
     },
+    showWarningMessage: async (message) => { events.push(`warning:${message}`); },
     showErrorMessage: async (message) => { events.push(`error:${message}`); }
   };
   await activate(context, services);
@@ -338,9 +340,9 @@ test("activation bootstraps only after dependency success and reports one failur
   events.length = 0;
   services.ensurePlugin = async () => { throw new Error("dependency unavailable"); };
   await activate({ extension: context.extension }, services);
-  assert.equal(events.length, 2);
-  assert.match(events[1], /^error:Unable to start Agent Factory\. dependency unavailable/);
-  assert.ok(!events.includes("bootstrap"));
+  assert.equal(events.length, 3);
+  assert.match(events[1], /^warning:Agent Factory plugin setup needs attention\..*dependency unavailable/);
+  assert.equal(events[2], "bootstrap");
 });
 
 test("the Antigravity plugin is ensured after startup and its failure only warns", async () => {
@@ -441,7 +443,8 @@ test("activation Retry reruns dependencies and concurrent activation bootstraps 
   let bootstraps = 0;
   let notifications = 0;
   const services = {
-    ensurePlugin: async () => { if (++attempts === 1) throw new Error("Codex CLI executable was not found"); },
+    ensurePlugin: async () => { attempts++; },
+    initializeDefaults: async () => { if (attempts === 1) throw new Error("Codex CLI executable was not found"); },
     bootstrap: () => { bootstraps++; },
     withProgress: async (_, task) => task(),
     showErrorMessage: async (message, action) => {
@@ -463,14 +466,15 @@ test("dismissing dependency error leaves activation retryable without bootstrap"
   const context = { extension: { packageJSON: { version: "1.0.2" } } };
   let bootstraps = 0;
   const services = {
-    ensurePlugin: async () => { throw new Error("installation failed"); },
+    ensurePlugin: async () => {},
+    initializeDefaults: async () => { throw new Error("defaults failed"); },
     bootstrap: () => { bootstraps++; },
     withProgress: async (_, task) => task(),
     showErrorMessage: async () => undefined
   };
   await activate(context, services);
   assert.equal(bootstraps, 0);
-  services.ensurePlugin = async () => {};
+  services.initializeDefaults = async () => {};
   await activate(context, services);
   assert.equal(bootstraps, 1);
 });
@@ -483,7 +487,8 @@ test("dismissed startup failure leaves the open command registered with recovery
   let notifications = 0;
   let bootstraps = 0;
   const services = {
-    ensurePlugin: async () => { if (++attempts === 1) throw new Error("Codex CLI missing from host PATH"); },
+    ensurePlugin: async () => { attempts++; },
+    initializeDefaults: async () => { if (attempts === 1) throw new Error("Codex CLI missing from host PATH"); },
     bootstrap: () => { bootstraps++; },
     withProgress: async (_, task) => task(),
     showErrorMessage: async (message, action) => {
@@ -600,21 +605,26 @@ test("with both CLIs, both plugins are managed and a Claude plugin failure only 
   assert.deepEqual(calls, ["codex-plugin:1.0.17", "claude-plugin", "warning:true", "bootstrap"]);
 });
 
-test("Claude-only activation fails when the Claude plugin cannot be installed", async () => {
+test("Claude-only activation stays available when the Claude plugin cannot be installed", async () => {
   const { activate } = await importTypeScript("src/extension.ts", true);
   const context = { extension: { packageJSON: { version: "1.0.17" } }, subscriptions: [] };
-  let shown;
+  const warnings = [];
+  let bootstraps = 0;
   const services = {
     detectProviders: async () => ({ codex: false, claude: true, antigravity: false }),
     ensurePlugin: async () => assert.fail("no Codex"),
     ensureClaudePlugin: async () => { throw new Error("claude install failed"); },
-    requireInstalledPlugin: async () => assert.fail("must not continue"),
-    bootstrap: () => assert.fail("must not bootstrap"),
+    requireInstalledPlugin: async () => { throw new Error("runtime missing"); },
+    bootstrap: () => { bootstraps++; },
     withProgress: async (_, task) => task(),
-    showErrorMessage: async message => { shown = message; return undefined; }
+    showWarningMessage: async message => { warnings.push(message); },
+    showErrorMessage: async message => assert.fail(message)
   };
   await activate(context, services);
-  assert.match(shown, /claude install failed/);
+  assert.equal(bootstraps, 1);
+  assert.equal(warnings.length, 2);
+  assert.match(warnings[0], /claude install failed/);
+  assert.match(warnings[1], /runtime missing/);
 });
 
 test("with no provider CLI the chat still starts without plugin checks and warns once", async () => {
@@ -660,21 +670,19 @@ test("sidebar placeholder claims the view during startup and releases it before 
   const { activate } = await importTypeScript("src/extension.ts", true);
   const events = [];
   const view = { message: undefined, dispose() { events.push("dispose"); } };
-  let fail = true;
   const services = {
     createStartupView: () => { events.push("create"); return view; },
-    ensurePlugin: async () => { events.push(`check:${view.message}`); if (fail) throw new Error("broken"); },
+    ensurePlugin: async () => { events.push(`check:${view.message}`); throw new Error("broken"); },
+    showWarningMessage: async () => { events.push("warning"); },
     bootstrap: () => { events.push("bootstrap"); },
     withProgress: async (_, task) => task(),
     showErrorMessage: async () => undefined
   };
   const context = { extensionMode: 1, subscriptions: [], extension: { packageJSON: { version: "1.0.2" } } };
   await activate(context, services);
-  assert.deepEqual(events, ["create", "check:Starting Agent Factory…"]);
-  assert.match(view.message, /could not start\. broken/);
-  fail = false;
+  assert.deepEqual(events, ["create", "check:Starting Agent Factory…", "warning", "dispose", "bootstrap"]);
   await activate(context, services);
-  assert.deepEqual(events.slice(2), [`check:${view.message}`, "dispose", "bootstrap"]);
+  assert.equal(events.length, 5);
   assert.deepEqual(context.subscriptions, [view]);
 });
 
