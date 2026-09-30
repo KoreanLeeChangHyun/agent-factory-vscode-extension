@@ -43,6 +43,7 @@ const clientMessageTypes = new Set([
   "providers.configure",
   "providers.pick",
   "providers.update",
+  "providers.cli.install",
   "providers.versions.request",
   "providers.updateMode.select",
   "session.select",
@@ -235,11 +236,16 @@ export function parseClientMessage(value: unknown): ClientMessage | undefined {
     case "attachments.pick":
       return { type: value.type };
     case "providers.update":
-      if (value.version === undefined) return value.provider === undefined ? { type: value.type } : undefined;
-      if (typeof value.provider !== "string" || !PROVIDER_IDS.includes(value.provider as ProviderId)) return undefined;
+      if (value.provider !== undefined) return undefined;
+      if (value.version === undefined) return { type: value.type };
       return typeof value.version === "string" && value.version.length <= 128
         && /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/.test(value.version)
-        ? { type: value.type, provider: value.provider as ProviderId, version: value.version } : undefined;
+        ? { type: value.type, version: value.version } : undefined;
+    case "providers.cli.install":
+      return (value.provider === "codex" || value.provider === "claude")
+        && typeof value.version === "string" && value.version.length <= 128
+        && /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/.test(value.version)
+        ? { type: value.type, provider: value.provider, version: value.version } : undefined;
     case "conversation.read": {
       const id = (value: unknown): value is string => typeof value === "string" && /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(value);
       if ((value.conversationId !== null && !id(value.conversationId)) || !id(value.requestId) || (value.before !== undefined && !id(value.before))) return undefined;

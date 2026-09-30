@@ -65,7 +65,8 @@ export type ClientMessage =
   | { readonly type: "models.request" }
   | { readonly type: "usage.refresh" }
   | { readonly type: "providers.request" | "providers.detect" | "providers.versions.request" }
-  | { readonly type: "providers.update"; readonly provider?: import("../infrastructure/agent-factory/provider-detection").ProviderId; readonly version?: string }
+  | { readonly type: "providers.update"; readonly version?: string }
+  | { readonly type: "providers.cli.install"; readonly provider: "codex" | "claude"; readonly version: string }
   | { readonly type: "providers.configure"; readonly provider: import("../infrastructure/agent-factory/provider-detection").ProviderId; readonly path: string }
   | { readonly type: "providers.pick"; readonly provider: import("../infrastructure/agent-factory/provider-detection").ProviderId }
   | { readonly type: "providers.updateMode.select"; readonly mode: import("../infrastructure/agent-factory/provider-detection").PluginUpdateMode }

@@ -15,6 +15,7 @@ function harness() {
     state: { timeline: [] }, renders: 0, frames: [],
     document: { hidden: false }, requestAnimationFrame(callback) { context.frames.push(callback); return context.frames.length; },
     messageElements: new Map(), messageRenderKeys: new Map(), eventVersion: () => 1, followLatest: false,
+    assistantDisplayText: value => value,
     createId: () => "id-" + (id += 1), scheduleTimelineRender() { context.renders += 1; }, renderRunStatus() {}, renderWorkLoopPanel() {},
     extractTaskFlows: () => ({ flows: [] }), currentTaskFlows: () => [], renderMath() {}, persist() {}
   };

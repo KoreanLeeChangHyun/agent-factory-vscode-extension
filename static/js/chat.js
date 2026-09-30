@@ -6729,6 +6729,7 @@
   let providerNoticeShown = false;
   let providerVersionsRequested = false;
   let missingProviderExpanded = false;
+  let factoryInstallVersion = "";
   const providerInstallVersions = new Map();
 
   function receiveProviders(message) {
@@ -6768,6 +6769,38 @@
     update.addEventListener("click", function () { vscode.postMessage({ type: "providers.update" }); });
     actions.append(update);
     section.append(actions);
+    const factoryControls = document.createElement("div");
+    factoryControls.className = "provider-version-controls provider-factory-version-controls";
+    const factoryInput = document.createElement("input");
+    factoryInput.type = "text";
+    factoryInput.inputMode = "text";
+    factoryInput.spellcheck = false;
+    factoryInput.maxLength = 128;
+    factoryInput.placeholder = t("ui.providers.factory.version.placeholder");
+    factoryInput.setAttribute("aria-label", t("ui.providers.factory.version.label"));
+    factoryInput.dataset.providerControl = "factory-install-version-input";
+    factoryInput.value = factoryInstallVersion;
+    factoryInput.disabled = providerSnapshot.busy;
+    const factoryInstall = document.createElement("button");
+    factoryInstall.type = "button";
+    factoryInstall.dataset.providerControl = "factory-install-version";
+    factoryInstall.textContent = t("ui.providers.install");
+    const validFactoryVersion = () => /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/.test(factoryInput.value.trim());
+    const updateFactoryButton = () => { factoryInstall.disabled = providerSnapshot.busy || !hasDetected || !validFactoryVersion(); };
+    const submitFactoryVersion = () => {
+      if (factoryInstall.disabled) return;
+      vscode.postMessage({ type: "providers.update", version: factoryInput.value.trim() });
+    };
+    factoryInput.addEventListener("input", function () { factoryInstallVersion = factoryInput.value; updateFactoryButton(); });
+    factoryInput.addEventListener("keydown", function (event) {
+      if (event.key !== "Enter" || event.isComposing) return;
+      event.preventDefault();
+      submitFactoryVersion();
+    });
+    factoryInstall.addEventListener("click", submitFactoryVersion);
+    updateFactoryButton();
+    factoryControls.append(factoryInput, factoryInstall);
+    section.append(factoryControls);
     const missing = providerSnapshot.providers.filter(provider => !provider.detected);
     let missingList;
     let missingDetails;
@@ -6818,7 +6851,7 @@
         updateState.textContent = t(versions.pluginCurrent ? "ui.providers.update.current" : "ui.providers.update.available");
         row.append(updateState);
       }
-      if (provider.detected) {
+      if (provider.detected && provider.id !== "antigravity") {
         const versionControls = document.createElement("div");
         versionControls.className = "provider-version-controls";
         const versionInput = document.createElement("input");
@@ -6826,8 +6859,8 @@
         versionInput.inputMode = "text";
         versionInput.spellcheck = false;
         versionInput.maxLength = 128;
-        versionInput.placeholder = t("ui.providers.install.version.placeholder");
-        versionInput.setAttribute("aria-label", t("ui.providers.install.version.label", providerNames[provider.id]));
+        versionInput.placeholder = t("ui.providers.cli.version.placeholder");
+        versionInput.setAttribute("aria-label", t("ui.providers.cli.version.label", providerNames[provider.id]));
         versionInput.dataset.providerControl = provider.id + ":install-version-input";
         versionInput.value = providerInstallVersions.get(provider.id) ?? "";
         versionInput.disabled = providerSnapshot.busy;
@@ -6835,12 +6868,12 @@
         installVersion.type = "button";
         installVersion.dataset.providerControl = provider.id + ":install-version";
         installVersion.textContent = t("ui.providers.install");
-        const validVersion = () => /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/.test(versionInput.value.trim());
+        const validVersion = () => /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/.test(versionInput.value.trim());
         const updateVersionButton = () => { installVersion.disabled = providerSnapshot.busy || !validVersion(); };
         const submitVersion = () => {
           const version = versionInput.value.trim();
           if (!validVersion() || providerSnapshot.busy) return;
-          vscode.postMessage({ type: "providers.update", provider: provider.id, version });
+          vscode.postMessage({ type: "providers.cli.install", provider: provider.id, version });
         };
         versionInput.addEventListener("input", function () {
           providerInstallVersions.set(provider.id, versionInput.value);
@@ -6855,6 +6888,11 @@
         updateVersionButton();
         versionControls.append(versionInput, installVersion);
         row.append(versionControls);
+      } else if (provider.detected) {
+        const unsupported = document.createElement("span");
+        unsupported.className = "provider-version";
+        unsupported.textContent = t("ui.providers.cli.version.unsupported");
+        row.append(unsupported);
       }
       const problems = [];
       if (!provider.detected && provider.configuredInvalid && typeof provider.configuredPath === "string") problems.push(t("ui.providers.configured.invalid"));

@@ -74,12 +74,20 @@ test("provider path messages accept a bounded path or an empty reset only for kn
   assert.equal(parseClientMessage({ type: "providers.pick", provider: "gemini" }), undefined);
   assert.deepEqual(parseClientMessage({ type: "providers.detect" }), { type: "providers.detect" });
   assert.deepEqual(parseClientMessage({ type: "providers.update" }), { type: "providers.update" });
-  assert.deepEqual(parseClientMessage({ type: "providers.update", provider: "codex", version: "1.0.20+codex.7" }),
-    { type: "providers.update", provider: "codex", version: "1.0.20+codex.7" });
-  assert.equal(parseClientMessage({ type: "providers.update", version: "1.0.20" }), undefined);
+  assert.deepEqual(parseClientMessage({ type: "providers.update", version: "1.0.20+codex.7" }),
+    { type: "providers.update", version: "1.0.20+codex.7" });
+  assert.equal(parseClientMessage({ type: "providers.update", provider: "codex", version: "1.0.20" }), undefined);
+  assert.deepEqual(parseClientMessage({ type: "providers.update", version: "1.0.20" }),
+    { type: "providers.update", version: "1.0.20" });
   assert.equal(parseClientMessage({ type: "providers.update", provider: "unknown", version: "1.0.20" }), undefined);
   assert.equal(parseClientMessage({ type: "providers.update", provider: "claude" }), undefined);
   assert.equal(parseClientMessage({ type: "providers.update", version: "latest" }), undefined);
   assert.equal(parseClientMessage({ type: "providers.update", version: "1.0.20\n--force" }), undefined);
+  assert.deepEqual(parseClientMessage({ type: "providers.cli.install", provider: "codex", version: "0.159.2" }),
+    { type: "providers.cli.install", provider: "codex", version: "0.159.2" });
+  assert.deepEqual(parseClientMessage({ type: "providers.cli.install", provider: "claude", version: "2.1.285" }),
+    { type: "providers.cli.install", provider: "claude", version: "2.1.285" });
+  assert.equal(parseClientMessage({ type: "providers.cli.install", provider: "antigravity", version: "1.2.9" }), undefined);
+  assert.equal(parseClientMessage({ type: "providers.cli.install", provider: "codex", version: "1.0.20+factory" }), undefined);
   assert.deepEqual(parseClientMessage({ type: "providers.request" }), { type: "providers.request" });
 });

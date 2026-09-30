@@ -129,7 +129,7 @@ test("release metadata and installation guidance stay coupled", async () => {
 
   assert.equal(packageLock.version, version);
   assert.equal(packageLock.packages[""].version, version);
-  assert.match(readme, /installs the matching Agent Factory companion plugin when needed/);
+  assert.match(readme, /installs or updates the matching Agent Factory companion plugin/);
 });
 
 function record(overrides = {}) {

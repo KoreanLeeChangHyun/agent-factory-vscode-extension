@@ -39,6 +39,7 @@ import type { AccountLimits, AgentRuntimeClient } from "../agent-factory/agent-c
 import { readProviderModels } from "../agent-factory/model-catalog";
 import { readAntigravityUsage } from "../agent-factory/antigravity-usage";
 import { isProviderDetected, providerStatuses, type ProviderId } from "../agent-factory/provider-detection";
+import { installProviderCliVersion } from "../agent-factory/provider-cli-installer";
 import { redetectProviders, saveProviderPath, pluginUpdateMode, savePluginUpdateMode, updateProviderPlugins, providerVersions, refreshProviderVersions } from "./provider-settings";
 import { ChatSessionController } from "../../modules/chat/session-controller";
 import { saveConvertedImage } from "./converted-image-store";
@@ -787,7 +788,10 @@ export class ChatPanelManager implements vscode.Disposable {
         await this.post(managed.panel, { type: "providers.status", providers: providerStatuses(), busy: this.providerRefresh !== undefined, errors: this.providerErrors, pluginUpdateMode: message.mode, versions: providerVersions() });
         return;
       case "providers.update":
-        await this.updateProviderPluginsNow(message.version, message.provider);
+        await this.updateProviderPluginsNow(message.version);
+        return;
+      case "providers.cli.install":
+        await this.installProviderCliNow(message.provider, message.version);
         return;
       case "providers.versions.request":
         await refreshProviderVersions(this.context.extension?.packageJSON?.version);
@@ -1153,16 +1157,38 @@ export class ChatPanelManager implements vscode.Disposable {
     return refresh;
   }
 
-  /** Update all detected providers, or install a requested version for one detected provider. */
-  public updateProviderPluginsNow(version?: string, provider?: ProviderId): Promise<void> {
+  /** Update Agent Factory plugins for all detected providers. */
+  public updateProviderPluginsNow(version?: string): Promise<void> {
     if (this.providerRefresh) return this.providerRefresh;
     const refresh = (async () => {
       try {
         await this.broadcast({ type: "providers.status", providers: providerStatuses(), busy: true, errors: this.providerErrors, pluginUpdateMode: pluginUpdateMode(), versions: providerVersions() });
-        this.providerErrors = { ...this.providerErrors, ...(await updateProviderPlugins(this.context, version, provider)) };
+        this.providerErrors = { ...this.providerErrors, ...(await updateProviderPlugins(this.context, version)) };
         await refreshProviderVersions(this.context.extension?.packageJSON?.version);
       } catch (error) {
         console.error("[Agent Factory] Provider plugin update failed", error);
+      } finally {
+        this.providerRefresh = undefined;
+      }
+      await this.broadcast({ type: "providers.status", providers: providerStatuses(), busy: false, errors: this.providerErrors, pluginUpdateMode: pluginUpdateMode(), versions: providerVersions() });
+    })();
+    this.providerRefresh = refresh;
+    return refresh;
+  }
+
+  private installProviderCliNow(provider: "codex" | "claude", version: string): Promise<void> {
+    if (this.providerRefresh) return this.providerRefresh;
+    const selected = providerStatuses().find(status => status.id === provider && status.detected && status.path);
+    const executable = selected?.path;
+    if (!executable) return Promise.resolve();
+    const refresh = (async () => {
+      try {
+        await this.broadcast({ type: "providers.status", providers: providerStatuses(), busy: true, errors: this.providerErrors, pluginUpdateMode: pluginUpdateMode(), versions: providerVersions() });
+        await installProviderCliVersion(provider, executable, version);
+        this.providerErrors = { ...(await redetectProviders(this.context)).errors };
+        await refreshProviderVersions(this.context.extension?.packageJSON?.version);
+      } catch (error) {
+        await this.broadcast({ type: "host.notice", level: "error", text: error instanceof Error ? error.message : String(error) });
       } finally {
         this.providerRefresh = undefined;
       }

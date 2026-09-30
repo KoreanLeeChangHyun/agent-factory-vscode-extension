@@ -94,9 +94,9 @@ export async function redetectProviders(context: vscode.ExtensionContext): Promi
   return { providers, errors };
 }
 
-/** Update all detected providers, or install a requested version for one detected provider. */
-export async function updateProviderPlugins(context: vscode.ExtensionContext, version?: string, provider?: ProviderId): Promise<Partial<Record<ProviderId, string>>> {
-  return installPlugins(context, providerStatuses().filter(status => status.detected && (!provider || status.id === provider)).map(status => status.id), version);
+/** Update or install the requested Agent Factory plugin version for every detected provider. */
+export async function updateProviderPlugins(context: vscode.ExtensionContext, version?: string): Promise<Partial<Record<ProviderId, string>>> {
+  return installPlugins(context, providerStatuses().filter(status => status.detected).map(status => status.id), version);
 }
 
 export interface ProviderVersions {
