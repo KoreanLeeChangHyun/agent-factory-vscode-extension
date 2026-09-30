@@ -75,9 +75,31 @@ export function claudeExecutable(): string {
   return selectedClaudeCli ?? "claude";
 }
 
+let selectedAntigravityCli: string | undefined;
+
+export function configureAntigravityCli(executable: string | undefined): void {
+  selectedAntigravityCli = executable;
+}
+
+export function antigravityExecutable(): string {
+  return selectedAntigravityCli ?? "agy";
+}
+
+export type ProviderCommand = "codex" | "claude" | "agy";
+
+/** One CLI resolved like Codex; undefined when this host has none. */
+export function resolveProviderCli(command: ProviderCommand, options: CodexCliResolutionOptions = {}): Promise<CodexCliSelection | undefined> {
+  return resolveCli(command, options);
+}
+
+/** The live host's terminal PATH, so several CLI lookups can share one login-shell probe. */
+export function probeTerminalPath(): Promise<readonly string[]> {
+  return terminalPathOf(process.platform, process.env);
+}
+
 interface Candidate extends CodexCliSelection {}
 
-async function resolveCli(command: "codex" | "claude", options: CodexCliResolutionOptions): Promise<CodexCliSelection | undefined> {
+async function resolveCli(command: ProviderCommand, options: CodexCliResolutionOptions): Promise<CodexCliSelection | undefined> {
   const live = options.environment === undefined;
   const environment = options.environment ?? process.env;
   const platform = options.platform ?? process.platform;
@@ -156,6 +178,8 @@ async function findInDirectory(directory: string, command: string, platform: Nod
  */
 async function windowsNative(path: string, command: string): Promise<Candidate | undefined> {
   if (/\.exe$/i.test(path)) return { executable: path, source: "path", binDirectory: dirname(path) };
+  // Antigravity ships a native executable; its shims have no npm package to map.
+  if (command === "agy") return undefined;
   const packageName = command === "claude" ? ["@anthropic-ai", "claude-code"] : ["@openai", "codex"];
   const roots = new Set<string>([join(dirname(path), "node_modules", ...packageName)]);
   try {

@@ -30,6 +30,10 @@ async function checkStatusCustomizationLayout(page) {
   await page.evaluate(() => {
     window.dispatchEvent(new MessageEvent('message', { data: { type: 'workUnits.summary', activeUnits: 0, totalCalled: 0 } }));
     window.dispatchEvent(new MessageEvent('message', { data: { type: 'goal.updated', goal: { status: 'active', tokensUsed: 0, timeUsedSeconds: 0, tokenBudget: 1000 } } }));
+    window.dispatchEvent(new MessageEvent('message', { data: { type: 'usage.accounts', accounts: {
+      codex: { weeklyUsedPercent: 60, weeklyResetsAt: Date.now() / 1000 + 86400, reportedAt: Date.now() },
+      claude: { fiveHourUsedPercent: 72, fiveHourResetsAt: Date.now() / 1000 + 3600, weeklyUsedPercent: 25, reportedAt: Date.now() }
+    } } }));
   });
   try {
     for (const width of [420, 900]) {
@@ -85,6 +89,19 @@ async function checkStatusCustomizationLayout(page) {
       }), true, 'Settings tabs must stay clickable while the content scrolls');
       await settings.locator('[data-item-id="goalBudget"] input').check();
       assert.ok(await page.evaluate(() => window.saved.statusItems.includes('goalBudget')));
+      await settings.locator('#settings-tab-usage').click();
+      assert.equal(await settings.locator('.usage-group').count(), 4);
+      assert.ok(await page.evaluate(() => window.sentMessages.some(message => message.type === 'usage.refresh')),
+        'Opening settings asks the host for fresh Antigravity quota');
+      assert.deepEqual(await settings.locator('.usage-meter').evaluateAll(elements => elements.map(element => element.value)), [40, 28, 75]);
+      assert.equal(await settings.locator('.usage-limit[data-level="medium"]').count(), 2);
+      assert.equal(await settings.locator('.usage-limit[data-level="healthy"]').count(), 1);
+      assert.equal(await settings.locator('#account-usage').evaluate(element => getComputedStyle(element).gridTemplateColumns.split(' ').length), 1,
+        'Providers stay in one scan-friendly column');
+      const limitColumns = await settings.locator('.usage-group[data-provider="claude"] .usage-limits').evaluate(element => getComputedStyle(element).gridTemplateColumns.split(' ').length);
+      assert.equal(limitColumns, width <= 480 ? 1 : 2, 'Limits adapt inside each provider card');
+      assert.equal(await settings.locator('.usage-group[data-provider="claude"] .usage-group-heading > .usage-reported').count(), 1,
+        'Last report time stays with the provider heading');
       await page.keyboard.press('Escape');
       assert.equal(await settings.isHidden(), true);
       assert.equal(await button.evaluate(element => document.activeElement === element), true);

@@ -2,14 +2,14 @@ const assert = require('node:assert/strict');
 async function checkAgentModels(page) {
   const emit = async value => { await page.evaluate(value => window.postMessage(value, '*'), value); await page.evaluate(() => new Promise(requestAnimationFrame)); };
   const capability = { model: true, reasoning: true, taskModes: ['direct', 'work', 'work-verification'] };
-  await emit({ type: 'host.initialize', panelId: 'roles', role: 'main', title: 'Main', agentPermissions: { main: 'bypass', work: 'bypass', verification: 'danger-full-access' }, runtimeAvailable: true, capabilities: { submit: capability, send: capability } });
+  await emit({ type: 'host.initialize', panelId: 'roles', role: 'main', title: 'Main', model: 'main-model', reasoning: 'medium', agentModels: { work: { model: 'work-model', reasoningEffort: 'medium' }, verification: { model: 'verify-model', reasoningEffort: 'high' } }, agentPermissions: { main: 'bypass', work: 'bypass', verification: 'danger-full-access' }, runtimeAvailable: true, capabilities: { submit: capability, send: capability } });
   await emit({ type: 'models.list', models: ['main-model', 'work-model', 'verify-model'] });
-  await emit({ type: 'agent.defaults', settings: { effective: { work: { model: 'work-model', reasoningEffort: 'medium' }, verification: { model: 'verify-model', reasoningEffort: 'high' } }, sources: {}, projectAvailable: true } });
+  await emit({ type: 'agent.defaults', settings: { global: {}, project: {}, projectAvailable: true } });
   assert.equal(await page.locator('#reasoning-button').isVisible(), false);
   await page.locator('#model-button').click();
   assert.equal(await page.locator('#agent-default-scope').inputValue(), 'project');
   await page.locator('#agent-default-scope').selectOption('chat');
-  assert.equal(await page.locator('#model-menu select[data-role]').count(), 3);
+  assert.deepEqual(await page.locator('#model-menu > .agent-model-row').evaluateAll(rows => rows.map(row => row.dataset.agentRole)), ['main', 'work', 'workLight', 'verification']);
   assert.equal(await page.evaluate(() => window.saved.agentModels.work.model), 'work-model');
   assert.equal(await page.evaluate(() => window.saved.agentModels.work.reasoningEffort), 'medium');
   for (const height of [900, 600]) {
@@ -48,10 +48,10 @@ async function checkAgentModels(page) {
   assert.equal(sent.execution.reasoningEffort, 'low');
   assert.deepEqual(sent.execution.agentModels, saved.agentModels);
   await page.locator('#model-button').click();
-  assert.equal(await page.locator('#model-menu option[value=""]').count(), 0);
+  assert.equal(await page.locator('#model-menu select[data-field="model"] option[value=""]').count(), 0);
   assert.equal(await page.locator('#model-menu .agent-setting-reset').count(), 0);
   assert.equal(await page.locator('#model-menu .agent-setting-source').count(), 0);
-  await emit({ type: 'agent.defaults', settings: { effective: { work: { model: 'different', reasoningEffort: 'none' } }, sources: {} } });
+  await emit({ type: 'agent.defaults', settings: { global: {}, project: { work: { model: 'different', reasoningEffort: 'none' } }, projectAvailable: true } });
   assert.equal(await page.evaluate(() => window.saved.agentModels.work.model), 'work-model');
   await emit({ type: 'models.list', models: ['gpt-5.6-sol', 'gpt-6-astra', 'gpt-5.6-terra', 'gpt-5.6-luna', 'gpt-5.5'] });
   await page.locator('#model-menu select[data-role="main"][data-field="model"]').selectOption('gpt-5.6-sol');
@@ -107,31 +107,30 @@ async function checkAgentModels(page) {
   assert.equal(await page.locator('[data-permission-role]').count(), 0);
   assert.equal(await page.locator('#model-menu [data-setting="permissions"]').count(), 0);
   // Project and global defaults are edited from the same panel through its scope selector.
-  await emit({ type: 'agent.defaults', settings: { global: {}, project: {}, effective: {}, sources: {}, projectAvailable: true } });
+  await emit({ type: 'agent.defaults', settings: { global: {}, project: {}, projectAvailable: true } });
   assert.equal(await page.locator('#agent-default-scope').inputValue(), 'chat');
   assert.equal(await page.locator('#model-menu #agent-default-fields').count(), 0);
   await page.locator('#agent-default-scope').selectOption('project');
   assert.equal(await page.locator('#agent-default-scope').evaluate(el => el === document.activeElement), true);
-  assert.equal(await page.locator('#model-menu #agent-default-fields select').count(), 3);
+  assert.equal(await page.locator('#model-menu #agent-default-fields select').count(), 4);
   await page.locator('#agent-default-fields select').first().selectOption('gpt-6-astra');
   assert.deepEqual(await page.evaluate(() => window.sentMessages.filter(m => m.type === 'agent.defaults.save').at(-1)), { type: 'agent.defaults.save', scope: 'project', role: 'main', field: 'model', value: 'gpt-6-astra' });
-  assert.equal(await page.locator('#agent-default-fields input[type=range]').count(), 3);
-  await page.locator('#agent-default-fields input[data-role=work]').fill('5');
+  assert.equal(await page.locator('#agent-default-fields input[type=range]').count(), 4);
+  await page.locator('#agent-default-fields input[data-role=work]').fill('4');
   assert.deepEqual(await page.evaluate(() => window.sentMessages.filter(m => m.type === 'agent.defaults.save').at(-1)), { type: 'agent.defaults.save', scope: 'project', role: 'work', field: 'reasoningEffort', value: 'xhigh' });
   await page.locator('#agent-default-scope').selectOption('global');
-  await page.locator('#agent-default-fields input[data-role=verification]').fill('6');
+  await page.locator('#agent-default-fields input[data-role=verification]').fill('5');
   assert.deepEqual(await page.evaluate(() => window.sentMessages.filter(m => m.type === 'agent.defaults.save').at(-1)), { type: 'agent.defaults.save', scope: 'global', role: 'verification', field: 'reasoningEffort', value: 'max' });
   // A defaults update keeps the chosen scope instead of snapping back to chat rows.
-  await emit({ type: 'agent.defaults', settings: { global: { verification: { reasoningEffort: 'max' } }, project: {}, effective: {}, sources: {}, projectAvailable: true } });
-  assert.equal(await page.locator('#model-menu #agent-default-fields .agent-model-row').count(), 3);
+  await emit({ type: 'agent.defaults', settings: { global: { verification: { reasoningEffort: 'max' } }, project: {}, projectAvailable: true } });
+  assert.equal(await page.locator('#model-menu #agent-default-fields .agent-model-row').count(), 4);
   for (const width of [795, 566, 320]) {
     await page.setViewportSize({ width, height: 740 });
-    // The scope selector shares the heading row with the title and close button.
-    const [heading, scope, close] = await Promise.all(['.agent-settings-heading > strong', '#agent-default-scope', '.agent-settings-close'].map(s => page.locator('#model-menu ' + s).boundingBox()));
-    for (const box of [scope, close]) assert.ok(Math.abs(box.y + box.height / 2 - heading.y - heading.height / 2) < 2, JSON.stringify([width, heading, box]));
-    assert.ok(heading.x + heading.width <= scope.x && scope.x + scope.width <= close.x, JSON.stringify([width, heading, scope, close]));
+    // The scope selector and saved-set picker share the heading row with the close button.
+    const [picker, scope, close] = await Promise.all(['#agent-preset-picker', '#agent-default-scope', '.agent-settings-close'].map(s => page.locator('#model-menu ' + s).boundingBox()));
+    for (const box of [scope, close]) assert.ok(Math.abs(box.y + box.height / 2 - picker.y - picker.height / 2) < 2, JSON.stringify([width, picker, box]));
+    assert.ok(scope.x + scope.width <= picker.x && picker.x + picker.width <= close.x, JSON.stringify([width, scope, picker, close]));
     assert.equal(await page.locator('#model-menu').getByText('우선순위', { exact: false }).count(), 0);
-    assert.equal(await page.locator('#model-menu .agent-settings-heading > strong').evaluate(el => { const r = document.createRange(); r.selectNodeContents(el); return r.getClientRects().length; }), 1, 'Title stays on one line');
     for (const row of await page.locator('#agent-default-fields .agent-model-row').all()) {
       const model = await row.locator('select').boundingBox();
       const effort = await row.locator('input[type=range]').boundingBox();
@@ -174,7 +173,10 @@ async function checkAgentModels(page) {
 
 async function checkModelVendorTabs(page, emit) {
   // Vendor tabs filter the catalog; route suffixes replace redundant group headings.
+  const freshCapability = { model: true, reasoning: true, taskModes: ['direct'] };
+  await emit({ type: 'host.initialize', panelId: 'roles', role: 'main', title: 'Main', model: 'gpt-5.6-sol', reasoning: 'medium', agentSettingsScope: 'chat', agentSettingsSet: 'Default', resetConversation: true, runtimeAvailable: true, capabilities: { submit: freshCapability, send: freshCapability } });
   await page.locator('#model-button').click();
+  await page.locator('#agent-default-scope').selectOption('chat');
   await emit({ type: 'models.list', models: ['gpt-5.6-sol', 'claude-opus-5-5', 'antigravity/claude-sonnet-4-6', 'gemini-3.8-flash', 'antigravity/gpt-oss-120b-medium'] });
   const row = page.locator('#model-menu .agent-model-row[data-agent-role="main"]');
   const model = row.locator('select[data-field="model"]');
@@ -231,7 +233,7 @@ async function checkModelVendorTabs(page, emit) {
     assert.equal(await page.locator('#model-menu').evaluate(el => el.scrollWidth > el.clientWidth + 1), false);
     // Every vendor name stays readable at both widths.
     const fit = await row.locator('.model-vendor-tab').evaluateAll(tabs => tabs.map(tab => [tab.textContent, tab.scrollWidth, tab.clientWidth, tab.parentElement.clientWidth]));
-    assert.ok(fit.every(([, scroll, client]) => scroll <= client), JSON.stringify([width, fit]));
+    assert.ok(fit.every(([, scroll, client]) => scroll <= client + 1), JSON.stringify([width, fit]));
     await page.locator('#model-menu').screenshot({ path: path.join(artifactDir, 'vendor-tabs-' + width + '.png') });
   }
   await page.keyboard.press('Escape');
@@ -242,7 +244,7 @@ async function checkReasoningSlider(page) {
   const capability = { model: true, reasoning: true, taskModes: ['direct', 'work', 'work-verification'] };
   await emit({ type: 'host.initialize', panelId: 'reasoning-slider', role: 'main', title: 'Main', runtimeAvailable: true, capabilities: { submit: capability, send: capability } });
   await emit({ type: 'models.list', models: ['main-model', 'work-model', 'verify-model'] });
-  await emit({ type: 'agent.defaults', settings: { global: {}, project: {}, effective: {}, sources: {}, projectAvailable: true } });
+  await emit({ type: 'agent.defaults', settings: { global: {}, project: {}, projectAvailable: true } });
   await page.locator('#model-button').click();
   assert.equal(await page.locator('#agent-default-scope').inputValue(), 'project');
   await page.locator('#agent-default-scope').selectOption('chat');

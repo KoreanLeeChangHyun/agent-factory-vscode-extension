@@ -25,7 +25,7 @@ test('selected file bytes are stored on the host and acknowledged only after sto
     async createDirectory() {}, async writeFile(uri, bytes) { if (fail) throw Error('write failed'); writes.push({ uri, bytes }); }
   } } };
   const create = runInNewContext(code + '\ncreateFileAttachment', { vscode, randomUUID: () => 'unique-upload', Buffer, localize: key => key });
-  const owner = { context: { globalStorageUri: '/remote/storage' }, async post(panel, message) { messages.push(message); } };
+  const owner = { context: { globalStorageUri: '/remote/storage' }, storageRoot() { return this.context.globalStorageUri; }, async post(panel, message) { messages.push(message); } };
   const managed = { state: { panelId: 'panel-one' }, panel: {} };
   const input = { type: 'attachments.createFile', id: 'file-one', name: 'notes.txt', size: 3, data: 'YWJj' };
   await create.call(owner, managed, input);
@@ -38,4 +38,17 @@ test('selected file bytes are stored on the host and acknowledged only after sto
   await create.call(owner, managed, input);
   assert.equal(messages[0].type, 'attachment.rejected');
   assert.equal(messages.some(m => m.type === 'attachments.add'), false);
+});
+
+test('attachment storage uses a file URI when global storage is exposed as vscode-userdata', async () => {
+  const source = await readFile('src/infrastructure/vscode/chat-panel-manager.ts', 'utf8');
+  const start = source.indexOf('  private storageRoot(): vscode.Uri {');
+  const method = source.slice(start, source.indexOf('\n  }\n', start) + 4);
+  const { code } = await transform(method.replace('private storageRoot(): vscode.Uri {', 'function storageRoot() {'), { loader: 'ts' });
+  const vscode = { Uri: { file: path => ({ scheme: 'file', fsPath: path }) } };
+  const storageRoot = runInNewContext(code + '\nstorageRoot', { vscode });
+  const path = '/Users/me/Library/Application Support/Code/User/globalStorage/agent-factory';
+  assert.deepEqual(storageRoot.call({ context: { globalStorageUri: { scheme: 'vscode-userdata', fsPath: path } } }), { scheme: 'file', fsPath: path });
+  const local = { scheme: 'file', fsPath: path };
+  assert.equal(storageRoot.call({ context: { globalStorageUri: local } }), local);
 });

@@ -8,6 +8,7 @@ import { AgentFactoryClient } from "../infrastructure/agent-factory/agent-client
 import { AsyncCache } from "../common/async-cache";
 import { developmentPluginRoot, developmentExecPath } from "../infrastructure/agent-factory/development-plugin";
 import { defaultPythonCommand } from "../infrastructure/agent-factory/process-environment";
+import { affectsProviderPaths, affectsPluginUpdateMode } from "../infrastructure/vscode/provider-settings";
 
 type RuntimeConnection = { readonly available: true; readonly client: AgentFactoryClient } | { readonly available: false; readonly diagnostic: string };
 
@@ -52,6 +53,8 @@ export function createContainer(context: vscode.ExtensionContext): Container {
 
   context.subscriptions.push(vscode.workspace.onDidChangeConfiguration(event => {
     if (event.affectsConfiguration("agentFactory.mainChat.botsEnabled") || event.affectsConfiguration("agentFactory.mainChat.botPrompt")) void chatPanels.refreshBots();
+    if (affectsProviderPaths(event)) void chatPanels.refreshProviders();
+    if (affectsPluginUpdateMode(event)) void chatPanels.refreshProviders();
     if (event.affectsConfiguration("agentFactory.mainChat.statusItems")) {
       void chatPanels.refreshStatusItems();
     }

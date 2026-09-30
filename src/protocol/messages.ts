@@ -13,12 +13,12 @@ export interface MessageSubmission {
 }
 
 export type ClientMessage =
-  | { readonly type: "agent.preset.field"; readonly name: string; readonly role: "main" | "work" | "verification"; readonly field: "model" | "reasoningEffort"; readonly value: string }
+  | { readonly type: "agent.preset.field"; readonly scope: import("../core/config/agent-settings").AgentPresetScope; readonly name: string; readonly role: "main" | "work" | "workLight" | "verification"; readonly field: "model" | "reasoningEffort"; readonly value: string }
   | { readonly type: "bot.interact"; readonly action: import("../modules/chat/companion").CompanionAction }
   | { readonly type: "contract.open"; readonly id: string }
   | { readonly type: "contracts.request" }
   | { readonly type: "agent.preset"; readonly action: "save" | "apply" | "update" | "delete"; readonly scope: "global" | "project" | "chat"; readonly name: string }
-  | { readonly type: "agent.defaults.save"; readonly scope: "global" | "project"; readonly role: "main" | "work" | "verification"; readonly field: "model" | "reasoningEffort"; readonly value: string }
+  | { readonly type: "agent.defaults.save"; readonly scope: "global" | "project"; readonly role: "main" | "work" | "workLight" | "verification"; readonly field: "model" | "reasoningEffort"; readonly value: string }
   | { readonly type: "worktree.create"; readonly repository: string; readonly name: string; readonly base: string }
   | { readonly type: "worktree.merge" | "worktree.refresh" | "worktree.repositories" }
   | { readonly type: "deploy.detect" }
@@ -63,6 +63,12 @@ export type ClientMessage =
   | { readonly type: "conversation.clear" }
   | { readonly type: "sessions.request" }
   | { readonly type: "models.request" }
+  | { readonly type: "usage.refresh" }
+  | { readonly type: "providers.request" | "providers.detect" | "providers.versions.request" }
+  | { readonly type: "providers.update"; readonly provider?: import("../infrastructure/agent-factory/provider-detection").ProviderId; readonly version?: string }
+  | { readonly type: "providers.configure"; readonly provider: import("../infrastructure/agent-factory/provider-detection").ProviderId; readonly path: string }
+  | { readonly type: "providers.pick"; readonly provider: import("../infrastructure/agent-factory/provider-detection").ProviderId }
+  | { readonly type: "providers.updateMode.select"; readonly mode: import("../infrastructure/agent-factory/provider-detection").PluginUpdateMode }
   | { readonly type: "session.select"; readonly agentId: string }
   | { readonly type: "workflow.close"; readonly workAgentId: string; readonly loopId: string }
   | { readonly type: "conversations.request" }
@@ -92,6 +98,8 @@ export type ClientMessage =
       readonly workLoopMode?: boolean;
       readonly businessMode?: import("../common/types/business-mode").BusinessMode;
       readonly taskMode?: import("../modules/chat/task-selection").TaskSelection;
+      readonly agentSettingsScope?: import("../core/config/agent-settings").AgentPresetScope;
+      readonly agentSettingsSet?: string;
     }
   | {
       readonly type: "status.reorder";
@@ -111,7 +119,7 @@ export type HostMessage =
   | { readonly type: "usage.accounts"; readonly accounts: Readonly<Record<string, AccountUsage>> }
   | { readonly type: "agent.preset.field.result"; readonly error?: string }
   | { readonly type: "contracts.list"; readonly contracts: readonly import("../infrastructure/filesystem/contracts").ContractEntry[]; readonly error?: string }
-  | { readonly type: "agent.preset.result"; readonly error?: string }
+  | { readonly type: "agent.preset.result"; readonly scope?: import("../core/config/agent-settings").AgentPresetScope; readonly name?: string; readonly settings?: import("../core/config/agent-settings").AgentDefaults; readonly error?: string }
   | { readonly type: "agent.defaults"; readonly settings: import("../core/config/agent-settings").AgentDefaultsSnapshot }
   | import("../infrastructure/vscode/sudo-broker").SudoChallenge
   | { readonly type: "sudo.closed" }
@@ -138,6 +146,15 @@ export type HostMessage =
   | { readonly type: "capabilities.updated"; readonly capabilities: { readonly submit: import("../infrastructure/agent-factory/agent-client").ExecutionCapabilities; readonly send: import("../infrastructure/agent-factory/agent-client").ExecutionCapabilities } }
   | { readonly type: "models.list"; readonly models: readonly string[] }
   | {
+      readonly type: "providers.status";
+      readonly providers: readonly import("../infrastructure/agent-factory/provider-detection").ProviderStatus[];
+      readonly busy?: boolean;
+      readonly errors?: Partial<Readonly<Record<import("../infrastructure/agent-factory/provider-detection").ProviderId, string>>>;
+      readonly pluginUpdateMode?: import("../infrastructure/agent-factory/provider-detection").PluginUpdateMode;
+      readonly versions?: Partial<Readonly<Record<import("../infrastructure/agent-factory/provider-detection").ProviderId, import("../infrastructure/vscode/provider-settings").ProviderVersions>>>;
+    }
+  | { readonly type: "runtime.updated"; readonly runtimeAvailable: boolean; readonly capabilities?: { readonly submit: import("../infrastructure/agent-factory/agent-client").ExecutionCapabilities; readonly send: import("../infrastructure/agent-factory/agent-client").ExecutionCapabilities } }
+  | {
       readonly type: "host.initialize";
       readonly panelId: string;
       readonly title: string;
@@ -161,6 +178,8 @@ export type HostMessage =
       readonly workLoopMode?: boolean;
       readonly businessMode?: import("../common/types/business-mode").BusinessMode;
       readonly taskMode?: import("../modules/chat/task-selection").TaskSelection;
+      readonly agentSettingsScope?: import("../core/config/agent-settings").AgentPresetScope;
+      readonly agentSettingsSet?: string;
       readonly contextUsedTokens?: number;
       readonly contextWindowTokens?: number;
       readonly fiveHourUsedPercent?: number;
@@ -183,7 +202,7 @@ export type HostMessage =
   | { readonly type: "attachment.rejected"; readonly id: string }
   | {
       readonly type: "host.notice";
-      readonly level: "info" | "warning" | "error";
+      readonly level: "info" | "warning" | "error" | "cancelled";
       readonly text: string;
     }
   | {

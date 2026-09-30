@@ -8,6 +8,7 @@
 !templates/**
 !package.json
 !README.md
+!LICENSE
 !package.nls*.json
 
 # Local-only character artwork must never ship in a VSIX.

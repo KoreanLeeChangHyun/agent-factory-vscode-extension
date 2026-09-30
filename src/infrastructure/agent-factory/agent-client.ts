@@ -7,7 +7,7 @@ import type { AgentPermissions } from "../../common/types/agent-permissions";
 import type { AgentModels } from "../../common/types/agent-models";
 import { constants as fsConstants, type Dirent } from "node:fs";
 import { spawn } from "node:child_process";
-import { claudeExecutable, codexExecutable, defaultPythonCommand, runtimeEnvironment } from "./process-environment";
+import { antigravityExecutable, claudeExecutable, codexExecutable, defaultPythonCommand, runtimeEnvironment } from "./process-environment";
 import { sudoHandoffEnvironment } from "../vscode/sudo-broker";
 import { pluginRuntimeEnvironment } from "./development-plugin";
 import { lstat, mkdtemp, open as openFile, readFile, readdir, realpath, rm, writeFile } from "node:fs/promises";
@@ -62,7 +62,7 @@ export interface ExecutionCapabilities {
   readonly diagnostic?: string;
 }
 
-export const TASK_MODES = ["direct", "work", "plan", "verification", "plan-work", "work-verification", "plan-work-verification"] as const;
+export const TASK_MODES = ["orchestrate", "direct", "work", "plan", "verification", "plan-work", "work-verification", "plan-work-verification"] as const;
 export type TaskMode = typeof TASK_MODES[number];
 
 export type ExecutionMode = "cli-default" | "workspace-write" | "danger-full-access" | "bypass";
@@ -227,6 +227,7 @@ export interface AgentRuntimeClient {
   result(agentId: string, runId: string): Promise<RunResult>;
   cancel(agentId: string, runId: string): Promise<void>;
   activeRun(agentId: string): Promise<RunAcceptance | undefined>;
+  pendingDecision?(agentId: string): Promise<{ readonly runId: string } | undefined>;
   goal(agentId: string, action: GoalAction): Promise<{ readonly goal?: NativeGoal | null; readonly accepted?: RunAcceptance; readonly error?: string }>;
   resetConversation(agentId: string): Promise<{ readonly conversationId: string; readonly startedAt: string }>;
   listSessions(): Promise<readonly MainAgentSession[]>;
@@ -571,6 +572,25 @@ When a command needs sudo and the Human has requested it, use python3 ${JSON.str
       }
     }
     return undefined;
+  }
+
+  public async pendingDecision(agentId: string): Promise<{ readonly runId: string } | undefined> {
+    const path = await this.managedPath(agentId, "runs");
+    let entries;
+    try { entries = await this.managedDirectoryEntries(path); }
+    catch (error) { if (isMissingFile(error)) return undefined; throw error; }
+    let latest: { readonly key: string; readonly runId: string; readonly status: string } | undefined;
+    for (const entry of entries) {
+      if (!entry.isDirectory() || !MANAGED_ID.test(entry.name)) continue;
+      const statePath = await this.managedPath(agentId, "runs", entry.name, "state.json");
+      let state: Record<string, unknown> | undefined;
+      try { state = await this.cachedRunState(statePath); }
+      catch (error) { if (isMissingFile(error)) continue; throw error; }
+      if (state?.agentId !== agentId || state.runId !== entry.name || typeof state.status !== "string") continue;
+      const key = typeof state.acceptedAt === "string" ? state.acceptedAt : entry.name;
+      if (!latest || key > latest.key) latest = { key, runId: entry.name, status: state.status };
+    }
+    return latest?.status === "needs-human-decision" ? { runId: latest.runId } : undefined;
   }
 
   public async conversations(agentId: string): Promise<readonly SavedConversation[]> {
@@ -1325,6 +1345,9 @@ When a command needs sudo and the Human has requested it, use python3 ${JSON.str
     }
     if (claudeExecutable() !== "claude" && ["submit", "capabilities", "worktree"].includes(arguments_[0] ?? "") && !arguments_.includes("--claude")) {
       arguments_ = [...arguments_, "--claude", claudeExecutable()];
+    }
+    if (antigravityExecutable() !== "agy" && ["submit", "capabilities", "worktree"].includes(arguments_[0] ?? "") && !arguments_.includes("--agy")) {
+      arguments_ = [...arguments_, "--agy", antigravityExecutable()];
     }
     try {
       const info = await lstat(this.execPath);

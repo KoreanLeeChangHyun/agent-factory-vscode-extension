@@ -35,7 +35,7 @@ function harness() {
   const context = {
     document: { createElement: element, createElementNS: (_namespace, _tag) => element(), getElementById(id) { if (!nodes.has(id)) nodes.set(id, element()); return nodes.get(id); }, querySelectorAll: () => elements },
     state: { statusItems: ["project", "branch", "queue"], title: "Main", projectName: "fixture-project", branch: "fixture-branch", role: "main", runtimeAvailable: true, workUnitsKnown: true, workUnits: { workActive: 1, verificationActive: 2, totalCalled: 3 }, queueCount: 0 },
-    nativeGoal: null, goalError: undefined, taskModeNames: { work: "Work" },
+    nativeGoal: null, goalError: undefined, taskModeNames: { work: "Work" }, enterAction: () => "orchestrate",
     conversationWorktree: undefined, worktreeLocationDescription: () => "Workspace", receiveBotPrompt() {}, receiveBotCharacter() {}, renderBotModels() {}, renderShortcuts() {}, botMenu: { querySelectorAll: () => [] }, factoryBot: { classList: { toggle() {} } },
     currentCapabilities: () => ({ model: true, reasoning: true, fast: true }),
     renderStatusBar() {},
@@ -43,7 +43,7 @@ function harness() {
     vscode: { postMessage(message) { sent.push(clean(message)); } }
   };
   runInNewContext([
-    section('  function inheritedAgentRole(', '  function renderAgentDefaults('),
+    section('  function agentSettingRole(', '  function renderAgentDefaults('),
     section('  const defaultStatusItems =', '  const longPasteThreshold'),
     section('  function setStatusItems(', '  statusSettingsButton.addEventListener'),
     section('  function statusItemAvailable(', '  function statusLabel('),
@@ -85,23 +85,23 @@ test("catalog checkboxes toggle fields and keyboard buttons persist ordered choi
   assert.equal(row('project').children[1].children[0].disabled, true);
 });
 
-test("catalog availability follows real metrics without discarding saved selections", () => {
+test("catalog lists every item regardless of metrics and marks unavailable ones", () => {
   const { run, context, nodes } = harness();
   context.state.statusItems = ['project', 'context', 'weekly'];
-  const rows = () => nodes.get('status-catalog').children.filter(node => node.dataset.itemId).map(node => node.dataset.itemId);
+  const rows = () => nodes.get('status-catalog').children.filter(node => node.dataset.itemId);
+  const ids = () => rows().map(node => node.dataset.itemId);
+  const availability = id => rows().find(node => node.dataset.itemId === id).dataset.available;
   run('renderStatusCatalog()');
-  assert.ok(rows().includes('project'));
-  assert.ok(!rows().includes('context'));
-  assert.ok(!rows().includes('weekly'));
+  const all = run('Object.keys(statusCatalog())');
+  assert.equal(ids().length, all.length);
+  assert.deepEqual(ids().slice(0, 3), ['project', 'context', 'weekly']);
+  assert.equal(availability('context'), 'false');
+  assert.equal(availability('weekly'), 'false');
   Object.assign(context.state, { contextUsedTokens: 0, contextWindowTokens: 100, weeklyUsedPercent: 0 });
   run('renderStatusCatalog()');
-  assert.ok(rows().includes('context'));
-  assert.ok(rows().includes('weekly'));
-  context.state.contextUsedTokens = undefined;
-  context.state.weeklyUsedPercent = undefined;
-  run('renderStatusCatalog()');
-  assert.ok(!rows().includes('context'));
-  assert.ok(!rows().includes('weekly'));
+  assert.deepEqual(ids().slice(0, 3), ['project', 'context', 'weekly']);
+  assert.equal(availability('context'), 'true');
+  assert.equal(availability('weekly'), 'true');
   assert.deepEqual(clean(context.state.statusItems), ['project', 'context', 'weekly']);
 });
 
@@ -330,8 +330,9 @@ test("catalog dragging uses vertical insertion and cancelled dragging clears the
 });
 
 test("Usage settings list each provider's remaining share and refill time", () => {
-  const make = () => ({ children: [], textContent: "", className: "",
-    append(...nodes) { this.children.push(...nodes); }, replaceChildren(...nodes) { this.children = nodes; } });
+  const make = tagName => ({ tagName, children: [], textContent: "", className: "", dataset: {}, attributes: {},
+    append(...nodes) { this.children.push(...nodes); }, replaceChildren(...nodes) { this.children = nodes; },
+    setAttribute(name, value) { this.attributes[name] = value; } });
   const root = make();
   const context = {
     document: { createElement: make, getElementById: id => id === "account-usage" ? root : undefined },
@@ -343,14 +344,24 @@ test("Usage settings list each provider's remaining share and refill time", () =
     section('  function safePercentOrUndefined(', '  function normalizeSettingValue(')
   ].join('\n') + '\nglobalThis.setUsage = value => { accountUsage = value; };', context);
   const later = Date.now() + 2 * 60 * 60 * 1000;
-  context.setUsage({ claude: { fiveHourUsedPercent: 80, fiveHourResetsAt: later / 1000, weeklyUsedPercent: 41, reportedAt: Date.now() } });
+  context.setUsage({ claude: { fiveHourUsedPercent: 80, fiveHourResetsAt: later / 1000, weeklyUsedPercent: 41, reportedAt: Date.now() },
+    "antigravity-gemini": { fiveHourUsedPercent: 11.4, weeklyUsedPercent: 11.6, weeklyResetsAt: later / 1000, reportedAt: Date.now() } });
   runInNewContext('renderAccountUsage()', context);
   const text = node => [node.textContent, ...node.children.map(text)].join(' ');
-  const [codex, claude, gemini] = root.children;
+  const find = (node, predicate) => [node, ...node.children.flatMap(child => find(child, predicate))].filter(predicate);
+  const [codex, claude, gemini, thirdParty] = root.children;
   assert.match(text(codex.children[0]), /Codex/);
   assert.match(text(codex), /No usage has been reported yet/);
-  assert.match(text(claude), /5-hour.*Left 20% · Resets .*\d{2}:\d{2}/);
-  assert.match(text(claude), /Weekly.*Left 59% · Resets —/);
+  assert.match(text(claude), /5-hour.*20%.*Next reset · .*\d{2}:\d{2}/);
+  assert.match(text(claude), /Weekly.*59%.*Next reset · —/);
   assert.match(text(claude), /Last reported/);
-  assert.match(text(gemini), /Gemini.*does not report account usage limits/);
+  assert.equal(claude.children[0].children.some(node => node.className === 'usage-reported'), true);
+  assert.deepEqual(find(claude, node => node.tagName === 'progress').map(node => node.value), [20, 59]);
+  assert.deepEqual(find(claude, node => node.tagName === 'progress').map(node => node.attributes['aria-label']), ['Claude 5-hour Left', 'Claude Weekly Left']);
+  assert.deepEqual(find(claude, node => node.className === 'usage-limit').map(node => node.dataset.level), ['low', 'healthy']);
+  // Antigravity reports two quota pools, each shown as its own account.
+  assert.match(text(gemini.children[0]), /Antigravity · Gemini/);
+  assert.deepEqual(find(gemini, node => node.tagName === 'progress').map(node => node.value), [88.6, 88.4]);
+  assert.match(text(thirdParty.children[0]), /Antigravity · Claude\/GPT/);
+  assert.match(text(thirdParty), /No usage has been reported yet/);
 });

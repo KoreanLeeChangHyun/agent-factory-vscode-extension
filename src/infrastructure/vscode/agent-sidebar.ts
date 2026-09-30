@@ -175,14 +175,27 @@ export class AgentSidebar implements vscode.TreeDataProvider<Node>, vscode.TreeD
 
   public handleDrag(nodes: readonly Node[], transfer: vscode.DataTransfer, token: vscode.CancellationToken): void {
     if (token.isCancellationRequested || this.disposed) return;
+    const groupIds = nodes.filter(node => node.kind === "group").map(node => node.group.id);
     const ids = nodes.filter(node => node.kind === "agent").map(node => node.agent.state.panelId);
-    if (ids.length) transfer.set(DRAG_MIME, new vscode.DataTransferItem({ source: this.dragSource, ids }));
+    if (groupIds.length && ids.length) return;
+    if (groupIds.length || ids.length) transfer.set(DRAG_MIME, new vscode.DataTransferItem({ source: this.dragSource, ids, groupIds }));
   }
 
   public async handleDrop(target: Node | undefined, transfer: vscode.DataTransfer, token: vscode.CancellationToken): Promise<void> {
     if (token.isCancellationRequested || this.disposed) return;
     const payload = transfer.get(DRAG_MIME)?.value;
     if (!payload || payload.source !== this.dragSource || !Array.isArray(payload.ids)) return;
+    if (Array.isArray(payload.groupIds) && payload.groupIds.length) {
+      if (payload.ids.length || payload.groupIds.some((id: unknown) => typeof id !== "string")) return;
+      const requested = new Set<string>(payload.groupIds);
+      if (requested.size !== payload.groupIds.length ||
+          [...requested].some(id => !this.layout.groups.some(group => group.id === id))) return;
+      const destination = target?.kind === "group" ? target.group.id
+        : target?.kind === "agent" ? this.groupFor(target.agent.state.panelId) : undefined;
+      if (target?.kind === "agent" && !this.visibleAgentIds().includes(target.agent.state.panelId)) return;
+      if (this.moveGroups(requested, destination)) await this.save();
+      return;
+    }
     const groupId = target?.kind === "group" ? target.group.id
       : target?.kind === "agent" ? this.groupFor(target.agent.state.panelId) : undefined;
     if (groupId && !this.layout.groups.some(group => group.id === groupId)) return;
@@ -216,6 +229,19 @@ export class AgentSidebar implements vscode.TreeDataProvider<Node>, vscode.TreeD
     }
     ids.push(...this.layout.order.filter(id => visible.has(id) && this.groupFor(id) === undefined));
     return ids;
+  }
+
+  private moveGroups(selected: ReadonlySet<string>, destination?: string): boolean {
+    if (destination && (!this.layout.groups.some(group => group.id === destination) || selected.has(destination))) return false;
+    const moving = this.layout.groups.filter(group => selected.has(group.id));
+    const remaining = this.layout.groups.filter(group => !selected.has(group.id));
+    const insertion = destination ? remaining.findIndex(group => group.id === destination) : remaining.length;
+    if (insertion < 0) return false;
+    const groups = [...remaining.slice(0, insertion), ...moving, ...remaining.slice(insertion)];
+    if (groups.every((group, index) => group.id === this.layout.groups[index]?.id)) return false;
+    this.layout.groups = groups;
+    this.layoutVersion += 1;
+    return true;
   }
 
   private moveAgents(ids: readonly string[], groupId: string | undefined, targetId?: string): boolean {

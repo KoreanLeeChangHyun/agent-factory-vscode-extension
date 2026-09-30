@@ -13,8 +13,8 @@ results in VS Code.
 1. Run **Agent Factory: Add Main Agent Chat** from the VS Code Command Palette.
 2. Work directly with Main, or submit a task for delegated execution.
 
-- The extension installs the matching Agent Factory companion plugin when needed: the Codex
-  plugin, and the Claude Code plugin when the `claude` CLI is available.
+- The extension installs or updates the matching Agent Factory companion plugin for each
+  available runtime: Codex, Claude Code (`claude`) and Antigravity (`agy`).
 
 ## 2. Core features
 
@@ -33,11 +33,13 @@ results in VS Code.
 
 ### 2.2. Contracts → Work–Verification loop
 
-- Turn a conversation into a work contract with an intended outcome, individual
-  tasks, and observable completion criteria. For file changes, identify the exact
-  paths and operations so the execution boundary is clear before work begins.
-- Keep each task linked to its scope and results. Contract revisions preserve
-  earlier versions and record confirmed scope changes.
+- Turn a conversation into a work contract with four sections: the **goal** with its
+  boundary and observable completion criteria, the **structure** of exact file changes
+  shown as a tree with add/modify/delete markers, the **workers** assigned to each task,
+  and the execution **order** with dependencies.
+- Each contract version at `docs/progress/<contract-id>/contract-v<N>.md` also holds
+  its execution record: runs, agents, Work and Verification status, and evidence per
+  task. Revisions create a new version and preserve earlier ones.
 - In a Work–Verification loop, the agents have distinct responsibilities:
 
   | Agent | Responsibility |
@@ -139,8 +141,9 @@ results in VS Code.
 ### 4.1. Scope and inheritance
 
 - Open the chat's **Agent settings** panel to configure Main, Work and Verification
-  models and reasoning levels, and select the scope to edit: **Chat**, **Project**,
-  or **Global**.
+  models and reasoning levels, and select the scope to edit: **Global**, **Project**,
+  or **This chat**. The panel opens on **Project**; without an open workspace folder,
+  it uses **Global**.
 - Each value resolves independently: **chat → project → global → provider default**.
 - **Use parent setting** removes an override. The panel shows each value's
   source and effective setting.
@@ -177,15 +180,11 @@ results in VS Code.
   and by runtime (Codex, Claude Code, Antigravity) within each vendor. In a started
   conversation, models from other runtimes are locked.
 
-- When `claude` is available, the model picker offers these identifiers:
-
-  | Selection | Model identifiers |
-  | --- | --- |
-  | Pinned versions | `claude-opus-5-5`, `claude-sonnet-5`, `claude-fable-5-1`, `claude-haiku-4-5-20251001` |
-  | Family aliases | `claude-opus`, `claude-sonnet`, `claude-haiku` |
-
-- Claude Code resolves family aliases to the latest model in each family.
-  Availability depends on your account.
+- When `claude` is available, the model picker lists the Claude models from Claude
+  Code's own account-specific model catalog (`~/.claude/cache/model-catalog/`, or
+  `$CLAUDE_CONFIG_DIR`). The list is read again each time the picker opens, so it
+  follows your account without an extension update. If Claude Code has not written
+  a catalog yet, no Claude models are listed.
 - Start a new chat or clear the current conversation before switching between
   Codex and Claude.
 - Every execution mode works with Claude. Plan runs in Claude's plan mode and

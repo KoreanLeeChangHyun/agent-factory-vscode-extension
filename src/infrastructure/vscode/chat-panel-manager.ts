@@ -1,4 +1,4 @@
-import { mergeAgentSettings } from "../../core/config/agent-settings";
+import type { AgentDefaults } from "../../core/config/agent-settings";
 import { BOT_DEFAULT_PROMPTS, resolveBotPrompt } from "../../modules/chat/bot-prompts";
 import { isBotModel } from "../../modules/chat/bot-model";
 import { localCompanionAvailable } from "../../modules/chat/bot-build-policy";
@@ -37,6 +37,9 @@ import { parseClientMessage } from "../../protocol/validator";
 import type { ChatTemplateRenderer } from "./chat-template-renderer";
 import type { AccountLimits, AgentRuntimeClient } from "../agent-factory/agent-client";
 import { readProviderModels } from "../agent-factory/model-catalog";
+import { readAntigravityUsage } from "../agent-factory/antigravity-usage";
+import { isProviderDetected, providerStatuses, type ProviderId } from "../agent-factory/provider-detection";
+import { redetectProviders, saveProviderPath, pluginUpdateMode, savePluginUpdateMode, updateProviderPlugins, providerVersions, refreshProviderVersions } from "./provider-settings";
 import { ChatSessionController } from "../../modules/chat/session-controller";
 import { saveConvertedImage } from "./converted-image-store";
 import { writeNewImageAttachment } from "./image-attachment-store";
@@ -87,6 +90,8 @@ interface ManagedPanel {
 
 const COMPOSER_PREFERENCES_KEY = "agentFactory.mainChat.composerPreferences";
 const ACCOUNT_USAGE_KEY = "agentFactory.accountUsage.v1";
+// agy answers /usage locally without a model turn; refresh it at most this often across panels.
+const ANTIGRAVITY_USAGE_REFRESH_MS = 60_000;
 const AGENT_REFRESH_INTERVAL_MS = 2_000;
 const AGENT_IDLE_VISIBLE_REFRESH_INTERVAL_MS = 5_000;
 const AGENT_IDLE_HIDDEN_REFRESH_INTERVAL_MS = 15_000;
@@ -184,7 +189,7 @@ export class ChatPanelManager implements vscode.Disposable {
       (state.agentId && panel.state.agentId === state.agentId));
     if (existing) { existing.panel.reveal(undefined, true); return; }
     const panel = vscode.window.createWebviewPanel(this.viewType, state.title, vscode.ViewColumn.Active, this.webviewOptions(state.panelId));
-    await this.attach(panel, { ...this.composerPreferences(), ...state });
+    await this.attach(panel, { ...this.newChatPreferences(state.role ?? "main"), ...state });
   }
 
   public async renameSidebarAgent(state: ChatPanelState, title: string): Promise<void> {
@@ -214,7 +219,7 @@ export class ChatPanelManager implements vscode.Disposable {
   }
 
   public async openDraft(): Promise<void> {
-    const state = { ...createDraftChatState(this.composerPreferences()), role: "main" as const };
+    const state = { ...createDraftChatState(this.newChatPreferences()), role: "main" as const };
     const panel = vscode.window.createWebviewPanel(
       this.viewType,
       state.title,
@@ -225,7 +230,7 @@ export class ChatPanelManager implements vscode.Disposable {
   }
 
   public async revive(panel: vscode.WebviewPanel, serializedState: unknown): Promise<void> {
-    const state = restoreChatState(serializedState, this.composerPreferences());
+    const state = restoreChatState(serializedState, this.newChatPreferences());
     const panelMatch = this.panels.get(state.panelId);
     const existing = (panelMatch && !panelMatch.disposed ? panelMatch : undefined) ?? [...this.panels.values()].find(candidate =>
       Boolean(!candidate.disposed && state.agentId && candidate.state.agentId === state.agentId));
@@ -436,6 +441,11 @@ export class ChatPanelManager implements vscode.Disposable {
         ? rawMessage.type : "unknown";
       // Log the protocol operation only, never chat text, attachments or credentials.
       console.warn("[Agent Factory] Chat request rejected", { type, reason: "protocol-validation-failed" });
+      // A rejected upload must release its pending composer chip, or sending stays blocked.
+      if ((type === "attachments.createImage" || type === "attachments.createFile")
+          && typeof rawMessage === "object" && rawMessage !== null && "id" in rawMessage && typeof rawMessage.id === "string" && /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(rawMessage.id)) {
+        await this.post(managed.panel, { type: "attachment.rejected", id: rawMessage.id });
+      }
       await this.post(managed.panel, {
         type: "host.notice",
         level: "error",
@@ -486,9 +496,10 @@ export class ChatPanelManager implements vscode.Disposable {
         managed.themeSignature = undefined;
         await this.refreshTheme(managed);
         const connection = await this.connectRuntime();
-        await ensureAgentPresets(this.context.globalState);
-        await this.post(managed.panel, { type: "agent.defaults", settings: readAgentDefaults(this.context.globalState) });
+        await ensureAgentPresets(this.context.globalState, this.context.workspaceState, managed.state.panelId, this.agentSettingsFromState(managed.state));
+        await this.post(managed.panel, { type: "agent.defaults", settings: readAgentDefaults(this.context.globalState, this.context.workspaceState, managed.state.panelId) });
         await this.post(managed.panel, { type: "usage.accounts", accounts: this.accountUsage() });
+        void this.refreshAntigravityUsage();
         const capabilities = connection.available ? await connection.client.capabilities(managed.state.agentId, this.effectiveModel(managed)) : undefined;
         this.broadcastCompanion();
         let runtimeConversationId: string | undefined;
@@ -535,6 +546,8 @@ export class ChatPanelManager implements vscode.Disposable {
           agentModels: managed.state.agentModels,
           agentPermissions: managed.state.agentPermissions,
           reasoning: managed.state.reasoning,
+          agentSettingsScope: managed.state.agentSettingsScope,
+          agentSettingsSet: managed.state.agentSettingsSet,
           businessMode: "normal",
           taskMode: "direct",
           fastMode: managed.state.fastMode === true,
@@ -639,7 +652,7 @@ export class ChatPanelManager implements vscode.Disposable {
         return;
       case "agent.preset.field": {
         try {
-          await updateAgentPresetField(this.context.globalState, message.name, message.role, message.field, message.value);
+          await updateAgentPresetField(this.context.globalState, this.context.workspaceState, managed.state.panelId, message.scope, message.name, message.role, message.field, message.value);
           await this.post(managed.panel, {type: "agent.preset.field.result"});
           for (const panel of this.panels.values()) await this.refreshAgentDefaults(panel);
         } catch (cause) {
@@ -649,14 +662,16 @@ export class ChatPanelManager implements vscode.Disposable {
       }
       case "agent.preset": {
         let error: string | undefined;
+        let settings: AgentDefaults | undefined;
         try {
-          await useAgentPreset(this.context.globalState, message.action, message.scope, message.name, mergeAgentSettings(
-            readAgentDefaults().effective, managed.state.agentModels ?? {},
-            {[managed.state.role ?? "main"]: {model: managed.state.model, reasoningEffort: managed.state.reasoning}}
-          ));
+          settings = await useAgentPreset(this.context.globalState, this.context.workspaceState, managed.state.panelId, message.action, message.scope, message.name, this.agentSettingsFromState(managed.state));
+          if (settings) {
+            managed.state = this.applyAgentSettings(managed.state, settings, message.scope, message.name);
+            await this.rememberAgent(managed.state);
+          }
         } catch (cause) { error = cause instanceof Error ? cause.message : String(cause); }
         finally {
-          await this.post(managed.panel, {type: "agent.preset.result", ...(error ? {error} : {})});
+          await this.post(managed.panel, {type: "agent.preset.result", scope: message.scope, name: message.name, ...(settings && !error ? {settings} : {}), ...(error ? {error} : {})});
           for (const panel of this.panels.values()) await this.refreshAgentDefaults(panel);
         }
         return;
@@ -677,6 +692,8 @@ export class ChatPanelManager implements vscode.Disposable {
           agentModels: message.agentModels,
           agentPermissions: message.agentPermissions,
           reasoning: message.reasoning,
+          agentSettingsScope: message.agentSettingsScope,
+          agentSettingsSet: message.agentSettingsSet,
           fastMode: message.fastMode,
           goalMode: false,
           workLoopMode: false
@@ -728,6 +745,53 @@ export class ChatPanelManager implements vscode.Disposable {
         return;
       case "models.request":
         await this.sendModelList(managed);
+        return;
+      case "usage.refresh":
+        await this.refreshAntigravityUsage();
+        return;
+      case "providers.request":
+        await this.post(managed.panel, { type: "providers.status", providers: providerStatuses(), busy: this.providerRefresh !== undefined, errors: this.providerErrors, pluginUpdateMode: pluginUpdateMode(), versions: providerVersions() });
+        return;
+      case "providers.detect":
+        await this.refreshProviders();
+        return;
+      case "providers.configure":
+        try {
+          await saveProviderPath(message.provider, message.path);
+        } catch (error) {
+          await this.post(managed.panel, { type: "host.notice", level: "error", text: error instanceof Error ? error.message : String(error) });
+        }
+        // The configuration listener also refreshes; both calls share one detection.
+        await this.refreshProviders();
+        return;
+      case "providers.pick": {
+        const selected = await vscode.window.showOpenDialog({
+          canSelectFiles: true,
+          canSelectFolders: false,
+          canSelectMany: false,
+          title: localize("ui.providers.pick.title"),
+          openLabel: localize("ui.providers.pick")
+        });
+        const executable = selected?.[0];
+        if (!executable) return;
+        try {
+          await saveProviderPath(message.provider, executable.fsPath);
+          await this.refreshProviders();
+        } catch (error) {
+          await this.post(managed.panel, { type: "host.notice", level: "error", text: error instanceof Error ? error.message : String(error) });
+        }
+        return;
+      }
+      case "providers.updateMode.select":
+        await savePluginUpdateMode(message.mode);
+        await this.post(managed.panel, { type: "providers.status", providers: providerStatuses(), busy: this.providerRefresh !== undefined, errors: this.providerErrors, pluginUpdateMode: message.mode, versions: providerVersions() });
+        return;
+      case "providers.update":
+        await this.updateProviderPluginsNow(message.version, message.provider);
+        return;
+      case "providers.versions.request":
+        await refreshProviderVersions(this.context.extension?.packageJSON?.version);
+        await this.broadcast({ type: "providers.status", providers: providerStatuses(), busy: this.providerRefresh !== undefined, errors: this.providerErrors, pluginUpdateMode: pluginUpdateMode(), versions: providerVersions() });
         return;
       case "workflow.close": {
         if (!managed.state.agentId || (managed.state.role ?? "main") !== "main") return;
@@ -1049,8 +1113,74 @@ export class ChatPanelManager implements vscode.Disposable {
     }
   }
 
+  private providerRefresh?: Promise<void>;
+  private providerRefreshQueued = false;
+  private providerErrors: Partial<Record<ProviderId, string>> = {};
+
+  /** Detect provider CLIs again and bring every open chat up to date without a window reload. */
+  public refreshProviders(): Promise<void> {
+    if (this.providerRefresh) {
+      this.providerRefreshQueued = true;
+      return this.providerRefresh;
+    }
+    const refresh = (async () => {
+      try {
+        do {
+          this.providerRefreshQueued = false;
+          await this.broadcast({ type: "providers.status", providers: providerStatuses(), busy: true, errors: this.providerErrors, pluginUpdateMode: pluginUpdateMode(), versions: providerVersions() });
+          this.providerErrors = { ...(await redetectProviders(this.context)).errors };
+        } while (this.providerRefreshQueued);
+      } catch (error) {
+        console.error("[Agent Factory] Provider detection failed", error);
+      } finally {
+        this.providerRefresh = undefined;
+      }
+      await this.broadcast({ type: "providers.status", providers: providerStatuses(), busy: false, errors: this.providerErrors, pluginUpdateMode: pluginUpdateMode(), versions: providerVersions() });
+      try {
+        const connection = await this.connectRuntime();
+        for (const managed of this.panels.values()) {
+          if (managed.disposed) continue;
+          await this.sendModelList(managed);
+          const capabilities = connection.available
+            ? await connection.client.capabilities(managed.state.agentId, this.effectiveModel(managed)).catch(() => undefined) : undefined;
+          await this.post(managed.panel, { type: "runtime.updated", runtimeAvailable: connection.available, capabilities });
+        }
+      } catch (error) {
+        console.error("[Agent Factory] Runtime refresh after provider detection failed", error);
+      }
+    })();
+    this.providerRefresh = refresh;
+    return refresh;
+  }
+
+  /** Update all detected providers, or install a requested version for one detected provider. */
+  public updateProviderPluginsNow(version?: string, provider?: ProviderId): Promise<void> {
+    if (this.providerRefresh) return this.providerRefresh;
+    const refresh = (async () => {
+      try {
+        await this.broadcast({ type: "providers.status", providers: providerStatuses(), busy: true, errors: this.providerErrors, pluginUpdateMode: pluginUpdateMode(), versions: providerVersions() });
+        this.providerErrors = { ...this.providerErrors, ...(await updateProviderPlugins(this.context, version, provider)) };
+        await refreshProviderVersions(this.context.extension?.packageJSON?.version);
+      } catch (error) {
+        console.error("[Agent Factory] Provider plugin update failed", error);
+      } finally {
+        this.providerRefresh = undefined;
+      }
+      await this.broadcast({ type: "providers.status", providers: providerStatuses(), busy: false, errors: this.providerErrors, pluginUpdateMode: pluginUpdateMode(), versions: providerVersions() });
+    })();
+    this.providerRefresh = refresh;
+    return refresh;
+  }
+
+  private async broadcast(message: HostMessage): Promise<void> {
+    await Promise.all([...this.panels.values()].filter(managed => !managed.disposed).map(managed => this.post(managed.panel, message)));
+  }
+
   private async sendModelList(managed: ManagedPanel): Promise<void> {
-    const models = await readProviderModels();
+    // Undetected providers contribute no models; with none detected the picker is empty.
+    const models = await readProviderModels(undefined, undefined, undefined, undefined, {
+      codex: isProviderDetected("codex"), claude: isProviderDetected("claude"), antigravity: isProviderDetected("antigravity")
+    });
     if (models !== undefined) await this.post(managed.panel, { type: "models.list", models });
   }
 
@@ -1238,7 +1368,7 @@ Read the exact stored child result/receipt and existing workflow status for repo
       }
       const label = child.role === "work" ? "Work agent" : "Verification agent";
       const state: ChatPanelState = {
-        ...createDraftChatState(this.composerPreferences()),
+        ...createDraftChatState(this.newChatPreferences(child.role)),
         title: `${label} · ${child.agentId}`,
         agentId: child.agentId,
         role: child.role,
@@ -1261,13 +1391,13 @@ Read the exact stored child result/receipt and existing workflow status for repo
   }
 
   private effectiveModel(managed: ManagedPanel): string | undefined {
-    return managed.state.model || readAgentDefaults(this.context.globalState).effective[managed.state.role ?? "main"]?.model;
+    return managed.state.model;
   }
 
   private async refreshAgentDefaults(managed: ManagedPanel): Promise<void> {
     if (managed.disposed) return;
-    await ensureAgentPresets(this.context.globalState);
-    await this.post(managed.panel, { type: "agent.defaults", settings: readAgentDefaults(this.context.globalState) });
+    await ensureAgentPresets(this.context.globalState, this.context.workspaceState, managed.state.panelId, this.agentSettingsFromState(managed.state));
+    await this.post(managed.panel, { type: "agent.defaults", settings: readAgentDefaults(this.context.globalState, this.context.workspaceState, managed.state.panelId) });
     const model = this.effectiveModel(managed);
     const connection = await this.connectRuntime();
     if (connection.available) {
@@ -1280,6 +1410,51 @@ Read the exact stored child result/receipt and existing workflow status for repo
     const { model, reasoning, agentModels, ...preferences } = restoreChatState(
       this.context.globalState.get(COMPOSER_PREFERENCES_KEY), {});
     return preferences;
+  }
+
+  private newChatPreferences(role: "main" | "work" | "verification" = "main"): ComposerPreferences {
+    const defaults = readAgentDefaults(this.context.globalState);
+    const source = defaults.projectAvailable ? defaults.project : defaults.global;
+    const own = source[role] ?? {};
+    return {
+      ...this.composerPreferences(),
+      ...(own.model ? { model: own.model } : {}),
+      ...(own.reasoningEffort ? { reasoning: own.reasoningEffort } : {}),
+      agentSettingsScope: defaults.projectAvailable ? "project" : "global",
+      agentSettingsSet: "Default",
+      ...(role === "main" ? { agentModels: {
+        ...(source.work ? { work: { ...source.work } } : {}),
+        ...(source.workLight || source.work ? { workLight: { ...(source.work ?? {}), ...(source.workLight ?? {}) } } : {}),
+        ...(source.verification ? { verification: { ...source.verification } } : {})
+      } } : {})
+    };
+  }
+
+  private agentSettingsFromState(state: ChatPanelState): AgentDefaults {
+    if ((state.role ?? "main") !== "main") return { [state.role!]: { model: state.model, reasoningEffort: state.reasoning } };
+    return {
+      main: { model: state.model, reasoningEffort: state.reasoning },
+      work: { ...state.agentModels?.work },
+      workLight: { ...state.agentModels?.workLight },
+      verification: { ...state.agentModels?.verification }
+    };
+  }
+
+  private applyAgentSettings(state: ChatPanelState, settings: AgentDefaults, scope: "global" | "project" | "chat", name: string): ChatPanelState {
+    const role = state.role ?? "main";
+    const own = settings[role === "main" ? "main" : role] ?? {};
+    return {
+      ...state,
+      ...(own.model ? {model: own.model} : {}),
+      ...(own.reasoningEffort ? {reasoning: own.reasoningEffort} : {}),
+      ...(role === "main" ? {agentModels: {
+        ...(settings.work ? {work: {...settings.work}} : {}),
+        ...(settings.workLight || settings.work ? {workLight: {...(settings.work ?? {}), ...(settings.workLight ?? {})}} : {}),
+        ...(settings.verification ? {verification: {...settings.verification}} : {})
+      }} : {}),
+      agentSettingsScope: scope,
+      agentSettingsSet: name
+    };
   }
 
   private async saveComposerPreferences(state: ChatPanelState): Promise<void> {
@@ -1486,8 +1661,8 @@ Read the exact stored child result/receipt and existing workflow status for repo
           void this.post(managed.panel, { type: "run.observed", status });
           this.scheduleAgentList(managed);
         },
-        onError: (message) => {
-          void this.post(managed.panel, { type: "host.notice", level: "error", text: message });
+        onError: (message, level = "error") => {
+          void this.post(managed.panel, { type: "host.notice", level, text: message });
         }
       }, managed.state.agentId);
     }
@@ -1650,7 +1825,7 @@ Read the exact stored child result/receipt and existing workflow status for repo
               return text ? `${localize(m.type === "user" ? "unit.summary.request" : "unit.summary.result")}: ${text}` : "";
             }).filter(Boolean).join("\n\n");
         }
-        const state = { ...createDraftChatState(this.composerPreferences()), role: "main" as const, title: name.trim(), ...(managed.state.model ? { model: managed.state.model } : {}) };
+        const state = { ...createDraftChatState(this.newChatPreferences()), role: "main" as const, title: name.trim(), ...(managed.state.model ? { model: managed.state.model } : {}) };
         const panel = vscode.window.createWebviewPanel(this.viewType, state.title, vscode.ViewColumn.Active, this.webviewOptions(state.panelId));
         await this.attach(panel, state);
         targetPanel = this.panels.get(state.panelId)!;
@@ -1964,7 +2139,7 @@ Read the exact stored child result/receipt and existing workflow status for repo
 
   private async createFileAttachment(managed: ManagedPanel, message: Extract<import("../../protocol/messages").ClientMessage, { type: "attachments.createFile" }>): Promise<void> {
     try {
-      const directory = vscode.Uri.joinPath(this.context.globalStorageUri, "uploaded-files", managed.state.panelId, randomUUID());
+      const directory = vscode.Uri.joinPath(this.storageRoot(), "uploaded-files", managed.state.panelId, randomUUID());
       const uri = vscode.Uri.joinPath(directory, message.name);
       await vscode.workspace.fs.createDirectory(directory);
       await vscode.workspace.fs.writeFile(uri, Buffer.from(message.data, "base64"));
@@ -1980,7 +2155,7 @@ Read the exact stored child result/receipt and existing workflow status for repo
   private async createTextAttachment(managed: ManagedPanel, text: string): Promise<void> {
     try {
       const directory = vscode.Uri.joinPath(
-        this.context.globalStorageUri,
+        this.storageRoot(),
         "pasted-text",
         managed.state.panelId
       );
@@ -2047,17 +2222,26 @@ Read the exact stored child result/receipt and existing workflow status for repo
     assertAttachmentScopeId(id, "attachment");
     if (content.byteLength < 1 || !hasImageSignature(content, mediaType)) throw new Error(localize("ui.the.image.is.unsupported.or.too.large"));
     const suffix = imageSuffix(mediaType);
-    const directory = vscode.Uri.joinPath(this.context.globalStorageUri, "chat-images", panelId, id.slice(0, 2));
+    const directory = vscode.Uri.joinPath(this.storageRoot(), "chat-images", panelId, id.slice(0, 2));
     await vscode.workspace.fs.createDirectory(directory);
     const uri = vscode.Uri.joinPath(directory, `${id}${suffix}`);
     await writeNewImageAttachment(uri.fsPath, content);
     return { id, name, kind: "image", uri: uri.toString(), previewUri: panel.webview.asWebviewUri(uri).toString(), mediaType, size: content.byteLength };
   }
 
+  /**
+   * Profile-enabled desktop hosts can expose global storage as `vscode-userdata:`. Attachments
+   * are handed to CLIs as local paths, so use the equivalent `file:` URI for the same folder.
+   */
+  private storageRoot(): vscode.Uri {
+    const root = this.context.globalStorageUri;
+    return root.scheme === "vscode-userdata" ? vscode.Uri.file(root.fsPath) : root;
+  }
+
   private async imageAttachmentPath(panelId: string, id: string): Promise<vscode.Uri | undefined> {
     assertAttachmentScopeId(panelId, "panel");
     assertAttachmentScopeId(id, "attachment");
-    const base = vscode.Uri.joinPath(this.context.globalStorageUri, "chat-images", panelId, id.slice(0, 2));
+    const base = vscode.Uri.joinPath(this.storageRoot(), "chat-images", panelId, id.slice(0, 2));
     for (const suffix of [".png", ".jpg", ".gif", ".webp"]) {
       const uri = vscode.Uri.joinPath(base, `${id}${suffix}`);
       try {
@@ -2149,6 +2333,20 @@ Read the exact stored child result/receipt and existing workflow status for repo
     for (const panel of this.panels.values()) {
       if (!panel.disposed) void this.post(panel.panel, { type: "usage.accounts", accounts: next });
     }
+  }
+
+  private antigravityUsageCheckedAt = 0;
+  private antigravityUsageRefresh: Promise<void> | undefined;
+
+  /** Antigravity reports quota only on request, so poll `agy /usage` (throttled) instead of waiting for runs. */
+  private refreshAntigravityUsage(): Promise<void> {
+    if (this.antigravityUsageRefresh) return this.antigravityUsageRefresh;
+    if (Date.now() - this.antigravityUsageCheckedAt < ANTIGRAVITY_USAGE_REFRESH_MS) return Promise.resolve();
+    this.antigravityUsageCheckedAt = Date.now();
+    this.antigravityUsageRefresh = (async () => {
+      for (const limits of await readAntigravityUsage()) await this.recordAccountLimits(limits);
+    })().catch(() => undefined).finally(() => { this.antigravityUsageRefresh = undefined; });
+    return this.antigravityUsageRefresh;
   }
 
   private broadcastCompanion(): void {
@@ -2248,7 +2446,7 @@ Read the exact stored child result/receipt and existing workflow status for repo
       retainContextWhenHidden: true,
       localResourceRoots: uniqueUris([
         ...this.templates.localResourceRoots,
-        vscode.Uri.joinPath(this.context.globalStorageUri, "chat-images", panelId)
+        vscode.Uri.joinPath(this.storageRoot(), "chat-images", panelId)
       ])
     };
   }

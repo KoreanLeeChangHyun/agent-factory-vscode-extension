@@ -2,24 +2,32 @@ import { disposeCodexConnections } from "./infrastructure/agent-factory/codex-co
 import { localize, setHostLanguage } from "./common/localization";
 import * as vscode from "vscode";
 import { bootstrap } from "./core/bootstrap";
-import { ensureAgentFactoryPlugin } from "./infrastructure/agent-factory/plugin-dependency";
+import { ensureAgentFactoryCodexRuntime } from "./infrastructure/agent-factory/codex-plugin-setup";
 import { ensureAgentFactoryClaudePlugin } from "./infrastructure/agent-factory/claude-plugin-dependency";
-import { ensureAgentFactoryAntigravityPlugin, isAntigravityAvailable } from "./infrastructure/agent-factory/antigravity-plugin-dependency";
+import { ensureAgentFactoryAntigravityPlugin } from "./infrastructure/agent-factory/antigravity-plugin-dependency";
 import { developmentPluginRoot, validateDevelopmentPlugin } from "./infrastructure/agent-factory/development-plugin";
 import { locateAgentFactoryExec } from "./infrastructure/agent-factory/plugin-locator";
-import { CodexCliNotFoundError, configureClaudeCli, configureCodexCli, resolveClaudeCli, resolveCodexCli } from "./infrastructure/agent-factory/process-environment";
+import { detectProviders } from "./infrastructure/agent-factory/provider-detection";
+import { configuredProviderPaths } from "./infrastructure/vscode/provider-settings";
 import { openWslWorkspace } from "./infrastructure/vscode/wsl-workspace";
 import { initializeAgentDefaults } from "./infrastructure/vscode/agent-settings-store";
 
+export interface ProviderAvailability {
+  readonly codex: boolean;
+  readonly claude: boolean;
+  readonly antigravity: boolean;
+}
+
 export interface ActivationServices {
   readonly initializeDefaults?: (context: vscode.ExtensionContext, providers: { codex: boolean; claude: boolean }) => Promise<void>;
-  readonly prepareCodex?: (configuredPath?: string, options?: { readonly allowRedirect: boolean }) => Promise<void | "redirected">;
-  /** Resolves the optional Claude Code CLI; true when Claude can run without Codex. */
-  readonly prepareClaude?: (configuredPath?: string) => Promise<boolean>;
+  /** Resolves every provider CLI; a missing one is reported, never thrown. Without it Codex is assumed. */
+  readonly detectProviders?: () => Promise<ProviderAvailability>;
+  /** Opens the workspace in WSL when no provider CLI exists on this host; true when handed off. */
+  readonly redirectToWsl?: () => Promise<boolean>;
   readonly ensurePlugin: (requiredVersion: string) => Promise<void>;
   /** Installs or updates the matching Claude Code plugin when the Claude CLI is available. */
   readonly ensureClaudePlugin?: (requiredVersion: string) => Promise<void>;
-  /** Installs or updates the matching Antigravity plugin when the agy CLI is available; never blocks startup. */
+  /** Installs or updates the matching Antigravity plugin; blocks startup only when agy is the sole provider. */
   readonly ensureAntigravityPlugin?: (requiredVersion: string) => Promise<void>;
   readonly showWarningMessage?: typeof vscode.window.showWarningMessage;
   /** Claude-only hosts cannot install from the Codex marketplace; they need an already installed plugin. */
@@ -29,10 +37,17 @@ export interface ActivationServices {
   readonly showErrorMessage: typeof vscode.window.showErrorMessage;
   readonly showInformationMessage?: typeof vscode.window.showInformationMessage;
   readonly registerCommand?: typeof vscode.commands.registerCommand;
+  /** Claims the sidebar view before the slow dependency checks so it never shows a missing provider. */
+  readonly createStartupView?: () => StartupView;
+}
+
+export interface StartupView extends vscode.Disposable {
+  message: string | undefined;
 }
 
 const activations = new WeakMap<vscode.ExtensionContext, Promise<boolean>>();
 const recoveryCommands = new WeakMap<vscode.ExtensionContext, vscode.Disposable>();
+const startupViews = new WeakMap<vscode.ExtensionContext, StartupView>();
 
 export function activate(
   context: vscode.ExtensionContext,
@@ -41,6 +56,12 @@ export function activate(
   setHostLanguage(vscode.env?.language || "en");
   const pending = activations.get(context);
   if (pending) return pending.then(() => undefined);
+  if (!startupViews.has(context) && services.createStartupView) {
+    const view = services.createStartupView();
+    view.message = localize("ui.sidebar.starting");
+    startupViews.set(context, view);
+    context.subscriptions?.push(view);
+  }
   const activation = start(context, services);
   activations.set(context, activation);
   // Keep successful activation cached so bootstrap registers subscriptions only once.
@@ -59,21 +80,14 @@ async function start(context: vscode.ExtensionContext, services: ActivationServi
         throw new Error(localize("ui.unable.to.read.the.extension.version"));
       }
       const developmentRoot = developmentPluginRoot(context.extensionMode === vscode.ExtensionMode.Development);
-      const settings = vscode.workspace?.getConfiguration("agentFactory.mainChat");
-      const configuredCodexPath = settings?.get<string>("codexPath")?.trim();
-      const claudeAvailable = await services.prepareClaude?.(settings?.get<string>("claudePath")?.trim()) ?? false;
-      let codexAvailable = true;
-      let prepared: void | "redirected" = undefined;
-      try {
-        // A usable local Claude CLI makes a WSL redirect for a missing Codex unnecessary.
-        prepared = await services.prepareCodex?.(configuredCodexPath, { allowRedirect: !claudeAvailable });
-      } catch (error) {
-        if (!(error instanceof Error && error.name === "CodexCliNotFoundError") || !claudeAvailable) throw error;
-        codexAvailable = false;
-      }
-      if (prepared === "redirected") {
+      const providers = await services.detectProviders?.() ?? { codex: true, claude: false, antigravity: false };
+      const codexAvailable = providers.codex, claudeAvailable = providers.claude, antigravityAvailable = providers.antigravity;
+      const anyProvider = codexAvailable || claudeAvailable || antigravityAvailable;
+      // Any local provider CLI makes a WSL redirect unnecessary.
+      if (!anyProvider && await services.redirectToWsl?.()) {
         recoveryCommands.get(context)?.dispose();
         recoveryCommands.delete(context);
+        setStartupMessage(context, localize("ui.wsl.project.opened"));
         // The command that triggered activation must still exist in the original window.
         if (services.registerCommand) {
           const disposable = services.registerCommand("agentFactory.mainChat.open", () =>
@@ -88,6 +102,8 @@ async function start(context: vscode.ExtensionContext, services: ActivationServi
         cancellable: false
       }, async () => {
         if (developmentRoot) return validateDevelopmentPlugin(developmentRoot, requiredVersion);
+        // Without any CLI the chat still opens; Settings can set paths and install the plugin later.
+        if (!anyProvider) return;
         if (codexAvailable) await services.ensurePlugin(requiredVersion);
         if (claudeAvailable && services.ensureClaudePlugin) {
           try {
@@ -98,9 +114,12 @@ async function start(context: vscode.ExtensionContext, services: ActivationServi
             void services.showWarningMessage?.(localize("claude.plugin.warning", error instanceof Error ? error.message : String(error)));
           }
         }
+        // Antigravity is the only installer on an agy-only host, so the runtime must wait for it.
+        if (!codexAvailable && !claudeAvailable && services.ensureAntigravityPlugin) await services.ensureAntigravityPlugin(requiredVersion);
         if (!codexAvailable && services.requireInstalledPlugin) await services.requireInstalledPlugin(requiredVersion);
       });
-      if (!developmentRoot && services.ensureAntigravityPlugin) {
+      if (!anyProvider) void services.showWarningMessage?.(localize("ui.providers.none.detected"));
+      if (!developmentRoot && antigravityAvailable && (codexAvailable || claudeAvailable) && services.ensureAntigravityPlugin) {
         // Optional host: its GitHub install must not delay or fail the chat's own startup.
         void services.ensureAntigravityPlugin(requiredVersion).catch(error =>
           services.showWarningMessage?.(localize("antigravity.plugin.warning", error instanceof Error ? error.message : String(error))));
@@ -114,10 +133,14 @@ async function start(context: vscode.ExtensionContext, services: ActivationServi
       );
       if (action === localize("ui.retry")) continue;
       installRecoveryCommand(context, services, detail);
+      setStartupMessage(context, localize("ui.sidebar.startup.failed", detail));
       return false;
     }
     recoveryCommands.get(context)?.dispose();
     recoveryCommands.delete(context);
+    // The real sidebar registers the same view ID, so the placeholder must release it first.
+    startupViews.get(context)?.dispose();
+    startupViews.delete(context);
     services.bootstrap(context);
     return true;
   }
@@ -128,28 +151,34 @@ export function deactivate(): void {
   // VS Code disposes subscriptions registered on the extension context.
 }
 
+function setStartupMessage(context: vscode.ExtensionContext, message: string): void {
+  const view = startupViews.get(context);
+  if (view) view.message = message;
+}
+
+function createStartupView(): StartupView {
+  const view = vscode.window.createTreeView<never>("agentFactory.agents", {
+    treeDataProvider: { getTreeItem: item => item, getChildren: () => [] }
+  });
+  return {
+    get message() { return view.message; },
+    set message(value) { view.message = value; },
+    dispose: () => view.dispose()
+  };
+}
+
 function defaultActivationServices(): ActivationServices {
   return {
-    initializeDefaults: (context, providers) => initializeAgentDefaults(context.globalState, providers),
-    prepareCodex: async (configuredPath, options) => {
-      configureCodexCli(undefined);
-      try {
-        configureCodexCli(await resolveCodexCli({ configuredPath }));
-      } catch (error) {
-        if (error instanceof CodexCliNotFoundError && (options?.allowRedirect ?? true) && await openWslWorkspace()) return "redirected";
-        throw error;
-      }
+    initializeDefaults: (context, providers) => initializeAgentDefaults(context.globalState, providers, context.workspaceState),
+    detectProviders: async () => {
+      const statuses = await detectProviders(configuredProviderPaths());
+      const detected = (id: string) => statuses.some(status => status.id === id && status.detected);
+      return { codex: detected("codex"), claude: detected("claude"), antigravity: detected("antigravity") };
     },
-    prepareClaude: async (configuredPath) => {
-      const executable = await resolveClaudeCli({ configuredPath });
-      configureClaudeCli(executable);
-      return executable !== undefined;
-    },
-    ensurePlugin: ensureAgentFactoryPlugin,
+    redirectToWsl: openWslWorkspace,
+    ensurePlugin: ensureAgentFactoryCodexRuntime,
     ensureClaudePlugin: ensureAgentFactoryClaudePlugin,
-    ensureAntigravityPlugin: async (requiredVersion) => {
-      if (await isAntigravityAvailable()) await ensureAgentFactoryAntigravityPlugin(requiredVersion);
-    },
+    ensureAntigravityPlugin: (requiredVersion) => ensureAgentFactoryAntigravityPlugin(requiredVersion),
     showWarningMessage: vscode.window.showWarningMessage.bind(vscode.window),
     requireInstalledPlugin: async (requiredVersion) => {
       const configuredPath = vscode.workspace?.getConfiguration("agentFactory.mainChat").get<string>("runtimeExecPath")?.trim();
@@ -160,7 +189,8 @@ function defaultActivationServices(): ActivationServices {
     withProgress: vscode.window.withProgress.bind(vscode.window),
     showErrorMessage: vscode.window.showErrorMessage.bind(vscode.window),
     showInformationMessage: vscode.window.showInformationMessage.bind(vscode.window),
-    registerCommand: vscode.commands.registerCommand.bind(vscode.commands)
+    registerCommand: vscode.commands.registerCommand.bind(vscode.commands),
+    createStartupView
   };
 }
 

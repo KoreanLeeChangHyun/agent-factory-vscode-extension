@@ -36,7 +36,7 @@ export interface SessionControllerEvents {
   readonly onHumanDecision?: (text: string, submission: MessageSubmission) => void;
   readonly onGoal?: (goal: NativeGoal | null, error?: string) => void;
   readonly onStatusObserved?: (status: string) => void;
-  readonly onError: (message: string) => void;
+  readonly onError: (message: string, level?: "error" | "cancelled") => void;
 }
 
 export interface SessionControllerOptions {
@@ -205,6 +205,15 @@ export class ChatSessionController {
         await this.flushCancellation();
         void this.followExistingRun(active.agentId, active.runId);
         return true;
+      }
+      const pending = await this.runtime.pendingDecision?.(this.agentId);
+      if (this.disposed) return false;
+      if (pending) {
+        this.pendingDecisionRunId = pending.runId;
+        this.pendingDecisionCanApprove = false;
+        this.events.onDecision?.(pending.runId, false);
+      } else if (this.pendingDecisionRunId) {
+        this.clearDecision();
       }
       this.releaseBusyAndDrainQueue();
       return false;
@@ -635,9 +644,10 @@ Answer the Human's current question without cancelling these workflows. For task
           const summary = terminalSummary(result.status);
           this.events.onProgress(summary);
           if ((result.status !== "completed" && result.status !== "needs-human-decision") || diagnostic || goalError) {
-            this.events.onError(joinLocalizedMessages([summary, diagnostic ? `${diagnostic.code}: ${diagnostic.message}` : "", diagnostic?.code === "execution_preflight_failed" ? localize("ui.execution.environment.check.failed.after.the.run.finishes.select.the.required.permissions.and.retry.with.your.next.message") : "", goalError ?? ""]));
+            const noticeLevel = result.status === "cancelled" && !diagnostic && !goalError ? "cancelled" : "error";
+            this.events.onError(joinLocalizedMessages([summary, diagnostic ? `${diagnostic.code}: ${diagnostic.message}` : "", diagnostic?.code === "execution_preflight_failed" ? localize("ui.execution.environment.check.failed.after.the.run.finishes.select.the.required.permissions.and.retry.with.your.next.message") : "", goalError ?? ""]), noticeLevel);
             if (result.status === "cancelled") {
-              // The error notice already carries the cancellation summary.
+              // The terminal notice already carries the cancellation summary.
               const partialResult = result.text.trim();
               if (partialResult && partialResult !== summary) {
                 const text = localize("ui.preserved.partial.result.completion.unconfirmed.0", partialResult);
@@ -671,9 +681,10 @@ Answer the Human's current question without cancelling these workflows. For task
 
 function mergePendingSends(items: readonly PendingSend[]): Pick<PendingSend, "text" | "attachments" | "execution"> & { submissions: MessageSubmission[] } {
   const first = items[0]!;
-  const modelGuidance = (first.execution.taskMode ?? "direct") === "direct"
+  const mode = first.execution.taskMode ?? "direct";
+  const modelGuidance = mode === "direct"
     ? ""
-    : backgroundWorkflowGuidance + delegatedModelGuidance(first.execution.agentModels) + delegatedPermissionGuidance(first.execution.agentPermissions);
+    : (mode === "orchestrate" ? orchestratorGuidance : backgroundWorkflowGuidance) + delegatedModelGuidance(first.execution.agentModels) + delegatedPermissionGuidance(first.execution.agentPermissions);
   const inspectionGuidance = first.execution.inspectionOnly ? withInspectionGuidance("") : "";
   const workflowGuidanceParts: string[] = [];
   const submissions = items.map(item => {
@@ -767,9 +778,12 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-function delegatedModelGuidance(settings: ExecutionOptions["agentModels"]): string {
+export function delegatedModelGuidance(settings: ExecutionOptions["agentModels"]): string {
   if (!settings || !Object.keys(settings).length) return "";
-  return `\n\n[Delegated agent model settings for this request]\n${JSON.stringify(settings)}\nApply each specified role override when dispatching its agent. For exec.py submit/send use --model and --reasoning-effort. For loop.py start use --work-model/--work-reasoning-effort and --verification-model/--verification-reasoning-effort. Plan uses the Work settings in the same Work session. Preserve these overrides on revision turns. Omitted fields use the runtime default; do not substitute Main's model. These settings do not authorize extra agents or change the selected route. If the runtime does not support a requested flag, report the limitation instead of silently dropping the setting.\n[End delegated agent model settings]`;
+  const profiles = settings.workLight?.model
+    ? " Work profiles: `work` is the heavy profile and `workLight` the light profile. Use workLight for bounded, already-decided changes and work for multi-file, design or unknown-cause tasks; if a workLight attempt fails, retry that task once with the work profile. Pass their exact model IDs and reasoning efforts as --work-model/--work-reasoning-effort; never pass a profile name such as light or heavy as a model."
+    : "";
+  return `\n\n[Delegated agent model settings for this request]\n${JSON.stringify(settings)}\nApply each specified role override when dispatching its agent.${profiles} For exec.py submit/send use --model and --reasoning-effort. For loop.py start use --work-model/--work-reasoning-effort and --verification-model/--verification-reasoning-effort. Plan uses the Work settings in the same Work session. Preserve these overrides on revision turns. Omitted fields use the runtime default; do not substitute Main's model. These settings do not authorize extra agents or change the selected route. If the runtime does not support a requested flag, report the limitation instead of silently dropping the setting.\n[End delegated agent model settings]`;
 }
 
 function delegatedPermissionGuidance(settings: ExecutionOptions["agentPermissions"]): string {
@@ -777,6 +791,15 @@ function delegatedPermissionGuidance(settings: ExecutionOptions["agentPermission
   const roles = { work: settings.work, verification: settings.verification };
   return `\n\n[Delegated agent permissions for this request]\n${JSON.stringify(roles)}\nThese are Human-selected role permissions. For loop.py start pass --work-execution-mode and --verification-execution-mode with the specified values. Plan uses Work permissions. For standalone exec.py submit/send: workspace-write and danger-full-access map to --sandbox <value> --approval-policy never --human-approval-policy required; bypass maps to --sandbox danger-full-access --approval-policy never --human-approval-policy bypass. cli-default retains the inherited runtime policy. Preserve the captured permissions on revisions. Do not silently substitute another role's permissions. If the installed runtime does not support these flags, report the limitation instead of dropping the permissions. Permissions do not authorize extra tasks or source edits by Verification.\n[End delegated agent permissions]`;
 }
+
+// Orchestrator mode is the default route, not an explicit dispatch request.
+export const orchestratorGuidance = `
+
+[Orchestrator mode]
+This is ordinary conversation in orchestrator mode, not a Human-selected workflow. Answer greetings, questions, planning, Interview and light lookups of local project files directly without dispatch.
+When the request needs a project change, or any web search or external lookup (research, however small), delegate it with a brief instead of a work contract. Write one request file inside this run's directory with four short parts: Goal (one or two sentences), Scope (target files or research topic, and what not to do, such as no commits), Done (what must be true when finished) and Report (result summary and changed paths; sources for research). Then run the installed loop.py start --project-root PROJECT --task-mode work --work-agent UNIQUE_ID --request-file BRIEF with the Work profile flags from the delegated model settings. Do not write a task-list JSON, run announce-tasks, print a task-flow block, bind a contract, create progress documents or retrieve lessons for a brief; the runtime derives the single task shown in the task panel. Use --task-mode work-verification with --verification-agent only when the Human explicitly asks for verification.
+Before dispatch, check that the conversation gives enough to act; if a target, desired outcome or constraint is genuinely missing, ask one focused question instead of guessing. After the runtime accepts the brief, finish this turn promptly with the accepted loop and agent IDs so the Human can keep talking; do not poll the child. When the completion notification arrives, acknowledge the exact result or receipt and report it without reviewing the implementation or rerunning its checks. Report separate Verification as not requested unless it ran. Keep Main Goal disabled for delegated routes. A dispatch acknowledgement is not completion; never invent results.
+[End orchestrator mode]`;
 
 const backgroundWorkflowGuidance = `
 

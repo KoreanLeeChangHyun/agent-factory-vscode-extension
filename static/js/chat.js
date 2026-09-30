@@ -22,6 +22,21 @@
   function uiLocale() { return globalThis.AgentFactoryI18n.locale(displayLanguage, document.documentElement.dataset.hostLanguage || navigator.language); }
   function t(key, ...values) { return globalThis.AgentFactoryI18n.format(key, uiLocale(), ...values); }
   function localizedText(value, descriptor) { return globalThis.AgentFactoryI18n.resolve(descriptor, uiLocale(), value); }
+  function assistantDisplayText(value) {
+    if (typeof value !== "string") return value;
+    let candidate = value.trim();
+    const listItem = candidate.match(/^(?:[-+*]|\u2022)[ \t]+(\{[\s\S]*\})$/);
+    if (listItem) candidate = listItem[1];
+    if (!candidate.startsWith("{")) return value;
+    let envelope;
+    try { envelope = JSON.parse(candidate); } catch { return value; }
+    if (!envelope || Array.isArray(envelope) || typeof envelope !== "object") return value;
+    const keys = Object.keys(envelope);
+    const allowed = new Set(["decisionKind", "resultPath", "resultText", "status"]);
+    return keys.every(key => allowed.has(key)) && typeof envelope.status === "string" &&
+      typeof envelope.resultPath === "string" && typeof envelope.resultText === "string"
+      ? envelope.resultText : value;
+  }
   function reasoningDisplayLabel(value) { return value ? uiLocale() === "en" ? value : t("ui." + value) : t("ui.default"); }
 
   const markdown = typeof globalThis.markdownit === "function"
@@ -123,8 +138,9 @@
 
   const modelMenu = document.getElementById("model-menu");
   const fastModeButton = document.getElementById("fast-mode-button");
+  const orchestrateModeButton = document.getElementById("orchestrate-mode-button");
   const businessModeNames = () => ({ normal: t("ui.normal"), contract: t("ui.contract"), interview: t("ui.interview"), planning: t("ui.planning"), design: t("ui.design"), migration: t("ui.migration"), lessons: t("ui.lessons"), pipeline: t("ui.pipeline") });
-  const taskModeNames = () => ({ plan: t("ui.plan"), verification: t("ui.verification"), direct: t("ui.direct"), work: t("ui.work"), "plan-work": t("ui.plan.work"), "work-verification": t("ui.work.verification"), "plan-work-verification": t("ui.plan.work.verification") });
+  const taskModeNames = () => ({ orchestrate: t("ui.orchestrate.mode"), plan: t("ui.plan"), verification: t("ui.verification"), direct: t("ui.direct"), work: t("ui.work"), "plan-work": t("ui.plan.work"), "work-verification": t("ui.work.verification"), "plan-work-verification": t("ui.plan.work.verification") });
   let nativeGoal = null;
   let goalError;
   const sessionMenu = document.getElementById("session-menu");
@@ -532,6 +548,8 @@
     verifiedWorkRunId: typeof saved?.verifiedWorkRunId === "string" ? saved.verifiedWorkRunId : undefined,
     draft: typeof saved?.draft === "string" ? saved.draft : "",
     autoScroll: saved?.autoScroll !== false,
+    // Ordinary Enter sends orchestrator mode unless the Human switches this chat to worker mode (direct).
+    orchestrateMode: saved?.orchestrateMode !== false,
     uiLanguage: ["auto", "ko", "en"].includes(saved?.uiLanguage) ? saved.uiLanguage : "auto",
     botsEnabled: false,
     botsAvailable: true,
@@ -558,6 +576,8 @@
     agentModels: saved?.agentModels || {},
     model: normalizeModel(saved?.model),
     reasoning: normalizeSettingValue(saved?.reasoning, settingOptions.reasoning),
+    agentSettingsScope: ["global", "project", "chat"].includes(saved?.agentSettingsScope) ? saved.agentSettingsScope : undefined,
+    agentSettingsSet: typeof saved?.agentSettingsSet === "string" && saved.agentSettingsSet.trim() ? saved.agentSettingsSet.trim() : "Default",
     fastMode: saved?.fastMode === true,
     goalMode: false,
     businessMode: "normal",
@@ -775,8 +795,8 @@
   let botDraftRevision = 0;
   let botSpeechVisible = false;
   const botCharacterSelect = document.getElementById("bot-character");
-  let botCharacter = "lumi";
-  let localBotAvailable = true;
+  let botCharacter = "factory";
+  let localBotAvailable = false;
   const botPromptDrafts = new Map();
   function receiveBotCharacter(message) {
     if (typeof message.localCompanionAvailable === "boolean") localBotAvailable = message.localCompanionAvailable;
@@ -796,8 +816,6 @@
     state.companionAvailable = next === "lumi" && localBotAvailable;
     factoryBot.classList.toggle("sd-companion", state.companionAvailable);
     botMenu.querySelectorAll("[data-companion-action]").forEach(button => { button.hidden = false; });
-    botCharacterSelect.querySelector('[value="lumi"]').hidden = !localBotAvailable;
-    botCharacterSelect.querySelector('[value="lumi"]').disabled = !localBotAvailable;
     botCharacterSelect.value = next;
     botCharacterSelect.disabled = !!botPromptPending || !!botTalkPending;
   }
@@ -905,7 +923,7 @@
   resizePrompt();
   vscode.postMessage({ type: "client.ready" });
   const restoreImages = state.attachments.filter(function (item) { return item.kind === "image"; })
-    .slice(0, 8).map(function (item) { return { id: item.id, name: item.name, target: "composer" }; });
+    .map(function (item) { return { id: item.id, name: item.name, target: "composer" }; });
   for (const event of [...state.timeline, ...state.pendingRequests]) {
     for (const item of Array.isArray(event.attachments) ? event.attachments : []) {
       if (item.kind === "image" && restoreImages.length < 100) restoreImages.push({ id: item.id, name: item.name, target: "history" });
@@ -1669,7 +1687,7 @@
       const role = document.createElement("strong");
       role.textContent = item.type === "user" ? t("ui.conversation.user") : "Agent";
       const content = document.createElement("div");
-      if (item.type === "assistant") renderAssistantMarkdown(content, item.text);
+      if (item.type === "assistant") renderAssistantMarkdown(content, assistantDisplayText(item.text));
       else { content.className = "history-user-text"; content.textContent = item.text; }
       article.append(role, content);
       fragment.append(article);
@@ -1877,6 +1895,11 @@
   });
   submissionButton.addEventListener("click", function () { openSetting("submission"); });
   fastModeButton.addEventListener("click", function () { toggleMode("fastMode"); });
+  orchestrateModeButton.addEventListener("click", function () {
+    state.orchestrateMode = !state.orchestrateMode;
+    updateModeControls();
+    persist();
+  });
   prompt.addEventListener("input", function () { inputFeedback.hidden = true; });
   questionButton.addEventListener("click", function () {
     if (questionMenu.hidden) {
@@ -2003,9 +2026,13 @@
     if (!event.clipboardData) {
       return;
     }
-    const images = Array.from(event.clipboardData.files).filter(function (file) {
+    let images = Array.from(event.clipboardData.files || []).filter(function (file) {
       return file.type.startsWith("image/");
     });
+    // Some screenshot tools expose the image only as a clipboard item, leaving files empty.
+    if (!images.length) images = Array.from(event.clipboardData.items || []).filter(function (item) {
+      return item.kind === "file" && item.type.startsWith("image/");
+    }).map(function (item) { return item.getAsFile(); }).filter(Boolean);
     if (images.length) {
       event.preventDefault();
       addBrowserImages(images);
@@ -2079,8 +2106,13 @@
       }
       case "agent.preset.result": {
         agentPresetBusy = false;
-        if (message.error) pendingPresetName = "";
+        if (message.error) {
+          pendingPresetName = "";
+          const scopeControl = document.getElementById("agent-default-scope");
+          if (scopeControl && state.agentSettingsScope) scopeControl.value = state.agentSettingsScope;
+        }
         const status = document.getElementById("agent-preset-status"); status.hidden = !message.error; status.textContent = message.error || "";
+        if (!message.error && message.settings && message.scope && message.name) applyAgentSettingsToChat(message.settings, message.scope, message.name);
         renderAgentDefaults();
         renderAgentPresets();
         break;
@@ -2091,9 +2123,10 @@
         break;
       case "agent.defaults":
         state.agentDefaults = message.settings;
+        if (state.agentSettingsScope === "project" && !message.settings.projectAvailable) state.agentSettingsScope = "global";
+        if (!state.agentSettingsScope) state.agentSettingsScope = message.settings.projectAvailable ? "project" : "global";
         renderAgentDefaults();
-        // Default rows update in place; chat rows show inherited defaults and re-render.
-        if (openSettingId === "model" && document.getElementById("agent-default-scope").value === "chat") renderModelSettings(modelMenu);
+        // Existing chat values are an independent snapshot and do not follow later default changes.
         updateModeControls();
         break;
       case "host.initialize":
@@ -2115,6 +2148,8 @@
         state.model = normalizeModel(message.model);
         state.agentModels = message.agentModels || state.agentModels || {};
         state.reasoning = normalizeSettingValue(message.reasoning, settingOptions.reasoning);
+        state.agentSettingsScope = ["global", "project", "chat"].includes(message.agentSettingsScope) ? message.agentSettingsScope : state.agentSettingsScope;
+        state.agentSettingsSet = typeof message.agentSettingsSet === "string" && message.agentSettingsSet.trim() ? message.agentSettingsSet.trim() : state.agentSettingsSet;
         state.businessMode = "normal";
         state.taskMode = "direct";
         state.fastMode = message.fastMode === true;
@@ -2154,6 +2189,7 @@
         renderBotModels();
         state.statusItems = normalizeStatusItems(message.statusItems);
         updateModeControls();
+        vscode.postMessage({ type: "providers.request" });
         if (state.agentId && state.role === "main") vscode.postMessage({ type: "goal.control", action: "get" });
         renderTimeline();
         renderStatusBar();
@@ -2234,6 +2270,16 @@
         updateModeControls();
         // The conversation's provider decides which model routes remain selectable.
         if (openSettingId === "model") renderSettingMenu("model", modelMenu);
+        break;
+      case "providers.status":
+        receiveProviders(message);
+        break;
+      case "runtime.updated":
+        state.runtimeAvailable = message.runtimeAvailable === true;
+        if (message.capabilities) state.capabilities = message.capabilities;
+        updateModeControls();
+        updateSendButton();
+        renderStatusBar();
         break;
       case "models.list":
         if (Array.isArray(message.models)) {
@@ -2725,6 +2771,7 @@
   function submit(action = "direct", workflow = "normal", asGoal = false, choiceAnswer = null) {
     if (conversationClearing || (conversationWorktree?.worktree?.workUnit && conversationWorktree.worktree.phase === "merged")) return;
     if (!Object.hasOwn(taskModeNames(), action)) action = "direct";
+    if (action === "direct") action = enterAction();
     const contextualRequest = workflow === "contract" ? t("submission.contract.request")
       : workflow === "planning" ? t("submission.planning.request")
       : workflow === "interview" ? t("submission.interview.request")
@@ -2843,6 +2890,15 @@
     }
   }
 
+  function orchestrateAvailable() {
+    return state.role === "main" && currentCapabilities().taskModes?.includes("orchestrate") === true;
+  }
+
+  // The route ordinary Enter/send uses; menu actions choose their own route.
+  function enterAction() {
+    return state.orchestrateMode && orchestrateAvailable() ? "orchestrate" : "direct";
+  }
+
   function cancelRun(retry = false) {
     if (!state.running || (state.cancellationRequested && !retry)) {
       return;
@@ -2951,6 +3007,7 @@
   // so a long answer costs O(new text) per frame instead of O(whole answer).
   const previewCaches = new WeakMap();
   function renderPreviewMarkdown(container, text, entry) {
+    text = assistantDisplayText(text);
     if (!markdown) {
       container.textContent = text;
       return;
@@ -3555,14 +3612,14 @@
         message.dataset.level = event.level || "info";
         const mark = document.createElement("span");
         mark.className = "notice-mark";
-        mark.textContent = event.level === "error" ? "×" : event.level === "warning" ? "!" : "i";
+        mark.textContent = event.level === "error" || event.level === "cancelled" ? "×" : event.level === "warning" ? "!" : "i";
         const text = document.createElement("span");
         text.textContent = localizedText(event.text, event.localization);
         content.append(mark, text);
       } else if (event.type === "assistant" && event.streaming) {
         renderPreviewMarkdown(content, event.text, event);
       } else if (event.type === "assistant") {
-        const taskContent = extractTaskFlows(localizedText(event.text, event.localization));
+        const taskContent = extractTaskFlows(assistantDisplayText(localizedText(event.text, event.localization)));
         const extracted = event.phase !== "commentary" && globalThis.agentFactoryExecutionReferences
           ? globalThis.agentFactoryExecutionReferences.extract(taskContent.text, markdown)
           : { text: taskContent.text, references: [] };
@@ -5653,8 +5710,8 @@
     setStatusItems(items, statusCatalog()[sourceId][0] + t("ui.position.updated"));
   }
 
-  function moveStatus(itemId, offset) {
-    const visible = state.statusItems.filter(statusItemAvailable);
+  function moveStatus(itemId, offset, order) {
+    const visible = order || state.statusItems.filter(statusItemAvailable);
     const index = visible.indexOf(itemId);
     const target = visible[index + offset];
     if (index >= 0 && target) reorderStatus(itemId, target, offset > 0);
@@ -5714,8 +5771,10 @@
     if (statusSettings.hidden) return;
     const focusKey = statusCatalogList.contains(document.activeElement) ? document.activeElement.dataset.focusKey : undefined;
     statusCatalogList.replaceChildren();
-    const visible = state.statusItems.filter(statusItemAvailable);
-    const ids = [...visible, ...Object.keys(statusCatalog()).filter(id => !state.statusItems.includes(id) && statusItemAvailable(id))];
+    // The catalog is fixed: every item stays listed so settings do not shift with model or run state.
+    // Availability only decides whether a selected item currently appears in the status bar.
+    const visible = state.statusItems.slice();
+    const ids = [...visible, ...Object.keys(statusCatalog()).filter(id => !state.statusItems.includes(id))];
     statusCatalogList.dataset.available = Object.keys(statusCatalog()).filter(statusItemAvailable).join(",");
     let previousGroup;
     for (const id of ids) {
@@ -5731,6 +5790,8 @@
       row.className = "status-catalog-row";
       row.dataset.itemId = id;
       row.dataset.selected = String(selected);
+      const available = statusItemAvailable(id);
+      row.dataset.available = String(available);
       const label = document.createElement("label");
       const checkbox = document.createElement("input");
       checkbox.type = "checkbox";
@@ -5757,7 +5818,8 @@
       const preview = document.createElement("span");
       preview.className = "status-preview";
       preview.dataset.previewId = id;
-      preview.textContent = statusLabel(id);
+      preview.textContent = available ? statusLabel(id) : t("ui.status.item.unavailable");
+      if (!available) preview.title = t("ui.status.item.unavailable.hint");
       const actions = document.createElement("div");
       actions.className = "status-order-actions";
       for (const [offset, title] of [[-1, t("ui.earlier")], [1, t("ui.later")]]) {
@@ -5776,7 +5838,7 @@
         button.setAttribute("aria-label", statusCatalog()[id][0] + " " + title + t("ui.move"));
         const index = visible.indexOf(id);
         button.disabled = !selected || index + offset < 0 || index + offset >= visible.length;
-        button.addEventListener("click", function () { moveStatus(id, offset); });
+        button.addEventListener("click", function () { moveStatus(id, offset, visible); });
         actions.append(button);
       }
       actions.hidden = !selected;
@@ -5796,7 +5858,7 @@
       renderStatusCatalog();
     }
     for (const preview of statusCatalogList.querySelectorAll("[data-preview-id]")) {
-      preview.textContent = statusLabel(preview.dataset.previewId);
+      if (statusItemAvailable(preview.dataset.previewId)) preview.textContent = statusLabel(preview.dataset.previewId);
     }
   }
 
@@ -5813,45 +5875,71 @@
     statusSettingsButton.setAttribute("aria-expanded", "true");
     renderStatusCatalog();
     renderAccountUsage();
+    vscode.postMessage({ type: "usage.refresh" });
     statusSettings.querySelector('[role="tab"][aria-selected="true"]')?.focus();
   });
   let accountUsage = {};
-  // Gemini (Antigravity) reports no account limits, so its section explains the absence instead of showing blanks.
-  const usageProviders = [["codex", "Codex"], ["claude", "Claude"], ["antigravity", "Gemini"]];
+  // Antigravity keeps separate quota pools for Gemini and for its Claude/GPT models.
+  const usageProviders = [["codex", "Codex"], ["claude", "Claude"], ["antigravity-gemini", "Antigravity · Gemini"],
+    ["antigravity-claude-gpt", "Antigravity · Claude/GPT"]];
   function renderAccountUsage() {
     const root = document.getElementById("account-usage");
     if (!root || statusSettings.hidden) return;
     const groups = usageProviders.map(function ([id, name]) {
       const group = document.createElement("section");
       group.className = "usage-group";
+      group.dataset.provider = id;
+      const header = document.createElement("header");
+      header.className = "usage-group-heading";
       const heading = document.createElement("h3");
       heading.textContent = name;
-      group.append(heading);
+      header.append(heading);
+      group.append(header);
       const report = accountUsage[id];
       const note = text => { const p = document.createElement("p"); p.className = "usage-note"; p.textContent = text; group.append(p); };
-      if (id === "antigravity") { note(t("ui.usage.not.provided")); return group; }
-      if (!report || typeof report !== "object") { note(t("ui.usage.not.reported")); return group; }
-      const list = document.createElement("dl");
-      list.className = "settings-shortcuts";
-      const row = (label, value) => {
-        const item = document.createElement("div");
-        const term = document.createElement("dt");
-        const detail = document.createElement("dd");
-        term.textContent = label;
-        detail.textContent = value;
-        item.append(term, detail);
-        list.append(item);
-      };
+      if (!report || typeof report !== "object") { group.dataset.state = "empty"; note(t("ui.usage.not.reported")); return group; }
+      group.dataset.state = "ready";
+      if (Number.isFinite(report.reportedAt)) {
+        const reported = document.createElement("time");
+        reported.className = "usage-reported";
+        reported.dateTime = new Date(report.reportedAt).toISOString();
+        reported.textContent = t("ui.usage.reported") + " · " + new Date(report.reportedAt).toLocaleString(uiLocale(), { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" });
+        header.append(reported);
+      }
+      const limits = document.createElement("div");
+      limits.className = "usage-limits";
       for (const [key, label] of [["fiveHour", t("ui.usage.five.hour")], ["weekly", t("ui.usage.weekly")]]) {
         const used = safePercentOrUndefined(report[key + "UsedPercent"]);
         const resetsAt = safeResetsAtOrUndefined(report[key + "ResetsAt"]);
         if (used === undefined && resetsAt === undefined) continue;
-        row(label, t("ui.usage.left") + (used === undefined ? "—" : formatPercent(100 - used)) + " · " + t("ui.usage.resets") + formatResetsAt(resetsAt));
+        const remaining = used === undefined ? undefined : Math.max(0, 100 - used);
+        const item = document.createElement("article");
+        item.className = "usage-limit";
+        item.dataset.level = remaining === undefined ? "unknown" : remaining <= 20 ? "low" : remaining <= 50 ? "medium" : "healthy";
+        const top = document.createElement("div");
+        top.className = "usage-limit-heading";
+        const title = document.createElement("span");
+        title.textContent = label;
+        const value = document.createElement("strong");
+        value.className = "usage-limit-value";
+        value.textContent = t("ui.usage.left") + (remaining === undefined ? "—" : formatPercent(remaining));
+        top.append(title, value);
+        item.append(top);
+        if (remaining !== undefined) {
+          const progress = document.createElement("progress");
+          progress.className = "usage-meter";
+          progress.max = 100;
+          progress.value = remaining;
+          progress.setAttribute("aria-label", name + " " + label + " " + t("ui.usage.left").trim());
+          item.append(progress);
+        }
+        const reset = document.createElement("p");
+        reset.className = "usage-reset";
+        reset.textContent = t("ui.usage.resets") + formatResetsAt(resetsAt);
+        item.append(reset);
+        limits.append(item);
       }
-      if (Number.isFinite(report.reportedAt)) {
-        row(t("ui.usage.reported"), new Date(report.reportedAt).toLocaleString(uiLocale(), { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" }));
-      }
-      group.append(list);
+      if (limits.children.length) group.append(limits);
       return group;
     });
     root.replaceChildren(...groups);
@@ -5867,6 +5955,10 @@
     }
     renderStatusCatalog();
     renderAccountUsage();
+    if (tab.dataset.settingsTab === "providers" && !providerVersionsRequested) {
+      providerVersionsRequested = true;
+      vscode.postMessage({ type: "providers.versions.request" });
+    }
     tab.focus();
   }
   for (const tab of settingsTabs) {
@@ -5968,7 +6060,7 @@
       model: t("ui.model.b32422") + (supported.model ? effectiveAgentValue("main", "model") || t("ui.default") : t("ui.unknown")),
       reasoning: t("ui.reasoning.529e9c") + (supported.reasoning ? reasoningDisplayLabel(effectiveAgentValue("main", "reasoningEffort")) : t("ui.unknown")),
       fast: t("ui.fast.314aef") + (supported.fast ? state.fastMode ? t("ui.on") : t("ui.off") : t("ui.unknown")),
-      task: main ? t("ui.task") + taskModeNames()[state.taskMode]?.replaceAll(t("ui.verification"), t("ui.verify")) : t("ui.task.main.only"),
+      task: main ? t("ui.task") + taskModeNames()[enterAction()]?.replaceAll(t("ui.verification"), t("ui.verify")) : t("ui.task.main.only"),
       execution: t("ui.perms") + (executionLabels[state.executionMode] || "—"),
       goal: !main ? t("ui.goal.main.only") : goalError ? t("ui.goal.0c4444") : nativeGoal ? t("ui.goal.8c9d70") + (goalLabels[nativeGoal.status] || "—") : t("ui.goal.8c9d70") + t("ui.off"),
       goalTokens: t("ui.goal.used") + (main && !goalError ? count(nativeGoal?.tokensUsed) : "—") + t("ui.tokens"),
@@ -6152,6 +6244,13 @@
     modelButton.parentElement.hidden = false;
     submissionButton.hidden = state.role !== "main";
     fastModeButton.hidden = supported.fast !== true;
+    orchestrateModeButton.hidden = state.role !== "main";
+    orchestrateModeButton.disabled = !orchestrateAvailable();
+    const orchestrating = enterAction() === "orchestrate";
+    const orchestrateLabel = !orchestrateAvailable() ? t("ui.orchestrate.mode.unavailable") : orchestrating ? t("ui.orchestrate.mode.on") : t("ui.orchestrate.mode.off");
+    orchestrateModeButton.setAttribute("aria-pressed", String(orchestrating));
+    orchestrateModeButton.setAttribute("aria-label", orchestrateLabel);
+    orchestrateModeButton.title = orchestrateLabel;
     fastModeButton.setAttribute("aria-pressed", String(state.fastMode));
     fastModeButton.setAttribute("aria-label", state.fastMode ? t("ui.fast.mode.on") : t("ui.fast.mode.off"));
     fastModeButton.title = state.fastMode ? t("ui.fast.mode.on") : t("ui.fast.mode.off");
@@ -6186,18 +6285,18 @@
     (selected || menu.querySelector("button:not(:disabled), select:not(:disabled), details:not([hidden]) > summary"))?.focus();
   }
 
-  function inheritedAgentRole(role) {
+  function agentSettingRole(role) {
     return role === "main" ? state.role || "main" : role;
   }
   function effectiveAgentValue(role, field) {
     const own = role === "main" ? (field === "model" ? state.model : state.reasoning) : state.agentModels?.[role]?.[field];
-    return own || state.agentDefaults?.effective?.[inheritedAgentRole(role)]?.[field] || "";
+    return own || "";
   }
   function effectiveDelegatedModels() {
-    return Object.fromEntries(["work", "verification"].map(role => [role, Object.fromEntries(
+    return Object.fromEntries(["work", "workLight", "verification"].map(role => [role, Object.fromEntries(
       ["model", "reasoningEffort"].map(field => [field, effectiveAgentValue(role, field) || undefined]))]));
   }
-  function createAgentSettingControl(role, label, field, current, onChange, inheritLabel = "") {
+  function createAgentSettingControl(role, label, field, current, onChange, lockRoute = true) {
     const wrapper = document.createElement("label");
     const fieldLabel = field === "model" ? t("ui.model") : t("ui.reasoning");
     const caption = document.createElement("span");
@@ -6205,7 +6304,7 @@
     caption.textContent = fieldLabel;
     wrapper.append(caption);
     const explicitValues = field === "model" ? [...new Set([...settingOptions.model, current].filter(value => typeof value === "string" && value.length > 0))] : settingOptions.reasoning.filter(Boolean);
-    const values = inheritLabel ? ["", ...explicitValues] : explicitValues;
+    const values = explicitValues;
     const isReasoning = field === "reasoningEffort";
     const control = document.createElement(isReasoning ? "input" : "select");
     control.dataset.role = role;
@@ -6233,14 +6332,14 @@
       ticks.setAttribute("aria-hidden", "true");
       for (const value of values) {
         const tick = document.createElement("span");
-        tick.title = value ? reasoningDisplayLabel(value) : inheritLabel;
+        tick.title = reasoningDisplayLabel(value);
         ticks.append(tick);
       }
       slider.append(progress, ticks);
     } else {
-      control.id = "agent-model-" + (inheritLabel ? "default-" : "") + role + "-" + createId();
+      control.id = "agent-model-" + role + "-" + createId();
       wrapper.htmlFor = control.id; // The vendor tabs below are buttons; keep the label on the select.
-      renderModelPicker(wrapper, control, values, current || "", inheritLabel, role === "main" && !inheritLabel);
+      renderModelPicker(wrapper, control, values, current || "", role === "main" && lockRoute);
     }
     const selectedValue = () => isReasoning ? values[Number(control.value)] : control.value;
     const showEffort = () => {
@@ -6248,13 +6347,13 @@
       const value = selectedValue();
       const ultra = value === "max";
       wrapper.classList.toggle("is-ultra", ultra);
-      output.textContent = !value && inheritLabel ? inheritLabel : ultra ? "ULTRA" : value && uiLocale() === "en" ? value.toUpperCase() : reasoningDisplayLabel(value);
-      output.title = !value && inheritLabel ? inheritLabel : ultra ? t("ui.ultra.max.reasoning.effort") : reasoningDisplayLabel(value);
-      control.setAttribute("aria-valuetext", value ? reasoningDisplayLabel(value) : inheritLabel);
+      output.textContent = ultra ? "ULTRA" : value && uiLocale() === "en" ? value.toUpperCase() : reasoningDisplayLabel(value);
+      output.title = ultra ? t("ui.ultra.max.reasoning.effort") : reasoningDisplayLabel(value);
+      control.setAttribute("aria-valuetext", reasoningDisplayLabel(value));
       progress.value = Number(control.value);
     };
     showEffort();
-    control.disabled = !inheritLabel && currentCapabilities()[isReasoning ? "reasoning" : "model"] !== true;
+    control.disabled = currentCapabilities()[isReasoning ? "reasoning" : "model"] !== true;
     if (isReasoning) {
       control.addEventListener("input", function () {
         if (control.disabled) return;
@@ -6295,7 +6394,7 @@
       state.startedMessageIds?.length || state.timeline?.some(item => item.type === "user" || item.type === "assistant"));
   }
 
-  function renderModelPicker(wrapper, control, values, current, inheritLabel, lockRoute) {
+  function renderModelPicker(wrapper, control, values, current, lockRoute) {
     const models = values.filter(Boolean);
     wrapper.classList.add("agent-model-picker");
     // A started conversation keeps its provider; other routes apply to a new or cleared chat.
@@ -6333,13 +6432,6 @@
       });
       tabs.append(tab);
     }
-    if (inheritLabel) {
-      const option = document.createElement("option");
-      option.value = "";
-      option.textContent = inheritLabel;
-      option.selected = !current;
-      control.append(option);
-    }
     for (const [vendor] of MODEL_VENDORS) {
       const own = models.filter(model => modelVendor(model) === vendor);
       const routes = [...new Set(own.map(modelRoute))];
@@ -6359,12 +6451,46 @@
       }
     }
     // Long names are truncated in the closed select; the title keeps the full name and route.
-    const describe = () => { control.title = control.value ? modelOptionLabel(control.value) : inheritLabel; };
+    const describe = () => { control.title = control.value ? modelOptionLabel(control.value) : ""; };
     control.addEventListener("change", () => { selectedModel = control.value; describe(); if (control.value) { active = modelVendor(control.value); show(); } });
     describe();
     entries = [...control.children];
     show();
     wrapper.append(tabs);
+  }
+
+  function agentSettingsApplyError(values) {
+    const nextOwn = values?.[state.role === "main" ? "main" : state.role] || {};
+    const nextModel = nextOwn.model || state.model || settingOptions.model.find(Boolean);
+    const locked = hasStartedModelConversation() && (currentCapabilities().sessionProvider || modelRoute(state.model));
+    if (locked && modelRoute(nextModel) !== locked) return t("ui.model.route.new.chat");
+    if (currentCapabilities().model !== true && nextModel !== state.model) return t("ui.model.route.new.chat");
+    return "";
+  }
+
+  function applyAgentSettingsToChat(values, scope, name) {
+    const error = agentSettingsApplyError(values);
+    const status = document.getElementById("agent-preset-status");
+    if (error) { status.hidden = false; status.textContent = error; return false; }
+    const nextOwn = values?.[state.role === "main" ? "main" : state.role] || {};
+    state.model = nextOwn.model || state.model || settingOptions.model.find(Boolean);
+    state.reasoning = nextOwn.reasoningEffort || state.reasoning || "medium";
+    if (state.role === "main") state.agentModels = {
+      ...state.agentModels,
+      ...(values.work ? {work: {...values.work}} : {}),
+      ...(values.workLight || values.work ? {workLight: {...(values.work || {}), ...(values.workLight || {})}} : {}),
+      ...(values.verification ? {verification: {...values.verification}} : {})
+    };
+    state.agentSettingsScope = scope;
+    state.agentSettingsSet = name;
+    const scopeControl = document.getElementById("agent-default-scope");
+    if (scopeControl) scopeControl.value = scope;
+    status.textContent = "";
+    status.hidden = true;
+    persist();
+    saveComposerSettings();
+    updateModeControls();
+    return true;
   }
 
   function renderAgentDefaults() {
@@ -6386,16 +6512,25 @@
       const column = document.createElement("span"); column.textContent = t(key); columns.append(column);
     }
     container.append(columns);
-    for (const role of ["main", "work", "verification"]) {
+    for (const role of ["main", "work", "workLight", "verification"]) {
       const row = document.createElement("div"); row.className = "agent-model-row";
       row.dataset.agentRole = role;
-      const heading = document.createElement("strong"); heading.textContent = t("ui." + role); heading.className = "agent-model-name"; heading.prepend(createAgentRoleIcon(role)); row.append(heading);
+      const heading = document.createElement("strong"); heading.textContent = t("ui.role." + role); heading.className = "agent-model-name"; heading.prepend(createAgentRoleIcon(role)); row.append(heading);
       for (const field of ["model", "reasoningEffort"]) {
         const current = settings[scope]?.[role]?.[field] || "";
-        row.append(createAgentSettingControl(role, t("ui." + role), field, current, value => {
+        row.append(createAgentSettingControl(role, t("ui.role." + role), field, current, value => {
+          const nextSettings = {...(settings[scope] || {}), [role]: {...(settings[scope]?.[role] || {}), [field]: value}};
+          const error = agentSettingsApplyError(nextSettings);
+          if (error) {
+            const status = document.getElementById("agent-preset-status"); status.hidden = false; status.textContent = error;
+            renderAgentDefaults();
+            return;
+          }
+          state.agentDefaults[scope] = nextSettings;
           vscode.postMessage({ type: "agent.defaults.save", scope, role, field, value });
           autoSavePresetField(role, field, value);
-        }, t(scope === "project" ? "ui.inherited.global" : "ui.inherited.product")));
+          applyAgentSettingsToChat(nextSettings, scope, document.getElementById("agent-preset-select").value || "Default");
+        }, false));
       }
       container.append(row);
     }
@@ -6405,22 +6540,25 @@
   function autoSavePresetField(role, field, value) {
     const name = document.getElementById("agent-preset-select").value;
     if (!name) return;
-    vscode.postMessage({type: "agent.preset.field", name, role, field, value});
+    vscode.postMessage({type: "agent.preset.field", scope: document.getElementById("agent-default-scope").value, name, role, field, value});
   }
   let agentPresetBusy = false;
   let pendingPresetName = "";
   function renderAgentPresets() {
     const select = document.getElementById("agent-preset-select");
-    const selected = pendingPresetName || select.value || state.agentDefaults?.presets?.find(preset => preset.isDefault)?.name || "";
+    const scope = document.getElementById("agent-default-scope").value;
+    const presets = (state.agentDefaults?.presets || []).filter(preset => preset.scope === scope);
+    const desired = pendingPresetName || (state.agentSettingsScope === scope ? state.agentSettingsSet : "") || select.value;
+    const selected = presets.some(preset => preset.name === desired) ? desired : presets.find(preset => preset.isDefault)?.name || "";
     select.replaceChildren();
     const placeholder = document.createElement("option"); placeholder.value = ""; placeholder.textContent = t("preset.choose"); select.append(placeholder);
-    for (const preset of state.agentDefaults?.presets || []) {
+    for (const preset of presets) {
       const option = document.createElement("option"); option.value = preset.name; option.textContent = preset.isDefault ? t("preset.default") : preset.name; select.append(option);
     }
     select.value = Array.from(select.options).some(option => option.value === selected) ? selected : "";
     if (select.value === pendingPresetName) pendingPresetName = "";
     select.disabled = agentPresetBusy;
-    document.getElementById("agent-preset-delete").disabled = agentPresetBusy || !select.value;
+    document.getElementById("agent-preset-delete").disabled = agentPresetBusy || !select.value || presets.find(preset => preset.name === select.value)?.isDefault === true;
     document.getElementById("agent-preset-save").disabled = agentPresetBusy || !document.getElementById("agent-preset-name").value.trim();
     document.getElementById("agent-preset-name").disabled = agentPresetBusy;
     document.getElementById("agent-default-scope").disabled = agentPresetBusy;
@@ -6430,28 +6568,16 @@
     const name = document.getElementById(action === "save" ? "agent-preset-name" : "agent-preset-select").value.trim();
     if (!name) return;
     const scope = document.getElementById("agent-default-scope").value;
-    if (scope === "chat" && action === "apply") {
-      const preset = state.agentDefaults?.presets?.find(item => item.name === name);
+    if (action === "apply") {
+      const preset = state.agentDefaults?.presets?.find(item => item.scope === scope && item.name === name);
       if (!preset) return;
-      const values = preset.settings || {};
-      const nextMain = values[state.role === "main" ? "main" : state.role] || {};
-      // Preset inheritance must not resolve through the chat overrides being replaced.
-      const inheritedMain = state.agentDefaults?.effective?.[inheritedAgentRole("main")] || {};
-      const nextModel = nextMain.model || inheritedMain.model || settingOptions.model.find(Boolean) || state.model;
-      const locked = hasStartedModelConversation() && (currentCapabilities().sessionProvider || modelRoute(state.model));
-      const status = document.getElementById("agent-preset-status");
-      status.hidden = false;
-      if (locked && modelRoute(nextModel) !== locked) { status.textContent = t("ui.model.route.new.chat"); return; }
-      if (currentCapabilities().model !== true && nextModel !== state.model) { status.textContent = t("ui.model.route.new.chat"); return; }
-      state.model = nextModel;
-      state.reasoning = nextMain.reasoningEffort || inheritedMain.reasoningEffort || "medium";
-      if (state.role === "main") state.agentModels = {...state.agentModels, work: {...values.work}, verification: {...values.verification}};
-      persist(); saveComposerSettings(); updateModeControls();
-      status.textContent = "";
-      status.hidden = true;
-      return;
+      const error = agentSettingsApplyError(preset.settings || {});
+      if (error) {
+        const status = document.getElementById("agent-preset-status"); status.hidden = false; status.textContent = error;
+        return;
+      }
     }
-    if (action === "save" || action === "update") pendingPresetName = name;
+    if (action === "save" || action === "update" || action === "apply") pendingPresetName = name;
     agentPresetBusy = true;
     const status = document.getElementById("agent-preset-status"); status.hidden = false; status.textContent = t("preset.busy");
     renderAgentDefaults();
@@ -6461,24 +6587,27 @@
   }
   for (const action of ["save", "delete"]) document.getElementById("agent-preset-" + action).addEventListener("click", () => performPresetAction(action));
   document.getElementById("agent-preset-name").addEventListener("input", renderAgentPresets);
-  document.getElementById("agent-preset-select").addEventListener("change", () => { renderAgentPresets(); performPresetAction("apply"); });
+  document.getElementById("agent-preset-select").addEventListener("change", () => performPresetAction("apply"));
 
   document.getElementById("agent-default-scope")?.addEventListener("change", event => {
     if (openSettingId !== "model") { renderAgentDefaults(); return; }
-    renderModelSettings(modelMenu);
+    document.getElementById("agent-preset-select").value = "";
+    renderModelSettings(modelMenu, true);
     event.currentTarget.focus(); // Re-rendering moves the select; keep keyboard focus on it.
+    performPresetAction("apply");
   });
 
   function createAgentRoleIcon(role) {
     const paths = {
       main: "M4 5h16v11H9l-5 4V5Zm4 4h8m-8 3h5",
       work: "M9 7V4h6v3M3 7h18v13H3V7Zm0 5h18m-11 0v3h4v-3",
+      workLight: "M9 7V4h6v3M3 7h18v13H3V7Zm5 7h8",
       verification: "M12 3 3 7v5c0 5 9 9 9 9s9-4 9-9V7l-9-4Zm-4 9 3 3 5-6"
     };
     return createModeIcon(paths[role] || paths.main, "agent-role-icon");
   }
 
-  function renderModelSettings(menu) {
+  function renderModelSettings(menu, preserveScope = false) {
     // Scope and default controls are persistent nodes; park them so they stay in the document.
     document.getElementById("agent-scope-parts").append(document.getElementById("agent-scope-row"), document.getElementById("agent-defaults-content"));
     document.getElementById("agent-defaults-content").append(document.getElementById("agent-preset-content"));
@@ -6497,7 +6626,8 @@
     // One panel edits every scope: this chat's overrides, or the project/global defaults beneath them.
     // Keep the preset, scope and close controls together in one compact heading.
     const scopeControl = document.getElementById("agent-default-scope");
-    header.append(document.getElementById("agent-preset-picker"), document.getElementById("agent-scope-row"), document.getElementById("agent-preset-create"), document.getElementById("agent-preset-delete"), close);
+    if (!preserveScope && state.agentSettingsScope && (state.agentSettingsScope !== "project" || state.agentDefaults?.projectAvailable)) scopeControl.value = state.agentSettingsScope;
+    header.append(document.getElementById("agent-scope-row"), document.getElementById("agent-preset-picker"), document.getElementById("agent-preset-create"), document.getElementById("agent-preset-delete"), close);
     menu.classList.add("aligned-settings");
     menu.append(header);
     renderAgentPresets();
@@ -6515,7 +6645,7 @@
       columns.append(column);
     }
     menu.append(columns);
-    const roles = state.role === "main" ? [["main", t("ui.main")], ["work", t("ui.work")], ["verification", t("ui.verification")]] : [["main", state.role === "work" ? t("ui.work") : t("ui.verification")]];
+    const roles = state.role === "main" ? [["main", t("ui.role.main")], ["work", t("ui.role.work")], ["workLight", t("ui.role.workLight")], ["verification", t("ui.role.verification")]] : [["main", state.role === "work" ? t("ui.work") : t("ui.verification")]];
     let initialized = false;
     for (const [role, label] of roles) {
       const row = document.createElement("div");
@@ -6530,19 +6660,22 @@
       row.append(legend);
       for (const field of ["model", "reasoningEffort"]) {
         const own = role === "main" ? (field === "model" ? state.model : state.reasoning) : state.agentModels?.[role]?.[field];
-        const current = own || effectiveAgentValue(role, field) || (field === "model" ? state.model || settingOptions.model.find(Boolean) || "" : state.reasoning || "medium");
+        // The light Work profile starts from the Work profile, never from Main's model.
+        const current = own || effectiveAgentValue(role, field) || (role === "workLight" ? effectiveAgentValue("work", field) : "") || (field === "model" ? state.model || settingOptions.model.find(Boolean) || "" : state.reasoning || "medium");
         if (!own && current) {
           if (role === "main") state[field === "model" ? "model" : "reasoning"] = current;
           else state.agentModels = { ...state.agentModels, [role]: { ...state.agentModels?.[role], [field]: current } };
           initialized = true;
         }
         row.append(createAgentSettingControl(role, label, field, current, value => {
+          state.agentSettingsScope = "chat";
+          state.agentSettingsSet = document.getElementById("agent-preset-select").value || "Default";
           if (role === "main") state[field === "reasoningEffort" ? "reasoning" : "model"] = value;
           else state.agentModels = { ...state.agentModels, [role]: { ...state.agentModels?.[role], [field]: value || undefined } };
           updateModeControls();
           persist();
           saveComposerSettings();
-          autoSavePresetField(inheritedAgentRole(role), field, value);
+          autoSavePresetField(agentSettingRole(role), field, value);
         }));
       }
       menu.append(row);
@@ -6586,6 +6719,209 @@
       });
       row.append(legend, select, help);
       menu.append(row);
+    }
+    renderProviderSettings();
+  }
+
+  const providerNames = { codex: "Codex", claude: "Claude Code", antigravity: "Antigravity" };
+  let providerSnapshot = { providers: [], busy: false, errors: {}, pluginUpdateMode: "auto", versions: {} };
+  const providerDrafts = new Map();
+  let providerNoticeShown = false;
+  let providerVersionsRequested = false;
+  let missingProviderExpanded = false;
+  const providerInstallVersions = new Map();
+
+  function receiveProviders(message) {
+    const providers = Array.isArray(message.providers)
+      ? message.providers.filter(item => item && Object.hasOwn(providerNames, item.id)) : [];
+    providerSnapshot = {
+      providers,
+      busy: message.busy === true,
+      errors: message.errors && typeof message.errors === "object" ? message.errors : {},
+      pluginUpdateMode: message.pluginUpdateMode === "manual" ? "manual" : "auto",
+      versions: message.versions && typeof message.versions === "object" ? message.versions : {}
+    };
+    if (!providerSnapshot.busy) providerDrafts.clear();
+    // Without any CLI the chat stays open; point once to the place where a path can be set.
+    if (!providerSnapshot.busy && providers.length && !providers.some(item => item.detected) && !providerNoticeShown) {
+      providerNoticeShown = true;
+      appendNotice("warning", t("ui.providers.none.chat"));
+    }
+    if (providers.some(item => item.detected)) providerNoticeShown = false;
+    renderProviderSettings();
+  }
+
+  function renderProviderSettings() {
+    const root = document.getElementById("provider-settings");
+    if (!root) return;
+    const focused = root.contains(document.activeElement) ? document.activeElement.dataset.providerControl : undefined;
+    const section = document.createElement("section");
+    section.className = "provider-settings";
+    const hasDetected = providerSnapshot.providers.some(provider => provider.detected);
+    const actions = document.createElement("div");
+    actions.className = "provider-actions";
+    const update = document.createElement("button");
+    update.type = "button";
+    update.dataset.providerControl = "update-now";
+    update.textContent = t(providerSnapshot.busy ? "ui.providers.update.updating" : "ui.providers.update.now");
+    update.disabled = providerSnapshot.busy || !hasDetected;
+    update.addEventListener("click", function () { vscode.postMessage({ type: "providers.update" }); });
+    actions.append(update);
+    section.append(actions);
+    const missing = providerSnapshot.providers.filter(provider => !provider.detected);
+    let missingList;
+    let missingDetails;
+    if (missing.length) {
+      missingDetails = document.createElement("details");
+      missingDetails.className = "provider-missing";
+      missingDetails.open = !hasDetected || missingProviderExpanded;
+      missingDetails.addEventListener("toggle", function () {
+        if (hasDetected) missingProviderExpanded = missingDetails.open;
+      });
+      const summary = document.createElement("summary");
+      summary.textContent = t("ui.providers.add.path");
+      missingList = document.createElement("div");
+      missingList.className = "provider-missing-list";
+      missingDetails.append(summary, missingList);
+    }
+    for (const provider of providerSnapshot.providers) {
+      const row = document.createElement("div");
+      row.className = "provider-row";
+      const head = document.createElement("div");
+      head.className = "provider-row-head";
+      const name = document.createElement("span");
+      name.className = "provider-name";
+      name.textContent = providerNames[provider.id];
+      const status = document.createElement("span");
+      status.className = "provider-state";
+      status.dataset.detected = String(provider.detected === true);
+      status.textContent = provider.detected
+        ? t("ui.providers.detected") + " · " + t(provider.source === "configured" ? "ui.providers.source.configured" : "ui.providers.source.auto")
+        : "";
+      head.append(name);
+      if (provider.detected) head.append(status);
+      row.append(head);
+      const versions = providerSnapshot.versions[provider.id];
+      if (provider.detected && versions && (versions.cli || versions.plugin)) {
+        const versionLine = document.createElement("span");
+        versionLine.className = "provider-version";
+        versionLine.textContent = [
+          versions.cli ? t("ui.providers.version.cli", versions.cli) : undefined,
+          versions.plugin ? t("ui.providers.version.plugin", versions.plugin) : undefined
+        ].filter(Boolean).join(" · ");
+        row.append(versionLine);
+      }
+      if (provider.detected && versions && typeof versions.pluginCurrent === "boolean") {
+        const updateState = document.createElement("span");
+        updateState.className = "provider-update-state";
+        updateState.dataset.current = String(versions.pluginCurrent);
+        updateState.textContent = t(versions.pluginCurrent ? "ui.providers.update.current" : "ui.providers.update.available");
+        row.append(updateState);
+      }
+      if (provider.detected) {
+        const versionControls = document.createElement("div");
+        versionControls.className = "provider-version-controls";
+        const versionInput = document.createElement("input");
+        versionInput.type = "text";
+        versionInput.inputMode = "text";
+        versionInput.spellcheck = false;
+        versionInput.maxLength = 128;
+        versionInput.placeholder = t("ui.providers.install.version.placeholder");
+        versionInput.setAttribute("aria-label", t("ui.providers.install.version.label", providerNames[provider.id]));
+        versionInput.dataset.providerControl = provider.id + ":install-version-input";
+        versionInput.value = providerInstallVersions.get(provider.id) ?? "";
+        versionInput.disabled = providerSnapshot.busy;
+        const installVersion = document.createElement("button");
+        installVersion.type = "button";
+        installVersion.dataset.providerControl = provider.id + ":install-version";
+        installVersion.textContent = t("ui.providers.install");
+        const validVersion = () => /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/.test(versionInput.value.trim());
+        const updateVersionButton = () => { installVersion.disabled = providerSnapshot.busy || !validVersion(); };
+        const submitVersion = () => {
+          const version = versionInput.value.trim();
+          if (!validVersion() || providerSnapshot.busy) return;
+          vscode.postMessage({ type: "providers.update", provider: provider.id, version });
+        };
+        versionInput.addEventListener("input", function () {
+          providerInstallVersions.set(provider.id, versionInput.value);
+          updateVersionButton();
+        });
+        versionInput.addEventListener("keydown", function (event) {
+          if (event.key !== "Enter" || event.isComposing) return;
+          event.preventDefault();
+          submitVersion();
+        });
+        installVersion.addEventListener("click", submitVersion);
+        updateVersionButton();
+        versionControls.append(versionInput, installVersion);
+        row.append(versionControls);
+      }
+      const problems = [];
+      if (!provider.detected && provider.configuredInvalid && typeof provider.configuredPath === "string") problems.push(t("ui.providers.configured.invalid"));
+      if (typeof providerSnapshot.errors[provider.id] === "string") problems.push(t("ui.providers.plugin.failed", providerSnapshot.errors[provider.id]));
+      for (const text of problems) {
+        const problem = document.createElement("p");
+        problem.className = "provider-error";
+        problem.textContent = text;
+        row.append(problem);
+      }
+      const edit = document.createElement("div");
+      edit.className = "provider-path-edit";
+      const input = document.createElement("input");
+      input.type = "text";
+      input.spellcheck = false;
+      input.dataset.providerControl = provider.id + ":input";
+      // A failed manual override can fall back to a working auto-detected executable.
+      // Show the executable actually used for this provider, not the stale override.
+      const displayedPath = provider.detected && typeof provider.path === "string"
+        ? provider.path : provider.configuredPath ?? "";
+      input.value = providerDrafts.get(provider.id) ?? displayedPath;
+      input.placeholder = t("ui.providers.path.placeholder");
+      input.setAttribute("aria-label", t("ui.providers.path", providerNames[provider.id]));
+      input.disabled = providerSnapshot.busy;
+      let lastSubmittedPath = displayedPath;
+      const submit = () => {
+        const path = input.value.trim();
+        if (providerSnapshot.busy || !path || path === lastSubmittedPath) return;
+        lastSubmittedPath = path;
+        vscode.postMessage({ type: "providers.configure", provider: provider.id, path });
+      };
+      input.addEventListener("input", function () { providerDrafts.set(provider.id, input.value); });
+      input.addEventListener("blur", function (event) {
+        if (!edit.contains(event.relatedTarget)) submit();
+      });
+      input.addEventListener("keydown", function (event) {
+        if (event.key !== "Enter" || event.isComposing) return;
+        event.preventDefault();
+        submit();
+      });
+      const pick = document.createElement("button");
+      pick.type = "button";
+      pick.dataset.providerControl = provider.id + ":pick";
+      pick.textContent = t("ui.providers.pick");
+      pick.disabled = providerSnapshot.busy;
+      pick.addEventListener("click", function () { vscode.postMessage({ type: "providers.pick", provider: provider.id }); });
+      const clear = document.createElement("button");
+      clear.type = "button";
+      clear.dataset.providerControl = provider.id + ":clear";
+      clear.textContent = t("ui.providers.clear");
+      clear.disabled = providerSnapshot.busy;
+      clear.setAttribute("aria-pressed", String(provider.detected ? provider.source !== "configured" : !provider.configuredPath));
+      clear.addEventListener("click", function () {
+        providerDrafts.delete(provider.id);
+        vscode.postMessage({ type: "providers.configure", provider: provider.id, path: "" });
+      });
+      edit.append(input, pick, clear);
+      row.append(edit);
+      if (provider.detected) section.append(row);
+      else missingList?.append(row);
+    }
+    if (missingDetails) section.append(missingDetails);
+    root.replaceChildren(section);
+    if (focused) {
+      const target = root.querySelector('[data-provider-control="' + focused + '"]');
+      if (target && !target.disabled) target.focus();
+      else if (providerSnapshot.busy) root.querySelector('[data-provider-control$=":input"]')?.focus();
     }
   }
 
@@ -6839,6 +7175,7 @@
       verifiedWorkRunId: state.verifiedWorkRunId,
       draft: state.draft,
       autoScroll: state.autoScroll,
+      orchestrateMode: state.orchestrateMode,
       uiLanguage: state.uiLanguage,
       botVisible: state.botVisible,
       botAnimations: state.botAnimations,
@@ -6869,6 +7206,8 @@
       agentModels: state.agentModels,
       model: state.model,
       reasoning: state.reasoning,
+      agentSettingsScope: state.agentSettingsScope,
+      agentSettingsSet: state.agentSettingsSet,
       fastMode: state.fastMode,
       contextUsedTokens: state.contextUsedTokens,
       contextWindowTokens: state.contextWindowTokens,
@@ -6909,6 +7248,8 @@
       agentModels: state.agentModels,
       model: state.model || undefined,
       reasoning: state.reasoning || undefined,
+      agentSettingsScope: state.agentSettingsScope,
+      agentSettingsSet: state.agentSettingsSet,
       fastMode: state.fastMode,
       goalMode: false,
       businessMode: "normal",

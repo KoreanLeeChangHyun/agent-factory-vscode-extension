@@ -78,10 +78,28 @@ export async function locateAgentFactoryExec(
   } catch {
     // A host that was never installed has no cache; the other host may still provide the runtime.
   }
+  // Antigravity installs one unversioned copy with plugin.json at its root.
+  const antigravityRoot = join(home, ".gemini", "config", "plugins", "agent-factory");
+  try {
+    const manifest = JSON.parse(await readFile(join(antigravityRoot, "plugin.json"), "utf8"));
+    readableRoots += 1;
+    if (manifest.name === "agent-factory" && typeof manifest.version === "string"
+      && (!options.requiredVersion || semanticBase(manifest.version) === semanticBase(options.requiredVersion))) {
+      for (const relative of RELATIVE_EXEC_PATHS) {
+        const info = await lstat(join(antigravityRoot, relative)).catch(() => undefined);
+        if (info?.isFile()) {
+          candidates.push({ path: join(antigravityRoot, relative), modifiedAt: info.mtimeMs });
+          break;
+        }
+      }
+    }
+  } catch {
+    // Antigravity is optional; a missing or unreadable copy leaves the other hosts' caches.
+  }
   if (!readableRoots) {
     return {
       available: false,
-      diagnostic: localize("ui.unable.to.find.the.agent.factory.plugin.cache.0", cacheRoots.join(", "))
+      diagnostic: localize("ui.unable.to.find.the.agent.factory.plugin.cache.0", [...cacheRoots, antigravityRoot].join(", "))
     };
   }
   candidates.sort((left, right) => right.modifiedAt - left.modifiedAt || right.path.localeCompare(left.path));

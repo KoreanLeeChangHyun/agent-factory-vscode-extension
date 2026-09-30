@@ -30,6 +30,30 @@ async function checkComposerRendering(page) {
     assert.deepEqual(await geometry(), empty, 'Clearing and completing restores the same geometry');
   }
   await page.locator('#notes-close').click();
+  await page.setViewportSize({ width: 721, height: 402 });
+  const restingTimelinePadding = await page.locator('#timeline').evaluate(element => getComputedStyle(element).paddingBottom);
+  await page.evaluate(() => {
+    document.querySelector('#companion-dock').hidden = false;
+    document.querySelector('#factory-bot').hidden = false;
+  });
+  assert.equal(await page.locator('#timeline').evaluate(element => getComputedStyle(element).paddingBottom), restingTimelinePadding,
+    'Floating bot does not reserve transcript clearance');
+  await page.evaluate(() => {
+    document.querySelector('#companion-dock').hidden = true;
+    document.querySelector('#factory-bot').hidden = true;
+  });
+  await page.evaluate(() => window.postMessage({ type: 'chat.assistant', phase: 'final', text: 'Latest visible transcript line' }, '*'));
+  await page.evaluate(() => window.postMessage({ type: 'run.state', running: true }, '*'));
+  await page.waitForFunction(() => !document.querySelector('#run-status').hidden);
+  assert.notEqual(await page.locator('#timeline').evaluate(element => getComputedStyle(element).paddingBottom), restingTimelinePadding,
+    'Compact loading status reserves transcript clearance');
+  await page.evaluate(() => { const timeline = document.querySelector('#timeline'); timeline.scrollTop = timeline.scrollHeight; });
+  await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+  const latestMessage = await page.locator('.message-assistant').last().boundingBox();
+  const compactStatus = await page.locator('#run-status-toggle').boundingBox();
+  assert.ok(latestMessage.y + latestMessage.height <= compactStatus.y,
+    'Latest chat message stays above the compact loading status');
+  await page.evaluate(() => window.postMessage({ type: 'run.state', running: false }, '*'));
   await page.setViewportSize(viewport);
   const pendingRequests = Array.from({ length: 100 }, (_, i) => ({
     id: 'queued-' + i, text: 'Queued ' + i, attachments: [], rejected: i === 0,

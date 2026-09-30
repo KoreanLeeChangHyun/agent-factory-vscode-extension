@@ -18,8 +18,8 @@ for (const release of [false, true]) test(`bot host availability in ${release ? 
   assert.equal(writes, 1);
   settings.set('factoryBotPrompt', null);
   settings.set('botPrompt', 'legacy factory identity');
-  assert.equal(manager.botCharacter(), release ? 'factory' : 'lumi');
-  assert.equal(manager.botPrompt(), release ? 'legacy factory identity' : '');
+  assert.equal(manager.botCharacter(), 'factory');
+  assert.equal(manager.botPrompt(), 'legacy factory identity');
   settings.set('botCharacter', 'factory');
   assert.equal(manager.botPrompt(), 'legacy factory identity');
   settings.set('factoryBotPrompt', '');
@@ -27,7 +27,7 @@ for (const release of [false, true]) test(`bot host availability in ${release ? 
   settings.set('factoryBotPrompt', 'factory only');
   settings.set('lumiPrompt', 'lumi only');
   settings.set('botCharacter', 'lumi');
-  assert.equal(manager.botPrompt(), release ? 'factory only' : 'lumi only');
+  assert.equal(manager.botPrompt(), 'factory only');
   manager.post = async () => {};
   await manager.handleMessage({ panel: {} }, { type: 'bot.prompt.save', requestId: 'explicit-factory', character: 'factory', prompt: 'updated factory only' });
   assert.equal(settings.get('factoryBotPrompt'), 'updated factory only');
@@ -40,12 +40,8 @@ for (const release of [false, true]) test(`bot host availability in ${release ? 
     return 'Awake';
   } } }, { type: 'bot.talk', requestId: 'wake-on-talk', text: 'Wake up' });
   assert.ok(atConversationStart, 'Conversation was invoked');
-  if (!release) {
-    assert.equal(atConversationStart.action, 'call');
-    assert.ok(Date.now() - atConversationStart.lastInteractionAt < 1000);
-    assert.equal(atConversationStart.careCount, 3, 'Talking does not award care points');
-  }
-  const character = release ? 'factory' : 'lumi';
+  assert.equal(atConversationStart.action, 'sleep', 'Factory fallback preserves dormant Lumi state');
+  const character = 'factory';
   const key = 'agentFactory.botConversation.v1.' + character;
   assert.equal(saved.get(key).length, 2);
   let receivedHistory;
@@ -68,17 +64,11 @@ for (const release of [false, true]) test(`bot host availability in ${release ? 
   const cancelled = { panel: {}, disposed: false, lunaBot: { talk: async () => { cancelled.disposed = true; return 'late'; } } };
   await restored.handleMessage(cancelled, { type: 'bot.talk', requestId: 'closed', text: 'Do not save' });
   assert.equal(saved.get(key).length, 8, 'Closed panels cannot append stale replies');
-  if (!release) {
-    settings.set('botCharacter', 'factory');
-    await restored.handleMessage({ panel: {}, lunaBot: { talk: async (_text, _prompt, _model, history) => {
-      receivedHistory = history; return 'Factory';
-    } } }, { type: 'bot.talk', requestId: 'factory', text: 'Separate' });
-    assert.equal(receivedHistory.length, 0, 'Characters never receive each other’s history');
-    assert.equal(saved.get(key).length, 8);
-  }
-  if (release) {
-    const beforeInteraction = writes;
-    await manager.handleMessage({ disposed: false }, { type: 'bot.interact', action: 'pet' });
-    assert.equal(writes, beforeInteraction, 'Release ignores interactions without changing local care state');
-  }
+  const beforeSelection = writes;
+  await manager.handleMessage({ panel: {} }, { type: 'bot.character.save', character: 'lumi' });
+  assert.equal(writes, beforeSelection, 'Removed character cannot be selected by stale clients');
+  assert.equal(manager.botCharacter(), 'factory', 'Persisted Lumi selection falls back to Factory');
+  const beforeInteraction = writes;
+  await manager.handleMessage({ disposed: false }, { type: 'bot.interact', action: 'pet' });
+  assert.equal(writes, beforeInteraction, 'Factory selection preserves dormant Lumi care state');
 });

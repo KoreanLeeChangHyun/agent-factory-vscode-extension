@@ -9,6 +9,7 @@ const MAX_OUTPUT_BYTES = 256 * 1024;
 // The repair-only catalog is substantially larger than the installed list, but remains bounded.
 const MAX_AVAILABLE_OUTPUT_BYTES = 4 * 1024 * 1024;
 const LIST_TIMEOUT_MS = 15_000;
+const LIST_RETRY_DELAY_MS = 1_000;
 const ADD_TIMEOUT_MS = 30_000;
 const OFFICIAL_SOURCE = "KoreanLeeChangHyun/agent-factory-codex-plugin";
 const pendingRepairs = new WeakMap<ProcessRunner, { version: string; promise: Promise<void> }>();
@@ -45,6 +46,8 @@ export class PluginDependencyError extends Error {
   }
 }
 
+class InvalidJsonError extends PluginDependencyError {}
+
 export async function ensureAgentFactoryPlugin(
   requiredExtensionVersion: string,
   runner: ProcessRunner = runProcess
@@ -62,6 +65,16 @@ export async function ensureAgentFactoryPlugin(
     await promise;
   } finally {
     pendingRepairs.delete(runner);
+  }
+}
+
+/** Read-only: the installed Agent Factory Codex plugin's version, without installing or updating anything. */
+export async function installedCodexPluginVersion(runner: ProcessRunner = runProcess): Promise<string | undefined> {
+  try {
+    const records = await listPlugins(runner, "installed");
+    return records.find(record => record.name === "agent-factory" && record.installed && record.enabled)?.version;
+  } catch {
+    return undefined;
   }
 }
 
@@ -152,7 +165,21 @@ async function listPlugins(
     includeAvailable ? localize("ui.list.available.codex.plugins") : localize("ui.list.installed.codex.plugins"),
     includeAvailable ? MAX_AVAILABLE_OUTPUT_BYTES : MAX_OUTPUT_BYTES
   );
-  return parsePluginRecords(result.stdout, list);
+  try {
+    return parsePluginRecords(result.stdout, list);
+  } catch (error) {
+    if (!(error instanceof InvalidJsonError)) throw error;
+    // A concurrent Codex update or plugin install can briefly disturb the list; retry once.
+    await new Promise((resolve) => setTimeout(resolve, LIST_RETRY_DELAY_MS));
+    const retry = await invoke(
+      runner,
+      includeAvailable ? LIST_AVAILABLE_ARGUMENTS : LIST_INSTALLED_ARGUMENTS,
+      LIST_TIMEOUT_MS,
+      includeAvailable ? localize("ui.list.available.codex.plugins") : localize("ui.list.installed.codex.plugins"),
+      includeAvailable ? MAX_AVAILABLE_OUTPUT_BYTES : MAX_OUTPUT_BYTES
+    );
+    return parsePluginRecords(retry.stdout, list);
+  }
 }
 
 async function invoke(
@@ -185,6 +212,13 @@ async function invoke(
     if (isTimedOutProcess(error)) {
       throw new PluginDependencyError(localize("ui.0.timed.out.please.try.again.shortly", operation), { cause: error });
     }
+    const stderr = isObject(error) && typeof error.stderr === "string" ? cleanOutput(error.stderr) : "";
+    if (stderr) {
+      // Codex refuses every command while config.toml is invalid; name the file instead of the install.
+      const key = /failed to load configuration|config\.toml/i.test(stderr)
+        ? "ui.0.failed.codex.configuration.is.invalid.1" : "ui.0.failed.codex.reported.1";
+      throw new PluginDependencyError(localize(key, operation, stderr), { cause: error });
+    }
     throw new PluginDependencyError(localize("ui.0.failed.check.the.codex.cli.installation.and.execution.environment", operation), {
       cause: error
     });
@@ -197,9 +231,9 @@ function parsePluginRecords(
 ): readonly PluginRecord[] {
   let value: unknown;
   try {
-    value = JSON.parse(stdout);
+    value = parseCliJson(stdout);
   } catch (error) {
-    throw new PluginDependencyError(localize("ui.the.codex.plugin.list.is.not.valid.json"), { cause: error });
+    throw new InvalidJsonError(localize("ui.the.codex.plugin.list.is.not.valid.json.0", outputExcerpt(stdout)), { cause: error });
   }
   const records = Array.isArray(value)
     ? value
@@ -237,12 +271,48 @@ function validatePluginRecord(value: unknown, index: number): PluginRecord {
 function parseJsonObject(stdout: string, label: string): Readonly<Record<string, unknown>> {
   let value: unknown;
   try {
-    value = JSON.parse(stdout);
+    value = parseCliJson(stdout);
   } catch (error) {
-    throw new PluginDependencyError(localize("ui.0.is.not.valid.json", label), { cause: error });
+    throw new InvalidJsonError(localize("ui.0.is.not.valid.json", label), { cause: error });
   }
   if (!isObject(value)) throw new PluginDependencyError(localize("ui.0.is.not.a.json.object", label));
   return value;
+}
+
+/**
+ * Codex can print update notices or warnings on stdout around `--json` output after an
+ * update. Parse the whole output first, then the JSON document that starts on its own line.
+ */
+export function parseCliJson(stdout: string): unknown {
+  try {
+    return JSON.parse(stdout);
+  } catch (error) {
+    const starts = [...stdout.matchAll(/^[ \t]*[{[]/gm)].map((match) => match.index ?? 0);
+    for (const start of starts) {
+      const text = stdout.slice(start);
+      const closer = text.trimStart()[0] === "{" ? "}" : "]";
+      for (let end = text.lastIndexOf(closer); end >= 0; end = text.lastIndexOf(closer, end - 1)) {
+        const trailing = text.slice(end + 1);
+        // Only trailing text on separate lines is ignored; a closer inside a notice is not an end.
+        if (trailing.trim() && !/^[ \t]*\r?\n/.test(trailing)) continue;
+        try { return JSON.parse(text.slice(0, end + 1)); } catch { /* try an earlier closer */ }
+      }
+    }
+    throw error;
+  }
+}
+
+function cleanOutput(value: string): string {
+  // eslint-disable-next-line no-control-regex
+  const text = value.replace(/\x1b\[[0-9;]*[A-Za-z]/g, "").split(/\r?\n/).map((line) => line.trim()).filter(Boolean).join(" ");
+  return text.length > 500 ? text.slice(0, 500) + "…" : text;
+}
+
+function outputExcerpt(stdout: string): string {
+  const line = stdout.split(/\r?\n/).map((value) => value.trim()).find(Boolean) ?? "";
+  // eslint-disable-next-line no-control-regex
+  const clean = line.replace(/\x1b\[[0-9;]*[A-Za-z]/g, "").replace(/[\x00-\x1f\x7f]/g, " ");
+  return clean ? `(${clean.length > 120 ? clean.slice(0, 120) + "…" : clean})` : localize("ui.empty.output");
 }
 
 function hasCompatibleInstalledPlugin(records: readonly PluginRecord[], requiredBase: string): boolean {

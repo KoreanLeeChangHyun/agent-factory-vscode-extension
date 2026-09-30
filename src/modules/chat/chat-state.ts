@@ -17,6 +17,8 @@ export interface ChatPanelState {
   readonly agentModels?: AgentModels;
   readonly agentPermissions?: AgentPermissions;
   readonly reasoning?: "none" | "low" | "medium" | "high" | "xhigh" | "max";
+  readonly agentSettingsScope?: "global" | "project" | "chat";
+  readonly agentSettingsSet?: string;
   readonly fastMode?: boolean;
   readonly goalMode?: boolean;
   readonly workLoopMode?: boolean;
@@ -33,7 +35,7 @@ export interface ChatPanelState {
 
 export type ComposerPreferences = Pick<
   ChatPanelState,
-  "agentPermissions" | "agentModels" | "model" | "reasoning" | "fastMode" | "goalMode" | "workLoopMode" | "taskMode" | "businessMode"
+  "agentPermissions" | "agentModels" | "model" | "reasoning" | "agentSettingsScope" | "agentSettingsSet" | "fastMode" | "goalMode" | "workLoopMode" | "taskMode" | "businessMode"
 >;
 
 export function createDraftChatState(preferences: ComposerPreferences = {}): ChatPanelState {
@@ -67,6 +69,12 @@ export function restoreChatState(
     ...(readReasoning(value.reasoning)
       ? { reasoning: readReasoning(value.reasoning) }
       : preferences.reasoning ? { reasoning: preferences.reasoning } : {}),
+    ...((value.agentSettingsScope === "global" || value.agentSettingsScope === "project" || value.agentSettingsScope === "chat")
+      ? { agentSettingsScope: value.agentSettingsScope }
+      : preferences.agentSettingsScope ? { agentSettingsScope: preferences.agentSettingsScope } : {}),
+    ...(readNonEmptyString(value.agentSettingsSet)
+      ? { agentSettingsSet: readNonEmptyString(value.agentSettingsSet) }
+      : preferences.agentSettingsSet ? { agentSettingsSet: preferences.agentSettingsSet } : {}),
     ...((parseAgentModels(value.agentModels) ?? preferences.agentModels) ? { agentModels: parseAgentModels(value.agentModels) ?? preferences.agentModels } : {}),
     ...((parseAgentPermissions(value.agentPermissions) ?? preferences.agentPermissions) ? { agentPermissions: parseAgentPermissions(value.agentPermissions) ?? preferences.agentPermissions } : {}),
     fastMode: typeof value.fastMode === "boolean" ? value.fastMode : preferences.fastMode === true,

@@ -6,7 +6,7 @@ import test from "node:test";
 const script = await readFile(new URL("../../static/js/chat.js", import.meta.url), "utf8");
 const submit = script.slice(script.indexOf("  function submit("), script.indexOf("  function cancelRun("))
   // submit() resolves delegated model settings through these helpers.
-  + script.slice(script.indexOf('  function inheritedAgentRole('), script.indexOf('  function createAgentSettingControl('));
+  + script.slice(script.indexOf('  function agentSettingRole('), script.indexOf('  function createAgentSettingControl('));
 const controls = script.slice(script.indexOf("  function updateSendButton()"), script.indexOf("  function updateRunControls()"));
 
 function harness(overrides = {}, text = "오류 수정") {
@@ -257,6 +257,21 @@ test("host derives the objective from chat text and rejects blank goals before d
   await send("Child message", { goal: true, goalObjective: "Stale" });
   assert.equal(calls[3].goalMode, false);
   assert.equal(calls[3].goalObjective, undefined);
+});
+
+test("ordinary sends follow the orchestrator switch while menu actions keep their route", () => {
+  const capabilities = { taskModes: ["orchestrate", "direct", "work"], goal: true, fast: true };
+  for (const [orchestrateMode, taskModes, action, expected] of [
+    [true, capabilities.taskModes, "direct", "orchestrate"],
+    [false, capabilities.taskModes, "direct", "direct"],
+    [true, ["direct", "work"], "direct", "direct"],
+    [true, capabilities.taskModes, "work", "work"]
+  ]) {
+    const { context, sent, run } = harness({ orchestrateMode });
+    context.currentCapabilities = () => ({ ...capabilities, taskModes });
+    run(`submit("${action}")`);
+    assert.equal(sent[0].execution.taskMode, expected);
+  }
 });
 
 test("contract actions can use conversation context while ordinary sends still need input", () => {

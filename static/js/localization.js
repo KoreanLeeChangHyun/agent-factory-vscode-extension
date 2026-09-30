@@ -37,11 +37,7 @@
   "ui.chat.scope": {"en": "This chat", "ko": "이 채팅"},
   "ui.project.defaults": {"en": "Project", "ko": "프로젝트"},
   "ui.global.defaults": {"en": "Global", "ko": "글로벌"},
-  "ui.use.parent.setting": {"en": "Inherit defaults", "ko": "기본값 상속"},
   "ui.chat.override": {"en": "This chat", "ko": "현재 채팅"},
-  "ui.inherited.project": {"en": "Inherited from project", "ko": "프로젝트에서 상속"},
-  "ui.inherited.global": {"en": "Inherited from global", "ko": "글로벌에서 상속"},
-  "ui.inherited.product": {"en": "Product default", "ko": "제품 기본값"},
 
   "sudo.title": {"en":"Administrator access requested for this command", "ko":"이 명령에 관리자 권한이 필요합니다"},
   "sudo.password": {"en":"Administrator password", "ko":"관리자 비밀번호"},
@@ -194,6 +190,10 @@
   "notes.loading": {"en": "Loading…", "ko": "불러오는 중…"},
   "notes.failed": {"en": "Could not save/load: {0}", "ko": "저장·불러오기 실패: {0}"},
   "notes.copied": {"en": "Copied", "ko": "복사했습니다"},
+  "ui.status.item.unavailable": {"en":"Not shown now","ko":"현재 표시 안 됨"},
+  "ui.status.item.unavailable.hint": {"en":"The current model or state does not provide this value, so it is hidden from the status bar. It reappears automatically when available.","ko":"현재 모델이나 상태에서 제공하지 않는 값이라 상태바에서 숨겨집니다. 사용할 수 있게 되면 자동으로 다시 표시됩니다."},
+  "ui.sidebar.starting": {"en":"Starting Agent Factory…","ko":"Agent Factory를 시작하는 중입니다…"},
+  "ui.sidebar.startup.failed": {"en":"Agent Factory could not start. {0} Run the new chat command to retry.","ko":"Agent Factory를 시작하지 못했습니다. {0} 새 채팅 명령으로 다시 시도해 주세요."},
   "ui.wsl.project.opened": {"en":"This project was opened in a new WSL window. Continue using Agent Factory in that window.","ko":"이 프로젝트를 새 WSL 창으로 열었습니다. 해당 창에서 Agent Factory를 사용해 주세요."},
   "ui.wsl.extension.required": {"en":"Codex was found in WSL ({0}). Install the Microsoft WSL extension (ms-vscode-remote.remote-wsl), then Retry to open this project there automatically.","ko":"WSL({0})에서 Codex를 찾았습니다. Microsoft WSL 확장(ms-vscode-remote.remote-wsl)을 설치한 뒤 재시도하시면 해당 환경에서 프로젝트가 자동으로 열립니다."},
   "ui.disable.all.bots": {"en":"Turn off all bots (all chats)","ko":"모든 봇 끄기 (전체 채팅)"},
@@ -298,6 +298,37 @@
   "ui.sidebar.archived.empty": { "en": "Agents are archived. Use Restore Archived Agent to bring them back.", "ko": "에이전트가 보관되어 있습니다. ‘보관한 에이전트 복원’으로 다시 표시할 수 있습니다." },
   "ui.sidebar.restore": { "en": "Restore Archived Agent", "ko": "보관한 에이전트 복원" },
   "ui.sidebar.restore.hint": { "en": "Choose an agent to return to the list. Conversation and execution records are preserved.", "ko": "목록에 다시 표시할 에이전트를 선택하세요. 대화·실행 기록은 보존됩니다." },
+  "ui.providers.none.detected": {"en":"No Codex, Claude Code or Antigravity CLI was detected. Set a CLI path in Agent Factory chat Settings › Providers.","ko":"Codex, Claude Code, Antigravity CLI를 찾지 못했습니다. Agent Factory 채팅의 설정 › 공급자에서 CLI 경로를 지정하세요."},
+  "ui.providers.none.chat": {"en":"No CLI detected. Set a CLI path in Settings › Providers.","ko":"감지된 CLI가 없습니다. 설정 › 공급자에서 CLI 경로를 지정하세요."},
+  "ui.providers": {"en":"CLI","ko":"CLI"},
+  "ui.providers.add.path": {"en":"Set another CLI path","ko":"다른 CLI 경로 지정"},
+  "ui.providers.detect": {"en":"Detect again","ko":"다시 감지"},
+  "ui.providers.detecting": {"en":"Detecting…","ko":"감지 중…"},
+  "ui.providers.detected": {"en":"Detected","ko":"감지됨"},
+  "ui.providers.missing": {"en":"Not detected","ko":"감지 안 됨"},
+  "ui.providers.source.configured": {"en":"Manual","ko":"수동"},
+  "ui.providers.source.auto": {"en":"Auto","ko":"자동"},
+  "ui.providers.path": {"en":"{0} path","ko":"{0} 경로"},
+  "ui.providers.path.placeholder": {"en":"Absolute path to the executable","ko":"실행 파일 절대 경로"},
+  "ui.providers.save": {"en":"Save","ko":"저장"},
+  "ui.providers.pick": {"en":"Browse","ko":"찾기"},
+  "ui.providers.pick.title": {"en":"Select CLI executable","ko":"CLI 실행 파일 선택"},
+  "ui.providers.clear": {"en":"Auto","ko":"자동"},
+  "ui.providers.configured.invalid": {"en":"The saved path cannot be executed. Check the path below or use auto-detect.","ko":"저장된 경로를 실행할 수 없습니다. 아래 경로를 확인하거나 자동 감지를 사용하세요."},
+  "ui.providers.plugin.failed": {"en":"Plugin setup failed: {0}","ko":"플러그인 설정 실패: {0}"},
+  "ui.providers.update.mode": {"en":"Plugin update mode","ko":"플러그인 업데이트 방식"},
+  "ui.providers.update.mode.auto": {"en":"Automatic","ko":"자동"},
+  "ui.providers.update.mode.manual": {"en":"Manual","ko":"수동"},
+  "ui.providers.update.now": {"en":"Update now","ko":"지금 업데이트"},
+  "ui.providers.update.updating": {"en":"Updating…","ko":"업데이트 중…"},
+  "ui.providers.update.current": {"en":"Up to date","ko":"최신"},
+  "ui.providers.update.available": {"en":"Update required","ko":"업데이트 필요"},
+  "ui.providers.install.version.label": {"en":"Agent Factory plugin version for {0}","ko":"{0}용 Agent Factory 플러그인 버전"},
+  "ui.providers.install.version.placeholder": {"en":"Plugin version (e.g. 1.0.20)","ko":"플러그인 버전 (예: 1.0.20)"},
+  "ui.providers.install": {"en":"Install","ko":"설치"},
+  "ui.providers.tab": {"en":"Providers","ko":"공급자"},
+  "ui.providers.version.cli": {"en":"CLI {0}","ko":"CLI {0}"},
+  "ui.providers.version.plugin": {"en":"Plugin {0}","ko":"플러그인 {0}"},
   "ui.settings": {
     "en": "Settings",
     "ko": "설정"
@@ -439,6 +470,22 @@
   "ui.work": {
     "en": "Work",
     "ko": "작업"
+  },
+  "ui.role.main": {
+    "en": "Orchestrator",
+    "ko": "조율자"
+  },
+  "ui.role.work": {
+    "en": "Expert",
+    "ko": "전문가"
+  },
+  "ui.role.workLight": {
+    "en": "Worker",
+    "ko": "작업자"
+  },
+  "ui.role.verification": {
+    "en": "Validator",
+    "ko": "검증자"
   },
   "ui.task.name.unavailable": {
     "en": "Task name not recorded",
@@ -605,8 +652,8 @@
     "ko": "잔여 "
   },
   "ui.usage.resets": {
-    "en": "Resets ",
-    "ko": "갱신 "
+    "en": "Next reset · ",
+    "ko": "다음 갱신 · "
   },
   "ui.usage.reported": {
     "en": "Last reported",
@@ -615,10 +662,6 @@
   "ui.usage.not.reported": {
     "en": "No usage has been reported yet. It appears after a run with this provider.",
     "ko": "아직 보고된 사용량이 없습니다. 이 공급자로 실행하면 표시됩니다."
-  },
-  "ui.usage.not.provided": {
-    "en": "Antigravity does not report account usage limits.",
-    "ko": "Antigravity는 계정 사용량 한도를 제공하지 않습니다."
   },
   "ui.five.hour.reset": {
     "en": "5-hour reset",
@@ -716,6 +759,26 @@
     "en": "NONE",
     "ko": "없음"
   },
+  "ui.orchestrate": {
+    "en": "Orchestrate",
+    "ko": "조율자"
+  },
+  "ui.orchestrate.mode": {
+    "en": "Orchestrator",
+    "ko": "조율자"
+  },
+  "ui.orchestrate.mode.on": {
+    "en": "Orchestrator mode on · Delegates changes to the Expert or Worker · Click for direct mode",
+    "ko": "조율자 모드 켜짐 · 변경 작업을 전문가·작업자에게 맡김 · 클릭하면 직접 모드"
+  },
+  "ui.orchestrate.mode.off": {
+    "en": "Direct mode · The orchestrator works directly · Click for orchestrator mode",
+    "ko": "직접 모드 · 조율자가 직접 작업 · 클릭하면 조율자 모드"
+  },
+  "ui.orchestrate.mode.unavailable": {
+    "en": "Orchestrator mode is unavailable with the installed runtime · Main works directly",
+    "ko": "설치된 런타임은 조율자 모드를 지원하지 않음 · Main이 직접 작업"
+  },
   "ui.fast": {
     "en": "Fast",
     "ko": "빠른 모드"
@@ -786,6 +849,7 @@
   "preset.missing": {"en": "The selected set no longer exists.", "ko": "선택한 세트를 찾을 수 없습니다."},
   "preset.invalid": {"en": "Invalid agent set", "ko": "세트의 설정 값이 올바르지 않습니다."},
   "preset.rollback.failed": {"en": "Applying the set failed and some settings could not be restored. Check the current settings.", "ko": "세트 적용에 실패했고 일부 설정을 복원하지 못했습니다. 현재 설정을 확인해 주세요."},
+  "preset.default.required": {"en": "The default set cannot be deleted.", "ko": "기본 세트는 삭제할 수 없습니다."},
   "preset.delete": {"en":"Delete", "ko":"삭제"},
   "preset.update": {"en": "Save set", "ko": "변경 저장"},
   "preset.default": {"en": "Default", "ko": "기본"},
@@ -965,7 +1029,7 @@
   },
   "ui.direct": {
     "en": "Direct",
-    "ko": "직접 전송"
+    "ko": "직접"
   },
   "ui.main.agent": {
     "en": "Main Agent",
@@ -2356,13 +2420,25 @@
     "en": "{0} timed out. Please try again shortly.",
     "ko": "{0} 시간이 초과되었습니다. 잠시 후 다시 시도하세요."
   },
+  "ui.0.failed.codex.reported.1": {
+    "en": "{0} failed. Codex reported: {1}",
+    "ko": "{0} 실패. Codex 오류: {1}"
+  },
+  "ui.0.failed.codex.configuration.is.invalid.1": {
+    "en": "{0} failed because the Codex configuration is invalid. Fix ~/.codex/config.toml (or the project .codex/config.toml): values under [features] must be true/false, and settings such as model belong above the first [section]. Codex reported: {1}",
+    "ko": "Codex 설정 오류로 {0}에 실패했습니다. ~/.codex/config.toml(또는 프로젝트의 .codex/config.toml)을 수정하세요. [features] 아래 값은 true/false만 가능하며 model 같은 설정은 첫 [구역] 줄보다 위에 있어야 합니다. Codex 오류: {1}"
+  },
   "ui.0.failed.check.the.codex.cli.installation.and.execution.environment": {
     "en": "{0} failed. Check the Codex CLI installation and execution environment.",
     "ko": "{0} 실패. Codex CLI 설치 상태와 실행 환경을 확인하세요."
   },
-  "ui.the.codex.plugin.list.is.not.valid.json": {
-    "en": "The Codex plugin list is not valid JSON.",
-    "ko": "Codex 플러그인 목록이 유효한 JSON이 아닙니다."
+  "ui.the.codex.plugin.list.is.not.valid.json.0": {
+    "en": "The Codex plugin list is not valid JSON. Output: {0}",
+    "ko": "Codex 플러그인 목록이 유효한 JSON이 아닙니다. 출력: {0}"
+  },
+  "ui.empty.output": {
+    "en": "(empty)",
+    "ko": "(비어 있음)"
   },
   "ui.the.codex.plugin.list.json.is.missing.the.0.array": {
     "en": "The Codex plugin list JSON is missing the {0} array.",

@@ -1,7 +1,7 @@
 import { isBotModel } from "../modules/chat/bot-model";
 import { COMPANION_ACTIONS, type CompanionAction } from "../modules/chat/companion";
 import { validNoteFolder } from "../infrastructure/vscode/note-store";
-import { validAgentValue } from "../core/config/agent-settings";
+import { AGENT_ROLES, validAgentValue } from "../core/config/agent-settings";
 import { parseAgentPermissions } from "../common/types/agent-permissions";
 import { parseAgentModels } from "../common/types/agent-models";
 import { BUSINESS_MODES, type BusinessMode } from "../common/types/business-mode";
@@ -9,6 +9,7 @@ import { TASK_SELECTIONS, type TaskSelection } from "../modules/chat/task-select
 import { STATUS_ITEM_IDS, type StatusItemId } from "../core/config/types";
 import type { AttachmentKind, AttachmentReference } from "../common/types/attachment";
 import type { ClientMessage } from "./messages";
+import { PROVIDER_IDS, PLUGIN_UPDATE_MODES, type ProviderId, type PluginUpdateMode } from "../infrastructure/agent-factory/provider-detection";
 
 const clientMessageTypes = new Set([
   "agent.defaults.save", "agent.preset", "agent.preset.field",
@@ -36,6 +37,14 @@ const clientMessageTypes = new Set([
   "goal.control",
   "sessions.request",
   "models.request",
+  "usage.refresh",
+  "providers.request",
+  "providers.detect",
+  "providers.configure",
+  "providers.pick",
+  "providers.update",
+  "providers.versions.request",
+  "providers.updateMode.select",
   "session.select",
   "agents.request",
   "history.request",
@@ -94,6 +103,16 @@ export function parseClientMessage(value: unknown): ClientMessage | undefined {
     case "worktree.merge":
     case "worktree.refresh":
       return { type: value.type };
+    case "providers.configure":
+      if (!PROVIDER_IDS.includes(value.provider as ProviderId) || typeof value.path !== "string"
+          || value.path.length > 4096 || /[\u0000-\u001f]/.test(value.path)) return undefined;
+      return { type: value.type, provider: value.provider as ProviderId, path: value.path };
+    case "providers.pick":
+      return PROVIDER_IDS.includes(value.provider as ProviderId)
+        ? { type: value.type, provider: value.provider as ProviderId } : undefined;
+    case "providers.updateMode.select":
+      if (!PLUGIN_UPDATE_MODES.includes(value.mode as PluginUpdateMode)) return undefined;
+      return { type: value.type, mode: value.mode as PluginUpdateMode };
     case "bot.interact":
       return COMPANION_ACTIONS.includes(value.action as CompanionAction) ? { type: value.type, action: value.action as CompanionAction } : undefined;
     case "bots.configure":
@@ -190,16 +209,16 @@ export function parseClientMessage(value: unknown): ClientMessage | undefined {
       return { type: value.type, scope: value.scope, note: { folder: (note.folder as string) || "", id: note.id, title: note.title, body: note.body, revision: Number(note.revision) } };
     }
     case "agent.preset.field":
-      if (typeof value.name !== "string" || !value.name.trim() || !["main", "work", "verification"].includes(String(value.role)) || !["model", "reasoningEffort"].includes(String(value.field)) || typeof value.value !== "string" || !validAgentValue(value.field as "model" | "reasoningEffort", value.value)) return undefined;
-      return {type: value.type, name: value.name.trim(), role: value.role as "main" | "work" | "verification", field: value.field as "model" | "reasoningEffort", value: value.value};
+      if ((value.scope !== "global" && value.scope !== "project" && value.scope !== "chat") || typeof value.name !== "string" || !value.name.trim() || !AGENT_ROLES.includes(value.role as typeof AGENT_ROLES[number]) || !["model", "reasoningEffort"].includes(String(value.field)) || typeof value.value !== "string" || !validAgentValue(value.field as "model" | "reasoningEffort", value.value)) return undefined;
+      return {type: value.type, scope: value.scope, name: value.name.trim(), role: value.role as typeof AGENT_ROLES[number], field: value.field as "model" | "reasoningEffort", value: value.value};
     case "agent.preset":
-      if ((value.action !== "save" && value.action !== "apply" && value.action !== "update" && value.action !== "delete") || (value.scope !== "global" && value.scope !== "project" && !(value.scope === "chat" && (value.action === "save" || value.action === "update" || value.action === "delete"))) || typeof value.name !== "string" || !value.name.trim()) return undefined;
+      if ((value.action !== "save" && value.action !== "apply" && value.action !== "update" && value.action !== "delete") || (value.scope !== "global" && value.scope !== "project" && value.scope !== "chat") || typeof value.name !== "string" || !value.name.trim()) return undefined;
       return {type: value.type, action: value.action, scope: value.scope, name: value.name.trim()};
     case "agent.defaults.save":
       if ((value.scope !== "global" && value.scope !== "project") ||
-          !["main", "work", "verification"].includes(String(value.role)) ||
+          !AGENT_ROLES.includes(value.role as typeof AGENT_ROLES[number]) ||
           (value.field !== "model" && value.field !== "reasoningEffort") || !validAgentValue(value.field, value.value)) return undefined;
-      return { type: value.type, scope: value.scope, role: value.role as "main" | "work" | "verification", field: value.field, value: value.value };
+      return { type: value.type, scope: value.scope, role: value.role as typeof AGENT_ROLES[number], field: value.field, value: value.value };
     case "client.ready":
     case "queue.resume":
     case "run.cancel":
@@ -208,9 +227,19 @@ export function parseClientMessage(value: unknown): ClientMessage | undefined {
     case "conversations.request":
     case "sessions.request":
     case "models.request":
+    case "usage.refresh":
+    case "providers.request":
+    case "providers.detect":
+    case "providers.versions.request":
     case "agents.request":
     case "attachments.pick":
       return { type: value.type };
+    case "providers.update":
+      if (value.version === undefined) return value.provider === undefined ? { type: value.type } : undefined;
+      if (typeof value.provider !== "string" || !PROVIDER_IDS.includes(value.provider as ProviderId)) return undefined;
+      return typeof value.version === "string" && value.version.length <= 128
+        && /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/.test(value.version)
+        ? { type: value.type, provider: value.provider as ProviderId, version: value.version } : undefined;
     case "conversation.read": {
       const id = (value: unknown): value is string => typeof value === "string" && /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(value);
       if ((value.conversationId !== null && !id(value.conversationId)) || !id(value.requestId) || (value.before !== undefined && !id(value.before))) return undefined;
@@ -236,6 +265,8 @@ export function parseClientMessage(value: unknown): ClientMessage | undefined {
         (value.agentPermissions !== undefined && !parseAgentPermissions(value.agentPermissions)) ||
         (value.model !== undefined && (typeof value.model !== "string" || value.model.length > 100)) ||
         (value.reasoning !== undefined && (typeof value.reasoning !== "string" || !reasoningEfforts.has(value.reasoning))) ||
+        (value.agentSettingsScope !== undefined && value.agentSettingsScope !== "global" && value.agentSettingsScope !== "project" && value.agentSettingsScope !== "chat") ||
+        (value.agentSettingsSet !== undefined && (typeof value.agentSettingsSet !== "string" || !value.agentSettingsSet.trim())) ||
         typeof value.fastMode !== "boolean" ||
         (value.workLoopMode !== undefined && typeof value.workLoopMode !== "boolean") ||
         typeof value.goalMode !== "boolean"
@@ -252,6 +283,8 @@ export function parseClientMessage(value: unknown): ClientMessage | undefined {
           : {}),
         ...(value.businessMode !== undefined ? { businessMode: value.businessMode as BusinessMode } : {}),
         ...(value.taskMode !== undefined ? { taskMode: value.taskMode as TaskSelection } : {}),
+        ...(value.agentSettingsScope !== undefined ? { agentSettingsScope: value.agentSettingsScope as "global" | "project" | "chat" } : {}),
+        ...(typeof value.agentSettingsSet === "string" ? { agentSettingsSet: value.agentSettingsSet.trim() } : {}),
         fastMode: value.fastMode,
         goalMode: value.goalMode,
         ...(typeof value.workLoopMode === "boolean" ? { workLoopMode: value.workLoopMode } : {})

@@ -3,13 +3,13 @@ export interface AgentModelSetting {
   readonly model?: string;
   readonly reasoningEffort?: "none" | "low" | "medium" | "high" | "xhigh" | "max";
 }
-export type AgentModels = Partial<Record<"work" | "verification", AgentModelSetting>>;
+export type AgentModels = Partial<Record<"work" | "workLight" | "verification", AgentModelSetting>>;
 
 export function parseAgentModels(value: unknown): AgentModels | undefined {
   if (typeof value !== "object" || value === null || Array.isArray(value)) return undefined;
   const result: AgentModels = {};
   for (const [role, setting] of Object.entries(value)) {
-    if (role !== "work" && role !== "verification") return undefined;
+    if (role !== "work" && role !== "workLight" && role !== "verification") return undefined;
     if (typeof setting !== "object" || setting === null || Array.isArray(setting)) return undefined;
     const fields = setting as Record<string, unknown>;
     if (Object.keys(fields).some(key => key !== "model" && key !== "reasoningEffort")) return undefined;

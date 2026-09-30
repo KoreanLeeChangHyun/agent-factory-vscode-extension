@@ -43,4 +43,40 @@ async function checkSafeMarkup(page) {
   assert.equal(await body.locator('[style]').count(), 0);
 }
 
-module.exports = { checkRichMarkdown, checkSafeMarkup };
+async function checkManagedEnvelope(page) {
+  const envelope = JSON.stringify({ decisionKind: null, resultPath: '/runtime/result.md',
+    resultText: '**Readable answer**', status: 'completed' });
+  await page.evaluate(envelope => window.dispatchEvent(new MessageEvent('message', {
+    data: { type: 'chat.assistant', phase: 'commentary', text: envelope }
+  })), envelope);
+  await page.waitForFunction(() => Array.from(document.querySelectorAll('.message-assistant .markdown-body')).at(-1)?.textContent.includes('Readable answer'));
+  const body = page.locator('.message-assistant .markdown-body').last();
+  assert.equal((await body.textContent()).trim(), 'Readable answer');
+  assert.equal(await body.locator('strong').textContent(), 'Readable answer');
+  assert.ok(!(await body.textContent()).includes('resultPath'));
+
+  await page.evaluate(envelope => window.dispatchEvent(new MessageEvent('message', {
+    data: { type: 'chat.assistant', phase: 'commentary', text: '- ' + envelope }
+  })), envelope);
+  const listWrappedBody = page.locator('.message-assistant .markdown-body').last();
+  await listWrappedBody.locator('strong').waitFor();
+  assert.equal((await listWrappedBody.textContent()).trim(), 'Readable answer');
+  assert.equal(await listWrappedBody.locator('li').count(), 0, 'Managed envelope list marker is not rendered');
+
+  await page.evaluate(envelope => window.dispatchEvent(new MessageEvent('message', {
+    data: { type: 'chat.delta', runId: 'managed-envelope-preview', stream: 'commentary', id: 'preview', text: '- ' + envelope }
+  })), envelope);
+  const streamedBody = page.locator('.message-assistant .markdown-body').last();
+  await streamedBody.locator('strong').waitFor();
+  assert.equal((await streamedBody.textContent()).trim(), 'Readable answer');
+  assert.ok(!(await streamedBody.textContent()).includes('resultPath'));
+
+  const ordinary = '{"answer":"visible JSON"}';
+  await page.evaluate(ordinary => window.dispatchEvent(new MessageEvent('message', {
+    data: { type: 'chat.assistant', phase: 'final', text: ordinary }
+  })), ordinary);
+  await page.waitForFunction(ordinary => Array.from(document.querySelectorAll('.message-assistant .markdown-body')).at(-1)?.textContent.includes(ordinary), ordinary);
+  assert.equal((await page.locator('.message-assistant .markdown-body').last().textContent()).trim(), ordinary);
+}
+
+module.exports = { checkRichMarkdown, checkSafeMarkup, checkManagedEnvelope };

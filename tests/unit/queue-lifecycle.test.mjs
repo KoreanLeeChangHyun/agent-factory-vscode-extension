@@ -88,6 +88,17 @@ test('decision-required pauses batching until an explicit answer is accepted', a
   assert.deepEqual(promoted, ['queued', 'also queued']);
 });
 
+test('reconnect restores the latest pending decision before conversation reset', async () => {
+  const decisions = [];
+  const controller = new ChatSessionController(runtime({
+    async pendingDecision() { return { runId: 'question' }; }
+  }), { ...events(), onDecision: (...args) => decisions.push(args) }, 'main-existing', { pollIntervalMs: 0 });
+  await controller.reconnect();
+  assert.deepEqual(decisions, [['question', false]]);
+  assert.ok(controller.conversationResetBlockedReason);
+  assert.equal(controller.approveDecision('question', {}), false);
+});
+
 test('polling loss preserves the current run and cannot dispatch queued input before reconnect completes', async () => {
   const broken = deferred(), recovered = deferred(), calls = [], promoted = [];
   let disconnected = true;

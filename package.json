@@ -5,7 +5,7 @@
   "version": "1.0.21",
   "publisher": "agent-factory",
   "icon": "static/images/agent-factory.png",
-  "license": "UNLICENSED",
+  "license": "MIT",
   "private": true,
   "engines": {
     "vscode": "^1.96.0"
@@ -253,6 +253,26 @@
           "default": "",
           "description": "%agentFactory.mainChat.claudePath.description%"
         },
+        "agentFactory.mainChat.antigravityPath": {
+          "type": "string",
+          "scope": "machine",
+          "default": "",
+          "description": "%agentFactory.mainChat.antigravityPath.description%"
+        },
+        "agentFactory.mainChat.pluginUpdateMode": {
+          "type": "string",
+          "scope": "machine",
+          "enum": [
+            "auto",
+            "manual"
+          ],
+          "default": "auto",
+          "enumDescriptions": [
+            "%agentFactory.mainChat.pluginUpdateMode.enum.0%",
+            "%agentFactory.mainChat.pluginUpdateMode.enum.1%"
+          ],
+          "description": "%agentFactory.mainChat.pluginUpdateMode.description%"
+        },
         "agentFactory.mainChat.runtimeExecPath": {
           "type": "string",
           "scope": "machine",
@@ -281,7 +301,6 @@
           "type": "string",
           "enum": [
             "",
-            "lumi",
             "factory"
           ],
           "default": "",
@@ -327,15 +346,14 @@
           "default": "",
           "scope": "resource",
           "description": "%agentFactory.agents.main.model.description%",
-          "pattern": "^$|^[A-Za-z0-9][A-Za-z0-9._:/-]{0,99}$"
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/-]{0,99}$"
         },
         "agentFactory.agents.main.reasoningEffort": {
           "type": "string",
-          "default": "",
+          "default": "medium",
           "scope": "resource",
           "description": "%agentFactory.agents.main.reasoningEffort.description%",
           "enum": [
-            "",
             "none",
             "low",
             "medium",
@@ -349,15 +367,35 @@
           "default": "",
           "scope": "resource",
           "description": "%agentFactory.agents.work.model.description%",
-          "pattern": "^$|^[A-Za-z0-9][A-Za-z0-9._:/-]{0,99}$"
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/-]{0,99}$"
         },
         "agentFactory.agents.work.reasoningEffort": {
           "type": "string",
-          "default": "",
+          "default": "medium",
           "scope": "resource",
           "description": "%agentFactory.agents.work.reasoningEffort.description%",
           "enum": [
-            "",
+            "none",
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ]
+        },
+        "agentFactory.agents.workLight.model": {
+          "type": "string",
+          "default": "",
+          "scope": "resource",
+          "description": "%agentFactory.agents.workLight.model.description%",
+          "pattern": "^$|^[A-Za-z0-9][A-Za-z0-9._:/-]{0,99}$"
+        },
+        "agentFactory.agents.workLight.reasoningEffort": {
+          "type": "string",
+          "default": "low",
+          "scope": "resource",
+          "description": "%agentFactory.agents.workLight.reasoningEffort.description%",
+          "enum": [
             "none",
             "low",
             "medium",
@@ -371,15 +409,14 @@
           "default": "",
           "scope": "resource",
           "description": "%agentFactory.agents.verification.model.description%",
-          "pattern": "^$|^[A-Za-z0-9][A-Za-z0-9._:/-]{0,99}$"
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/-]{0,99}$"
         },
         "agentFactory.agents.verification.reasoningEffort": {
           "type": "string",
-          "default": "",
+          "default": "medium",
           "scope": "resource",
           "description": "%agentFactory.agents.verification.reasoningEffort.description%",
           "enum": [
-            "",
             "none",
             "low",
             "medium",

@@ -1,5 +1,5 @@
 import { localize } from "../../common/localization";
-import { PluginDependencyError, runProcess, semanticBase, type ProcessRunner } from "./plugin-dependency";
+import { PluginDependencyError, parseCliJson, runProcess, semanticBase, type ProcessRunner } from "./plugin-dependency";
 import { claudeExecutable } from "./process-environment";
 import { readFile, stat } from "node:fs/promises";
 import { join } from "node:path";
@@ -52,6 +52,15 @@ async function ensure(requiredBase: string, runner: ProcessRunner): Promise<void
   const after = await installed(runner);
   if (!after || semanticBase(after.version) !== requiredBase) {
     throw new PluginDependencyError(localize("claude.plugin.unconfirmed", requiredBase));
+  }
+}
+
+/** Read-only: the installed Agent Factory Claude Code plugin's version, without installing or updating anything. */
+export async function installedClaudePluginVersion(runner: ProcessRunner = runProcess): Promise<string | undefined> {
+  try {
+    return (await installed(runner))?.version;
+  } catch {
+    return undefined;
   }
 }
 
@@ -115,7 +124,7 @@ async function run(runner: ProcessRunner, arguments_: readonly string[], timeout
 
 function parseJson(stdout: string): unknown {
   try {
-    return JSON.parse(stdout);
+    return parseCliJson(stdout);
   } catch (error) {
     throw new PluginDependencyError(localize("claude.plugin.invalid.output", stdout.slice(0, 200)), { cause: error });
   }

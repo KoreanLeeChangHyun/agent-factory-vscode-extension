@@ -204,7 +204,7 @@ test("legacy layouts adopt catalog order, retain unknown entries and append new 
   restored.sidebar.dispose();
 });
 
-test("drag and drop ignores cancellation, group drags, foreign payloads and stale targets", async () => {
+test("drag and drop ignores cancellation, foreign payloads and stale targets", async () => {
   const h = harness(), other = harness();
   await h.sidebar.refresh();
   await other.sidebar.refresh();
@@ -213,7 +213,10 @@ test("drag and drop ignores cancellation, group drags, foreign payloads and stal
   const group = h.sidebar.getChildren()[0], agent = h.sidebar.getChildren()[1];
   const transfer = new Map(), token = { isCancellationRequested: false };
   h.sidebar.handleDrag([group], transfer, token);
-  assert.equal(transfer.size, 0);
+  assert.equal(transfer.size, 1);
+  await h.sidebar.handleDrop(group, transfer, token);
+  assert.equal(h.sidebar.getChildren()[0].group.id, group.group.id);
+  transfer.clear();
   other.sidebar.handleDrag(other.sidebar.getChildren(), transfer, token);
   await h.sidebar.handleDrop(group, transfer, token);
   assert.equal(h.sidebar.getChildren(group).length, 0);
@@ -232,6 +235,35 @@ test("drag and drop ignores cancellation, group drags, foreign payloads and stal
   assert.equal(h.sidebar.getChildren().length, 2);
   h.sidebar.dispose();
   other.sidebar.dispose();
+});
+
+test("dragging directories reorders them, preserves members, and persists the order", async () => {
+  const h = harness();
+  await h.sidebar.refresh();
+  for (const name of ["One", "Two", "Three"]) {
+    h.inputs.push(name);
+    await h.run("newGroup");
+  }
+  const [one, two, three] = h.sidebar.getChildren();
+  const transfer = new Map(), token = { isCancellationRequested: false };
+  h.sidebar.handleDrag([h.sidebar.getChildren()[3]], transfer, token);
+  await h.sidebar.handleDrop(one, transfer, token);
+  h.sidebar.handleDrag([three], transfer, token);
+  await h.sidebar.handleDrop(one, transfer, token);
+  assert.deepEqual(Array.from(h.sidebar.getChildren().filter(node => node.kind === "group"), node => node.group.name),
+    ["Three", "One", "Two"]);
+  assert.equal(h.sidebar.getChildren(one).length, 1);
+  const restored = harness(h.storage);
+  await restored.sidebar.refresh();
+  assert.deepEqual(Array.from(restored.sidebar.getChildren().filter(node => node.kind === "group"), node => node.group.name),
+    ["Three", "One", "Two"]);
+  assert.equal(restored.sidebar.getChildren(restored.sidebar.getChildren()[1]).length, 1);
+  restored.sidebar.dispose();
+  h.sidebar.handleDrag([three], transfer, token);
+  await h.sidebar.handleDrop(undefined, transfer, token);
+  assert.deepEqual(Array.from(h.sidebar.getChildren().filter(node => node.kind === "group"), node => node.group.name),
+    ["One", "Two", "Three"]);
+  h.sidebar.dispose();
 });
 
 test("archiving hides agents across refresh and reload while preserving records and groups", async () => {

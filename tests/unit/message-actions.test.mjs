@@ -6,7 +6,7 @@ import test from 'node:test';
 const script = await readFile(new URL('../../static/js/chat.js', import.meta.url), 'utf8');
 const submitSource = script.slice(script.indexOf('  function submit('), script.indexOf('  function cancelRun('))
   // submit() resolves delegated model settings through these helpers.
-  + script.slice(script.indexOf('  function inheritedAgentRole('), script.indexOf('  function createAgentSettingControl('));
+  + script.slice(script.indexOf('  function agentSettingRole('), script.indexOf('  function createAgentSettingControl('));
 const actions = ['work', 'plan', 'verification', 'plan-work', 'work-verification', 'plan-work-verification'];
 
 for (const action of actions) for (const goalEnabled of [false, true]) {

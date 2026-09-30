@@ -3,22 +3,30 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import { claudeExecutable, runtimeEnvironment } from "./process-environment";
+import { antigravityExecutable, claudeExecutable, runtimeEnvironment } from "./process-environment";
 
 const MAX_CATALOG_BYTES = 4 * 1024 * 1024;
 
 const CLAUDE_PROBE_TTL_MS = 60_000;
 const claudeProbes = new Map<string, { readonly checkedAt: number; readonly available: Promise<boolean> }>();
 
+export interface ProviderSelection {
+  readonly codex?: boolean;
+  readonly claude?: boolean;
+  readonly antigravity?: boolean;
+}
+
+/** Only providers whose CLI was detected contribute models; an unset flag counts as detected. */
 export async function readProviderModels(
-  codexHome?: string, claude = claudeExecutable(), agy = "agy",
-  claudeConfigDir = process.env.CLAUDE_CONFIG_DIR || join(homedir(), ".claude")
+  codexHome?: string, claude = claudeExecutable(), agy = antigravityExecutable(),
+  claudeConfigDir = process.env.CLAUDE_CONFIG_DIR || join(homedir(), ".claude"),
+  providers: ProviderSelection = {}
 ): Promise<readonly string[] | undefined> {
-  const claudeAvailable = isClaudeAvailable(claude);
+  const claudeAvailable = providers.claude === false ? Promise.resolve(false) : isClaudeAvailable(claude);
   const [codex, claudeModels, antigravity] = await Promise.all([
-    readCodexModels(codexHome),
+    providers.codex === false ? [] : readCodexModels(codexHome),
     claudeAvailable.then(available => available ? readClaudeModels(claudeConfigDir) : []),
-    readAntigravityModels(agy)
+    providers.antigravity === false ? [] : readAntigravityModels(agy)
   ]);
   const models = [...(codex ?? []), ...claudeModels, ...antigravity];
   return models.length || codex ? [...new Set(models)] : undefined;
@@ -83,7 +91,7 @@ async function readClaudeCatalog(path: string): Promise<ClaudeCatalog | undefine
 const antigravityProbes = new Map<string, { readonly checkedAt: number; readonly models: Promise<readonly string[]> }>();
 
 /** `agy models` lists the signed-in subscription's models; probe each executable at most once a minute. */
-export function readAntigravityModels(agy = "agy"): Promise<readonly string[]> {
+export function readAntigravityModels(agy = antigravityExecutable()): Promise<readonly string[]> {
   const cached = antigravityProbes.get(agy);
   if (cached && Date.now() - cached.checkedAt < CLAUDE_PROBE_TTL_MS) return cached.models;
   const models = promisify(execFile)(agy, ["models"], {

@@ -131,6 +131,7 @@ async function main() {
     if (process.argv.includes('--rich-markdown-only')) {
       await require('./rich-markdown.cjs').checkRichMarkdown(page);
       await require('./rich-markdown.cjs').checkSafeMarkup(page);
+      await require('./rich-markdown.cjs').checkManagedEnvelope(page);
       // Mermaid measures labels in the document, where the CSP refuses its inline styles; the rendered image is unaffected.
       assert.deepEqual(errors.filter(error => !error.startsWith('Refused to apply inline style')), []);
       console.log('Rich Markdown browser checks passed');
@@ -297,6 +298,18 @@ async function main() {
       await checkStatusCustomizationLayout(page);
       assert.deepEqual(errors, []);
       console.log('Status availability, saved preferences and settings layout passed.');
+      return;
+    }
+    if (process.argv.includes('--status-layout-only')) {
+      await checkStatusCustomizationLayout(page);
+      assert.deepEqual(errors, []);
+      console.log('Status settings and responsive usage layout passed.');
+      return;
+    }
+    if (process.argv.includes('--cancellation-notice-only')) {
+      await require('./cancellation-notice.cjs').checkCancellationNotice(page);
+      assert.deepEqual(errors, []);
+      console.log('Cancellation notice warning color and failure distinction passed.');
       return;
     }
     if (process.argv.includes('--factory-bot-only')) {

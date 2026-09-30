@@ -3,6 +3,7 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { localize } from "../../common/localization";
 import { PluginDependencyError, runProcess, semanticBase, type ProcessRunner } from "./plugin-dependency";
+import { antigravityExecutable } from "./process-environment";
 
 const PLUGIN_NAME = "agent-factory";
 const OFFICIAL_REPOSITORY = "https://github.com/KoreanLeeChangHyun/agent-factory-antigravity-plugin";
@@ -13,7 +14,7 @@ const MAX_MANIFEST_BYTES = 64 * 1024;
 const pending = new WeakMap<ProcessRunner, Promise<void>>();
 
 /** The Antigravity CLI when it runs; agy is optional, so an unusable CLI is simply absent. */
-export async function isAntigravityAvailable(agy = "agy", runner: ProcessRunner = runProcess): Promise<boolean> {
+export async function isAntigravityAvailable(agy = antigravityExecutable(), runner: ProcessRunner = runProcess): Promise<boolean> {
   try {
     const { stdout } = await runner(agy, ["--version"], { timeout: PROBE_TIMEOUT_MS, maxBuffer: MAX_OUTPUT_BYTES });
     return /^\d+\.\d+\.\d+/.test(stdout.trim());
@@ -33,7 +34,7 @@ export async function ensureAgentFactoryAntigravityPlugin(
 ): Promise<void> {
   const inFlight = pending.get(runner);
   if (inFlight) return inFlight;
-  const promise = ensure(semanticBase(requiredExtensionVersion), runner, options.agy ?? "agy", options.home ?? homedir());
+  const promise = ensure(semanticBase(requiredExtensionVersion), runner, options.agy ?? antigravityExecutable(), options.home ?? homedir());
   pending.set(runner, promise);
   try {
     await promise;
@@ -58,6 +59,11 @@ async function ensure(requiredBase: string, runner: ProcessRunner, agy: string, 
   if (!after || semanticBase(after) !== requiredBase) {
     throw new PluginDependencyError(localize("antigravity.plugin.version.unavailable", requiredBase, after ?? "-"));
   }
+}
+
+/** Read-only: the installed Agent Factory Antigravity plugin's version, without installing or updating anything. */
+export async function installedAntigravityPluginVersion(home: string = homedir()): Promise<string | undefined> {
+  return installedVersion(join(home, ".gemini", "config", "plugins", PLUGIN_NAME, "plugin.json"));
 }
 
 async function installedVersion(manifest: string): Promise<string | undefined> {

@@ -320,7 +320,7 @@ test("conversation reset uses the runtime command and requires retained-history 
 
 test("composer shows only supported controls across draft and bound sessions", async function () {
   const script = await readFile(new URL('../../static/js/chat.js', import.meta.url), 'utf8');
-  const functions = script.slice(script.indexOf('  function inheritedAgentRole('), script.indexOf('  function renderAgentDefaults(')) + '\n' + script.slice(script.indexOf('  function currentCapabilities()'), script.indexOf('  function openSetting(setting)'));
+  const functions = script.slice(script.indexOf('  function agentSettingRole('), script.indexOf('  function renderAgentDefaults(')) + '\n' + script.slice(script.indexOf('  function currentCapabilities()'), script.indexOf('  function openSetting(setting)'));
   const iconFunction = script.slice(script.indexOf('  function createBusinessModeIcon(mode)'), script.indexOf('  function handleSettingMenuKeydown(event)'));
   const element = (namespaceURI, localName) => ({
     namespaceURI, localName, children: [], attributes: {}, dataset: {},
@@ -341,7 +341,8 @@ test("composer shows only supported controls across draft and bound sessions", a
     modelMenu: { querySelector() { return null; } }, submissionButton: button(),
     promptSurface: { classList: { toggle() {} } },
     state: { role: 'main', businessMode: 'normal', taskMode: 'work', capabilities: { submit: { model: true }, send: {} }, model: 'gpt-6-astra', reasoning: 'medium', fastMode: true, goalMode: true },
-    modelButton: button(), reasoningButton: button(), fastModeButton: button(), goalModeButton: button(), workLoopButton: button(),
+    modelButton: button(), reasoningButton: button(), fastModeButton: button(), orchestrateModeButton: button(), goalModeButton: button(), workLoopButton: button(),
+    orchestrateAvailable: () => true, enterAction: () => context.state.orchestrateMode === false ? "direct" : "orchestrate",
     taskModeNames: { work: "Work" }, businessModeNames: { normal: "Normal" }, businessModeButton: button(),
     executionModeButton: button(), executionModeLabel: {}, modelLabel: {}, reasoningLabel: {}, openSettingId: undefined,
     goalPanel: { querySelectorAll() { return []; } }, goalStatus: {}, nativeGoal: null, goalError: undefined
@@ -352,6 +353,8 @@ test("composer shows only supported controls across draft and bound sessions", a
   assert.equal(context.modelButton.parentElement.hidden, false);
   assert.equal(context.submissionButton.hidden, false);
   assert.equal(context.fastModeButton.hidden, true);
+  assert.equal(context.orchestrateModeButton.hidden, false);
+  assert.equal(context.orchestrateModeButton.title.length > 0, true);
   context.state.agentId = 'bound-session';
   runInNewContext('updateModeControls();', context);
   assert.equal(context.modelButton.parentElement.hidden, false);
@@ -361,6 +364,7 @@ test("composer shows only supported controls across draft and bound sessions", a
   context.state.role = 'work';
   runInNewContext('updateModeControls();', context);
   assert.equal(context.submissionButton.hidden, true);
+  assert.equal(context.orchestrateModeButton.hidden, true);
   assert.equal(clearButton.hidden, true);
 });
 
@@ -1426,6 +1430,21 @@ test("active run discovery includes queued runs, skips terminal runs and validat
   assert.equal(await client.activeRun("main-test"), undefined);
 });
 
+test("pending decision discovery uses the latest accepted run", async t => {
+  const { AgentFactoryClient } = await importTypeScript("src/infrastructure/agent-factory/agent-client.ts");
+  const root = await mkdtemp(join(tmpdir(), "af-decision-reconnect-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const client = new AgentFactoryClient(new URL("../fixtures/fake-exec.py", import.meta.url).pathname, root);
+  const runDirectory = join(agentsRoot(root), "main-test", "runs");
+  await mkdir(join(runDirectory, "run-1"), { recursive: true });
+  await mkdir(join(runDirectory, "run-2"), { recursive: true });
+  await writeFile(join(runDirectory, "run-1", "state.json"), JSON.stringify({ agentId: "main-test", runId: "run-1", status: "needs-human-decision", acceptedAt: "2026-09-30T10:00:00Z" }));
+  await writeFile(join(runDirectory, "run-2", "state.json"), JSON.stringify({ agentId: "main-test", runId: "run-2", status: "completed", acceptedAt: "2026-09-30T11:00:00Z" }));
+  assert.equal(await client.pendingDecision("main-test"), undefined);
+  await writeFile(join(runDirectory, "run-2", "state.json"), JSON.stringify({ agentId: "main-test", runId: "run-2", status: "needs-human-decision", acceptedAt: "2026-09-30T11:00:00Z" }));
+  assert.deepEqual(await client.pendingDecision("main-test"), { runId: "run-2" });
+});
+
 test("reconnect with no active run hands racing input to the pending batch exactly once", async () => {
   const { ChatSessionController } = await importTypeScript("src/modules/chat/session-controller.ts");
   let resolveDiscovery;
@@ -1849,7 +1868,7 @@ test("cancellation summaries are shown once on restore and live delivery without
 test("cancelled controller results emit one notice and preserve only meaningful partial text", async () => {
   const { ChatSessionController } = await importTypeScript("src/modules/chat/session-controller.ts");
   for (const resultText of ["", "The run was cancelled.", "Saved partial work"]) {
-    const texts = [], errors = [];
+    const texts = [], notices = [];
     const runtime = {
       async submit(agentId) { return { agentId, runId: "cancelled-run" }; },
       async updates() { return { cursor: 0, updates: [] }; },
@@ -1858,13 +1877,32 @@ test("cancelled controller results emit one notice and preserve only meaningful 
     };
     const controller = new ChatSessionController(runtime, {
       onBound() {}, onRunningChanged() {}, onProgress() {}, onActivity() {}, onUsage() {},
-      onAssistantText(text) { texts.push(text); }, onError(text) { errors.push(text); }
+      onAssistantText(text) { texts.push(text); }, onError(text, level) { notices.push([text, level]); }
     }, undefined, { pollIntervalMs: 0, maxPolls: 1 });
     await controller.send("task", [], {});
-    assert.deepEqual(errors, ["The run was cancelled."]);
+    assert.deepEqual(notices, [["The run was cancelled.", "cancelled"]]);
     assert.equal(texts.length, resultText === "Saved partial work" ? 1 : 0);
     if (texts.length) assert.match(texts[0], /Saved partial work/);
   }
+});
+
+test("cancelled results with diagnostics retain error severity", async () => {
+  const { ChatSessionController } = await importTypeScript("src/modules/chat/session-controller.ts");
+  const notices = [];
+  const runtime = {
+    async submit(agentId) { return { agentId, runId: "cancelled-diagnostic" }; },
+    async updates() { return { cursor: 0, updates: [] }; },
+    async status() { return { status: "cancelled" }; },
+    async result() { return { status: "cancelled", text: "", error: { code: "provider_error", message: "Provider stopped unexpectedly" } }; }
+  };
+  const controller = new ChatSessionController(runtime, {
+    onBound() {}, onRunningChanged() {}, onProgress() {}, onActivity() {}, onUsage() {}, onAssistantText() {},
+    onError(text, level) { notices.push([text, level]); }
+  }, undefined, { pollIntervalMs: 0, maxPolls: 1 });
+  await controller.send("task", [], {});
+  assert.equal(notices.length, 1);
+  assert.equal(notices[0][1], "error");
+  assert.match(notices[0][0], /Provider stopped unexpectedly/);
 });
 
 test("runtime result carries only explicit decision metadata for pending decisions", async () => {

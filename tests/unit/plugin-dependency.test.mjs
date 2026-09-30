@@ -16,9 +16,9 @@ async function importTypeScript(relativePath, mockExtensionImports = false) {
       buildApi.onLoad({ filter: /.*/, namespace: "mock" }, (args) => {
         if (args.path === "vscode") return { contents: "export const ExtensionMode = { Production: 1, Development: 2, Test: 3 }; export const ProgressLocation = { Notification: 15 }; export const window = {};" };
         if (args.path === "bootstrap") return { contents: "export function bootstrap() {}" };
-        if (args.path === "claude-dependency") return { contents: "export async function ensureAgentFactoryClaudePlugin() {}" };
-        if (args.path === "antigravity-dependency") return { contents: "export async function ensureAgentFactoryAntigravityPlugin() {} export async function isAntigravityAvailable() { return false; }" };
-        return { contents: "export async function ensureAgentFactoryPlugin() {} export function semanticBase(value) { return String(value).split('+')[0]; }" };
+        if (args.path === "claude-dependency") return { contents: "export async function ensureAgentFactoryClaudePlugin() {} export async function installedClaudePluginVersion() { return undefined; }" };
+        if (args.path === "antigravity-dependency") return { contents: "export async function ensureAgentFactoryAntigravityPlugin() {} export async function isAntigravityAvailable() { return false; } export async function installedAntigravityPluginVersion() { return undefined; }" };
+        return { contents: "export async function ensureAgentFactoryPlugin() {} export function semanticBase(value) { return String(value).split('+')[0]; } export async function installedCodexPluginVersion() { return undefined; }" };
       });
     }
   }] : [];
@@ -35,6 +35,25 @@ async function importTypeScript(relativePath, mockExtensionImports = false) {
 }
 
 const dependency = await importTypeScript("src/infrastructure/agent-factory/plugin-dependency.ts");
+const codexSetup = await importTypeScript("src/infrastructure/agent-factory/codex-plugin-setup.ts");
+
+test("Codex setup uses a matching local runtime without querying the remote plugin catalog", async () => {
+  const calls = [];
+  await codexSetup.ensureAgentFactoryCodexRuntime("1.0.2+extension.build", async options => {
+    calls.push(["locate", options.requiredVersion]);
+    return { available: true, execPath: "/cache/agent-factory/skills/agent/scripts/exec.py" };
+  }, async version => calls.push(["repair", version]));
+  assert.deepEqual(calls, [["locate", "1.0.2+extension.build"]]);
+});
+
+test("Codex setup runs the existing repair flow only when the local runtime is missing", async () => {
+  const calls = [];
+  await codexSetup.ensureAgentFactoryCodexRuntime("1.0.2", async options => {
+    calls.push(["locate", options.requiredVersion]);
+    return { available: false, diagnostic: "missing" };
+  }, async version => calls.push(["repair", version]));
+  assert.deepEqual(calls, [["locate", "1.0.2"], ["repair", "1.0.2"]]);
+});
 
 test("development activation uses live local sources without installation and fails closed", async (t) => {
   const root = await mkdtemp(join(tmpdir(), "af-dev-plugin-"));
@@ -257,7 +276,7 @@ test("add or recheck failure blocks activation", async (t) => {
 
 test("malformed, oversized, and failed command output blocks", async (t) => {
   await t.test("malformed JSON", async () => {
-    const process = queuedRunner([{ stdout: "{" }]);
+    const process = queuedRunner([{ stdout: "{" }, { stdout: "{" }]);
     await assert.rejects(dependency.ensureAgentFactoryPlugin("1.0.2", process.runner), /valid JSON/);
   });
   await t.test("invalid record", async () => {
@@ -329,6 +348,7 @@ test("the Antigravity plugin is ensured after startup and its failure only warns
   let release;
   const antigravity = new Promise(resolve => { release = resolve; });
   const services = {
+    detectProviders: async () => ({ codex: true, claude: false, antigravity: true }),
     ensurePlugin: async () => { events.push("ensure"); },
     ensureAntigravityPlugin: async (version) => { events.push(`antigravity:${version}`); await antigravity; throw new Error("offline"); },
     showWarningMessage: async (message) => { events.push(`warning:${message}`); },
@@ -521,7 +541,8 @@ test("WSL handoff is deduplicated and never starts the Windows plugin or chat ru
   let opens = 0;
   let handler, notice;
   const services = {
-    prepareCodex: async () => { opens++; return "redirected"; },
+    detectProviders: async () => ({ codex: false, claude: false, antigravity: false }),
+    redirectToWsl: async () => { opens++; return true; },
     ensurePlugin: async () => assert.fail("must not install into Windows"),
     bootstrap: () => assert.fail("must not bootstrap Windows runtime"),
     registerCommand: (name, callback) => { assert.equal(name, "agentFactory.mainChat.open"); handler = callback; return { dispose() {} }; },
@@ -537,19 +558,13 @@ test("WSL handoff is deduplicated and never starts the Windows plugin or chat ru
   assert.equal(context.subscriptions.length, 1);
 });
 
-function codexMissing() {
-  const error = new Error("Codex CLI was not found");
-  error.name = "CodexCliNotFoundError";
-  return error;
-}
-
 test("Claude-only hosts activate with an installed plugin and never redirect or install through Codex", async () => {
   const { activate } = await importTypeScript("src/extension.ts", true);
   const context = { extension: { packageJSON: { version: "1.0.14" } }, subscriptions: [] };
   const calls = [];
   const services = {
-    prepareClaude: async () => { calls.push("claude"); return true; },
-    prepareCodex: async (_, options) => { calls.push(`codex:${options.allowRedirect}`); throw codexMissing(); },
+    detectProviders: async () => { calls.push("detect"); return { codex: false, claude: true, antigravity: false }; },
+    redirectToWsl: async () => assert.fail("a local Claude CLI makes the WSL redirect unnecessary"),
     ensurePlugin: async () => assert.fail("Codex marketplace is unavailable without Codex"),
     ensureClaudePlugin: async version => { calls.push(`claude-plugin:${version}`); },
     requireInstalledPlugin: async version => { calls.push(`installed:${version}`); },
@@ -563,7 +578,7 @@ test("Claude-only hosts activate with an installed plugin and never redirect or 
     showErrorMessage: async () => assert.fail("Claude-only activation should succeed")
   };
   await activate(context, services);
-  assert.deepEqual(calls, ["claude", "codex:false", "claude-plugin:1.0.14", "installed:1.0.14", "defaults", "bootstrap"]);
+  assert.deepEqual(calls, ["detect", "claude-plugin:1.0.14", "installed:1.0.14", "defaults", "bootstrap"]);
 });
 
 test("with both CLIs, both plugins are managed and a Claude plugin failure only warns", async () => {
@@ -571,8 +586,7 @@ test("with both CLIs, both plugins are managed and a Claude plugin failure only 
   const context = { extension: { packageJSON: { version: "1.0.17" } }, subscriptions: [] };
   const calls = [];
   const services = {
-    prepareClaude: async () => true,
-    prepareCodex: async () => {},
+    detectProviders: async () => ({ codex: true, claude: true, antigravity: false }),
     ensurePlugin: async version => { calls.push(`codex-plugin:${version}`); },
     ensureClaudePlugin: async () => { calls.push("claude-plugin"); throw new Error("marketplace offline"); },
     requireInstalledPlugin: async () => assert.fail("Codex installs the runtime"),
@@ -590,8 +604,7 @@ test("Claude-only activation fails when the Claude plugin cannot be installed", 
   const context = { extension: { packageJSON: { version: "1.0.17" } }, subscriptions: [] };
   let shown;
   const services = {
-    prepareClaude: async () => true,
-    prepareCodex: async () => { throw codexMissing(); },
+    detectProviders: async () => ({ codex: false, claude: true, antigravity: false }),
     ensurePlugin: async () => assert.fail("no Codex"),
     ensureClaudePlugin: async () => { throw new Error("claude install failed"); },
     requireInstalledPlugin: async () => assert.fail("must not continue"),
@@ -603,19 +616,87 @@ test("Claude-only activation fails when the Claude plugin cannot be installed", 
   assert.match(shown, /claude install failed/);
 });
 
-test("a missing Codex CLI still fails activation when Claude is unavailable", async () => {
+test("with no provider CLI the chat still starts without plugin checks and warns once", async () => {
   const { activate } = await importTypeScript("src/extension.ts", true);
   const context = { extension: { packageJSON: { version: "1.0.14" } }, subscriptions: [] };
-  let shown;
+  const calls = [];
   const services = {
-    prepareClaude: async () => false,
-    prepareCodex: async (_, options) => { assert.equal(options.allowRedirect, true); throw codexMissing(); },
-    ensurePlugin: async () => assert.fail("must not install"),
-    requireInstalledPlugin: async () => assert.fail("must not use Claude-only mode"),
-    bootstrap: () => assert.fail("must not bootstrap"),
+    detectProviders: async () => ({ codex: false, claude: false, antigravity: false }),
+    redirectToWsl: async () => { calls.push("redirect"); return false; },
+    ensurePlugin: async () => assert.fail("must not install without Codex"),
+    ensureClaudePlugin: async () => assert.fail("must not install without Claude"),
+    ensureAntigravityPlugin: async () => assert.fail("must not install without agy"),
+    requireInstalledPlugin: async () => assert.fail("no provider can use the runtime yet"),
+    initializeDefaults: async (_, providers) => { calls.push(`defaults:${providers.codex}:${providers.claude}`); },
+    showWarningMessage: async () => { calls.push("warning"); },
+    bootstrap: () => { calls.push("bootstrap"); },
     withProgress: async (_, task) => task(),
-    showErrorMessage: async message => { shown = message; return undefined; }
+    showErrorMessage: async message => assert.fail(message)
   };
   await activate(context, services);
-  assert.match(shown, /Codex CLI was not found/);
+  assert.deepEqual(calls, ["redirect", "warning", "defaults:false:false", "bootstrap"]);
+});
+
+test("an Antigravity-only host waits for its plugin before requiring the installed runtime", async () => {
+  const { activate } = await importTypeScript("src/extension.ts", true);
+  const context = { extension: { packageJSON: { version: "1.0.21" } }, subscriptions: [] };
+  const calls = [];
+  const services = {
+    detectProviders: async () => ({ codex: false, claude: false, antigravity: true }),
+    redirectToWsl: async () => assert.fail("agy is a local provider"),
+    ensurePlugin: async () => assert.fail("no Codex"),
+    ensureAntigravityPlugin: async version => { calls.push(`agy-plugin:${version}`); },
+    requireInstalledPlugin: async version => { calls.push(`installed:${version}`); },
+    bootstrap: () => { calls.push("bootstrap"); },
+    withProgress: async (_, task) => task(),
+    showErrorMessage: async message => assert.fail(message)
+  };
+  await activate(context, services);
+  assert.deepEqual(calls, ["agy-plugin:1.0.21", "installed:1.0.21", "bootstrap"]);
+});
+
+test("sidebar placeholder claims the view during startup and releases it before bootstrap", async () => {
+  const { activate } = await importTypeScript("src/extension.ts", true);
+  const events = [];
+  const view = { message: undefined, dispose() { events.push("dispose"); } };
+  let fail = true;
+  const services = {
+    createStartupView: () => { events.push("create"); return view; },
+    ensurePlugin: async () => { events.push(`check:${view.message}`); if (fail) throw new Error("broken"); },
+    bootstrap: () => { events.push("bootstrap"); },
+    withProgress: async (_, task) => task(),
+    showErrorMessage: async () => undefined
+  };
+  const context = { extensionMode: 1, subscriptions: [], extension: { packageJSON: { version: "1.0.2" } } };
+  await activate(context, services);
+  assert.deepEqual(events, ["create", "check:Starting Agent Factory…"]);
+  assert.match(view.message, /could not start\. broken/);
+  fail = false;
+  await activate(context, services);
+  assert.deepEqual(events.slice(2), [`check:${view.message}`, "dispose", "bootstrap"]);
+  assert.deepEqual(context.subscriptions, [view]);
+});
+
+test("CLI JSON parsing tolerates update notices and retries a disturbed plugin list once", async () => {
+  const listed = JSON.stringify({ installed: [{ pluginId: "agent-factory@agent-factory", name: "agent-factory",
+    marketplaceName: "agent-factory", version: "1.0.2+codex.1", installed: true, enabled: true }] });
+  assert.deepEqual(dependency.parseCliJson(`✨ Update available! 0.1 -> 0.2 [see notes]\n${listed}\nRun codex update {now}\n`), JSON.parse(listed));
+  assert.throws(() => dependency.parseCliJson("Update available [x]"));
+  const outputs = ["", `WARNING: plugin cache is being updated\n${listed}`];
+  let calls = 0;
+  await dependency.ensureAgentFactoryPlugin("1.0.2", async () => ({ stdout: outputs[calls++] }));
+  assert.equal(calls, 2);
+  await assert.rejects(dependency.ensureAgentFactoryPlugin("1.0.2", async () => ({ stdout: "not json" })),
+    /not valid JSON\. Output: \(not json\)/);
+});
+
+test("Codex command failures surface stderr and point invalid configuration at config.toml", async () => {
+  const failure = (stderr) => async () => { throw Object.assign(new Error("Command failed"), { code: 1, stderr }); };
+  await assert.rejects(dependency.ensureAgentFactoryPlugin("1.0.2",
+    failure("Error: failed to load configuration\n\nCaused by:\n    invalid type: string \"gpt-6-sol\", expected a boolean\n    in `features`\n")),
+    /configuration is invalid\. Fix ~\/\.codex\/config\.toml.*expected a boolean in `features`/);
+  await assert.rejects(dependency.ensureAgentFactoryPlugin("1.0.2", failure("\u001b[31mnetwork unreachable\u001b[0m\n")),
+    /failed\. Codex reported: network unreachable$/);
+  await assert.rejects(dependency.ensureAgentFactoryPlugin("1.0.2", failure("")),
+    /Check the Codex CLI installation/);
 });

@@ -27,6 +27,11 @@ test('Claude discovery augments Codex and missing optional CLI preserves its cat
     await chmod(cli, 0o700);
     assert.deepEqual(await readProviderModels(root, cli, join(root, 'missing-agy'), claudeHome),
       ['gpt-existing', 'claude-opus-5-5', 'claude-sonnet-5-5']);
+    // Undetected providers contribute nothing, so no detected CLI leaves an empty picker.
+    assert.deepEqual(await readProviderModels(root, cli, join(root, 'missing-agy'), claudeHome, { codex: false }),
+      ['claude-opus-5-5', 'claude-sonnet-5-5']);
+    assert.deepEqual(await readProviderModels(root, cli, join(root, 'missing-agy'), claudeHome,
+      { codex: false, claude: false, antigravity: false }), []);
     await rm(join(root, 'models_cache.json'));
     assert.deepEqual(await readProviderModels(root, cli, join(root, 'missing-agy'), claudeHome),
       ['claude-opus-5-5', 'claude-sonnet-5-5']);
