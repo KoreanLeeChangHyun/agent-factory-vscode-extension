@@ -7,6 +7,7 @@
   md.renderer.rules.image = (tokens, i) => md.utils.escapeHtml(tokens[i].content || '[이미지]');
   const app = document.getElementById('contract-app');
   let data, workflowError, workflows = [], version, runId, tab = '계약서';
+  let diagramQueue = Promise.resolve(), diagramSequence = 0;
   const recordMarker = '<!-- contract-execution-record -->';
   const contractText = value => String(value || '').split(recordMarker, 1)[0].trim();
   const executionText = value => {
@@ -28,6 +29,22 @@
           for (const row of table.rows) row.cells[index]?.classList.add('identifier-cell');
         }
       }
+    }
+    for (const code of n.querySelectorAll('pre > code.language-mermaid')) {
+      const source = code.textContent;
+      diagramQueue = diagramQueue.then(async () => {
+        if (!globalThis.mermaid || !code.isConnected) return;
+        const light = document.body.classList.contains('vscode-light') || document.body.classList.contains('vscode-high-contrast-light');
+        mermaid.initialize({startOnLoad:false, securityLevel:'strict', theme:light ? 'default' : 'dark', htmlLabels:false, flowchart:{htmlLabels:false}});
+        const {svg} = await mermaid.render('contract-diagram-' + ++diagramSequence, source);
+        const element = new DOMParser().parseFromString(svg,'image/svg+xml').documentElement;
+        if (element.localName !== 'svg' || !code.isConnected) return;
+        const bytes = new TextEncoder().encode(new XMLSerializer().serializeToString(element));
+        let binary = '';
+        for (let index = 0; index < bytes.length; index += 8192) binary += String.fromCharCode(...bytes.subarray(index,index + 8192));
+        const image = el('img'); image.alt = source; image.src = 'data:image/svg+xml;base64,' + btoa(binary);
+        const figure = el('figure',undefined,'task-diagram'); figure.append(image); code.parentElement.replaceWith(figure);
+      }).catch(() => { /* Keep the source diagram readable when rendering fails. */ });
     }
     return n;
   };
@@ -100,7 +117,10 @@
     content.tabIndex = 0; content.setAttribute('aria-label', '계약 본문');
     if (tab === '계약서') {
       content.append(markdown(contractText(current.content)));
-      if (current.operations?.length) { content.append(el('h2','구조 · 파일 변경 계획','file-plan-heading')); renderFiles(content, current); }
+      // New contracts carry their own file-structure section; keep historical CSV-only contracts readable.
+      if (current.operations?.length && !/^#{2,4}\s*(?:5[.)]\s*)?파일 구조\s*$/m.test(contractText(current.content))) {
+        content.append(el('h2','파일 구조','file-plan-heading')); renderFiles(content, current);
+      }
     } else if (tab === '실행 기록') {
       renderProgress(content, flow);
       renderAgents(content, flow);
@@ -143,43 +163,40 @@
   function renderFiles(content, current) {
     const rows = current.operations;
     if (!rows.length) {content.append(el('p','이 버전의 파일 작업 목록이 없습니다. 계약 본문을 확인해 주세요.')); return;}
-    const tree = el('div',undefined,'file-tree');
-    tree.setAttribute('aria-label','변경 예정 파일 트리');
-    const folders = new Map([['',tree]]);
+    const wrap=el('div',undefined,'table-scroll file-plan');
+    wrap.tabIndex=0; wrap.setAttribute('role','region'); wrap.setAttribute('aria-label','파일 구조와 작업 목표');
+    const table=el('table'), head=el('thead'), headings=el('tr'), body=el('tbody');
+    for (const title of ['파일 구조','변경','작업 ID','파일별 목표']) { const cell=el('th',title); cell.scope='col'; headings.append(cell); }
+    head.append(headings);
+    const root = {folders:new Map(), entries:[]};
     for (const row of rows) {
       const path = row.path || row.source || row.destination || row.target || '';
-      const parts = path.split('/').filter(Boolean); let parent = tree, prefix = '';
+      const parts = path.split('/').filter(Boolean); let parent = root;
       for (const part of parts.slice(0,-1)) {
-        prefix += '/' + part;
-        if (!folders.has(prefix)) { const d = el('details'); d.open = true; const folder=el('summary',part+'/','folder-name'); d.append(folder); const children = el('div',undefined,'tree-children'); d.append(children); parent.append(d); folders.set(prefix,children); }
-        parent = folders.get(prefix);
+        if (!parent.folders.has(part)) { const folder={name:part,folders:new Map(),entries:[]}; parent.folders.set(part,folder); parent.entries.push(folder); }
+        parent = parent.folders.get(part);
       }
-      const [kind,code,label]=fileOperation(row.operation);
-      const filename=parts.at(-1) || '(경로 미지정)';
-      const item = el('div',undefined,'file op-'+kind);
-      item.title = `${path} · ${label}`;
-      const name=el('span',undefined,'file-name');
-      const dot=filename.lastIndexOf('.');
-      if (dot>0) name.append(el('span',filename.slice(0,dot)),el('span',filename.slice(dot),'file-extension'));
-      else name.textContent=filename;
-      item.append(el('span',code,'operation-badge'),name); parent.append(item);
+      parent.entries.push({row,path,name:parts.at(-1) || '(경로 미지정)'});
     }
-    content.append(tree,el('h2','파일별 작업 목표','file-goals-heading'));
-    const wrap=el('div',undefined,'table-scroll file-goals');
-    wrap.tabIndex=0; wrap.setAttribute('role','region'); wrap.setAttribute('aria-label','파일별 작업 목표');
-    const table=el('table'), head=el('thead'), headings=el('tr'), body=el('tbody');
-    for (const title of ['파일','변경','작업 ID','작업 목표']) { const cell=el('th',title); cell.scope='col'; headings.append(cell); }
-    head.append(headings);
-    for (const row of rows) {
-      const path=row.path || row.source || row.destination || row.target || '경로 미지정';
-      const target=row.destination && row.destination !== '미기재' ? row.destination : row.target;
-      const [kind,code,label]=fileOperation(row.operation);
-      const file=el('td',target && target !== path ? `${path} → ${target}` : path);
-      const operation=el('td',`${code} ${label}`,'op-'+kind);
-      const taskIds=row.taskIds || row.task_ids || row.taskId || row.task_id || '—';
-      const goal=row.purpose || row.goal || row.description || '—';
-      const tr=el('tr'); tr.append(file,operation,el('td',taskIds),el('td',goal)); body.append(tr);
-    }
+    const draw = (node,depth) => {
+      for (const entry of node.entries) {
+        if (entry.folders) {
+          const cell=el('th',entry.name+'/', 'folder-name'); cell.colSpan=4; cell.scope='rowgroup'; cell.style.paddingLeft=(8 + depth*14)+'px';
+          const tr=el('tr',undefined,'file-folder'); tr.append(cell); body.append(tr); draw(entry,depth+1);
+          continue;
+        }
+        const {row,path,name}=entry;
+        const target=row.destination && row.destination !== '미기재' ? row.destination : row.target;
+        const [kind,code,label]=fileOperation(row.operation);
+        const file=el('th',target && target !== path ? `${name} → ${target}` : name);
+        file.scope='row'; file.title=path; file.style.paddingLeft=(8 + depth*14)+'px';
+        const operation=el('td',`${code} ${label}`,'op-'+kind);
+        const taskIds=row.taskIds || row.task_ids || row.taskId || row.task_id || '—';
+        const goal=row.purpose || row.goal || row.description || '—';
+        const tr=el('tr',undefined,'file-row'); tr.append(file,operation,el('td',taskIds),el('td',goal)); body.append(tr);
+      }
+    };
+    draw(root,0);
     table.append(head,body); wrap.append(table); content.append(wrap);
   }
   function renderProgress(content, flow) {

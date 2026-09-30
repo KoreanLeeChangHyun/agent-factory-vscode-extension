@@ -10,7 +10,7 @@ export async function openContractPanel(extensionUri: vscode.Uri, root: string, 
   });
   const nonce = randomUUID();
   const resource = (path: string) => panel.webview.asWebviewUri(vscode.Uri.joinPath(extensionUri, "static", ...path.split("/"))).toString();
-  panel.webview.html = `<!doctype html><html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${panel.webview.cspSource}; script-src 'nonce-${nonce}';"><link rel="stylesheet" href="${resource("css/contracts.css")}"></head><body><main id="contract-app"></main><script nonce="${nonce}" src="${resource("vendor/markdown-it.min.js")}"></script><script nonce="${nonce}" src="${resource("js/contracts.js")}"></script></body></html>`;
+  panel.webview.html = `<!doctype html><html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${panel.webview.cspSource}; img-src data:; script-src 'nonce-${nonce}';"><link rel="stylesheet" href="${resource("css/contracts.css")}"></head><body><main id="contract-app"></main><script nonce="${nonce}" src="${resource("vendor/markdown-it.min.js")}"></script><script nonce="${nonce}" src="${resource("vendor/mermaid.min.js")}"></script><script nonce="${nonce}" src="${resource("js/contracts.js")}"></script></body></html>`;
   let revision = 0;
   let allowedAgents = new Set<string>();
   const send = async () => {
