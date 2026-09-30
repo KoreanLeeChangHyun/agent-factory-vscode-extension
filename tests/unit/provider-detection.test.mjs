@@ -15,6 +15,16 @@ async function load(relativePath) {
 }
 
 const detection = await load("src/infrastructure/agent-factory/provider-detection.ts");
+const { providerCliInstallMethod } = await load("src/infrastructure/agent-factory/provider-cli-installer.ts");
+
+test("CLI version installation targets the selected provider installation method", () => {
+  const home = join(tmpdir(), "provider-home");
+  const npmRoot = join(home, "npm", "node_modules");
+  assert.equal(providerCliInstallMethod("codex", join(home, ".codex", "packages", "standalone", "releases", "0.159.2", "bin", "codex"), npmRoot, home, join(home, ".codex")), "codex-standalone");
+  assert.equal(providerCliInstallMethod("claude", join(home, ".local", "share", "claude", "versions", "2.1.285"), npmRoot, home), "claude-native");
+  assert.equal(providerCliInstallMethod("codex", join(npmRoot, "@openai", "codex", "bin", "codex.js"), npmRoot, home), "npm");
+  assert.equal(providerCliInstallMethod("claude", join(home, "unrelated", "claude"), npmRoot, home), undefined);
+});
 
 test("provider plugin freshness compares release versions without build metadata", () => {
   assert.equal(detection.pluginVersionIsCurrent("1.0.21+codex.20261001", "1.0.21"), true);
