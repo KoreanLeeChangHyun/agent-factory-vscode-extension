@@ -154,6 +154,7 @@ export type HostMessage =
       readonly pluginUpdateMode?: import("../infrastructure/agent-factory/provider-detection").PluginUpdateMode;
       readonly versions?: Partial<Readonly<Record<import("../infrastructure/agent-factory/provider-detection").ProviderId, import("../infrastructure/vscode/provider-settings").ProviderVersions>>>;
     }
+  | { readonly type: "providers.catalog"; readonly catalog: import("../infrastructure/agent-factory/provider-version-catalog").ProviderVersionCatalog }
   | { readonly type: "runtime.updated"; readonly runtimeAvailable: boolean; readonly capabilities?: { readonly submit: import("../infrastructure/agent-factory/agent-client").ExecutionCapabilities; readonly send: import("../infrastructure/agent-factory/agent-client").ExecutionCapabilities } }
   | {
       readonly type: "host.initialize";

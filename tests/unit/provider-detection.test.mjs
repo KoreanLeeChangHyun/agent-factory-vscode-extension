@@ -16,6 +16,31 @@ async function load(relativePath) {
 
 const detection = await load("src/infrastructure/agent-factory/provider-detection.ts");
 const { providerCliInstallMethod } = await load("src/infrastructure/agent-factory/provider-cli-installer.ts");
+const { readProviderVersionCatalog, sortedVersions } = await load("src/infrastructure/agent-factory/provider-version-catalog.ts");
+
+test("version choices come from release catalogs and respect detected providers", async () => {
+  assert.deepEqual(sortedVersions(["1.0.9", "1.0.21", "1.0.9", "1.0.22-alpha.1"]), ["1.0.21", "1.0.9"]);
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (url) => {
+    const target = String(url);
+    const names = target.includes("registry.npmjs.org")
+      ? target.includes("codex") ? { "0.159.2": {}, "0.159.1": {}, "0.160.0-alpha.1": {} } : { "2.1.285": {}, "2.1.284": {} }
+      : target.includes("antigravity") ? [{ name: "v1.0.21" }, { name: "v1.0.20" }]
+        : [{ name: "v1.0.20" }, { name: "v1.0.21" }];
+    return { ok: true, json: async () => target.includes("registry.npmjs.org") ? { versions: names } : names };
+  };
+  try {
+    const catalog = await readProviderVersionCatalog([
+      { id: "codex", detected: true }, { id: "claude", detected: true }, { id: "antigravity", detected: true }
+    ], { antigravity: "1.0.20+agy" });
+    assert.deepEqual(catalog.factory, ["1.0.20"]);
+    assert.deepEqual(catalog.cli.codex, ["0.159.2", "0.159.1"]);
+    assert.deepEqual(catalog.cli.claude, ["2.1.285", "2.1.284"]);
+    assert.deepEqual(catalog.errors, {});
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
 
 test("CLI version installation targets the selected provider installation method", () => {
   const home = join(tmpdir(), "provider-home");

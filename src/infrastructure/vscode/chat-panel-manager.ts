@@ -40,6 +40,7 @@ import { readProviderModels } from "../agent-factory/model-catalog";
 import { readAntigravityUsage } from "../agent-factory/antigravity-usage";
 import { isProviderDetected, providerStatuses, type ProviderId } from "../agent-factory/provider-detection";
 import { installProviderCliVersion } from "../agent-factory/provider-cli-installer";
+import { readProviderVersionCatalog } from "../agent-factory/provider-version-catalog";
 import { redetectProviders, saveProviderPath, pluginUpdateMode, savePluginUpdateMode, updateProviderPlugins, providerVersions, refreshProviderVersions } from "./provider-settings";
 import { ChatSessionController } from "../../modules/chat/session-controller";
 import { saveConvertedImage } from "./converted-image-store";
@@ -796,6 +797,9 @@ export class ChatPanelManager implements vscode.Disposable {
       case "providers.versions.request":
         await refreshProviderVersions(this.context.extension?.packageJSON?.version);
         await this.broadcast({ type: "providers.status", providers: providerStatuses(), busy: this.providerRefresh !== undefined, errors: this.providerErrors, pluginUpdateMode: pluginUpdateMode(), versions: providerVersions() });
+        await this.post(managed.panel, { type: "providers.catalog", catalog: await readProviderVersionCatalog(
+          providerStatuses(), Object.fromEntries(Object.entries(providerVersions()).map(([id, value]) => [id, value?.plugin]))
+        ) });
         return;
       case "workflow.close": {
         if (!managed.state.agentId || (managed.state.role ?? "main") !== "main") return;

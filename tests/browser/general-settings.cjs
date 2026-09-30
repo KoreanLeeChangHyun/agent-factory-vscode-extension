@@ -55,6 +55,9 @@ async function checkGeneralSettings(page) {
     { id: 'claude', detected: true, path: '/opt/claude/bin/claude', source: 'configured', configuredPath: '/opt/claude/bin/claude', configuredInvalid: false },
     { id: 'antigravity', detected: false, configuredPath: '/missing/agy', configuredInvalid: true }
   ] }, '*'));
+  await page.evaluate(() => window.postMessage({ type: 'providers.catalog', catalog: {
+    factory: ['1.0.21', '1.0.20'], cli: { codex: ['0.159.2', '0.159.1'], claude: ['2.1.285', '2.1.284'] }, errors: {}
+  } }, '*'));
   await page.evaluate(() => new Promise(requestAnimationFrame));
   assert.deepEqual(await page.locator('#provider-settings .provider-name').allTextContents(), ['Codex', 'Claude Code', 'Antigravity']);
   assert.deepEqual(await page.locator('#provider-settings .provider-row:visible .provider-name').allTextContents(), ['Codex', 'Claude Code']);
@@ -75,26 +78,27 @@ async function checkGeneralSettings(page) {
   await page.locator('[data-provider-control="update-now"]').click();
   assert.deepEqual(await page.evaluate(() => window.sentMessages.at(-1)), { type: 'providers.update' });
   assert.equal(await page.locator('.provider-version-install').count(), 0);
-  const factoryInput = page.locator('[data-provider-control="factory-install-version-input"]');
+  const factoryInput = page.locator('[data-provider-control="factory-install-version-select"]');
   const factoryInstall = page.locator('[data-provider-control="factory-install-version"]');
   assert.equal(await factoryInput.getAttribute('aria-label'), 'Agent Factory plugin version for all detected providers');
-  await factoryInput.fill('1.0.20');
+  assert.deepEqual(await factoryInput.locator('option').evaluateAll(options => options.map(option => option.value)), ['', '1.0.21', '1.0.20']);
+  await factoryInput.selectOption('1.0.20');
   await factoryInstall.click();
   assert.deepEqual(await page.evaluate(() => window.sentMessages.at(-1)), { type: 'providers.update', version: '1.0.20' });
-  assert.equal(await page.locator('[data-provider-control="antigravity:install-version-input"]').count(), 0);
-  const versionInput = page.locator('[data-provider-control="codex:install-version-input"]');
+  assert.equal(await page.locator('[data-provider-control="antigravity:install-version-select"]').count(), 0);
+  const versionInput = page.locator('[data-provider-control="codex:install-version-select"]');
   const versionInstall = page.locator('[data-provider-control="codex:install-version"]');
-  const claudeVersionInput = page.locator('[data-provider-control="claude:install-version-input"]');
+  const claudeVersionInput = page.locator('[data-provider-control="claude:install-version-select"]');
   assert.equal(await versionInput.getAttribute('aria-label'), 'Codex CLI version');
   assert.equal(await versionInstall.isDisabled(), true);
-  await versionInput.fill('1.0.20');
+  await versionInput.selectOption('0.159.1');
   assert.equal(await versionInstall.isDisabled(), false);
   assert.equal(await claudeVersionInput.inputValue(), '');
   await versionInstall.click();
-  assert.deepEqual(await page.evaluate(() => window.sentMessages.at(-1)), { type: 'providers.cli.install', provider: 'codex', version: '1.0.20' });
-  await claudeVersionInput.fill('1.0.19');
+  assert.deepEqual(await page.evaluate(() => window.sentMessages.at(-1)), { type: 'providers.cli.install', provider: 'codex', version: '0.159.1' });
+  await claudeVersionInput.selectOption('2.1.284');
   await page.locator('[data-provider-control="claude:install-version"]').click();
-  assert.deepEqual(await page.evaluate(() => window.sentMessages.at(-1)), { type: 'providers.cli.install', provider: 'claude', version: '1.0.19' });
+  assert.deepEqual(await page.evaluate(() => window.sentMessages.at(-1)), { type: 'providers.cli.install', provider: 'claude', version: '2.1.284' });
   await page.locator('.provider-missing summary').click();
   assert.equal(await page.locator('[data-provider-control="antigravity:input"]').isVisible(), true);
   await page.locator('[data-provider-control="antigravity:pick"]').click();
