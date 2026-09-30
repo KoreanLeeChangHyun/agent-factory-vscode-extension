@@ -8,7 +8,7 @@ import { AgentFactoryClient } from "../infrastructure/agent-factory/agent-client
 import { AsyncCache } from "../common/async-cache";
 import { developmentPluginRoot, developmentExecPath } from "../infrastructure/agent-factory/development-plugin";
 import { defaultPythonCommand } from "../infrastructure/agent-factory/process-environment";
-import { affectsProviderPaths, affectsPluginUpdateMode } from "../infrastructure/vscode/provider-settings";
+import { affectsProviderPaths, affectsPluginUpdateMode, configuredDevelopmentPluginRoot } from "../infrastructure/vscode/provider-settings";
 
 type RuntimeConnection = { readonly available: true; readonly client: AgentFactoryClient } | { readonly available: false; readonly diagnostic: string };
 
@@ -30,7 +30,7 @@ export function createContainer(context: vscode.ExtensionContext): Container {
         return { available: false, diagnostic: localize("host.workspace.required") };
       }
       const isDevelopment = context.extensionMode === vscode.ExtensionMode.Development;
-      const developmentRoot = developmentPluginRoot(isDevelopment);
+      const developmentRoot = developmentPluginRoot(isDevelopment, process.env, configuredDevelopmentPluginRoot());
       const configuredPath = developmentRoot ? developmentExecPath(developmentRoot) : isDevelopment ? vscode.workspace
         .getConfiguration("agentFactory.mainChat")
         .get<string>("runtimeExecPath") : undefined;

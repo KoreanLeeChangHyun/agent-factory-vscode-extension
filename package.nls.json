@@ -35,6 +35,7 @@
   "agentFactory.mainChat.antigravityPath.description": "Optional absolute path to the Antigravity CLI (`agy`) on this extension host. Empty or unusable values fall back to finding the `agy` command like a new terminal would. Antigravity models appear only when the CLI is found.",
   "agentFactory.mainChat.claudePath.description": "Optional absolute path to the Claude Code CLI on this extension host. Empty or unusable values fall back to finding the `claude` command like a new terminal would. Claude models appear only when the CLI is found.",
   "agentFactory.mainChat.pluginUpdateMode.description": "How the Agent Factory plugin bundled in each detected CLI (Codex, Claude Code, Antigravity) is kept in sync with this extension's version.",
+  "agentFactory.mainChat.developmentPluginRoot.description": "Local Agent Factory plugin source directory for an Extension Development Host. Overrides the F5 launch path; empty uses that path. Plugin version differences do not block startup.",
   "agentFactory.mainChat.pluginUpdateMode.enum.0": "Install or update the plugin automatically whenever a CLI is newly detected or its path changes.",
   "agentFactory.mainChat.pluginUpdateMode.enum.1": "Only install or update the plugin when you click \"Update now\" in Settings › General.",
   "agentFactory.agents.main.model.description": "Main agent model for this scope. New projects copy global settings, and new chats copy project settings.",

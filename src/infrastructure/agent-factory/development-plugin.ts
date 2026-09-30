@@ -4,9 +4,9 @@ import { readFile, stat } from "node:fs/promises";
 import { join, resolve } from "node:path";
 
 /** F5 supplies this path only to the development host and its child processes. */
-export function developmentPluginRoot(isDevelopment: boolean, environment: NodeJS.ProcessEnv = process.env): string | undefined {
+export function developmentPluginRoot(isDevelopment: boolean, environment: NodeJS.ProcessEnv = process.env, configuredRoot?: string): string | undefined {
   if (!isDevelopment) return undefined;
-  const root = environment.AGENT_FACTORY_DEV_PLUGIN_ROOT?.trim();
+  const root = configuredRoot?.trim() || environment.AGENT_FACTORY_DEV_PLUGIN_ROOT?.trim();
   return root ? resolve(root) : undefined;
 }
 
@@ -30,12 +30,10 @@ async function developmentManifest(root: string): Promise<{ readonly name?: unkn
   throw new Error(localize("ui.missing.local.development.plugin.file.0", join(root, ".codex-plugin", "plugin.json")));
 }
 
-export async function validateDevelopmentPlugin(root: string, requiredVersion: string): Promise<void> {
+export async function validateDevelopmentPlugin(root: string): Promise<void> {
   const manifest = await developmentManifest(root);
-  if (manifest.name !== "agent-factory" || typeof manifest.version !== "string"
-      || manifest.version.split("+")[0] !== requiredVersion.split("+")[0]) {
-    throw new Error(localize("ui.local.development.plugin.must.match.extension.version.0.1", requiredVersion, root));
-  }
+  if (manifest.name !== "agent-factory" || typeof manifest.version !== "string" || !manifest.version.trim())
+    throw new Error(localize("ui.missing.local.development.plugin.file.0", root));
   for (const file of [developmentExecPath(root), ...["agent", "convention", "document"].map(
     name => join(root, "skills", name, "SKILL.md")
   )]) {

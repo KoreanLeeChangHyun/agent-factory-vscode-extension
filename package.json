@@ -273,6 +273,12 @@
           ],
           "description": "%agentFactory.mainChat.pluginUpdateMode.description%"
         },
+        "agentFactory.mainChat.developmentPluginRoot": {
+          "type": "string",
+          "scope": "machine",
+          "default": "",
+          "description": "%agentFactory.mainChat.developmentPluginRoot.description%"
+        },
         "agentFactory.mainChat.runtimeExecPath": {
           "type": "string",
           "scope": "machine",

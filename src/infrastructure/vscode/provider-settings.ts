@@ -25,6 +25,11 @@ export function configuredProviderPaths(): ProviderPaths {
   return Object.fromEntries(PROVIDER_IDS.map(id => [id, settings?.get<string>(PROVIDER_PATH_SETTINGS[id])?.trim() ?? ""]));
 }
 
+/** An explicit development path overrides F5's default; production never uses it. */
+export function configuredDevelopmentPluginRoot(): string | undefined {
+  return vscode.workspace?.getConfiguration(SECTION)?.get<string>("developmentPluginRoot")?.trim() || undefined;
+}
+
 export function affectsProviderPaths(event: vscode.ConfigurationChangeEvent): boolean {
   return PROVIDER_IDS.some(id => event.affectsConfiguration(`${SECTION}.${PROVIDER_PATH_SETTINGS[id]}`));
 }
@@ -61,7 +66,7 @@ async function installPlugins(
 ): Promise<Partial<Record<ProviderId, string>>> {
   const errors: Partial<Record<ProviderId, string>> = {};
   const requiredVersion: unknown = requestedVersion ?? context.extension?.packageJSON?.version;
-  const development = Boolean(developmentPluginRoot(context.extensionMode === vscode.ExtensionMode.Development));
+  const development = Boolean(developmentPluginRoot(context.extensionMode === vscode.ExtensionMode.Development, process.env, configuredDevelopmentPluginRoot()));
   if (typeof requiredVersion !== "string" || development) return errors;
   for (const id of ids) {
     try {

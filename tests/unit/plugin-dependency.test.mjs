@@ -55,7 +55,7 @@ test("Codex setup runs the existing repair flow only when the local runtime is m
   assert.deepEqual(calls, [["locate", "1.0.2"], ["repair", "1.0.2"]]);
 });
 
-test("development activation uses live local sources without installation and fails closed", async (t) => {
+test("development activation uses live local sources and allows a different plugin version", async (t) => {
   const root = await mkdtemp(join(tmpdir(), "af-dev-plugin-"));
   t.after(() => rm(root, { recursive: true, force: true }));
   const previous = process.env.AGENT_FACTORY_DEV_PLUGIN_ROOT;
@@ -86,9 +86,8 @@ test("development activation uses live local sources without installation and fa
   assert.equal(bootstraps, 1);
   await writeFile(join(root, ".codex-plugin/plugin.json"), JSON.stringify({ name: "agent-factory", version: "2.0.0" }));
   await activate(context(), services);
-  assert.equal(bootstraps, 1);
-  assert.equal(errors.length, 2);
-  assert.match(errors[1], /must match extension version/);
+  assert.equal(bootstraps, 2);
+  assert.equal(errors.length, 1);
 });
 
 test("production activation ignores an inherited development plugin root", async (t) => {
@@ -116,6 +115,8 @@ test("development root and child environment require explicit development select
   const inherited = { PATH: "/usr/bin", AGENT_FACTORY_DEV_PLUGIN_ROOT: "/local/plugin" };
   assert.equal(developmentPluginRoot(false, inherited), undefined);
   assert.equal(developmentPluginRoot(true, inherited), "/local/plugin");
+  assert.equal(developmentPluginRoot(true, inherited, "/configured/plugin"), "/configured/plugin");
+  assert.equal(developmentPluginRoot(false, inherited, "/configured/plugin"), undefined);
   assert.deepEqual(pluginRuntimeEnvironment(undefined, inherited), { PATH: "/usr/bin" });
   assert.deepEqual(pluginRuntimeEnvironment("/f5/plugin", inherited), { PATH: "/usr/bin", AGENT_FACTORY_DEV_PLUGIN_ROOT: "/f5/plugin" });
   assert.equal(inherited.AGENT_FACTORY_DEV_PLUGIN_ROOT, "/local/plugin");

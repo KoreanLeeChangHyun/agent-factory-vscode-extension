@@ -8,7 +8,7 @@ import { ensureAgentFactoryAntigravityPlugin } from "./infrastructure/agent-fact
 import { developmentPluginRoot, validateDevelopmentPlugin } from "./infrastructure/agent-factory/development-plugin";
 import { locateAgentFactoryExec } from "./infrastructure/agent-factory/plugin-locator";
 import { detectProviders } from "./infrastructure/agent-factory/provider-detection";
-import { configuredProviderPaths } from "./infrastructure/vscode/provider-settings";
+import { configuredDevelopmentPluginRoot, configuredProviderPaths } from "./infrastructure/vscode/provider-settings";
 import { openWslWorkspace } from "./infrastructure/vscode/wsl-workspace";
 import { initializeAgentDefaults } from "./infrastructure/vscode/agent-settings-store";
 
@@ -79,7 +79,7 @@ async function start(context: vscode.ExtensionContext, services: ActivationServi
       if (typeof requiredVersion !== "string" || !requiredVersion.trim()) {
         throw new Error(localize("ui.unable.to.read.the.extension.version"));
       }
-      const developmentRoot = developmentPluginRoot(context.extensionMode === vscode.ExtensionMode.Development);
+      const developmentRoot = developmentPluginRoot(context.extensionMode === vscode.ExtensionMode.Development, process.env, configuredDevelopmentPluginRoot());
       const providers = await services.detectProviders?.() ?? { codex: true, claude: false, antigravity: false };
       const codexAvailable = providers.codex, claudeAvailable = providers.claude, antigravityAvailable = providers.antigravity;
       const anyProvider = codexAvailable || claudeAvailable || antigravityAvailable;
@@ -101,7 +101,7 @@ async function start(context: vscode.ExtensionContext, services: ActivationServi
         title: localize("ui.checking.agent.factory.plugin.dependencies"),
         cancellable: false
       }, async () => {
-        if (developmentRoot) return validateDevelopmentPlugin(developmentRoot, requiredVersion);
+        if (developmentRoot) return validateDevelopmentPlugin(developmentRoot);
         // Without any CLI the chat still opens; Settings can set paths and install the plugin later.
         if (!anyProvider) return;
         if (codexAvailable) await services.ensurePlugin(requiredVersion);

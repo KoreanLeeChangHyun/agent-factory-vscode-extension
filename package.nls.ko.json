@@ -35,6 +35,7 @@
   "agentFactory.mainChat.antigravityPath.description": "이 익스텐션 호스트의 Antigravity CLI(`agy`) 절대 경로입니다(선택). 비워 두거나 사용할 수 없는 값이면 새 터미널과 같은 방식으로 `agy` 명령을 찾습니다. CLI가 있을 때만 Antigravity 모델이 표시됩니다.",
   "agentFactory.mainChat.claudePath.description": "이 익스텐션 호스트의 Claude Code CLI 절대 경로입니다(선택). 비워 두거나 사용할 수 없는 값이면 새 터미널과 같은 방식으로 `claude` 명령을 찾습니다. CLI가 있을 때만 Claude 모델이 표시됩니다.",
   "agentFactory.mainChat.pluginUpdateMode.description": "감지된 각 CLI(Codex, Claude Code, Antigravity)에 포함된 Agent Factory 플러그인을 이 익스텐션 버전에 맞춰 갱신하는 방식입니다.",
+  "agentFactory.mainChat.developmentPluginRoot.description": "확장 개발 호스트에서 사용할 로컬 Agent Factory 플러그인 소스 디렉터리입니다. F5 실행 경로보다 우선하며 비워 두면 F5 경로를 사용합니다. 플러그인 버전 차이로 시작을 중단하지 않습니다.",
   "agentFactory.mainChat.pluginUpdateMode.enum.0": "CLI가 새로 감지되거나 경로가 바뀔 때마다 플러그인을 자동으로 설치·업데이트합니다.",
   "agentFactory.mainChat.pluginUpdateMode.enum.1": "설정 › 일반에서 \"지금 업데이트\"를 눌렀을 때만 플러그인을 설치·업데이트합니다.",
   "agentFactory.agents.main.model.description": "이 범위에서 사용할 메인 에이전트 모델입니다. 새 프로젝트는 글로벌 설정을, 새 채팅은 프로젝트 설정을 복사합니다.",
