@@ -90,6 +90,28 @@ async function checkGeneralSettings(page) {
   const versionInstall = page.locator('[data-provider-control="codex:install-version"]');
   const claudeVersionInput = page.locator('[data-provider-control="claude:install-version-select"]');
   assert.equal(await versionInput.getAttribute('aria-label'), 'Codex CLI version');
+  const controlStyles = await page.evaluate(() => {
+    const style = selector => {
+      const element = document.querySelector(selector);
+      const computed = getComputedStyle(element);
+      return { height: computed.height, radius: computed.borderRadius, background: computed.backgroundColor, appearance: computed.appearance };
+    };
+    return {
+      language: style('.general-language select'),
+      factory: style('[data-provider-control="factory-install-version-select"]'),
+      version: style('[data-provider-control="codex:install-version-select"]'),
+      install: style('[data-provider-control="codex:install-version"]'),
+      path: style('[data-provider-control="codex:input"]'),
+      browse: style('[data-provider-control="codex:pick"]'),
+    };
+  });
+  for (const key of ['factory', 'version']) {
+    assert.deepEqual(controlStyles[key], controlStyles.language);
+  }
+  for (const key of ['install', 'path', 'browse']) {
+    assert.equal(controlStyles[key].height, controlStyles.language.height);
+    assert.equal(controlStyles[key].radius, controlStyles.language.radius);
+  }
   assert.equal(await versionInstall.isDisabled(), true);
   await versionInput.selectOption('0.159.1');
   assert.equal(await versionInstall.isDisabled(), false);
