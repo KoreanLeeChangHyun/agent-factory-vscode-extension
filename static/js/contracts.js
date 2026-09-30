@@ -100,7 +100,7 @@
     content.tabIndex = 0; content.setAttribute('aria-label', '계약 본문');
     if (tab === '계약서') {
       content.append(markdown(contractText(current.content)));
-      if (current.operations?.length) { content.append(el('h2','구조 · 파일 변경 계획')); renderFiles(content, current); }
+      if (current.operations?.length) { content.append(el('h2','구조 · 파일 변경 계획','file-plan-heading')); renderFiles(content, current); }
     } else if (tab === '실행 기록') {
       renderProgress(content, flow);
       renderAgents(content, flow);
@@ -143,11 +143,8 @@
   function renderFiles(content, current) {
     const rows = current.operations;
     if (!rows.length) {content.append(el('p','이 버전의 파일 작업 목록이 없습니다. 계약 본문을 확인해 주세요.')); return;}
-    content.append(el('p','계약의 변경 예정 목록입니다. 실제 변경 여부는 이 목록만으로 판정하지 않습니다.', 'notice'));
-    const legend = el('div',undefined,'file-legend');
-    for (const op of ['add','modify','delete','rename']) {const [kind,code,label]=fileOperation(op); legend.append(el('span',`${code} ${label}`,'op-'+kind));}
-    content.append(legend);
-    const columns = el('div', undefined, 'columns'), tree = el('div',undefined,'file-tree'), detail = el('article', '파일을 선택하면 계획과 연결 작업을 표시합니다.');
+    const tree = el('div',undefined,'file-tree');
+    tree.setAttribute('aria-label','변경 예정 파일 트리');
     const folders = new Map([['',tree]]);
     for (const row of rows) {
       const path = row.path || row.source || row.destination || row.target || '';
@@ -159,19 +156,31 @@
       }
       const [kind,code,label]=fileOperation(row.operation);
       const filename=parts.at(-1) || '(경로 미지정)';
-      const b = button('', () => {
-        detail.replaceChildren(el('h2',path || '경로 미지정'));
-        const dl = el('dl'); for (const [key,value] of Object.entries(row)) dl.append(el('dt',key),el('dd',value || '미기재')); detail.append(dl,el('p','실제 변경·검증 결과: 실행 근거 확인 필요', 'muted'));
-      }); b.className = 'file op-'+kind; b.title = `${path} · ${label}`;
-      b.setAttribute('aria-label',`${filename} · ${label}`);
-      const icon=el('span','◇','file-icon'); icon.setAttribute('aria-hidden','true');
+      const item = el('div',undefined,'file op-'+kind);
+      item.title = `${path} · ${label}`;
       const name=el('span',undefined,'file-name');
       const dot=filename.lastIndexOf('.');
       if (dot>0) name.append(el('span',filename.slice(0,dot)),el('span',filename.slice(dot),'file-extension'));
       else name.textContent=filename;
-      b.append(icon,name,el('span',code,'operation-badge')); parent.append(b);
+      item.append(el('span',code,'operation-badge'),name); parent.append(item);
     }
-    columns.append(tree,detail); content.append(columns);
+    content.append(tree,el('h2','파일별 작업 목표','file-goals-heading'));
+    const wrap=el('div',undefined,'table-scroll file-goals');
+    wrap.tabIndex=0; wrap.setAttribute('role','region'); wrap.setAttribute('aria-label','파일별 작업 목표');
+    const table=el('table'), head=el('thead'), headings=el('tr'), body=el('tbody');
+    for (const title of ['파일','변경','작업 ID','작업 목표']) { const cell=el('th',title); cell.scope='col'; headings.append(cell); }
+    head.append(headings);
+    for (const row of rows) {
+      const path=row.path || row.source || row.destination || row.target || '경로 미지정';
+      const target=row.destination && row.destination !== '미기재' ? row.destination : row.target;
+      const [kind,code,label]=fileOperation(row.operation);
+      const file=el('td',target && target !== path ? `${path} → ${target}` : path);
+      const operation=el('td',`${code} ${label}`,'op-'+kind);
+      const taskIds=row.taskIds || row.task_ids || row.taskId || row.task_id || '—';
+      const goal=row.purpose || row.goal || row.description || '—';
+      const tr=el('tr'); tr.append(file,operation,el('td',taskIds),el('td',goal)); body.append(tr);
+    }
+    table.append(head,body); wrap.append(table); content.append(wrap);
   }
   function renderProgress(content, flow) {
     content.append(el('p','선택한 실행에서 마지막으로 수신한 작업별 상태입니다. 새로고침으로 갱신하며, 저장된 결과는 아래 계약서 실행 기록에서 확인합니다.', 'muted'));
