@@ -234,4 +234,36 @@ async function checkModelVendorTabs(page, emit) {
   }
   await page.keyboard.press('Escape');
 }
-module.exports = { checkAgentModels };
+
+async function checkReasoningSlider(page) {
+  const emit = async value => { await page.evaluate(value => window.postMessage(value, '*'), value); await page.evaluate(() => new Promise(requestAnimationFrame)); };
+  const capability = { model: true, reasoning: true, taskModes: ['direct', 'work', 'work-verification'] };
+  await emit({ type: 'host.initialize', panelId: 'reasoning-slider', role: 'main', title: 'Main', runtimeAvailable: true, capabilities: { submit: capability, send: capability } });
+  await emit({ type: 'models.list', models: ['main-model', 'work-model', 'verify-model'] });
+  await emit({ type: 'agent.defaults', settings: { global: {}, project: {}, effective: {}, sources: {}, projectAvailable: true } });
+  await page.locator('#model-button').click();
+
+  const chatReasoning = page.locator('#model-menu input[data-role=main][data-field=reasoningEffort]');
+  await chatReasoning.fill('2');
+  const dragBox = await chatReasoning.boundingBox();
+  await page.mouse.move(dragBox.x + dragBox.width * 0.4, dragBox.y + dragBox.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(dragBox.x + dragBox.width - 1, dragBox.y + dragBox.height / 2, { steps: 5 });
+  await page.mouse.up();
+  assert.equal(await page.evaluate(() => window.saved.reasoning), 'max');
+  assert.equal(await page.locator('#model-menu').isVisible(), true, 'Dragging the reasoning slider must keep its settings panel open');
+
+  await page.locator('#agent-default-scope').selectOption('project');
+  const projectReasoning = page.locator('#agent-default-fields input[data-role=main][data-field=reasoningEffort]');
+  const savesBeforeInput = await page.evaluate(() => window.sentMessages.filter(m => m.type === 'agent.defaults.save').length);
+  await projectReasoning.evaluate(element => {
+    element.value = '4';
+    element.dispatchEvent(new Event('input', { bubbles: true }));
+  });
+  assert.equal(await projectReasoning.getAttribute('aria-valuetext'), 'high');
+  assert.equal(await page.evaluate(() => window.sentMessages.filter(m => m.type === 'agent.defaults.save').length), savesBeforeInput, 'Dragging must not save and re-render the slider mid-gesture');
+  await projectReasoning.evaluate(element => element.dispatchEvent(new Event('change', { bubbles: true })));
+  assert.deepEqual(await page.evaluate(() => window.sentMessages.filter(m => m.type === 'agent.defaults.save').at(-1)), { type: 'agent.defaults.save', scope: 'project', role: 'main', field: 'reasoningEffort', value: 'high' });
+}
+
+module.exports = { checkAgentModels, checkReasoningSlider };

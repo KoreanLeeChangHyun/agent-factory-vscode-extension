@@ -6255,11 +6255,19 @@
     };
     showEffort();
     control.disabled = !inheritLabel && currentCapabilities()[isReasoning ? "reasoning" : "model"] !== true;
-    control.addEventListener(isReasoning ? "input" : "change", function () {
+    if (isReasoning) {
+      control.addEventListener("input", function () {
+        if (control.disabled) return;
+        showEffort();
+      });
+      control.addEventListener("change", function () {
+        if (control.disabled) return;
+        showEffort();
+        onChange(selectedValue());
+      });
+    } else control.addEventListener("change", function () {
       if (control.disabled) return;
-      const value = selectedValue();
-      showEffort();
-      onChange(value);
+      onChange(selectedValue());
     });
     if (slider) {
       slider.append(control);

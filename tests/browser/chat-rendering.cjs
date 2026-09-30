@@ -11,7 +11,7 @@ const { checkAutoScroll } = require('./auto-scroll.cjs');
 const { checkFactoryBot } = require('./factory-bot.cjs');
 const { checkImageComposer } = require('./image-composer.cjs');
 const { checkFactoryRendering } = require('./factory-rendering.cjs');
-const { checkAgentModels } = require('./agent-models.cjs');
+const { checkAgentModels, checkReasoningSlider } = require('./agent-models.cjs');
 const { checkAstraStars } = require('./astra-stars.cjs');
 const { checkOneShotComposer } = require('./one-shot-composer.cjs');
 const { checkMessageSubmission, checkMessageLayout } = require('./message-submission.cjs');
@@ -605,6 +605,12 @@ async function main() {
       await checkAgentModels(page);
       assert.deepEqual(errors, []);
       console.log('Combined agent model settings checks passed.');
+      return;
+    }
+    if (process.argv.includes('--reasoning-slider-only')) {
+      await checkReasoningSlider(page);
+      assert.deepEqual(errors, []);
+      console.log('Reasoning slider browser checks passed.');
       return;
     }
     if (process.argv.includes('--factory-rendering-only')) {
