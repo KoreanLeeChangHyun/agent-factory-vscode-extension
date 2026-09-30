@@ -1,4 +1,4 @@
-import { open } from "node:fs/promises";
+import { open, readdir } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { execFile } from "node:child_process";
@@ -7,22 +7,77 @@ import { claudeExecutable, runtimeEnvironment } from "./process-environment";
 
 const MAX_CATALOG_BYTES = 4 * 1024 * 1024;
 
-// Pinned Claude model ids first, then the tracking aliases (always the latest of each family).
-// The runtime passes full ids to `claude --model` unchanged; Claude checks availability at execution time.
-export const CLAUDE_MODELS = [
-  "claude-opus-5-5", "claude-sonnet-5", "claude-fable-5-1", "claude-haiku-4-5-20251001",
-  "claude-opus", "claude-sonnet", "claude-haiku"
-] as const;
-
 const CLAUDE_PROBE_TTL_MS = 60_000;
 const claudeProbes = new Map<string, { readonly checkedAt: number; readonly available: Promise<boolean> }>();
 
 export async function readProviderModels(
-  codexHome?: string, claude = claudeExecutable(), agy = "agy"
+  codexHome?: string, claude = claudeExecutable(), agy = "agy",
+  claudeConfigDir = process.env.CLAUDE_CONFIG_DIR || join(homedir(), ".claude")
 ): Promise<readonly string[] | undefined> {
-  const [codex, claudeAvailable, antigravity] = await Promise.all([readCodexModels(codexHome), isClaudeAvailable(claude), readAntigravityModels(agy)]);
-  const models = [...(codex ?? []), ...(claudeAvailable ? CLAUDE_MODELS : []), ...antigravity];
+  const claudeAvailable = isClaudeAvailable(claude);
+  const [codex, claudeModels, antigravity] = await Promise.all([
+    readCodexModels(codexHome),
+    claudeAvailable.then(available => available ? readClaudeModels(claudeConfigDir) : []),
+    readAntigravityModels(agy)
+  ]);
+  const models = [...(codex ?? []), ...claudeModels, ...antigravity];
   return models.length || codex ? [...new Set(models)] : undefined;
+}
+
+interface ClaudeCatalog {
+  readonly fetchedAt: number;
+  readonly models: readonly string[];
+}
+
+// Claude Code owns and refreshes this account-specific catalog. Read it again for each picker request.
+export async function readClaudeModels(
+  claudeConfigDir = process.env.CLAUDE_CONFIG_DIR || join(homedir(), ".claude")
+): Promise<readonly string[]> {
+  const directory = join(claudeConfigDir, "cache", "model-catalog");
+  let names: readonly string[];
+  try {
+    names = (await readdir(directory, { withFileTypes: true }))
+      .filter(entry => entry.isFile() && entry.name.endsWith(".json"))
+      .map(entry => entry.name);
+  } catch {
+    return [];
+  }
+  const catalogs = (await Promise.all(names.map(name => readClaudeCatalog(join(directory, name)))))
+    .filter((catalog): catalog is ClaudeCatalog => catalog !== undefined)
+    .sort((left, right) => right.fetchedAt - left.fetchedAt);
+  return catalogs[0]?.models ?? [];
+}
+
+async function readClaudeCatalog(path: string): Promise<ClaudeCatalog | undefined> {
+  try {
+    const file = await open(path, "r");
+    try {
+      const info = await file.stat();
+      if (!info.isFile() || info.size > MAX_CATALOG_BYTES) return undefined;
+      const bytes = Buffer.alloc(MAX_CATALOG_BYTES + 1);
+      const { bytesRead } = await file.read(bytes, 0, bytes.length, 0);
+      if (bytesRead > MAX_CATALOG_BYTES) return undefined;
+      const document: unknown = JSON.parse(bytes.subarray(0, bytesRead).toString("utf8"));
+      if (!document || typeof document !== "object" || !("catalog" in document)
+          || !("fetchedAt" in document) || typeof document.fetchedAt !== "number"
+          || !Number.isFinite(document.fetchedAt)) return undefined;
+      const catalog = document.catalog;
+      if (!catalog || typeof catalog !== "object" || !("surface" in catalog) || catalog.surface !== "cc"
+          || !("config" in catalog) || !catalog.config || typeof catalog.config !== "object"
+          || !("models" in catalog.config) || !Array.isArray(catalog.config.models)) return undefined;
+      const models = [...new Set<string>(catalog.config.models.flatMap((model: unknown) => {
+        if (!model || typeof model !== "object" || !("id" in model) || typeof model.id !== "string"
+            || !/^claude-[A-Za-z0-9][A-Za-z0-9._-]{0,92}$/.test(model.id)) return [];
+        return [model.id];
+      }))];
+      return { fetchedAt: document.fetchedAt, models };
+    } finally {
+      await file.close();
+    }
+  } catch {
+    // Missing, stale, or partially rewritten entries do not hide another valid Claude Code catalog.
+    return undefined;
+  }
 }
 
 const antigravityProbes = new Map<string, { readonly checkedAt: number; readonly models: Promise<readonly string[]> }>();

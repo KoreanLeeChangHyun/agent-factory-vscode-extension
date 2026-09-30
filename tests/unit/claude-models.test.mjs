@@ -1,31 +1,51 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { mkdtemp, writeFile, chmod, rm } from 'node:fs/promises';
+import { mkdtemp, writeFile, chmod, mkdir, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { build } from 'esbuild';
 
 const bundled = await build({ entryPoints: ['src/infrastructure/agent-factory/model-catalog.ts'], bundle: true, format: 'esm', platform: 'node', write: false });
-const { readProviderModels, antigravityModels, CLAUDE_MODELS } = await import(`data:text/javascript;base64,${Buffer.from(bundled.outputFiles[0].text).toString('base64')}`);
+const { readProviderModels, readClaudeModels, antigravityModels } = await import(`data:text/javascript;base64,${Buffer.from(bundled.outputFiles[0].text).toString('base64')}`);
 
 test('Claude discovery augments Codex and missing optional CLI preserves its catalog', async () => {
   const root = await mkdtemp(join(tmpdir(), 'af-claude-catalog-'));
   try {
     await writeFile(join(root, 'models_cache.json'), JSON.stringify({ models: [{ slug: 'gpt-existing', visibility: 'list' }] }));
-    assert.deepEqual(await readProviderModels(root, join(root, 'missing'), join(root, 'missing-agy')), ['gpt-existing']);
+    const claudeHome = join(root, 'claude-home');
+    const catalogRoot = join(claudeHome, 'cache', 'model-catalog');
+    await mkdir(catalogRoot, { recursive: true });
+    await writeFile(join(catalogRoot, 'older.json'), JSON.stringify({ fetchedAt: 10, catalog: { surface: 'cc', config: {
+      models: [{ id: 'claude-sonnet-5' }, { id: 'invalid model' }]
+    } } }));
+    await writeFile(join(catalogRoot, 'current.json'), JSON.stringify({ fetchedAt: 20, catalog: { surface: 'cc', config: {
+      models: [{ id: 'claude-opus-5-5' }, { id: 'claude-sonnet-5-5' }, { id: 'claude-sonnet-5-5' }]
+    } } }));
+    assert.deepEqual(await readProviderModels(root, join(root, 'missing'), join(root, 'missing-agy'), claudeHome), ['gpt-existing']);
     const cli = join(root, 'claude');
     await writeFile(cli, '#!/bin/sh\nprintf "2.1.283 (Claude Code)\\n"\n');
     await chmod(cli, 0o700);
-    assert.deepEqual(await readProviderModels(root, cli, join(root, 'missing-agy')), ['gpt-existing', ...CLAUDE_MODELS]);
+    assert.deepEqual(await readProviderModels(root, cli, join(root, 'missing-agy'), claudeHome),
+      ['gpt-existing', 'claude-opus-5-5', 'claude-sonnet-5-5']);
     await rm(join(root, 'models_cache.json'));
-    assert.deepEqual(await readProviderModels(root, cli, join(root, 'missing-agy')), [...CLAUDE_MODELS]);
+    assert.deepEqual(await readProviderModels(root, cli, join(root, 'missing-agy'), claudeHome),
+      ['claude-opus-5-5', 'claude-sonnet-5-5']);
   } finally { await rm(root, { recursive: true, force: true }); }
 });
 
-test('Claude catalog lists pinned model versions before the tracking aliases', () => {
-  assert.deepEqual(CLAUDE_MODELS.slice(0, 4), ['claude-opus-5-5', 'claude-sonnet-5', 'claude-fable-5-1', 'claude-haiku-4-5-20251001']);
-  assert.ok(['claude-opus', 'claude-sonnet', 'claude-haiku'].every(alias => CLAUDE_MODELS.includes(alias)));
-  assert.ok(CLAUDE_MODELS.every(id => /^claude-[a-z0-9-]{1,90}$/.test(id)));
+test('Claude discovery uses the latest valid Claude Code catalog without a bundled fallback', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'af-claude-live-catalog-'));
+  try {
+    assert.deepEqual(await readClaudeModels(root), []);
+    const catalogRoot = join(root, 'cache', 'model-catalog');
+    await mkdir(catalogRoot, { recursive: true });
+    await writeFile(join(catalogRoot, 'malformed.json'), '{');
+    await writeFile(join(catalogRoot, 'other-surface.json'), JSON.stringify({ fetchedAt: 30,
+      catalog: { surface: 'api', config: { models: [{ id: 'claude-not-for-code' }] } } }));
+    await writeFile(join(catalogRoot, 'current.json'), JSON.stringify({ fetchedAt: 20,
+      catalog: { surface: 'cc', config: { models: [{ id: 'claude-sonnet-5-5' }, { id: 'gpt-not-claude' }] } } }));
+    assert.deepEqual(await readClaudeModels(root), ['claude-sonnet-5-5']);
+  } finally { await rm(root, { recursive: true, force: true }); }
 });
 
 test('Antigravity models collapse Gemini effort variants and qualify other families', async () => {
