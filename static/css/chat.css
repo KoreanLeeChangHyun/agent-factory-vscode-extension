@@ -2438,9 +2438,8 @@ select:focus-visible,
   :is(.agent-model-menu, #settings-panel-bot, #settings-panel-keyboard, #settings-panel-providers, #general-permissions, .general-language, #image-converter, #unit-create-dialog) option::checkmark { order: 1; margin-inline-start: auto; color: var(--af-color-accent); }
 }
 .provider-row { display: grid; gap: 6px; padding: 9px 10px; margin-bottom: 6px; border: 1px solid color-mix(in srgb, var(--vscode-panel-border, #ffffff20) 70%, transparent); border-radius: 6px; background: color-mix(in srgb, var(--vscode-editorWidget-background, var(--vscode-sideBar-background, transparent)) 60%, transparent); }
-.provider-actions { display: flex; justify-content: flex-end; margin-bottom: 8px; }
 .provider-version-controls { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 6px; margin-top: 6px; }
-.provider-factory-version-controls { margin: 0 0 8px; }
+.provider-factory-version-controls { grid-template-columns: minmax(0, 1fr) auto auto; margin: 0 0 8px; }
 .provider-version-controls select:focus-visible { outline: 1px solid var(--vscode-focusBorder); outline-offset: -1px; }
 .provider-missing { margin-top: 8px; }
 .provider-missing summary { width: fit-content; padding: 5px 2px; color: var(--vscode-textLink-foreground, var(--vscode-foreground)); cursor: pointer; }

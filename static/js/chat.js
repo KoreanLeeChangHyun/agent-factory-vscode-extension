@@ -6785,16 +6785,12 @@
     const section = document.createElement("section");
     section.className = "provider-settings";
     const hasDetected = providerSnapshot.providers.some(provider => provider.detected);
-    const actions = document.createElement("div");
-    actions.className = "provider-actions";
     const update = document.createElement("button");
     update.type = "button";
     update.dataset.providerControl = "update-now";
     update.textContent = t(providerSnapshot.busy ? "ui.providers.update.updating" : "ui.providers.update.now");
     update.disabled = providerSnapshot.busy || !hasDetected;
     update.addEventListener("click", function () { vscode.postMessage({ type: "providers.update" }); });
-    actions.append(update);
-    section.append(actions);
     const factoryControls = document.createElement("div");
     factoryControls.className = "provider-version-controls provider-factory-version-controls";
     const factoryInput = document.createElement("select");
@@ -6813,7 +6809,7 @@
     factoryInput.addEventListener("change", function () { factoryInstallVersion = factoryInput.value; updateFactoryButton(); });
     factoryInstall.addEventListener("click", submitFactoryVersion);
     updateFactoryButton();
-    factoryControls.append(factoryInput, factoryInstall);
+    factoryControls.append(factoryInput, factoryInstall, update);
     section.append(factoryControls);
     const missing = providerSnapshot.providers.filter(provider => !provider.detected);
     let missingList;

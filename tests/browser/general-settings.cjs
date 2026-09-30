@@ -145,6 +145,12 @@ async function checkGeneralSettings(page) {
     assert.ok(Math.abs(permissionBox.width - languageBox.width) < 1);
     await page.locator('#settings-tab-providers').click();
     assert.equal(await page.locator('#settings-panel-providers').evaluate(e => e.scrollWidth > e.clientWidth), false);
+    const factoryBox = await factoryInput.boundingBox();
+    const factoryInstallBox = await factoryInstall.boundingBox();
+    const updateBox = await page.locator('[data-provider-control="update-now"]').boundingBox();
+    assert.ok(factoryBox && factoryInstallBox && updateBox);
+    assert.ok(Math.abs(factoryBox.y - factoryInstallBox.y) < 2 && Math.abs(factoryBox.y - updateBox.y) < 2);
+    assert.ok(factoryBox.x + factoryBox.width <= factoryInstallBox.x && factoryInstallBox.x + factoryInstallBox.width <= updateBox.x);
     const pathBox = await page.locator('[data-provider-control="codex:input"]').boundingBox();
     const pickBox = await page.locator('[data-provider-control="codex:pick"]').boundingBox();
     const autoBox = await page.locator('[data-provider-control="codex:clear"]').boundingBox();
