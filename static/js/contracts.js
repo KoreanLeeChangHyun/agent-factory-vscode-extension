@@ -6,7 +6,14 @@
   md.renderer.rules.link_close = () => '</span>';
   md.renderer.rules.image = (tokens, i) => md.utils.escapeHtml(tokens[i].content || '[이미지]');
   const app = document.getElementById('contract-app');
-  let data, workflowError, workflows = [], version, runId, tab = '개요';
+  let data, workflowError, workflows = [], version, runId, tab = '계약서';
+  const recordMarker = '<!-- contract-execution-record -->';
+  const contractText = value => String(value || '').split(recordMarker, 1)[0].trim();
+  const executionText = value => {
+    const text = String(value || '');
+    const index = text.indexOf(recordMarker);
+    return index < 0 ? '' : text.slice(index + recordMarker.length).trim();
+  };
   const el = (tag, text, cls) => { const n = document.createElement(tag); if (text !== undefined) n.textContent = text; if (cls) n.className = cls; return n; };
   const button = (text, action) => { const n = el('button', text); n.type = 'button'; n.onclick = action; return n; };
   const markdown = text => {
@@ -85,54 +92,40 @@
     if (flow && String(contractOf(flow)?.version) !== version) header.append(el('p', `보고 있는 계약은 v${version}, 선택 실행은 v${contractOf(flow)?.version} 기준입니다.`, 'notice'));
     if (workflowError) header.append(el('p','실행 상태 갱신 실패: ' + workflowError, 'notice'));
     const nav = el('nav'); nav.setAttribute('aria-label','계약 상세');
-    for (const name of ['개요','실행 현황','변경 파일','에이전트','버전 비교','히스토리']) { const b = button(name, () => {tab = name; render();}); b.setAttribute('aria-pressed', String(tab === name)); b.dataset.focus = name; nav.append(b); }
+    for (const name of ['계약서','실행 기록','변경 이력']) { const b = button(name, () => {tab = name; render();}); b.setAttribute('aria-pressed', String(tab === name)); b.dataset.focus = name; nav.append(b); }
     const toolbar = el('div', undefined, 'contract-toolbar');
     toolbar.append(nav, controls);
     header.append(toolbar);
     const content = el('section');
     content.tabIndex = 0; content.setAttribute('aria-label', '계약 본문');
-    if (tab === '버전 비교') renderComparison(content, current);
-    else if (tab === '개요') { renderAssignment(content, flow); content.append(markdown(current.content)); }
-    else if (tab === '변경 파일') renderFiles(content, current);
-    else if (tab === '실행 현황') renderProgress(content, flow);
-    else if (tab === '에이전트') renderAgents(content, flow);
-    else renderHistory(content, flows);
+    if (tab === '계약서') {
+      content.append(markdown(contractText(current.content)));
+      if (current.operations?.length) { content.append(el('h2','구조 · 파일 변경 계획')); renderFiles(content, current); }
+    } else if (tab === '실행 기록') {
+      renderProgress(content, flow);
+      renderAgents(content, flow);
+      const bound = data.versions.find(v => String(v.version) === String(contractOf(flow)?.version)) || current;
+      const saved = executionText(bound.content);
+      if (saved) { content.append(el('h2',`계약서 v${bound.version}에 저장된 실행 기록`), markdown(saved)); }
+      else if (data.progress) { content.append(el('h2','기존 진행 기록'), markdown(data.progress)); }
+    } else renderHistory(content, current);
     app.replaceChildren(header, content);
     if (focused) app.querySelector(`[data-focus="${focused}"]`)?.focus();
   }
   function openVersions() {
     choose('계약 버전',data.versions.map(v=>({value:v.version,title:'v'+v.version,description:v.title,detail:'파일 수정: '+v.modifiedAt})),version,v=>{version=v;render();});
   }
-  function renderAssignment(content, flow) {
-    const diagram = el('div', undefined, 'assignment');
-    diagram.append(el('h2','작업 배정 흐름'));
-    if (!flow) {
-      diagram.append(el('p','배정 기록 없음 · 계약에 연결된 실행이 생기면 요청 Main과 작업별 배정을 표시합니다.','muted'));
-    } else {
-      diagram.append(el('p',`선택 실행의 배정 · 계약 v${contractOf(flow)?.version ?? '?'} 기준`, 'muted'));
-      const node = (role, id) => { const n=el('div',undefined,'assignment-node'); n.append(el('strong',role),el('code',id || '미배정')); return n; };
-      diagram.append(node('요청 Main',flow.parentAgentId));
-      for (const task of flow.workflow?.tasks || []) {
-        const row=el('div',undefined,'assignment-row');
-        const noVerify=['work','plan-work','direct'].includes(flow.taskMode);
-        row.append(el('span',`${task.id} · ${task.title || '작업'}`,'assignment-label'), node('작업자',task.workAgentId),el('span','→'),node(noVerify ? '별도 검증 미요청' : '검증자',noVerify ? '—' : task.verificationAgentId));
-        diagram.append(row);
-      }
-      diagram.append(el('p','Main 요청 → 작업 수행 → 검증. 검증 실패 시 같은 작업자가 수정하고 다시 검증합니다. 별도 검증 여부는 실행 모드에 따릅니다.','muted'));
-    }
-    content.append(diagram);
-  }
   function renderComparison(content, current) {
     if (data.versions.length < 2) {content.append(el('p','비교할 이전 버전이 없습니다.')); return;}
     let other = data.versions.find(v => v.version !== version);
     const output = el('div');
     const draw = () => {
-      const before = new Set(other.content.split('\n')), after = new Set(current.content.split('\n'));
+      const before = new Set(contractText(other.content).split('\n')), after = new Set(contractText(current.content).split('\n'));
       const columns = el('div', undefined, 'columns');
       for (const [v, opposite, label, cls] of [[other,after,'비교 기준','removed'],[current,before,'선택 버전','added']]) {
         const box = el('div'); box.append(el('h2', `${label} v${v.version}`));
         const pre = el('pre');
-        for (const line of v.content.split('\n')) { const n = el('div', (opposite.has(line) ? '  ' : cls === 'added' ? '+ ' : '− ') + line, opposite.has(line) ? '' : cls); pre.append(n); }
+        for (const line of contractText(v.content).split('\n')) { const n = el('div', (opposite.has(line) ? '  ' : cls === 'added' ? '+ ' : '− ') + line, opposite.has(line) ? '' : cls); pre.append(n); }
         box.append(pre); columns.append(box);
       }
       output.replaceChildren(columns);
@@ -141,10 +134,10 @@
   }
   function fileOperation(value) {
     const key = String(value || '').trim().toLowerCase();
-    if (['add','create','new','생성','추가'].includes(key)) return ['add','A','생성'];
-    if (['modify','update','edit','수정'].includes(key)) return ['modify','M','수정'];
-    if (['delete','remove','삭제'].includes(key)) return ['delete','D','삭제'];
-    if (['move','rename','이동','이름 변경'].includes(key)) return ['rename','R','이동·이름 변경'];
+    if (['add','create','new','생성','추가'].includes(key)) return ['add','+','생성'];
+    if (['modify','update','edit','수정'].includes(key)) return ['modify','+/-','수정'];
+    if (['delete','remove','삭제'].includes(key)) return ['delete','-','삭제'];
+    if (['move','rename','이동','이름 변경'].includes(key)) return ['rename','→','이동·이름 변경'];
     return ['unknown','?',value || '미기재'];
   }
   function renderFiles(content, current) {
@@ -181,7 +174,7 @@
     columns.append(tree,detail); content.append(columns);
   }
   function renderProgress(content, flow) {
-    content.append(el('p','선택한 실행에서 마지막으로 수신한 작업별 상태입니다. 새로고침으로 갱신하며, 상세 진행 기록은 히스토리에서 확인합니다.', 'muted'));
+    content.append(el('p','선택한 실행에서 마지막으로 수신한 작업별 상태입니다. 새로고침으로 갱신하며, 저장된 결과는 아래 계약서 실행 기록에서 확인합니다.', 'muted'));
     if (!flow) { content.append(el('p','이 계약에 연결된 실행 기록이 없습니다. 작업 상태를 추정하지 않습니다.')); return; }
     content.append(el('p',`${flow.loopId} · ${status(flow.status)} · 기록 시각: ${flow.updatedAt || '미확인'}`, 'muted'));
     const tasks = flow.workflow?.tasks || flow.tasks || [];
@@ -233,13 +226,12 @@
     }
     content.append(el('p','대화 열기는 기존 에이전트 화면으로 이동합니다. 새 작업을 제출하거나 실행을 재시작하지 않습니다.', 'muted'));
   }
-  function renderHistory(content, flows) {
-    content.append(el('p','계약 개정 파일과 수신된 실행 요약입니다. 파일 수정 시각은 승인 시각이 아니며, 전체 실행 이벤트 이력은 아직 제공되지 않습니다.', 'notice'));
+  function renderHistory(content, current) {
+    content.append(el('p','계약 버전의 변경 이력입니다. 실행·검증 결과는 실행 기록에서 확인합니다. 파일 수정 시각은 승인 시각이 아닙니다.', 'notice'));
+    renderComparison(content, current);
     const list = el('ol');
-    for (const v of data.versions) {const item = el('li'); item.append(button(`계약 v${v.version} · 파일 수정 ${v.modifiedAt}`, () => {version=v.version;tab='개요';render();}));list.append(item);}
-    for (const f of flows) list.append(el('li', `${f.updatedAt || '시각 미확인'} · ${f.loopId} · v${contractOf(f)?.version} · ${status(f.status)}`));
+    for (const v of data.versions) {const item = el('li'); item.append(button(`계약 v${v.version} · 파일 수정 ${v.modifiedAt}`, () => {version=v.version;tab='계약서';render();}));list.append(item);}
     content.append(list);
-    if (data.progress) { content.append(el('h2','저장된 진행·히스토리 문서'), markdown(data.progress)); }
   }
   window.addEventListener('message', ({data: message}) => {
     if (message.type === 'detail') {data = message.data; workflows = message.workflows || []; workflowError = message.workflowError; render();}

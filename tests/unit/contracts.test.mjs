@@ -27,7 +27,8 @@ test('contracts read disk and refresh versions without execution', async () => {
 test('submission asks for saved contract and chat contents without execution', () => {
  const text = withBusinessMode('prepare', 'contract');
  assert.match(text, /docs\/progress\/<contract-id>\/contract-v<version>\.md/);
- assert.match(text, /display the contract contents/);
+ assert.match(text, /display the four contract sections/);
+ assert.match(text, /목표, 구조, 작업자 and 순서/);
  assert.match(text, /not implementation, delegation/);
  assert.deepEqual(parseClientMessage({type: 'contracts.request'}), {type: 'contracts.request'});
 });

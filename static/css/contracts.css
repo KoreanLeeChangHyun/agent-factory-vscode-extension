@@ -31,10 +31,6 @@ header .controls{flex-shrink:0;max-width:100%}
 .version-dialog{color:inherit;background:var(--vscode-editor-background,#1e1e1e);border:1px solid var(--vscode-panel-border,#555);border-radius:8px;padding:18px;width:min(420px,calc(100vw - 64px));max-height:70vh;overflow:auto}
 .version-dialog::backdrop{background:#0008}
 .version-dialog h2{margin-top:0}.version-option{display:grid;text-align:left;gap:4px;width:100%;margin-bottom:8px;padding:10px;overflow-wrap:anywhere}.version-option small{font-size:11px}
-.assignment{border-bottom:1px solid var(--vscode-panel-border,#555);padding-bottom:12px;margin-bottom:20px}
-.assignment-node{border:1px solid var(--vscode-panel-border,#555);border-radius:6px;padding:10px;min-width:0;display:grid;gap:6px}.assignment-node code{overflow-wrap:anywhere;font-size:12px}
-.assignment-row{display:grid;grid-template-columns:minmax(90px,1fr) minmax(0,2fr) auto minmax(0,2fr);gap:10px;align-items:center;margin-top:10px}.assignment-label{overflow-wrap:anywhere}
-@media(max-width:600px){.assignment-row{grid-template-columns:minmax(0,1fr) auto minmax(0,1fr)}.assignment-label{grid-column:1/-1}}
 
 /* Scroll container spans the viewport; spacing belongs inside it. */
 #contract-app { max-width: none; width: 100%; margin: 0; padding: 0; --contract-inset: max(24px, calc((100vw - 1152px) / 2)); }
