@@ -4,9 +4,11 @@ async function checkAgentModels(page) {
   const capability = { model: true, reasoning: true, taskModes: ['direct', 'work', 'work-verification'] };
   await emit({ type: 'host.initialize', panelId: 'roles', role: 'main', title: 'Main', agentPermissions: { main: 'bypass', work: 'bypass', verification: 'danger-full-access' }, runtimeAvailable: true, capabilities: { submit: capability, send: capability } });
   await emit({ type: 'models.list', models: ['main-model', 'work-model', 'verify-model'] });
-  await emit({ type: 'agent.defaults', settings: { effective: { work: { model: 'work-model', reasoningEffort: 'medium' }, verification: { model: 'verify-model', reasoningEffort: 'high' } }, sources: {} } });
+  await emit({ type: 'agent.defaults', settings: { effective: { work: { model: 'work-model', reasoningEffort: 'medium' }, verification: { model: 'verify-model', reasoningEffort: 'high' } }, sources: {}, projectAvailable: true } });
   assert.equal(await page.locator('#reasoning-button').isVisible(), false);
   await page.locator('#model-button').click();
+  assert.equal(await page.locator('#agent-default-scope').inputValue(), 'project');
+  await page.locator('#agent-default-scope').selectOption('chat');
   assert.equal(await page.locator('#model-menu select[data-role]').count(), 3);
   assert.equal(await page.evaluate(() => window.saved.agentModels.work.model), 'work-model');
   assert.equal(await page.evaluate(() => window.saved.agentModels.work.reasoningEffort), 'medium');
@@ -242,6 +244,8 @@ async function checkReasoningSlider(page) {
   await emit({ type: 'models.list', models: ['main-model', 'work-model', 'verify-model'] });
   await emit({ type: 'agent.defaults', settings: { global: {}, project: {}, effective: {}, sources: {}, projectAvailable: true } });
   await page.locator('#model-button').click();
+  assert.equal(await page.locator('#agent-default-scope').inputValue(), 'project');
+  await page.locator('#agent-default-scope').selectOption('chat');
 
   const chatReasoning = page.locator('#model-menu input[data-role=main][data-field=reasoningEffort]');
   await chatReasoning.fill('2');

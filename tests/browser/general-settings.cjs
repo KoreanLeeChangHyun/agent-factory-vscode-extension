@@ -1,9 +1,13 @@
 const assert = require('node:assert/strict');
 
 async function checkGeneralSettings(page) {
-  // Scope lives in the chat's agent panel: this chat first, then global and project defaults.
-  assert.deepEqual(await page.locator('#agent-default-scope option').evaluateAll(options => options.map(option => option.value)), ['chat', 'global', 'project']);
-  assert.equal(await page.locator('#agent-default-scope').inputValue(), 'chat');
+  // Scope follows its inheritance order and opens on the project default.
+  assert.deepEqual(await page.locator('#agent-default-scope option').evaluateAll(options => options.map(option => option.value)), ['global', 'project', 'chat']);
+  assert.equal(await page.locator('#agent-default-scope').inputValue(), 'project');
+  await page.evaluate(() => window.postMessage({ type: 'agent.defaults', settings: { global: {}, effective: {}, sources: {}, projectAvailable: false } }, '*'));
+  await page.evaluate(() => new Promise(requestAnimationFrame));
+  assert.equal(await page.locator('#agent-default-scope').inputValue(), 'global');
+  assert.equal(await page.locator('#agent-default-scope option[value="project"]').evaluate(option => option.disabled), true);
   await page.locator('#status-settings-button').click();
   assert.equal(await page.locator('#status-settings [data-settings-tab="agents"]').count(), 0);
   assert.equal(await page.locator('#settings-panel-general').isVisible(), true);
