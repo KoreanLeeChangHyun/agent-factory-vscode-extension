@@ -602,6 +602,43 @@ test("stop on an unbound idle panel reconciles state without repeated notices", 
   for (const message of posted) assert.deepEqual(JSON.parse(JSON.stringify(message)), { type: "run.state", running: false });
 });
 
+test("Host rejects a provider-changing composer payload for a bound conversation", async () => {
+  const posted = [];
+  const manager = new module.exports.ChatPanelManager({ globalState: { get() {}, async update() {} } }, {}, () => [], async () => ({
+    available: true,
+    client: { async capabilities() { return { submit: { model: true, reasoning: true }, send: { model: true, reasoning: true, sessionProvider: "claude" } }; } }
+  }));
+  const managed = {
+    state: { panelId: "provider-bound", role: "main", agentId: "main-bound", model: "claude-opus-5-5", reasoning: "medium" },
+    panel: { webview: { async postMessage(message) { posted.push(message); return true; } } }
+  };
+  await manager.handleMessage(managed, {
+    type: "composer.settings", model: "gpt-6-astra", reasoning: "high", fastMode: false, goalMode: false
+  });
+  assert.equal(managed.state.model, "claude-opus-5-5");
+  assert.equal(managed.state.reasoning, "medium");
+  assert.match(posted.at(-1).text, /new (?:or cleared )?conversation|새 대화/);
+});
+
+test("Host rejects a provider-changing saved set before applying it", async () => {
+  const posted = [], writes = [];
+  const stored = new Map([["agentFactory.agentPresets.global.v2", [{ name: "Other provider", settings: { main: { model: "gpt-6-astra", reasoningEffort: "high" } } }]]]);
+  const memory = { get(key, fallback) { return stored.has(key) ? stored.get(key) : fallback; }, async update(...args) { writes.push(args); stored.set(args[0], args[1]); } };
+  const manager = new module.exports.ChatPanelManager({ globalState: memory }, {}, () => [], async () => ({
+    available: true,
+    client: { async capabilities() { return { submit: { model: true, reasoning: true }, send: { model: true, reasoning: true, sessionProvider: "claude" } }; } }
+  }));
+  const managed = {
+    state: { panelId: "preset-provider-bound", role: "main", agentId: "main-bound", model: "claude-opus-5-5", reasoning: "medium" },
+    panel: { webview: { async postMessage(message) { posted.push(message); return true; } } }
+  };
+  await manager.handleMessage(managed, { type: "agent.preset", action: "apply", scope: "global", name: "Other provider" });
+  assert.equal(managed.state.model, "claude-opus-5-5");
+  assert.equal(writes.length, 0, "An incompatible set is rejected before any preset/configuration write");
+  assert.equal(posted.at(-1).type, "agent.preset.result");
+  assert.match(posted.at(-1).error, /new (?:or cleared )?conversation|새 대화/);
+});
+
 test("status customization serializes rapid edits, broadcasts saved empty selection and restores on failure", async () => {
   let items = ['project'];
   let fail = false;

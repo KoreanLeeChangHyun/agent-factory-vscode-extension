@@ -2,8 +2,9 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { runUiInNewContext as runInNewContext } from "../support/ui-localization.mjs";
 import test from "node:test";
+import { readChatSource } from "../support/chat-source.mjs";
 
-const script = await readFile(new URL("../../static/js/chat.js", import.meta.url), "utf8");
+const script = await readChatSource();
 const submit = script.slice(script.indexOf("  function submit("), script.indexOf("  function cancelRun("))
   // submit() resolves delegated model settings through these helpers.
   + script.slice(script.indexOf('  function agentSettingRole('), script.indexOf('  function createAgentSettingControl('));

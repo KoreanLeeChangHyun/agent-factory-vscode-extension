@@ -7,7 +7,7 @@ import { workUnitContextText, workUnitBranch } from "./work-unit-context";
 import { unitGit, validateUnitBranch, directBranchEvidence } from "./work-unit-git";
 import { openContractPanel } from "./contract-panel";
 import { listContracts } from "../filesystem/contracts";
-import { readAgentDefaults, saveAgentDefault, updateAgentPresetField, useAgentPreset, ensureAgentPresets } from "./agent-settings-store";
+import { readAgentDefaults, saveAgentDefault, saveModelFastMode, updateAgentPresetField, updateAgentPresetFastMode, useAgentPreset, ensureAgentPresets } from "./agent-settings-store";
 import { readMarkdownImage } from "./markdown-image";
 import { localize, describeLocalizedMessage } from "../../common/localization";
 import { LunaBot, type BotContext, type BotMessage } from "../codex/luna-bot";
@@ -21,7 +21,8 @@ import { constants as fsConstants } from "node:fs";
 import { open as openFile, realpath, unlink } from "node:fs/promises";
 import { readGitBranch } from "./git-branch";
 import { NoteStore } from "./note-store";
-import { RunningTitle } from "./running-title";
+import { RunningTitle, shouldShowTabLoading } from "./running-title";
+import { prepareTabIcons } from "./tab-icons";
 import * as vscode from "vscode";
 import type { StatusItemId } from "../../core/config/types";
 import type { AttachmentReference } from "../../common/types/attachment";
@@ -51,6 +52,12 @@ import { DeployError, deployRunStatus, detectDeployTarget, dispatchDeploy, setup
 type RuntimeConnection =
   | { readonly available: true; readonly client: AgentRuntimeClient }
   | { readonly available: false; readonly diagnostic: string };
+
+function modelProvider(model: string | undefined): "codex" | "claude" | "antigravity" | undefined {
+  if (!model) return undefined;
+  if (model.startsWith("antigravity/") || model.startsWith("gemini-")) return "antigravity";
+  return model.startsWith("claude-") ? "claude" : "codex";
+}
 
 interface ManagedPanel {
   initialPrompt?: string;
@@ -82,6 +89,7 @@ interface ManagedPanel {
   agentRefreshTimer?: NodeJS.Timeout;
   lastAgentRefreshAt?: number;
   agentRefreshInFlight?: boolean;
+  activeChildRuns?: readonly { readonly status: string }[];
   backgroundContinuation?: boolean;
   branchRefreshTimer?: NodeJS.Timeout;
   branchRefreshStarted?: boolean;
@@ -110,6 +118,8 @@ export class ChatPanelManager implements vscode.Disposable {
   private readonly disposedPanels = new WeakSet<vscode.WebviewPanel>();
   private readonly panels = new Map<string, ManagedPanel>();
   private activePanelId: string | undefined;
+  private tabIconRoot: vscode.Uri | undefined;
+  private tabIconPreparation: Promise<void> | undefined;
   private readonly sidebarListeners = new Set<() => void>();
   private sidebarAgentWrite: Promise<void> = Promise.resolve();
   private branchNoticeWrite: Promise<void> = Promise.resolve();
@@ -183,7 +193,7 @@ export class ChatPanelManager implements vscode.Disposable {
       else states.push(managed.state);
     }
     return states.map(state => ({ state, running: [...this.panels.values()].some(panel =>
-      (panel.state.panelId === state.panelId || (state.agentId && panel.state.agentId === state.agentId)) && panel.controller?.running === true) }));
+      (panel.state.panelId === state.panelId || (state.agentId && panel.state.agentId === state.agentId)) && this.tabLoading(panel)) }));
   }
 
   public async openSidebarAgent(state: ChatPanelState): Promise<void> {
@@ -200,7 +210,7 @@ export class ChatPanelManager implements vscode.Disposable {
       if (managed.state.panelId !== state.panelId && (!state.agentId || managed.state.agentId !== state.agentId)) continue;
       managed.state = { ...managed.state, title };
       managed.panel.title = title;
-      if (managed.controller?.running) managed.runningTitle?.refresh();
+      if (this.tabLoading(managed)) managed.runningTitle?.refresh();
       await this.post(managed.panel, { type: "chat.renamed", title });
     }
     await this.rememberAgent(updated);
@@ -286,7 +296,7 @@ export class ChatPanelManager implements vscode.Disposable {
     const normalizedTitle = title.trim();
     managed.state = { ...managed.state, title: normalizedTitle };
     managed.panel.title = normalizedTitle;
-    if (managed.controller?.running) managed.runningTitle?.refresh();
+    if (this.tabLoading(managed)) managed.runningTitle?.refresh();
     await this.post(managed.panel, { type: "chat.renamed", title: normalizedTitle });
     this.rememberAgent(managed.state);
   }
@@ -315,9 +325,27 @@ export class ChatPanelManager implements vscode.Disposable {
     this.panels.clear();
   }
 
+  private tabIcon(name: string): vscode.Uri {
+    this.tabIconPreparation ??= prepareTabIcons(this.context.extensionUri, this.context.globalStorageUri).then(root => {
+      this.tabIconRoot = root;
+      for (const managed of this.panels.values()) {
+        if (!managed.disposed && !this.tabLoading(managed)) managed.panel.iconPath = this.tabIcon("agent-factory.png");
+      }
+    }).catch(() => undefined);
+    return vscode.Uri.joinPath(this.tabIconRoot ?? vscode.Uri.joinPath(this.context.extensionUri, "static", "images"), name);
+  }
+
+  private tabLoading(managed: ManagedPanel): boolean {
+    return shouldShowTabLoading(managed.controller?.running === true, managed.activeChildRuns);
+  }
+
+  private refreshTabLoading(managed: ManagedPanel): void {
+    managed.runningTitle?.setRunning(this.tabLoading(managed));
+  }
+
   private async attach(panel: vscode.WebviewPanel, state: ChatPanelState): Promise<void> {
     panel.title = state.title;
-    panel.iconPath = vscode.Uri.joinPath(this.context.extensionUri, "static", "images", "agent-factory.png");
+    panel.iconPath = this.tabIcon("agent-factory.png");
     panel.webview.options = this.webviewOptions(state.panelId);
 
     const subscriptions: vscode.Disposable[] = [];
@@ -332,7 +360,7 @@ export class ChatPanelManager implements vscode.Disposable {
     managed.runningTitle = new RunningTitle(() => managed.state.title, (title, frame) => {
       panel.title = title;
       const icon = frame === undefined ? "agent-factory.png" : `loading-squares-${frame}.svg`;
-      panel.iconPath = vscode.Uri.joinPath(this.context.extensionUri, "static", "images", icon);
+      panel.iconPath = this.tabIcon(icon);
     });
     subscriptions.push(managed.runningTitle);
     subscriptions.push(new vscode.Disposable(() => {
@@ -502,12 +530,16 @@ export class ChatPanelManager implements vscode.Disposable {
         await this.post(managed.panel, { type: "agent.defaults", settings: readAgentDefaults(this.context.globalState, this.context.workspaceState, managed.state.panelId) });
         await this.post(managed.panel, { type: "usage.accounts", accounts: this.accountUsage() });
         void this.refreshAntigravityUsage();
-        const capabilities = connection.available ? await connection.client.capabilities(managed.state.agentId, this.effectiveModel(managed)) : undefined;
+        // A failed runtime probe must not prevent host.initialize; the chat reports it instead.
+        const runtimeErrors = new Set<string>();
+        const runtimeError = (error: unknown) => { runtimeErrors.add(error instanceof Error ? error.message : String(error)); return undefined; };
+        const capabilities = connection.available
+          ? await connection.client.capabilities(managed.state.agentId, this.effectiveModel(managed)).catch(runtimeError) : undefined;
         this.broadcastCompanion();
         let runtimeConversationId: string | undefined;
         if (managed.state.agentId && connection.available) {
-          runtimeConversationId = (await connection.client.listSessions())
-            .find(session => session.agentId === managed.state.agentId)?.conversationId;
+          runtimeConversationId = (await connection.client.listSessions().catch(runtimeError))
+            ?.find(session => session.agentId === managed.state.agentId)?.conversationId;
         }
         const resetConversation = Boolean(runtimeConversationId && runtimeConversationId !== managed.state.conversationId);
         if (runtimeConversationId) {
@@ -546,6 +578,7 @@ export class ChatPanelManager implements vscode.Disposable {
           botModel: this.botModel(), botDefaultPrompt: BOT_DEFAULT_PROMPTS[this.botCharacter()], botPrompt: resolveBotPrompt(this.botCharacter(), this.botPrompt()),
           model: managed.state.model,
           agentModels: managed.state.agentModels,
+          modelFastModes: managed.state.modelFastModes,
           agentPermissions: managed.state.agentPermissions,
           reasoning: managed.state.reasoning,
           agentSettingsScope: managed.state.agentSettingsScope,
@@ -573,6 +606,7 @@ export class ChatPanelManager implements vscode.Disposable {
             text: connection.diagnostic
           });
         }
+        for (const text of runtimeErrors) await this.post(managed.panel, { type: "host.notice", level: "error", text });
         await this.sendModelList(managed);
         if (managed.state.agentId) await this.post(managed.panel, { type: "session.bound", agentId: managed.state.agentId });
         if (managed.state.agentId && connection.available) {
@@ -662,10 +696,25 @@ export class ChatPanelManager implements vscode.Disposable {
         }
         return;
       }
+      case "agent.preset.fast": {
+        try {
+          await updateAgentPresetFastMode(this.context.globalState, this.context.workspaceState, managed.state.panelId, message.scope, message.name, message.model, message.value);
+          await this.post(managed.panel, {type: "agent.preset.field.result"});
+          for (const panel of this.panels.values()) await this.refreshAgentDefaults(panel);
+        } catch (cause) {
+          await this.post(managed.panel, {type: "agent.preset.field.result", error: cause instanceof Error ? cause.message : String(cause)});
+        }
+        return;
+      }
       case "agent.preset": {
         let error: string | undefined;
         let settings: AgentDefaults | undefined;
         try {
+          if (message.action === "apply") {
+            const preset = (readAgentDefaults(this.context.globalState, this.context.workspaceState, managed.state.panelId).presets ?? [])
+              .find(item => item.scope === message.scope && item.name === message.name);
+            if (preset) await this.assertAgentSettingsCompatible(managed, preset.settings);
+          }
           settings = await useAgentPreset(this.context.globalState, this.context.workspaceState, managed.state.panelId, message.action, message.scope, message.name, this.agentSettingsFromState(managed.state));
           if (settings) {
             managed.state = this.applyAgentSettings(managed.state, settings, message.scope, message.name);
@@ -685,13 +734,29 @@ export class ChatPanelManager implements vscode.Disposable {
           for (const panel of this.panels.values()) await this.refreshAgentDefaults(panel);
         }
         return;
+      case "agent.defaults.fast":
+        try {
+          await saveModelFastMode(message.scope, message.model, message.value);
+        } finally {
+          for (const panel of this.panels.values()) await this.refreshAgentDefaults(panel);
+        }
+        return;
       case "composer.settings":
+        try {
+          await this.assertAgentSettingsCompatible(managed, {
+            [managed.state.role ?? "main"]: { model: message.model, reasoningEffort: message.reasoning }
+          });
+        } catch (cause) {
+          await this.post(managed.panel, { type: "host.notice", level: "error", text: cause instanceof Error ? cause.message : String(cause) });
+          return;
+        }
         managed.state = {
           ...managed.state,
           businessMode: "normal",
           taskMode: "direct",
           model: message.model,
           agentModels: message.agentModels,
+          modelFastModes: message.modelFastModes,
           agentPermissions: message.agentPermissions,
           reasoning: message.reasoning,
           agentSettingsScope: message.agentSettingsScope,
@@ -706,8 +771,8 @@ export class ChatPanelManager implements vscode.Disposable {
           const selectedModel = this.effectiveModel(managed);
           const connection = await this.connectRuntime();
           if (connection.available) {
-            const capabilities = await connection.client.capabilities(managed.state.agentId, selectedModel);
-            if (!managed.disposed && this.effectiveModel(managed) === selectedModel) {
+            const capabilities = await connection.client.capabilities(managed.state.agentId, selectedModel).catch(() => undefined);
+            if (capabilities && !managed.disposed && this.effectiveModel(managed) === selectedModel) {
               await this.post(managed.panel, { type: "capabilities.updated", capabilities });
             }
           }
@@ -813,6 +878,19 @@ export class ChatPanelManager implements vscode.Disposable {
         }
         return;
       }
+      case "workflow.decision": {
+        // Reaches the runtime only from a Human's click in this Main chat; no Agent output produces this message.
+        if (!managed.state.agentId || (managed.state.role ?? "main") !== "main") return;
+        try {
+          const connection = await this.connectRuntime();
+          if (!connection.available || !connection.client.decideRevisionLimit) throw new Error("Revision-limit decisions are unavailable in this runtime");
+          const snapshot = await connection.client.decideRevisionLimit(managed.state.agentId, message.workAgentId, message.loopId, message.decision);
+          await this.post(managed.panel, { type: "agents.list", agents: await connection.client.listChildSessions(managed.state.agentId), workflows: [snapshot] });
+        } catch (error) {
+          await this.post(managed.panel, { type: "host.notice", level: "error", text: String(error) });
+        }
+        return;
+      }
       case "contract.open": {
         const root = managed.worktree?.workingDirectory ?? vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
         if (!root) return;
@@ -911,6 +989,9 @@ export class ChatPanelManager implements vscode.Disposable {
         return;
       case "attachments.pick":
         await this.mutateImages(managed, () => this.pickAttachments(managed));
+        return;
+      case "attachments.addUris":
+        await this.mutateImages(managed, () => this.addUriAttachments(managed, message.uris));
         return;
       case "attachments.createText":
         await this.createTextAttachment(managed, message.text);
@@ -1216,6 +1297,8 @@ export class ChatPanelManager implements vscode.Disposable {
 
   private async sendAgentList(managed: ManagedPanel): Promise<void> {
     if (!managed.state.agentId || (managed.state.role ?? "main") !== "main") {
+      managed.activeChildRuns = [];
+      this.refreshTabLoading(managed);
       await this.post(managed.panel, { type: "agents.list", agents: [] });
       return;
     }
@@ -1227,6 +1310,9 @@ export class ChatPanelManager implements vscode.Disposable {
       if (!connection.available) return;
       const { agents, workflows } = await this.sharedAgentRefresh(connection.client, agentId);
       if (managed.disposed || managed.state.agentId !== agentId) return;
+      managed.activeChildRuns = agents;
+      this.refreshTabLoading(managed);
+      this.notifyAgents();
       await this.post(managed.panel, { type: "agents.list", agents, workflows });
       if (workflows) managed.contractWorkflows = workflows;
       if (workflows) await this.reportWorkflowResults(managed, workflows, connection.client);
@@ -1358,7 +1444,7 @@ Read the exact stored child result/receipt and existing workflow status for repo
   private scheduleAgentList(managed: ManagedPanel, immediate = false): void {
     if (managed.disposed || !managed.state.agentId || (managed.state.role ?? "main") !== "main") return;
     const elapsed = Date.now() - (managed.lastAgentRefreshAt ?? 0);
-    const interval = managed.controller?.running
+    const interval = this.tabLoading(managed)
       ? AGENT_REFRESH_INTERVAL_MS
       : managed.panel.visible ? AGENT_IDLE_VISIBLE_REFRESH_INTERVAL_MS : AGENT_IDLE_HIDDEN_REFRESH_INTERVAL_MS;
     const delay = immediate ? 0 : Math.max(0, interval - elapsed);
@@ -1424,6 +1510,32 @@ Read the exact stored child result/receipt and existing workflow status for repo
     return managed.state.model;
   }
 
+  private async assertAgentSettingsCompatible(managed: ManagedPanel, settings: AgentDefaults): Promise<void> {
+    if (!managed.state.agentId) return;
+    const role = managed.state.role ?? "main";
+    const next = settings[role];
+    if (!next?.model && !next?.reasoningEffort) return;
+    const existingProvider = modelProvider(managed.state.model);
+    if (next.model && existingProvider && modelProvider(next.model) !== existingProvider) {
+      throw new Error(localize("ui.model.route.new.chat"));
+    }
+    const connection = await this.connectRuntime();
+    if (!connection.available) return;
+    const resolved = await connection.client.capabilities(managed.state.agentId, managed.state.model).catch(() => undefined);
+    if (!resolved) return;
+    const capabilities = resolved.send;
+    const lockedProvider = capabilities.sessionProvider ?? existingProvider;
+    if (next.model && lockedProvider && modelProvider(next.model) !== lockedProvider) {
+      throw new Error(localize("ui.model.route.new.chat"));
+    }
+    if (next.model && next.model !== managed.state.model && capabilities.model !== true) {
+      throw new Error(localize("ui.model.change.unavailable.active.chat"));
+    }
+    if (next.reasoningEffort && next.reasoningEffort !== managed.state.reasoning && capabilities.reasoning !== true) {
+      throw new Error(localize("ui.reasoning.change.unavailable.active.chat"));
+    }
+  }
+
   private async refreshAgentDefaults(managed: ManagedPanel): Promise<void> {
     if (managed.disposed) return;
     await ensureAgentPresets(this.context.globalState, this.context.workspaceState, managed.state.panelId, this.agentSettingsFromState(managed.state));
@@ -1431,8 +1543,9 @@ Read the exact stored child result/receipt and existing workflow status for repo
     const model = this.effectiveModel(managed);
     const connection = await this.connectRuntime();
     if (connection.available) {
-      const capabilities = await connection.client.capabilities(managed.state.agentId, model);
-      if (!managed.disposed && model === this.effectiveModel(managed)) await this.post(managed.panel, { type: "capabilities.updated", capabilities });
+      // The defaults were already saved and posted; a failed capability probe must not report them as failed.
+      const capabilities = await connection.client.capabilities(managed.state.agentId, model).catch(() => undefined);
+      if (capabilities && !managed.disposed && model === this.effectiveModel(managed)) await this.post(managed.panel, { type: "capabilities.updated", capabilities });
     }
   }
 
@@ -1450,6 +1563,8 @@ Read the exact stored child result/receipt and existing workflow status for repo
       ...this.composerPreferences(),
       ...(own.model ? { model: own.model } : {}),
       ...(own.reasoningEffort ? { reasoning: own.reasoningEffort } : {}),
+      ...(own.model && typeof source.fastByModel?.[own.model] === "boolean" ? { fastMode: source.fastByModel[own.model] } : typeof own.fast === "boolean" ? { fastMode: own.fast } : {}),
+      ...(source.fastByModel ? { modelFastModes: source.fastByModel } : {}),
       agentSettingsScope: defaults.projectAvailable ? "project" : "global",
       agentSettingsSet: "Default",
       ...(role === "main" ? { agentModels: {
@@ -1463,10 +1578,11 @@ Read the exact stored child result/receipt and existing workflow status for repo
   private agentSettingsFromState(state: ChatPanelState): AgentDefaults {
     if ((state.role ?? "main") !== "main") return { [state.role!]: { model: state.model, reasoningEffort: state.reasoning } };
     return {
-      main: { model: state.model, reasoningEffort: state.reasoning },
+      main: { model: state.model, reasoningEffort: state.reasoning, fast: state.fastMode === true },
       work: { ...state.agentModels?.work },
       workLight: { ...state.agentModels?.workLight },
-      verification: { ...state.agentModels?.verification }
+      verification: { ...state.agentModels?.verification },
+      ...(state.modelFastModes ? {fastByModel: state.modelFastModes} : {})
     };
   }
 
@@ -1477,6 +1593,8 @@ Read the exact stored child result/receipt and existing workflow status for repo
       ...state,
       ...(own.model ? {model: own.model} : {}),
       ...(own.reasoningEffort ? {reasoning: own.reasoningEffort} : {}),
+      ...(own.model && typeof settings.fastByModel?.[own.model] === "boolean" ? {fastMode: settings.fastByModel[own.model]} : typeof own.fast === "boolean" ? {fastMode: own.fast} : {}),
+      ...(settings.fastByModel ? {modelFastModes: settings.fastByModel} : {}),
       ...(role === "main" ? {agentModels: {
         ...(settings.work ? {work: {...settings.work}} : {}),
         ...(settings.workLight || settings.work ? {workLight: {...(settings.work ?? {}), ...(settings.workLight ?? {})}} : {}),
@@ -1492,6 +1610,7 @@ Read the exact stored child result/receipt and existing workflow status for repo
     if (state.role && state.role !== "main") return;
     await this.context.globalState.update(COMPOSER_PREFERENCES_KEY, {
       agentPermissions: state.agentPermissions,
+      modelFastModes: state.modelFastModes,
       businessMode: "normal",
       taskMode: "direct",
       fastMode: state.fastMode === true,
@@ -1638,7 +1757,11 @@ Read the exact stored child result/receipt and existing workflow status for repo
           else if (managed.botContext === "working") managed.botContext = "idle";
           this.reactBot(managed);
           this.broadcastCompanion();
-          managed.runningTitle?.setRunning(running);
+          // When Main stops, keep its current frame until the immediate durable child refresh
+          // confirms whether delegated Work or Verification is still active.
+          if (running || !managed.state.agentId || (managed.state.role ?? "main") !== "main") {
+            this.refreshTabLoading(managed);
+          }
           void this.post(managed.panel, { type: "run.state", running });
           this.scheduleAgentList(managed, !running);
           if (!running) void this.refreshWorktree(managed);
@@ -1659,6 +1782,9 @@ Read the exact stored child result/receipt and existing workflow status for repo
         },
         onAssistantDelta: (delta) => {
           void this.post(managed.panel, { type: "chat.delta", ...delta });
+        },
+        onInterviewQuestion: (question, runId) => {
+          void this.post(managed.panel, { type: "interview.question", question, runId });
         },
         onDecision: (runId, canApprove) => {
           void this.post(managed.panel, { type: "decision.pending", runId, canApprove });
@@ -1956,7 +2082,7 @@ Read the exact stored child result/receipt and existing workflow status for repo
       let activeChildren: readonly import("../agent-factory/agent-client").ChildAgentSession[];
       try {
         activeChildren = (await connection.client.listChildSessions(managed.state.agentId))
-          .filter(child => ["accepted", "queued", "starting", "running", "cancelling"].includes(child.status));
+          .filter(child => ["accepted", "queued", "starting", "running", "verifying", "cancelling"].includes(child.status));
       } catch (error) {
         await this.post(managed.panel, {
           type: "host.notice", level: "error",
@@ -2103,7 +2229,6 @@ Read the exact stored child result/receipt and existing workflow status for repo
   }
 
   private async pickAttachments(managed: ManagedPanel): Promise<void> {
-    const panel = managed.panel;
     const uris = await vscode.window.showOpenDialog({
       canSelectFiles: true,
       // Windows/Linux cannot select files and folders together: that opens a folder picker.
@@ -2116,6 +2241,26 @@ Read the exact stored child result/receipt and existing workflow status for repo
       return;
     }
 
+    await this.prepareAttachmentUris(managed, uris);
+  }
+
+  private async addUriAttachments(managed: ManagedPanel, values: readonly string[]): Promise<void> {
+    const uris: vscode.Uri[] = [];
+    try {
+      for (const value of values) {
+        const uri = vscode.Uri.parse(value, true);
+        if (uri.scheme !== "file" && uri.scheme !== "vscode-remote") throw new Error(localize("ui.unable.to.prepare.attachments.0", value));
+        uris.push(uri);
+      }
+    } catch (error) {
+      await this.post(managed.panel, { type: "host.notice", level: "error", text: localize("ui.unable.to.prepare.attachments.0", error instanceof Error ? error.message : String(error)) });
+      return;
+    }
+    await this.prepareAttachmentUris(managed, uris);
+  }
+
+  private async prepareAttachmentUris(managed: ManagedPanel, uris: readonly vscode.Uri[]): Promise<void> {
+    const panel = managed.panel;
     const attachments: AttachmentReference[] = [];
     const createdImageIds: string[] = [];
     let imageCount = managed.imageAttachments.size;

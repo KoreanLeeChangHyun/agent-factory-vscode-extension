@@ -1,6 +1,18 @@
 const assert = require('node:assert/strict');
 async function checkAgentPresets(page) {
   const emit=async data=>{await page.evaluate(data=>window.postMessage(data,'*'),data);await page.evaluate(()=>new Promise(requestAnimationFrame));};
+  const chooseModel=async(container,value)=>{
+    const button=container.locator('button[data-field="model"]');
+    await button.click();
+    const option=container.locator('.model-picker-option[data-value="'+value+'"]');
+    if(!await option.count()){
+      for(const tab of await container.locator('.model-vendor-tab').all()){
+        if(!await tab.isDisabled()) await tab.click();
+        if(await option.count()) break;
+      }
+    }
+    await option.click();
+  };
   await emit({type:'host.initialize',panelId:'preset-check',role:'main',projectName:'project',runtimeAvailable:true,running:false,statusItems:[],queueCount:0,fastMode:false,goalMode:false,capabilities:{submit:{model:true,reasoning:true},send:{model:true,reasoning:true}}});
   await emit({type:'models.list',models:['gpt-6-astra','gpt-6-sol','claude-opus-5-5']});
   const globalSet={main:{model:'gpt-6-astra',reasoningEffort:'medium'},work:{model:'gpt-6-sol',reasoningEffort:'medium'},verification:{model:'gpt-6-sol',reasoningEffort:'medium'}};
@@ -18,7 +30,7 @@ async function checkAgentPresets(page) {
   assert.equal(await page.locator('#agent-preset-select').inputValue(),'Default');
   assert.equal(await page.locator('.agent-settings-heading #agent-preset-select').count(),1);
   assert.equal(await page.locator('#agent-preset-update').count(),0);
-  await page.locator('#agent-default-fields select[data-role="main"][data-field="model"]').selectOption('gpt-6-astra');
+  await chooseModel(page.locator('#agent-default-fields .agent-model-row[data-agent-role="main"]'),'gpt-6-astra');
   assert.deepEqual(await page.evaluate(()=>window.sentMessages.filter(m=>m.type==='agent.preset.field').at(-1)),{type:'agent.preset.field',scope:'global',name:'Default',role:'main',field:'model',value:'gpt-6-astra'});
   assert.equal(await page.locator('.agent-settings-heading > strong').count(),0);
   const picker=await page.locator('#agent-preset-select').boundingBox();
@@ -43,6 +55,16 @@ async function checkAgentPresets(page) {
   await emit({type:'agent.preset.result',scope:'global',name:'Quality',settings:globalSet});
   assert.equal(await page.locator('#agent-preset-status').isVisible(),false);
   assert.equal(await page.locator('#agent-preset-select').inputValue(),'Quality');
+  assert.equal(await page.locator('#agent-preset-create').getAttribute('open'),null,'Successful save closes the new-set popup');
+  assert.equal(await page.locator('#agent-preset-name').inputValue(),'','Successful save clears the completed name');
+  await page.locator('#agent-preset-create summary').click();
+  await page.locator('#agent-preset-name').fill('Retry me');
+  await page.locator('#agent-preset-save').click();
+  await emit({type:'agent.preset.result',error:'Save failed'});
+  assert.notEqual(await page.locator('#agent-preset-create').getAttribute('open'),null,'Failed save keeps the popup open');
+  assert.equal(await page.locator('#agent-preset-name').inputValue(),'Retry me','Failed save preserves the name');
+  assert.equal(await page.locator('#agent-preset-status').textContent(),'Save failed');
+  await page.locator('#agent-preset-create summary').click();
   await page.locator('#agent-default-scope').selectOption('project');
   assert.deepEqual(await last(),{type:'agent.preset',action:'apply',scope:'project',name:'Default'});
   await emit({type:'agent.preset.result',scope:'project',name:'Default',settings:projectSet});
@@ -65,6 +87,7 @@ async function checkAgentPresets(page) {
   assert.equal(await page.locator('.agent-settings-heading #agent-preset-delete').count(), 1);
   assert.equal(await page.locator('.agent-settings-heading #agent-preset-create').count(), 1);
   assert.equal(await page.locator('#model-menu .agent-model-name .agent-role-icon').count(), 4);
+  await page.locator('#agent-preset-create summary').click();
   await page.locator('#agent-preset-name').fill('Chat set');
   await page.locator('#agent-preset-save').click();
   assert.deepEqual(await last(), {type:'agent.preset',action:'save',scope:'chat',name:'Chat set'});
@@ -78,13 +101,13 @@ async function checkAgentPresets(page) {
   assert.equal(await page.evaluate(()=>window.saved.model), 'gpt-6-sol');
   assert.equal(await page.locator('#agent-preset-status').isVisible(),false);
   assert.equal(await page.evaluate(()=>window.sentMessages.filter(m=>m.type==='composer.settings').at(-1).model),'gpt-6-sol');
-  await page.locator('#model-menu select[data-role="main"][data-field="model"]').selectOption('gpt-6-astra');
+  await chooseModel(page.locator('#model-menu .agent-model-row[data-agent-role="main"]'),'gpt-6-astra');
   assert.deepEqual(await page.evaluate(()=>window.sentMessages.filter(m=>m.type==='agent.preset.field').at(-1)),{type:'agent.preset.field',scope:'chat',name:'Fast',role:'main',field:'model',value:'gpt-6-astra'});
   await emit({type:'agent.preset.field.result',error:'Autosave failed'});
   assert.equal(await page.locator('#agent-preset-status').textContent(),'Autosave failed');
   await emit({type:'agent.preset.field.result'});
   assert.equal(await page.locator('#agent-preset-status').isVisible(),false);
-  await page.locator('#model-menu select[data-role="main"][data-field="model"]').selectOption('gpt-6-sol');
+  await chooseModel(page.locator('#model-menu .agent-model-row[data-agent-role="main"]'),'gpt-6-sol');
   await emit({type:'agent.preset.result'});
   assert.equal(await page.locator('#agent-preset-status').isVisible(),false);
   settings.presets.push({scope:'chat',name:'Partial legacy set',settings:{}});
@@ -97,26 +120,30 @@ async function checkAgentPresets(page) {
   await emit({type:'agent.defaults',settings});
   await emit({type:'chat.started',id:'preset-lock',text:'hello',attachments:[]});
   const before=await page.evaluate(()=>JSON.stringify({model:window.saved.model,agentModels:window.saved.agentModels}));
-  await page.locator('#agent-preset-select').selectOption('Other provider');
+  const lockedOption=page.locator('#agent-preset-select option[value="Other provider"]');
+  const lockEvidence=await page.evaluate(()=>({model:window.saved.model,role:window.saved.role,timeline:window.saved.timeline,agentId:window.saved.agentId}));
+  assert.equal(await lockedOption.evaluate(option=>option.disabled),true,'A provider-changing set is disabled: '+JSON.stringify({lockEvidence,title:await lockedOption.getAttribute('title')}));
+  const presetMessages=await page.evaluate(()=>window.sentMessages.filter(message=>message.type==='agent.preset').length);
+  await page.locator('#agent-preset-select').evaluate(select=>{select.value='Other provider';select.dispatchEvent(new Event('change',{bubbles:true}));});
+  assert.equal(await page.evaluate(()=>window.sentMessages.filter(message=>message.type==='agent.preset').length),presetMessages,'Programmatic change cannot bypass the Webview guard');
   assert.equal(await page.evaluate(()=>JSON.stringify({model:window.saved.model,agentModels:window.saved.agentModels})),before);
   assert.equal(await page.locator('#agent-preset-status').isVisible(),true);
   await page.locator('#agent-preset-create summary').click();
   assert.equal(await page.locator('[data-i18n="preset.help"]').count(),0);
+  await page.locator('#agent-preset-create summary').click();
   for (const size of [{width:465,height:556},{width:560,height:650}]) {
     await page.setViewportSize(size);
     const geometry=await page.locator('#model-menu').evaluate(el=>({height:el.clientHeight,scroll:el.scrollHeight,top:el.getBoundingClientRect().top,bottom:el.getBoundingClientRect().bottom}));
-    assert.ok(geometry.scroll<=geometry.height+1,JSON.stringify({size,geometry}));
     assert.ok(geometry.top>=0 && geometry.bottom<=size.height,JSON.stringify({size,geometry}));
-    const anchor=await page.locator('#model-menu').evaluate(el=>({bottom:el.getBoundingClientRect().bottom,parentTop:el.offsetParent.getBoundingClientRect().top,position:getComputedStyle(el).position}));
-    assert.equal(anchor.position,'absolute');
-    assert.ok(Math.abs(anchor.bottom-(anchor.parentTop-6))<2,JSON.stringify(anchor));
+    assert.equal(await page.locator('#model-menu').evaluate(el=>el.scrollWidth<=el.clientWidth+1),true);
+    assert.equal(await page.locator('#model-menu').evaluate(el=>getComputedStyle(el).position),'fixed');
   }
   await page.locator('#agent-preset-delete').click();
   assert.deepEqual(await last(),{type:'agent.preset',action:'delete',scope:'chat',name:'Other provider'});
   assert.equal(await page.locator('#agent-preset-delete').isDisabled(),true);
   await emit({type:'agent.preset.result',error:'Delete failed'});
   assert.equal(await page.locator('#agent-preset-select').inputValue(),'Fast');
-  await page.locator('#agent-preset-select').selectOption('Other provider');
+  await page.locator('#agent-preset-select').evaluate(select=>{for(const option of select.options) option.disabled=false;select.value='Other provider';select.dispatchEvent(new Event('change',{bubbles:true}));});
   await page.locator('#agent-preset-delete').click();
   await emit({type:'agent.preset.result'});
   settings.presets=[

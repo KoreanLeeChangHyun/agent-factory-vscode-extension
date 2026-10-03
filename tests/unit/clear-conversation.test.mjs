@@ -1,12 +1,12 @@
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
-import { runInNewContext } from 'node:vm';
 import test from 'node:test';
 import { importTypeScript } from '../support/import-typescript.mjs';
+import { readChatSource, runChatInNewContext as runInNewContext } from "../support/chat-source.mjs";
 
 const root = new URL('../../', import.meta.url);
 const packageJson = JSON.parse(await readFile(new URL('package.json', root), 'utf8'));
-const script = await readFile(new URL('static/js/chat.js', root), 'utf8');
+const script = await readChatSource();
 const protocol = await readFile(new URL('src/protocol/messages.ts', root), 'utf8');
 const validator = await readFile(new URL('src/protocol/validator.ts', root), 'utf8');
 

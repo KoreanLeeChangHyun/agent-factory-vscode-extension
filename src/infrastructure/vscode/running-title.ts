@@ -1,4 +1,13 @@
-const FRAME_COUNT = 6;
+export const FRAME_COUNT = 6;
+
+const ACTIVE_CHILD_RUN_STATUSES = new Set(["accepted", "queued", "starting", "running", "verifying", "cancelling"]);
+
+export function shouldShowTabLoading(
+  mainRunning: boolean,
+  childRuns: readonly { readonly status: string }[] = []
+): boolean {
+  return mainRunning || childRuns.some(child => ACTIVE_CHILD_RUN_STATUSES.has(child.status));
+}
 
 /** Animates the tab icon while preserving the human-readable title. */
 export class RunningTitle {

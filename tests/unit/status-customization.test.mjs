@@ -3,8 +3,9 @@ import { readFile } from "node:fs/promises";
 import { runUiInNewContext as runInNewContext } from "../support/ui-localization.mjs";
 import test from "node:test";
 import { build } from "esbuild";
+import { readChatSource } from "../support/chat-source.mjs";
 
-const script = await readFile(new URL("../../static/js/chat.js", import.meta.url), "utf8");
+const script = await readChatSource();
 const section = (from, to) => script.slice(script.indexOf(from), script.indexOf(to, script.indexOf(from)));
 const clean = value => JSON.parse(JSON.stringify(value));
 function harness() {
@@ -43,6 +44,7 @@ function harness() {
     vscode: { postMessage(message) { sent.push(clean(message)); } }
   };
   runInNewContext([
+    section('  function normalizeModelFastModes(', '  function normalizeModel('),
     section('  function agentSettingRole(', '  function renderAgentDefaults('),
     section('  const defaultStatusItems =', '  const longPasteThreshold'),
     section('  function setStatusItems(', '  statusSettingsButton.addEventListener'),
@@ -52,7 +54,7 @@ function harness() {
     section('  function normalizeStatusItems(', '  function saveComposerSettings('),
     section('  function safeCountOrUndefined(', '  function normalizeStatusItems('),
     section('  function contextStatusLabel(', '  function renderContextStatus('),
-    section('  function formatElapsed(', '  function renderAttachments(')
+    section('  function formatElapsed(', '  const chatImageConverter =')
   ].join('\n'), context);
   const run = code => runInNewContext(code, context);
   return { context, sent, persisted, run, element, nodes };

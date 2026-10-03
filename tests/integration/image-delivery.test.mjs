@@ -71,11 +71,11 @@ test("browser image bytes reach the plugin contract on submit and send", async f
     assert.deepEqual(call.images, [{ path: stagedPath, mediaType: "image/png" }]);
   }
 
-  const pluginRuntime = fileURLToPath(new URL("../../../plugin/skills/agent/runtime/", import.meta.url));
+  const pluginRuntime = fileURLToPath(new URL("../../../plugin/runtime/", import.meta.url));
   const python = [
     "import hashlib,json,sys", "from pathlib import Path", "sys.path.insert(0, sys.argv[1])",
     "contract=json.loads(Path(sys.argv[2]).read_text(encoding='utf-8'))",
-    "from image_input import read_agent_input", "request, images = read_agent_input(Path(sys.argv[2]))",
+    "from execution.images import read_agent_input", "request, images = read_agent_input(Path(sys.argv[2]))",
     "print(json.dumps({'message': request.decode('utf-8'), 'siblings': [{'path': i['path'], 'exists': (Path(sys.argv[2]).parent / i['path']).is_file()} for i in contract['images']], 'images': [{'size': len(i['content']), 'sha256': hashlib.sha256(i['content']).hexdigest(), 'mediaType': i['mediaType']} for i in images]}))"
   ].join("; ");
   const pluginObservations = [];

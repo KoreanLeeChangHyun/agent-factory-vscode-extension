@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { importTypeScript } from '../support/import-typescript.mjs';
+import { readChatSource, runChatInNewContext as runInNewContext } from "../support/chat-source.mjs";
 
 const { ChatSessionController } = await importTypeScript('src/modules/chat/session-controller.ts');
 const { parseClientMessage } = await importTypeScript('src/protocol/validator.ts');
@@ -56,15 +57,14 @@ test('failed creation retains an accepted session for status and retry', async (
 
 test('worktree toolbar reflects queue, connection and unsupported state', async () => {
   const { readFile } = await import('node:fs/promises');
-  const { runInNewContext } = await import('node:vm');
-  const script = await readFile('static/js/chat.js', 'utf8');
+  const script = await readChatSource();
   const nodes = new Map();
   const node = id => {
     if (!nodes.has(id)) nodes.set(id, {hidden:false, disabled:false, classList:{toggle(){}},setAttribute(){}});
     return nodes.get(id);
   };
   const context = {prompt: {}, t: key => key, updateSendButton(){}, document:{getElementById:node},state:{role:'main',running:false,queueCount:0},worktreeSupported:true,worktreeBusy:false,conversationWorktree:undefined,openSettingId:undefined,worktreeButton:node('worktree-button'),worktreeLocationDescription:()=>'/workspace',closeSettingMenu(){},deployAvailable:()=>false,renderDeploy(){}};
-  runInNewContext(script.slice(script.indexOf('  function renderWorktree()'),script.indexOf('  const statusBar =')),context);
+  runInNewContext(script.slice(script.indexOf('  function renderWorktree()'),script.indexOf('  function receiveUnitCreated(')),context);
   const render=()=>runInNewContext('renderWorktree()',context);
   render(); assert.equal(node('worktree-picker').hidden,false); assert.equal(node('worktree-create').disabled,false);
   context.state.queueCount=1; render(); assert.equal(node('worktree-create').disabled,true); assert.equal(node('worktree-refresh').disabled,false);

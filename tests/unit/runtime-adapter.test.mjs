@@ -9,6 +9,7 @@ import test from "node:test";
 import { runUiInNewContext as runInNewContext } from "../support/ui-localization.mjs";
 import { build } from "esbuild";
 import { importTypeScript } from "../support/import-typescript.mjs";
+import { readChatSource } from "../support/chat-source.mjs";
 
 const runtimeTestHome = await mkdtemp(join(tmpdir(), "af-extension-home-"));
 process.env.AGENT_FACTORY_HOME = runtimeTestHome;
@@ -111,9 +112,15 @@ test("conversation history restores ordered durable messages and honors reset bo
   await writeFile(sessionPath, JSON.stringify({ agentId: "main-history", conversationId: "conversation-new" }));
   assert.deepEqual((await client.history("main-history")).messages, []);
   await run("run-004", { conversationId: "conversation-new" });
+  const question = { id: "interview-1-of-1", current: 1, total: 1, text: "Choose a route", yesNo: false,
+    options: [{ value: "safe", label: "Safe", pros: "Lower risk", cons: "Slower" },
+      { value: "fast", label: "Fast", pros: "Quicker", cons: "Higher risk" }], recommendedValue: "safe" };
+  await writeFile(join(agentRoot, "runs/run-004/events.jsonl"), JSON.stringify({ type: "interview.question", question }) + "\n");
   const restored = await client.history("main-history");
   assert.equal(restored.conversationId, "conversation-new");
-  assert.equal(restored.messages.length, 2);
+  assert.equal(restored.messages.length, 3);
+  assert.deepEqual(restored.messages.map(item => item.type), ["user", "interview", "assistant"]);
+  assert.deepEqual(restored.messages[1].question, question);
   assert.deepEqual(await client.conversations("main-history"), [{ conversationId: null, startedAt: "run-001", runCount: 2 }]);
   const archived = await client.history("main-history", { limit: 2, conversationId: null, before: "run-003" });
   assert.deepEqual(archived.messages.map(item => item.text), ["question run-001", "answer run-001", "question run-002", "answer run-002"]);
@@ -269,7 +276,7 @@ if args.command == 'init':
     print(json.dumps({'schemaVersion':1,'kind':'runtime-location','home':str(home),'projectRoot':str(root),'projectId':identity,'runtimeRoot':str(runtime),'agentsRoot':str(runtime/'agents'),'registered':True}))
     raise SystemExit(0)
 if args.command == 'capabilities':
-    print(json.dumps({'kind': 'execution-capabilities', 'schemaVersion': '0.1.0', 'submit': {'model': True, 'reasoning': False, 'fast': False, 'goal': False}, 'send': {'model': False, 'reasoning': False, 'fast': False, 'goal': False}}))
+    print(json.dumps({'kind': 'execution-capabilities', 'schemaVersion': '0.1.0', 'submit': {'model': True, 'reasoning': False, 'fast': False, 'goal': False}, 'send': {'model': False, 'reasoning': False, 'fast': False, 'goal': False, 'sessionProvider': 'claude'}}))
     raise SystemExit(0)
 print(json.dumps({'kind': 'error', 'error': {'code': 'test', 'message': 'specific runtime failure'}}))
 raise SystemExit(2)
@@ -277,7 +284,7 @@ raise SystemExit(2)
   const client = new AgentFactoryClient(script, root);
   assert.deepEqual(await client.capabilities(), {
     submit: { model: true, reasoning: false, fast: false, goal: false, images: false, taskModes: [] },
-    send: { model: false, reasoning: false, fast: false, goal: false, images: false, taskModes: [] }
+    send: { model: false, reasoning: false, fast: false, goal: false, sessionProvider: "claude", images: false, taskModes: [] }
   });
   const compatible = new AgentFactoryClient("/unused/exec.py", root);
   compatible.command = async () => ({
@@ -319,7 +326,7 @@ test("conversation reset uses the runtime command and requires retained-history 
 });
 
 test("composer shows only supported controls across draft and bound sessions", async function () {
-  const script = await readFile(new URL('../../static/js/chat.js', import.meta.url), 'utf8');
+  const script = await readChatSource();
   const functions = script.slice(script.indexOf('  function agentSettingRole('), script.indexOf('  function renderAgentDefaults(')) + '\n' + script.slice(script.indexOf('  function currentCapabilities()'), script.indexOf('  function openSetting(setting)'));
   const iconFunction = script.slice(script.indexOf('  function createBusinessModeIcon(mode)'), script.indexOf('  function handleSettingMenuKeydown(event)'));
   const element = (namespaceURI, localName) => ({
@@ -341,7 +348,7 @@ test("composer shows only supported controls across draft and bound sessions", a
     modelMenu: { querySelector() { return null; } }, submissionButton: button(),
     promptSurface: { classList: { toggle() {} } },
     state: { role: 'main', businessMode: 'normal', taskMode: 'work', capabilities: { submit: { model: true }, send: {} }, model: 'gpt-6-astra', reasoning: 'medium', fastMode: true, goalMode: true },
-    modelButton: button(), reasoningButton: button(), fastModeButton: button(), orchestrateModeButton: button(), goalModeButton: button(), workLoopButton: button(),
+    modelButton: button(), reasoningButton: button(), fastModeSetting: button(), fastModeButton: button(), fastModeValue: {}, orchestrateModeButton: button(), goalModeButton: button(), workLoopButton: button(),
     orchestrateAvailable: () => true, enterAction: () => context.state.orchestrateMode === false ? "direct" : "orchestrate",
     taskModeNames: { work: "Work" }, businessModeNames: { normal: "Normal" }, businessModeButton: button(),
     executionModeButton: button(), executionModeLabel: {}, modelLabel: {}, reasoningLabel: {}, openSettingId: undefined,
@@ -353,6 +360,7 @@ test("composer shows only supported controls across draft and bound sessions", a
   assert.equal(context.modelButton.parentElement.hidden, false);
   assert.equal(context.submissionButton.hidden, false);
   assert.equal(context.fastModeButton.hidden, true);
+  assert.equal(context.fastModeSetting.hidden, true);
   assert.equal(context.orchestrateModeButton.hidden, false);
   assert.equal(context.orchestrateModeButton.title.length > 0, true);
   context.state.agentId = 'bound-session';
@@ -403,19 +411,19 @@ test("chat panel restoration preserves composer settings and context usage", asy
 });
 
 test("webview persistence carries weekly usage through chat state restoration", async function () {
-  const script = await readFile(new URL("../../static/js/chat.js", import.meta.url), "utf8");
+  const script = await readChatSource();
   const persist = script.slice(
     script.indexOf("  function persist("),
     script.indexOf("  function safeCount(value)")
   );
   let serialized;
-  runInNewContext("let persistenceScheduled = false; let persistenceTimer, persistenceStartedAt, lastPersistedState; let noteDraft = null;\n" + persist + "\npersist(false); persist(false);", {
+  runInNewContext("let persistenceScheduled = false; let persistenceTimer, persistenceStartedAt, lastPersistedState;\n" + persist + "\npersist(false); persist(false);", {
     setTimeout,
     clearTimeout,
     currentTaskFlows: () => [],
     shortcuts: {},
     shortcutDefaultsVersion: 2,
-    selectedNotesScope: "chat",
+    chatNotes: { selectedNotesScope: "chat", noteDraft: null },
     state: {
       panelId: "panel-one",
       title: "Main Agent",
@@ -449,7 +457,7 @@ test("webview persistence carries weekly usage through chat state restoration", 
 });
 
 test("Ctx left is independent of Weekly availability", async function () {
-  const script = await readFile(new URL("../../static/js/chat.js", import.meta.url), "utf8");
+  const script = await readChatSource();
   const functions = script.slice(
     script.indexOf("  function contextStatusLabel()"),
     script.indexOf("  function renderContextStatus(item)")
@@ -788,13 +796,15 @@ test("runtime client invokes official commands and reads the bounded managed res
   }) + "\n");
   const childState = join(agentsRoot(projectRoot), "work-hidden/runs/run-child/state.json");
   await mkdir(dirname(childState), { recursive: true });
-  await writeFile(childState, JSON.stringify({ status: "completed" }));
+  await writeFile(childState, JSON.stringify({ status: "completed", executionOptions: { model: "gpt-expert", reasoningEffort: "high" } }));
   assert.deepEqual(await client.listChildSessions("main-parent"), [{
     agentId: "work-hidden",
     parentRunId: "run-parent",
     runId: "run-child",
     role: "work",
     status: "completed",
+    model: "gpt-expert",
+    reasoningEffort: "high",
     updatedAt: "2026-09-01T10:00:00Z"
   }]);
 
@@ -949,6 +959,7 @@ test("session controller binds once, sends later turns, and retains attachment r
   assert.deepEqual(calls.map((call) => call[0]), ["submit", "send"]);
   assert.equal(calls[1][1], calls[0][1]);
   assert.deepEqual(calls[0][3], execution);
+  assert.deepEqual(calls[1][3], execution);
   assert.equal(messages.filter((message) => message[0] === "assistant").length, 2);
   assert.deepEqual(messages.filter((message) => message[0] === "status"), [["status", "completed"], ["status", "completed"]]);
 });
@@ -1091,19 +1102,19 @@ test("cancellation during Goal reopen acceptance targets the accepted run once",
   assert.deepEqual(cancellations, [["main-exact", "run-reopened"]]);
 });
 
-test("native settings preserve explicit off and inherit on exact-session send", async () => {
+test("native settings forward changed model and reasoning on exact-session send", async () => {
   const { AgentFactoryClient } = await importTypeScript("src/infrastructure/agent-factory/agent-client.ts");
   const root = await mkdtemp(join(tmpdir(), "native-settings-"));
   const client = new AgentFactoryClient(new URL("../fixtures/fake-exec.py", import.meta.url).pathname, root);
-  await client.send("main-exact", "off", { model: "model-one", reasoningEffort: "high", fast: false, goalMode: false });
+  await client.send("main-exact", "off", { model: "claude-fable-5-1", reasoningEffort: "high", fast: false, goalMode: false });
   await client.send("main-exact", "inherit", {});
   const calls = (await readFile(join(root, "fake-invocations.jsonl"), "utf8")).trim().split("\n").map(JSON.parse);
   assert.equal(calls.length, 2);
   assert.equal(calls[0][calls[0].indexOf("--agent") + 1], "main-exact");
   assert.ok(calls[0].includes("--no-fast"));
   assert.ok(calls[0].includes("--no-goal-mode"));
-  assert.ok(calls[0].includes("model-one"));
-  assert.ok(calls[0].includes("high"));
+  assert.equal(calls[0][calls[0].indexOf("--model") + 1], "claude-fable-5-1");
+  assert.equal(calls[0][calls[0].indexOf("--reasoning-effort") + 1], "high");
   assert.ok(!calls[1].some(value => ["--fast", "--no-fast", "--goal-mode", "--no-goal-mode"].includes(value)));
 });
 
@@ -1630,14 +1641,14 @@ test("child discovery retries an event log appended between read and metadata va
     "The stable retry result may be cached without hiding the appended child");
 });
 
-test("child progress counts queued work and excludes completed verification", async () => {
-  const script = await readFile(new URL("../../static/js/chat.js", import.meta.url), "utf8");
+test("child progress counts queued work and verifying children but excludes completed verification", async () => {
+  const script = await readChatSource();
   const source = script.slice(script.indexOf("  function summarizeChildAgents("), script.indexOf("  function childAgentStatusLabel("));
-  const context = { agents: [{ role: "work", status: "queued" }, { role: "verification", status: "completed" }] };
+  const context = { agents: [{ role: "work", status: "queued" }, { role: "verification", status: "verifying" }, { role: "verification", status: "completed" }] };
   const result = runInNewContext(source + "\nsummarizeChildAgents(agents)", context);
-  assert.equal(result.activeUnits, 1);
+  assert.equal(result.activeUnits, 2);
   assert.equal(result.workActive, 1);
-  assert.equal(result.verificationActive, 0);
+  assert.equal(result.verificationActive, 1);
 });
 
 test("direct managed commands discover children through shell wrappers and retain exact run status", async t => {
@@ -1814,6 +1825,17 @@ test("workflow protocol and preferences preserve valid independent selections", 
   assert.equal(parseClientMessage({ type: "chat.send", id: "x", text: "", attachments: [], execution: { taskMode: "verification", fast: false, goal: false } }).execution.taskMode, "verification");
 });
 
+test("interview question protocol accepts complete payloads and rejects ambiguous choices", async () => {
+  const { parseInterviewQuestion } = await importTypeScript("src/protocol/validator.ts");
+  const question = { id: "interview-2-of-3", current: 2, total: 3, text: "Choose a route", yesNo: false,
+    options: [{ value: "safe", label: "Safe", pros: "Lower risk", cons: "Slower" },
+      { value: "fast", label: "Fast", pros: "Quicker", cons: "Higher risk" }], recommendedValue: "safe" };
+  assert.deepEqual(parseInterviewQuestion(question), question);
+  assert.equal(parseInterviewQuestion({ ...question, options: [question.options[0]] }), undefined);
+  assert.equal(parseInterviewQuestion({ ...question, options: [question.options[0], { ...question.options[1], value: "safe" }] }), undefined);
+  assert.equal(parseInterviewQuestion({ ...question, recommendedValue: "missing" }), undefined);
+});
+
 
 test("Verification action requires the managed runtime route and is not restored", async () => {
   const { taskExecution } = await importTypeScript("src/modules/chat/task-selection.ts");
@@ -1830,7 +1852,7 @@ test("Verification action requires the managed runtime route and is not restored
 });
 
 test("cancellation summaries are shown once on restore and live delivery without hiding partial results", async () => {
-  const script = await readFile(new URL("../../static/js/chat.js", import.meta.url), "utf8");
+  const script = await readChatSource();
   const helpers = script.slice(script.indexOf("  function isDuplicateCancellation("), script.indexOf("  function appendNotice("));
   const summary = "The run was cancelled.";
   const notice = { type: "notice", level: "error", text: summary };
@@ -2017,7 +2039,7 @@ print(json.dumps(state))
   assert.equal(await readFile(path, 'utf8'), JSON.stringify(state), 'Host must not rewrite runtime state');
 });
 
-test("runtime launch forwards a custom CLI filename and preserves existing session selection", async (t) => {
+test("runtime launch forwards the current CLI filename for new and existing sessions", async (t) => {
   const output = await build({
     stdin: {
       contents: 'export { AgentFactoryClient } from "./src/infrastructure/agent-factory/agent-client"; export { configureCodexCli } from "./src/infrastructure/agent-factory/process-environment";',
@@ -2042,7 +2064,7 @@ test("runtime launch forwards a custom CLI filename and preserves existing sessi
     assert.equal(received.path.split(":")[0], root);
   }
   const sent = await client.runRuntimeProcess(["send"], 5000, 65536);
-  assert.deepEqual(JSON.parse(sent.stdout).args, ["send"]);
+  assert.deepEqual(JSON.parse(sent.stdout).args, ["send", "--codex", executable]);
 });
 
 

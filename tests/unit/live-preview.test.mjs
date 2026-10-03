@@ -2,8 +2,9 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { runUiInNewContext as runInNewContext } from "../support/ui-localization.mjs";
 import test from "node:test";
+import { readChatSource } from "../support/chat-source.mjs";
 
-const script = await readFile(new URL("../../static/js/chat.js", import.meta.url), "utf8");
+const script = await readChatSource();
 const handlers = script.slice(script.indexOf('      case "chat.assistant":'), script.indexOf('      case "bots.updated":'))
   + script.slice(script.indexOf('      case "chat.delta":'), script.indexOf('      case "bots.updated":', script.indexOf('      case "chat.delta":')));
 const helpers = script.slice(script.indexOf("  // A complete message supersedes"), script.indexOf("  function upsertActivity("))
@@ -17,7 +18,7 @@ function harness() {
     messageElements: new Map(), messageRenderKeys: new Map(), eventVersion: () => 1, followLatest: false,
     assistantDisplayText: value => value,
     createId: () => "id-" + (id += 1), scheduleTimelineRender() { context.renders += 1; }, renderRunStatus() {}, renderWorkLoopPanel() {},
-    extractTaskFlows: () => ({ flows: [] }), currentTaskFlows: () => [], renderMath() {}, persist() {}
+    extractTaskFlows: () => ({ flows: [] }), currentTaskFlows: () => [], chatMarkdown: { renderMath() {} }, persist() {}
   };
   runInNewContext(helpers + "\nfunction handle(message) { switch (message.type) {\n" + handlers + "\n} }", context);
   return { context, send: message => runInNewContext("handle(" + JSON.stringify(message) + ")", context) };
@@ -70,7 +71,7 @@ test("growing previews re-render only their own content once per frame", () => {
   context.messageElements.set(entry.id, element);
   context.messageRenderKeys.set(element, key);
   const rendered = [];
-  context.markdown = { render: text => { rendered.push(text); return "<" + text + ">"; } };
+  context.chatMarkdown.markdown = { render: text => { rendered.push(text); return "<" + text + ">"; } };
   context.document.createElement = () => fakeElement();
   send({ type: "chat.delta", runId: "r1", stream: "final", id: "b", text: "llo" });
   send({ type: "chat.delta", runId: "r1", stream: "final", id: "b", text: "**" });

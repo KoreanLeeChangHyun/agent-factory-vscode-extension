@@ -256,6 +256,8 @@
   "activity.request.failed": {"en":"Request command failed", "ko":"작업 요청 명령 실패"},
   "ui.conversation.user": {"en":"You", "ko":"사용자"},
   "ui.conversation.history": {"en":"Conversation history", "ko":"대화 내역"},
+  "ui.user.questions.and.history": {"en":"User questions and conversation history", "ko":"사용자 질문 및 대화 내역"},
+  "ui.conversation.lists": {"en":"Conversation lists", "ko":"대화 목록"},
   "ui.conversation.empty": {"en":"No conversation history.", "ko":"대화 내역이 없습니다."},
   "ui.task.history.empty": {"en":"No task history.", "ko":"작업 내역이 없습니다."},
   "ui.conversation.readonly": {"en":"Previous conversation · Read only", "ko":"이전 대화 · 읽기 전용"},
@@ -286,9 +288,23 @@
   "ui.goal.active.send": {"en":"Goal active · Send message (Enter)", "ko":"Goal 활성 · 메시지 전송 (Enter)"},
   "ui.goal.active.queue": {"en":"Goal active · Add message to queue (Enter)", "ko":"Goal 활성 · 대기열에 메시지 추가 (Enter)"},
   "flow.close.failed": {"en":"Close failed workflow", "ko":"실패한 작업 흐름 종료"},
+  "flow.decision.title": {"en":"Revision limit reached", "ko":"수정 상한 도달"},
+  "flow.decision.revisions": {"en":"Revisions used: {0} of {1}", "ko":"수정 {0}/{1}회 사용"},
+  "flow.decision.revisions.used": {"en":"Revisions used: {0}", "ko":"수정 {0}회 사용"},
+  "flow.decision.findings": {"en":"Open findings: {0}", "ko":"남은 지적 {0}건"},
+  "flow.decision.continue": {"en":"Continue", "ko":"계속"},
+  "flow.decision.continue.detail": {"en":"Continue with {0} more revisions", "ko":"수정 {0}회를 추가해 계속"},
+  "flow.decision.stop": {"en":"Stop", "ko":"중지"},
+  "flow.decision.stop.detail": {"en":"Stop and end this workflow", "ko":"이 작업 흐름을 종료"},
   "flow.summary.label": {"en":"Task summary", "ko":"업무 항목 요약"},
-  "flow.summary.workers": {"en":"Workers: {0}", "ko":"작업자 {0}명"},
-  "flow.summary.workers.unknown": {"en":"Workers: unconfirmed", "ko":"작업자 미확인"},
+  "flow.assignment.worker.assigned": {"en":"Worker assigned", "ko":"작업자 배정"},
+  "flow.assignment.worker.count": {"en":"Workers: {0}", "ko":"작업자 {0}명"},
+  "flow.assignment.worker.unassigned": {"en":"Worker unassigned", "ko":"작업자 미배정"},
+  "flow.assignment.expert.assigned": {"en":"Expert assigned", "ko":"전문가 배정"},
+  "flow.assignment.expert.count": {"en":"Experts: {0}", "ko":"전문가 {0}명"},
+  "flow.assignment.expert.unassigned": {"en":"Expert unassigned", "ko":"전문가 미배정"},
+  "flow.assignment.unrecorded": {"en":"No record", "ko":"기록 없음"},
+  "flow.assignment.unrecorded.count": {"en":"No record: {0}", "ko":"기록 없음 {0}명"},
   "flow.summary.count": {"en":"{0}: {1}", "ko":"{0} {1}개"},
   "flow.summary.current": {"en":"Current task: {0}", "ko":"현재 수행 작업: {0}"},
   "flow.summary.current.task": {"en":"{0} ({1})", "ko":"{0} ({1})"},
@@ -443,9 +459,17 @@
     "en": "This model runs on another CLI; select it in a new or cleared conversation.",
     "ko": "다른 CLI에서 실행되는 모델입니다. 새 대화나 초기화한 대화에서 선택할 수 있습니다."
   },
+  "ui.model.change.unavailable.active.chat": {
+    "en": "The current CLI cannot change the model in this ongoing conversation.",
+    "ko": "현재 CLI는 진행 중인 대화에서 모델을 변경할 수 없습니다."
+  },
   "ui.reasoning": {
     "en": "Reasoning",
     "ko": "추론"
+  },
+  "ui.reasoning.change.unavailable.active.chat": {
+    "en": "The current CLI cannot change the reasoning level in this ongoing conversation.",
+    "ko": "현재 CLI는 진행 중인 대화에서 추론 수준을 변경할 수 없습니다."
   },
   "ui.context.compaction": {
     "en": "Context compaction",
@@ -472,6 +496,7 @@
     "ko": "질문 복사"
   },
   "flow.open.work.session": { "en": "Open worker session", "ko": "작업자 세션 열기" },
+  "flow.open.expert.session": { "en": "Open expert session", "ko": "전문가 세션 열기" },
   "flow.open.verification.session": { "en": "Open verifier session", "ko": "검증자 세션 열기" },
   "ui.work": {
     "en": "Work",

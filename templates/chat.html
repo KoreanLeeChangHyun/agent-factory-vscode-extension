@@ -222,11 +222,14 @@
                     <p id="agent-preset-status" role="status" hidden></p>
                     </div><div id="agent-default-fields"></div>
                   </div>
+                  <div id="agent-fast-setting" class="agent-fast-setting">
+                    <strong data-i18n="ui.fast">Fast</strong>
+                    <button id="fast-mode-button" class="agent-fast-toggle toggle-control" type="button" title="Fast mode off" aria-label="Fast mode off" aria-pressed="false" data-i18n-title="ui.fast.mode.off" data-i18n-aria-label="ui.fast.mode.off">
+                      <span id="fast-mode-value" data-i18n="ui.off">Off</span><svg class="toggle-icon" viewBox="0 0 28 18" aria-hidden="true" focusable="false"><rect x="1" y="1" width="26" height="16" rx="8"></rect><circle class="toggle-thumb" cx="9" cy="9" r="4"></circle></svg>
+                    </button>
+                  </div>
                 </div>
               </div>
-              <button id="fast-mode-button" class="mode-button toggle-control" type="button" title="Fast mode off" aria-label="Fast mode off" aria-pressed="false" data-i18n-title="ui.fast.mode.off" data-i18n-aria-label="ui.fast.mode.off">
-                <span data-i18n="ui.fast">Fast</span><svg class="toggle-icon" viewBox="0 0 28 18" aria-hidden="true" focusable="false"><rect x="1" y="1" width="26" height="16" rx="8"></rect><circle class="toggle-thumb" cx="9" cy="9" r="4"></circle></svg>
-              </button>
               <button id="orchestrate-mode-button" class="mode-button toggle-control" type="button" title="Orchestrator mode on · Click for worker mode" aria-label="Orchestrator mode on · Click for worker mode" aria-pressed="true" data-i18n-title="ui.orchestrate.mode.on" data-i18n-aria-label="ui.orchestrate.mode.on">
                 <span data-i18n="ui.orchestrate">Orchestrate</span><svg class="toggle-icon" viewBox="0 0 28 18" aria-hidden="true" focusable="false"><rect x="1" y="1" width="26" height="16" rx="8"></rect><circle class="toggle-thumb" cx="9" cy="9" r="4"></circle></svg>
               </button>
@@ -267,8 +270,17 @@
                 <button id="question-button" class="utility-button question-button circular-action" type="button" title="User questions" aria-label="User questions" aria-haspopup="dialog" aria-expanded="false" aria-controls="question-menu" data-i18n-title="ui.user.questions" data-i18n-aria-label="ui.user.questions">
                   <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M14 3H5a2 2 0 0 0-2 2v11l4-3h7a2 2 0 0 0 2-2V5a2 2 0 0 0-2-2Z"></path><path d="M8 16v1a2 2 0 0 0 2 2h7l4 3V11a2 2 0 0 0-2-2"></path></svg>
                 </button>
-                <div id="question-menu" class="utility-list-menu question-menu" role="dialog" aria-label="User questions" hidden data-i18n-aria-label="ui.user.questions">
-                  <div id="question-list" class="question-list"></div>
+                <div id="question-menu" class="utility-list-menu question-menu" role="dialog" aria-label="User questions and conversation history" hidden data-i18n-aria-label="ui.user.questions.and.history">
+                  <div class="question-tabs" role="tablist" aria-label="Conversation lists" data-i18n-aria-label="ui.conversation.lists">
+                    <button id="question-tab-questions" type="button" role="tab" aria-selected="true" aria-controls="question-panel-questions" tabindex="0" data-question-tab="questions" data-i18n="ui.user.questions">User questions</button>
+                    <button id="question-tab-history" type="button" role="tab" aria-selected="false" aria-controls="question-panel-history" tabindex="-1" data-question-tab="history" data-i18n="ui.conversation.history">Conversation history</button>
+                  </div>
+                  <div id="question-panel-questions" class="question-tab-panel" role="tabpanel" aria-labelledby="question-tab-questions">
+                    <div id="question-list" class="question-list"></div>
+                  </div>
+                  <div id="question-panel-history" class="question-tab-panel" role="tabpanel" aria-labelledby="question-tab-history" hidden>
+                    <div id="conversation-history-list" class="conversation-history-list"></div>
+                  </div>
                 </div>
               </div>
             </div>
@@ -290,14 +302,6 @@
                     <svg class="chevron-icon" viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="m6 4 4 4-4 4"></path></svg>
                   </summary>
                   <div id="task-history-list" class="task-history-list"></div>
-                </details>
-                <details id="conversation-history" class="task-history">
-                  <summary class="setting-option" role="menuitem" aria-controls="conversation-history-list">
-                    <svg class="history-category-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M5 4h14a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H9l-6 3V6a2 2 0 0 1 2-2Zm2 5h10M7 13h6"></path></svg>
-                    <span data-i18n="ui.conversation.history">Conversation history</span>
-                    <svg class="chevron-icon" viewBox="0 0 16 16" aria-hidden="true"><path d="m6 4 4 4-4 4"></path></svg>
-                  </summary>
-                  <div id="conversation-history-list" class="task-history-list"></div>
                 </details>
               </div>
               <button id="submission-button" class="setting-button circular-action" type="button" title="Agent Factory" aria-label="Agent Factory" aria-haspopup="menu" aria-expanded="false" aria-controls="submission-menu" data-i18n-title="ui.more.ways.to.submit" data-i18n-aria-label="ui.more.ways.to.submit">
@@ -449,6 +453,17 @@
     <script nonce="{{nonce}}" src="{{ansiScriptUri}}"></script>
     <script nonce="{{nonce}}" src="{{executionReferencesScriptUri}}"></script>
     <script nonce="{{nonce}}" src="{{localizationScriptUri}}"></script>
+    <script nonce="{{nonce}}" src="{{chatModuleBaseUri}}/chat-agent-settings.js"></script>
+    <script nonce="{{nonce}}" src="{{chatModuleBaseUri}}/chat-history.js"></script>
+    <script nonce="{{nonce}}" src="{{chatModuleBaseUri}}/chat-image-converter.js"></script>
+    <script nonce="{{nonce}}" src="{{chatModuleBaseUri}}/chat-markdown.js"></script>
+    <script nonce="{{nonce}}" src="{{chatModuleBaseUri}}/chat-notes.js"></script>
+    <script nonce="{{nonce}}" src="{{chatModuleBaseUri}}/chat-providers.js"></script>
+    <script nonce="{{nonce}}" src="{{chatModuleBaseUri}}/chat-sudo.js"></script>
+    <script nonce="{{nonce}}" src="{{chatModuleBaseUri}}/chat-syntax.js"></script>
+    <script nonce="{{nonce}}" src="{{chatModuleBaseUri}}/chat-task-flow.js"></script>
+    <script nonce="{{nonce}}" src="{{chatModuleBaseUri}}/chat-terminal.js"></script>
+    <script nonce="{{nonce}}" src="{{chatModuleBaseUri}}/chat-work-units.js"></script>
     <script nonce="{{nonce}}" src="{{scriptUri}}"></script>
   </body>
 </html>

@@ -69,6 +69,32 @@ async function checkAutoScroll(page) {
   assert.ok(await page.locator('#timeline').evaluate(element => Math.abs(element.scrollHeight - element.clientHeight - element.scrollTop) <= 1));
   const indicator = page.locator('#auto-scroll-state');
   assert.equal(await indicator.getAttribute('data-state'), 'following');
+  const gap = () => page.locator('#timeline').evaluate(element => element.scrollHeight - element.clientHeight - element.scrollTop);
+  // Upward input pauses following before the browser applies the scroll and before streaming renders.
+  await page.locator('#timeline').evaluate(element => element.dispatchEvent(new WheelEvent('wheel', { deltaY: -120, bubbles: true, cancelable: true })));
+  await emit({ type: 'chat.assistant', text: 'Streaming after upward wheel\n\nMore content' });
+  assert.equal(await indicator.getAttribute('data-state'), 'paused', 'Upward wheel input must pause following');
+  assert.ok(await gap() > 24, 'Streaming after upward wheel must not pull the transcript down');
+  await page.locator('#jump-to-bottom').evaluate(button => button.click());
+  await settle();
+  assert.equal(await indicator.getAttribute('data-state'), 'following', 'Jump to bottom resumes following');
+  // An upward scroll in the same frame as a viewport resize must not be undone by the resize handler.
+  await page.locator('#timeline').evaluate(element => { element.style.maxHeight = element.clientHeight - 40 + 'px'; element.scrollTop -= 200; });
+  await settle();
+  await emit({ type: 'chat.assistant', text: 'Streaming after resize and upward scroll\n\nMore content' });
+  assert.equal(await indicator.getAttribute('data-state'), 'paused', 'Upward scroll during a resize must pause following');
+  assert.ok(await gap() > 24, 'Resize handling must not pull the transcript down after upward scroll');
+  await page.locator('#timeline').evaluate(element => { element.style.maxHeight = ''; });
+  await page.locator('#jump-to-bottom').evaluate(button => button.click());
+  await settle();
+  assert.equal(await indicator.getAttribute('data-state'), 'following');
+  // Layout growth while following at the bottom keeps following.
+  await page.locator('#timeline').evaluate(element => { element.style.maxHeight = element.clientHeight - 40 + 'px'; });
+  await settle();
+  await page.locator('#timeline').evaluate(element => { element.style.maxHeight = ''; });
+  await emit({ type: 'chat.assistant', text: 'Streaming after layout changes\n\nMore content' });
+  assert.equal(await indicator.getAttribute('data-state'), 'following', 'Layout changes at the bottom keep following');
+  assert.ok(Math.abs(await gap()) <= 1);
   await page.locator('#timeline').evaluate(element => { element.scrollTop = 150; });
   await settle();
   assert.equal(await toggle.getAttribute('aria-pressed'), 'true');

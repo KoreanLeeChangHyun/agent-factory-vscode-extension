@@ -29,7 +29,7 @@ test('interview confirmation retains the request and clickable Yes/No continuati
   const request = 'Discuss the current login flow';
   const guided = withBusinessMode(request, 'interview');
   assert.match(guided, /before proposing an interview/);
-  assert.match(guided, /decision cells exactly Yes and No/);
+  assert.match(guided, /exactly two options whose labels are Yes and No and whose stable values are 1 and 2/);
   assert.match(guided, /Wait for the Human's answer/);
   assert.match(guided, /No \(2\) does not start it/);
   const restored = historyPresentation(guided, 'direct', false);

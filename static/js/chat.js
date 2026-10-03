@@ -39,22 +39,19 @@
   }
   function reasoningDisplayLabel(value) { return value ? uiLocale() === "en" ? value : t("ui." + value) : t("ui.default"); }
 
-  const markdown = typeof globalThis.markdownit === "function"
-    ? globalThis.markdownit({ html: false, linkify: true, typographer: false }).use(markdownMath).use(markdownSafeMarkup)
-    : undefined;
-  // Heavy renderers load beside markdown-it only when a message needs them.
-  const vendorBase = document.querySelector('script[src*="markdown-it.min.js"]')?.src;
-  const scriptNonce = document.currentScript?.nonce;
-  const vendorLoads = new Map();
-  const mermaidImages = new Map();
-  let mermaidQueue = Promise.resolve();
-  let mermaidSequence = 0;
+  const chatSyntax = globalThis.AgentFactoryChat.syntax({
+    createActivityPhase, t, renderTimeline,
+    get state() { return state; }
+  });
+  const chatMarkdown = globalThis.AgentFactoryChat.markdown({
+    t, vscode, applySyntaxHighlighting: chatSyntax.applySyntaxHighlighting,
+    get state() { return state; }
+  });
   const timeline = document.getElementById("timeline");
   const jumpToBottom = document.getElementById("jump-to-bottom");
-  let commandDisclosureObserver;
-  let commandDisclosureFrame;
-  let commandOutputObserver;
-  let commandOutputFrame;
+  const chatTerminal = globalThis.AgentFactoryChat.terminal({
+    t, createActivityPhase, timeline, chatSyntax
+  });
   const emptyState = document.getElementById("empty-state");
   const prompt = document.getElementById("prompt");
   const promptSurface = prompt.closest(".prompt-surface");
@@ -70,74 +67,14 @@
   const submissionButton = document.getElementById("submission-button");
   const submissionMenu = document.getElementById("submission-menu");
   const inputFeedback = document.getElementById("input-feedback");
-  const sudoPanel = document.createElement("form");
-  sudoPanel.className = "sudo-panel";
-  sudoPanel.hidden = true;
-  sudoPanel.setAttribute("aria-label", t("sudo.title"));
-  const sudoTitle = document.createElement("strong");
-  const sudoCommand = document.createElement("code");
-  const sudoContext = document.createElement("span");
-  sudoContext.className = "sudo-context";
-  const sudoPassword = document.createElement("input");
-  sudoPassword.type = "password";
-  sudoPassword.autocomplete = "off";
-  sudoPassword.setAttribute("aria-label", t("sudo.password"));
-  const sudoSubmit = document.createElement("button");
-  sudoSubmit.type = "submit";
-  const sudoCancel = document.createElement("button");
-  sudoCancel.type = "button";
-  const sudoStatus = document.createElement("span");
-  sudoStatus.setAttribute("role", "status");
-  sudoPanel.append(sudoTitle, sudoCommand, sudoContext, sudoPassword, sudoSubmit, sudoCancel, sudoStatus);
-  inputFeedback.after(sudoPanel);
-  let sudoChallenge = null;
-  sudoCancel.onclick = function () {
-    if (sudoChallenge) vscode.postMessage({ type: "sudo.reply", id: sudoChallenge.id, cancelled: true });
-    closeSudoPanel();
-  };
-  sudoPanel.onsubmit = async function (event) {
-    event.preventDefault();
-    const challenge = sudoChallenge;
-    if (!challenge || !sudoPassword.value) return;
-    const secret = sudoPassword.value;
-    sudoPassword.value = "";
-    sudoSubmit.disabled = true;
-    sudoCancel.disabled = true;
-    sudoStatus.textContent = t("sudo.encrypting");
-    try {
-      const pem = challenge.publicKey.replace(/-----[^-]+-----/g, "").replace(/\s/g, "");
-      const keyBytes = Uint8Array.from(atob(pem), ch => ch.charCodeAt(0));
-      const publicKey = await crypto.subtle.importKey("spki", keyBytes, { name: "RSA-OAEP", hash: "SHA-256" }, false, ["encrypt"]);
-      const aes = await crypto.subtle.generateKey({ name: "AES-GCM", length: 256 }, true, ["encrypt"]);
-      const rawKey = await crypto.subtle.exportKey("raw", aes);
-      const iv = crypto.getRandomValues(new Uint8Array(12));
-      const encrypted = await crypto.subtle.encrypt({ name: "AES-GCM", iv }, aes, new TextEncoder().encode(secret));
-      const wrappedKey = await crypto.subtle.encrypt({ name: "RSA-OAEP" }, publicKey, rawKey);
-      new Uint8Array(rawKey).fill(0);
-      const b64 = bytes => {
-        const value = new Uint8Array(bytes);
-        let binary = "";
-        for (let index = 0; index < value.length; index += 8192) binary += String.fromCharCode(...value.subarray(index, index + 8192));
-        return btoa(binary);
-      };
-      vscode.postMessage({ type: "sudo.reply", id: challenge.id, key: b64(wrappedKey), iv: b64(iv), data: b64(encrypted) });
-      sudoStatus.textContent = t("sudo.running");
-    } catch {
-      sudoStatus.textContent = t("sudo.encryption.failed");
-      sudoSubmit.disabled = false;
-      sudoCancel.disabled = false;
-    }
-  };
-  function closeSudoPanel() {
-    sudoChallenge = null;
-    sudoPassword.value = "";
-    sudoStatus.textContent = "";
-    sudoPanel.hidden = true;
-    sudoCancel.disabled = false;
-  }
+  const chatSudo = globalThis.AgentFactoryChat.sudo({
+    t, inputFeedback, vscode
+  });
 
   const modelMenu = document.getElementById("model-menu");
+  const fastModeSetting = document.getElementById("agent-fast-setting");
   const fastModeButton = document.getElementById("fast-mode-button");
+  const fastModeValue = document.getElementById("fast-mode-value");
   const orchestrateModeButton = document.getElementById("orchestrate-mode-button");
   const businessModeNames = () => ({ normal: t("ui.normal"), contract: t("ui.contract"), interview: t("ui.interview"), planning: t("ui.planning"), design: t("ui.design"), migration: t("ui.migration"), lessons: t("ui.lessons"), pipeline: t("ui.pipeline") });
   const taskModeNames = () => ({ orchestrate: t("ui.orchestrate.mode"), plan: t("ui.plan"), verification: t("ui.verification"), direct: t("ui.direct"), work: t("ui.work"), "plan-work": t("ui.plan.work"), "work-verification": t("ui.work.verification"), "plan-work-verification": t("ui.plan.work.verification") });
@@ -148,6 +85,7 @@
   const questionButton = document.getElementById("question-button");
   const questionMenu = document.getElementById("question-menu");
   const questionList = document.getElementById("question-list");
+  const questionTabs = [...questionMenu.querySelectorAll("[data-question-tab]")];
   const factoryBot = document.getElementById("factory-bot");
   const runStatus = document.getElementById("run-status");
   const runStatusToggle = document.getElementById("run-status-toggle");
@@ -159,245 +97,12 @@
   const runStageList = document.getElementById("run-stage-list");
   const runStopButton = document.getElementById("run-stop-button");
   const attachmentList = document.getElementById("attachment-list");
-  const worktreeButton = document.getElementById("worktree-button");
-  const worktreeMenu = document.getElementById("worktree-menu");
-  worktreeButton.addEventListener("click", () => openSetting("worktree"));
-  let conversationWorktree;
-  let worktreeBusy = false;
-  let worktreeSupported = false;
-  for (const action of ["create", "merge", "refresh"]) {
-    document.getElementById("worktree-" + action)?.addEventListener("click", () => {
-      if (action !== "refresh") closeSettingMenu(false);
-      else vscode.postMessage({ type: "worktree.repositories" });
-      vscode.postMessage({ type: "worktree." + action });
-    });
-    document.getElementById("worktree-" + action)?.addEventListener("keydown", handleSettingMenuKeydown);
-  }
-  const unitDialog = document.getElementById("unit-create-dialog");
-  const unitForm = document.getElementById("unit-create-form");
-  const unitRepository = document.getElementById("unit-repository");
-  const unitName = document.getElementById("unit-name");
-  const unitBase = document.getElementById("unit-base");
-  const unitError = document.getElementById("unit-create-error");
-  const unitStatus = document.getElementById("unit-create-status");
-  let unitRepositories = [], unitBusy = false;
-  function unitSelectRepository() {
-    const repo = unitRepositories.find(r => r.path === unitRepository.value);
-    unitBase.replaceChildren();
-    for (const branch of repo?.branches || []) { const option = document.createElement("option"); option.value = branch; option.textContent = branch; unitBase.append(option); }
-    if (repo?.defaultBranch) unitBase.value = repo.defaultBranch;
-  }
-  function unitSetBusy(busy) {
-    unitBusy = busy;
-    for (const control of unitForm.querySelectorAll("input, select, textarea, button")) control.disabled = busy;
-    document.getElementById("unit-create-submit").disabled = busy;
-    unitForm.setAttribute("aria-busy", String(busy));
-  }
-  function openUnitCreate(repository) {
-    closeSettingMenu(false);
-    unitForm.reset(); unitError.hidden = true;
-    unitRepository.replaceChildren();
-    for (const repo of unitRepositories) { const option = document.createElement("option"); option.value = repo.path; option.textContent = repo.path; unitRepository.append(option); }
-    unitRepository.value = repository;
-    unitSelectRepository();
-    unitSetBusy(false); unitStatus.textContent = "";
-    unitDialog.showModal(); unitName.focus();
-  }
-  unitRepository.addEventListener("change", unitSelectRepository);
-  document.getElementById("unit-create-cancel").addEventListener("click", () => unitDialog.close());
-  unitDialog.addEventListener("cancel", event => { if (unitBusy) event.preventDefault(); });
-  unitDialog.addEventListener("keydown", event => {
-    if (event.key !== "Tab") return;
-    const controls = [...unitDialog.querySelectorAll("input:not(:disabled), select:not(:disabled), textarea:not(:disabled), button:not(:disabled)")];
-    const first = controls[0], last = controls.at(-1);
-    if (!first) { event.preventDefault(); return; }
-    if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); }
-    else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
+  const chatWorkUnits = globalThis.AgentFactoryChat.workUnits({
+    openSetting, closeSettingMenu, vscode, handleSettingMenuKeydown, t, promptSurface, prompt,
+    updateSendButton,
+    get state() { return state; },
+    get openSettingId() { return openSettingId; }
   });
-  unitDialog.addEventListener("close", () => worktreeButton.focus());
-  unitForm.addEventListener("submit", event => {
-    event.preventDefault();
-    if (unitBusy || !unitForm.reportValidity()) return;
-    unitError.hidden = true; unitStatus.textContent = t("unit.creating");
-    unitSetBusy(true);
-    vscode.postMessage({ type: "worktree.create", repository: unitRepository.value, name: unitName.value.trim(), base: unitBase.value });
-  });
-  function positionWorktreeMenu() {
-    if (worktreeMenu.hidden) return;
-    const anchor = worktreeButton.getBoundingClientRect();
-    const margin = 8;
-    const width = Math.min(320, window.innerWidth - margin * 2);
-    worktreeMenu.style.width = width + "px";
-    worktreeMenu.style.left = Math.max(margin, Math.min(anchor.right - width, window.innerWidth - width - margin)) + "px";
-    worktreeMenu.style.bottom = Math.max(margin, window.innerHeight - anchor.top + 8) + "px";
-    worktreeMenu.style.maxHeight = Math.max(48, anchor.top - margin * 2) + "px";
-  }
-  window.addEventListener("resize", positionWorktreeMenu);
-  const worktreePositionObserver = new ResizeObserver(positionWorktreeMenu);
-  worktreePositionObserver.observe(document.getElementById("worktree-picker"));
-  worktreePositionObserver.observe(promptSurface);
-
-  // GitHub deploy: the host detects manually dispatchable workflows; the dialog collects
-  // their declared inputs and requires a review step before anything is dispatched.
-  let deployTarget, deployError = "", deployLoading = false, deployRun, deployRepository = "", deployWorkflow, deployValues, deployBusy = false;
-  const deployDialog = document.getElementById("deploy-dialog");
-  const deployForm = document.getElementById("deploy-form");
-  const deployFields = document.getElementById("deploy-fields");
-  const deployErrorNode = document.getElementById("deploy-error");
-  const deployStatusNode = document.getElementById("deploy-status");
-  function deployAvailable() { return Boolean(deployTarget?.workflows?.length || deployRun); }
-  function deployActive() { return Boolean(deployRun && deployRun.status !== "completed"); }
-  function deployStateLabel(run) {
-    if (run.status !== "completed") return t("deploy.state.running", run.status);
-    return run.conclusion === "success" ? t("deploy.state.success") : t("deploy.state.failed", run.conclusion || run.status);
-  }
-  function renderDeploy() {
-    const controls = document.getElementById("deploy-controls");
-    if (!controls) return;
-    controls.hidden = state.role !== "main" || (!deployAvailable() && !deployError);
-    const summary = document.getElementById("deploy-summary");
-    summary.textContent = deployLoading ? t("deploy.detecting") : deployError || (deployTarget ? deployTarget.repository + " · " + deployTarget.ref : "");
-    const list = document.getElementById("deploy-workflows");
-    list.replaceChildren();
-    for (const workflow of deployTarget?.workflows || []) {
-      for (const secret of workflow.missingSecrets || []) {
-        const setup = document.createElement("button");
-        setup.type = "button"; setup.className = "setting-option"; setup.setAttribute("role", "menuitem");
-        setup.textContent = t("deploy.token.setup", secret);
-        setup.title = t("deploy.token.setup.title", secret);
-        setup.dataset.deploySecret = secret;
-        setup.addEventListener("click", () => { closeSettingMenu(false); vscode.postMessage({ type: "deploy.token", secret: secret }); });
-        setup.addEventListener("keydown", handleSettingMenuKeydown);
-        list.append(setup);
-      }
-      const button = document.createElement("button");
-      button.type = "button"; button.className = "setting-option"; button.setAttribute("role", "menuitem");
-      button.textContent = t("deploy.workflow", workflow.name);
-      button.title = workflow.path;
-      button.disabled = deployActive() || Boolean(workflow.missingSecrets?.length);
-      button.addEventListener("click", () => openDeploy(workflow));
-      button.addEventListener("keydown", handleSettingMenuKeydown);
-      list.append(button);
-    }
-    const link = document.getElementById("deploy-run-link");
-    link.hidden = !deployRun;
-    if (deployRun) link.textContent = t("deploy.run.link", deployRun.workflow, deployStateLabel(deployRun));
-    document.getElementById("deploy-refresh").disabled = deployLoading;
-  }
-  function requestDeployTargets() {
-    deployLoading = true; deployError = "";
-    renderDeploy();
-    vscode.postMessage({ type: "deploy.detect" });
-  }
-  document.getElementById("deploy-refresh").addEventListener("click", requestDeployTargets);
-  document.getElementById("deploy-refresh").addEventListener("keydown", handleSettingMenuKeydown);
-  document.getElementById("deploy-run-link").addEventListener("click", () => { if (deployRun?.url) vscode.postMessage({ type: "link.open", href: deployRun.url }); });
-  document.getElementById("deploy-run-link").addEventListener("keydown", handleSettingMenuKeydown);
-  function deploySetBusy(busy) {
-    deployBusy = busy;
-    for (const control of deployForm.querySelectorAll("input, select, button")) control.disabled = busy;
-    deployForm.setAttribute("aria-busy", String(busy));
-  }
-  function openDeploy(workflow) {
-    closeSettingMenu(false);
-    deployWorkflow = workflow; deployValues = undefined;
-    document.getElementById("deploy-target").textContent = t("deploy.target", deployTarget.repository, deployTarget.ref, workflow.name);
-    deployFields.replaceChildren();
-    for (const input of workflow.inputs) {
-      const label = document.createElement("label");
-      const caption = document.createElement("span");
-      caption.textContent = input.name + (input.required ? " *" : "");
-      let control;
-      if (input.type === "boolean") {
-        label.className = "deploy-checkbox";
-        control = document.createElement("input"); control.type = "checkbox";
-        control.checked = input.default === "true";
-      } else if (input.type === "choice") {
-        control = document.createElement("select");
-        for (const value of input.options || []) { const option = document.createElement("option"); option.value = option.textContent = value; control.append(option); }
-        if (input.default) control.value = input.default;
-      } else {
-        control = document.createElement("input");
-        control.type = input.type === "number" ? "number" : "text";
-        control.autocomplete = "off";
-        control.value = input.default ?? input.suggestion ?? "";
-        if (input.suggestion) control.pattern = "\\d+\\.\\d+\\.\\d+";
-      }
-      control.dataset.deployInput = input.name;
-      control.required = input.required && input.type !== "boolean";
-      if (input.type === "boolean") label.append(control, caption); else label.append(caption, control);
-      if (input.description) { const hint = document.createElement("small"); hint.textContent = input.description; label.append(hint); }
-      deployFields.append(label);
-    }
-    deployErrorNode.hidden = true; deployStatusNode.textContent = "";
-    deploySetBusy(false);
-    deployDialog.showModal();
-    deployFields.querySelector("input, select")?.focus();
-  }
-  function collectDeployValues() {
-    const values = {};
-    for (const control of deployFields.querySelectorAll("[data-deploy-input]")) {
-      values[control.dataset.deployInput] = control.type === "checkbox" ? control.checked : control.value.trim();
-    }
-    return values;
-  }
-  deployForm.addEventListener("submit", event => {
-    event.preventDefault();
-    if (deployBusy || !deployWorkflow) return;
-    deployErrorNode.hidden = true;
-    {
-      for (const control of deployFields.querySelectorAll("[data-deploy-input]")) {
-        if (control.required && !control.value.trim()) { control.focus(); deployErrorNode.textContent = t("deploy.required", control.dataset.deployInput); deployErrorNode.hidden = false; return; }
-        if (control.pattern && control.value && !new RegExp("^(?:" + control.pattern + ")$").test(control.value.trim())) {
-          control.focus(); deployErrorNode.textContent = t("deploy.invalid.version", control.dataset.deployInput); deployErrorNode.hidden = false; return;
-        }
-      }
-      // One confirmation: the dialog itself shows the target and values.
-      deployValues = collectDeployValues();
-    }
-    deploySetBusy(true);
-    deployStatusNode.textContent = t("deploy.dispatching");
-    vscode.postMessage({ type: "deploy.run", workflowId: deployWorkflow.id, inputs: deployValues });
-  });
-  document.getElementById("deploy-cancel").addEventListener("click", () => deployDialog.close());
-  deployDialog.addEventListener("cancel", event => { if (deployBusy) event.preventDefault(); });
-  deployDialog.addEventListener("close", () => worktreeButton.focus());
-  function worktreeLocationDescription() {
-    const tree = conversationWorktree?.worktree;
-    const isolated = tree && tree.phase !== "merged";
-    return t(isolated ? "worktree.isolated" : "worktree.workspace") +
-      (conversationWorktree?.workingDirectory ? " · " + conversationWorktree.workingDirectory : "") +
-      (conversationWorktree?.branch ? " · " + conversationWorktree.branch : "") +
-      (conversationWorktree?.conflicts?.length ? " · " + t("worktree.conflicts", conversationWorktree.conflicts.join(", ")) : "");
-  }
-
-  function renderWorktree() {
-    const controls = document.getElementById("worktree-controls");
-    if (!controls) return;
-    const unavailable = !worktreeSupported || state.role !== "main";
-    const pickerHidden = state.role !== "main" || (unavailable && !deployAvailable());
-    document.getElementById("worktree-picker").hidden = pickerHidden;
-    controls.hidden = unavailable;
-    renderDeploy();
-    if (pickerHidden && openSettingId === "worktree") closeSettingMenu(false);
-    const tree = conversationWorktree?.worktree;
-    const isolated = tree && tree.phase !== "merged";
-    worktreeButton.classList.toggle("is-connected", Boolean(isolated));
-    worktreeButton.title = t("worktree.isolated");
-    worktreeButton.setAttribute("aria-label", t("worktree.isolated"));
-    const summary = document.getElementById("worktree-summary");
-    summary.hidden = !isolated;
-    summary.textContent = isolated ? (tree.name || tree.branch) + " · " + tree.branch : "";
-    const busy = worktreeBusy || state.running || (state.pendingRequests || []).length > 0 || state.queueCount > 0;
-    const create = document.getElementById("worktree-create");
-    const merge = document.getElementById("worktree-merge");
-    create.hidden = true;
-    merge.hidden = (!isolated && !(tree?.workUnit && !tree.cleaned)) || tree?.phase === "creating";
-    prompt.readOnly = Boolean(tree?.workUnit && tree.phase === "merged");
-    updateSendButton();
-    create.disabled = merge.disabled = busy;
-    document.getElementById("worktree-refresh").disabled = worktreeBusy;
-  }
   const statusBar = document.getElementById("status-bar");
   const agentsMenu = document.getElementById("agents-menu");
   const agentsList = document.getElementById("agents-list");
@@ -413,7 +118,7 @@
   const statusCatalog = () => ({
     status: [t("ui.run.status"), t("ui.current.running.queued.or.decision.status")],
     agents: [t("ui.active.agents"), t("ui.number.of.main.agent.work.and.verification.agents")],
-    project: [t("worktree.location"), worktreeLocationDescription()],
+    project: [t("worktree.location"), chatWorkUnits.worktreeLocationDescription()],
     branch: [t("ui.git.branch"), t("ui.current.project.branch.or.when.unknown")],
     context: [t("ui.content.remaining.percentage"), t("ui.remaining.percentage.of.the.content.window.unavailable.without.usage.or.window.size")],
     queue: [t("ui.queued.messages"), t("ui.number.of.messages.waiting.to.send.in.this.chat")],
@@ -479,7 +184,7 @@
     submitShortcut("submitGoal", "workflow", "Alt+Shift+G", () => t("ui.goal"), "direct", "normal", true),
     { id: "openContracts", group: "history", fallback: "Alt+Shift+K", history: "contract-list", label: () => t("contracts.title") },
     { id: "openTaskHistory", group: "history", fallback: "Alt+Shift+T", history: "task-history", label: () => t("flow.history") },
-    { id: "openConversationHistory", group: "history", fallback: "Alt+Shift+H", history: "conversation-history", label: () => t("ui.conversation.history") },
+    { id: "openConversationHistory", group: "history", fallback: "Alt+Shift+H", questionTab: "history", label: () => t("ui.conversation.history") },
     { id: "botMenu", group: "bot", bot: true, fallback: "Alt+Shift+B", label: () => t("ui.shortcuts.bot.menu", botDisplayName()) },
     { id: "botFeed", group: "bot", bot: true, fallback: "Alt+Shift+1", button: '[data-bot-action="feed"]', label: () => t("bot.feed") },
     { id: "botPlay", group: "bot", bot: true, fallback: "Alt+Shift+2", button: '[data-bot-action="play"]', label: () => t("bot.play") },
@@ -574,6 +279,7 @@
     capabilities: undefined,
     running: saved?.running === true,
     agentModels: saved?.agentModels || {},
+    modelFastModes: normalizeModelFastModes(saved?.modelFastModes),
     model: normalizeModel(saved?.model),
     reasoning: normalizeSettingValue(saved?.reasoning, settingOptions.reasoning),
     agentSettingsScope: ["global", "project", "chat"].includes(saved?.agentSettingsScope) ? saved.agentSettingsScope : undefined,
@@ -609,8 +315,6 @@
       totalCalled: Number.isInteger(saved?.workUnits?.totalCalled) ? saved.workUnits.totalCalled : 0
     }
   };
-  let syntaxRevision = 0;
-  let themeUpdate = 0;
   let botOutcome;
   let botWaveTimer;
   let botIdleTimer;
@@ -890,20 +594,19 @@
   let followLatest = true;
   let autoScrollFrame;
   let timelineViewportHeight;
-  const taskFlowParseCache = new WeakMap();
-  let taskFlowSnapshot;
+  let timelineScrollTop = 0;
+  const chatTaskFlow = globalThis.AgentFactoryChat.taskFlow({
+    indexedTimeline, state, t, vscode, runStageList, selectQuestionTab, historyEmpty, runDetails,
+    runStatus, runStatusToggle, runStatusAgents, runDetailsSummary, runStopButton,
+    childAgentStatusLabel
+  });
   const messageRenderKeys = new WeakMap();
   const eventVersions = new WeakMap();
   const managedCommandCache = new WeakMap();
-  const lazyCommandOutputs = new WeakMap();
   let nextEventVersion = 0;
   let botRenderKey;
   const statusElements = new Map();
   const statusRenderKeys = new WeakMap();
-  const dirtyCommandBlocks = new Set();
-  const dirtyOutputBlocks = new Set();
-  let measureAllCommands = false;
-  let measureAllOutputs = false;
   const timelineIndexes = new WeakMap();
   let nextTimelineIndex = 0;
   let questionSourceId;
@@ -915,7 +618,14 @@
   const messageViewStates = new Map();
   let timelineEndId;
 
-
+  const chatAgentSettings = globalThis.AgentFactoryChat.agentSettings({
+    state, t, fastModeButton, currentCapabilities, settingOptions, reasoningDisplayLabel, createId,
+    uiLocale, normalizeModelFastModes, persist, saveComposerSettings, updateModeControls, vscode,
+    modelMenu, createModeIcon, fastModeSetting, closeSettingMenu, executionModeName,
+    executionModeExplanation, renderStatusBar,
+    get openSettingId() { return openSettingId; },
+    get chatProviders() { return chatProviders; }
+  });
   globalThis.AgentFactoryI18n.apply(document, uiLocale());
   document.documentElement.lang = uiLocale();
   prompt.value = state.draft;
@@ -933,20 +643,20 @@
 
   runStatusToggle.addEventListener("click", function () {
     state.runPanelExpanded = !state.runPanelExpanded;
-    renderWorkLoopPanel();
+    chatTaskFlow.renderWorkLoopPanel();
     if (state.runPanelExpanded && state.role === "main") {
       vscode.postMessage({ type: "agents.request" });
     }
     persist();
   });
-  runStopButton.addEventListener("click", cancelRun);
+  runStopButton.addEventListener("click", () => cancelRun());
 
   let syntaxThemeClass = document.body.className;
   new MutationObserver(function () {
     const nextThemeClass = document.body.className;
     if (nextThemeClass === syntaxThemeClass) return;
     syntaxThemeClass = nextThemeClass;
-    syntaxRevision += 1;
+    chatSyntax.syntaxRevision += 1;
     renderTimeline();
   }).observe(document.body, { attributes: true, attributeFilter: ["class"] });
 
@@ -1182,6 +892,11 @@
       details.querySelector("summary").focus({ preventScroll: true });
       return;
     }
+    if (action.questionTab) {
+      if (state.role !== "main") return;
+      openQuestionMenu(action.questionTab);
+      return;
+    }
     if (action.id === "botMenu") { factoryBot.click(); return; }
     const button = botMenu.querySelector(action.button);
     if (!button || button.disabled || button.hidden) return;
@@ -1316,316 +1031,14 @@
   document.addEventListener("pointerdown", function (event) {
     if (!botMenu.contains(event.target) && !factoryBot.contains(event.target)) closeBotMenu();
   });
-  const notesPanel = document.getElementById("notes-panel");
-  const notesToggle = document.getElementById("notes-toggle");
-  const notesScopeTabs = Array.from(document.querySelectorAll("[data-notes-scope]"));
-  let selectedNotesScope = saved?.notesScope === "global" ? "global" : "workspace";
-  try { const cached = localStorage.getItem("agentFactory.notes.scope"); if (cached === "global" || cached === "workspace") selectedNotesScope = cached; } catch { /* Persisted Webview state is the fallback. */ }
-  let selectedNoteFolder = "", noteRecords = [], noteFolders = [], noteMoving = null;
+  const chatNotes = globalThis.AgentFactoryChat.notes({
+    saved, persist, vscode, prompt, t
+  });
 
-  const notesTitle = document.getElementById("notes-title");
-  const notesBody = document.getElementById("notes-body");
-  const notesStatus = document.getElementById("notes-status");
-  const notesResize = document.getElementById("notes-resize");
-  let notesResizeStart;
-  function resizeNotes(width) {
-    const available = notesPanel.parentElement.clientWidth;
-    notesPanel.style.width = Math.max(Math.min(200, available - 42), Math.min(width, available - 42)) + "px";
-  }
-  notesResize.addEventListener("pointerdown", function (event) {
-    notesResizeStart = { x: event.clientX, width: notesPanel.getBoundingClientRect().width };
-    notesResize.setPointerCapture(event.pointerId);
-    event.preventDefault();
+  const chatHistory = globalThis.AgentFactoryChat.history({
+    handleSettingMenuKeydown, vscode, submissionMenu, questionButton, t, closeQuestionMenu,
+    renderAssistantMarkdown: chatMarkdown.renderAssistantMarkdown, assistantDisplayText, historyEmpty
   });
-  notesResize.addEventListener("pointermove", function (event) {
-    if (notesResizeStart) resizeNotes(notesResizeStart.width + notesResizeStart.x - event.clientX);
-  });
-  notesResize.addEventListener("lostpointercapture", function () { notesResizeStart = null; });
-  notesResize.addEventListener("keydown", function (event) {
-    if (!["ArrowLeft", "ArrowRight"].includes(event.key)) return;
-    resizeNotes(notesPanel.getBoundingClientRect().width + (event.key === "ArrowLeft" ? 16 : -16));
-    event.preventDefault();
-  });
-  let noteDraft = saved?.noteDraft || null;
-  let noteSending = null;
-  let noteDirty = Boolean(noteDraft);
-  let noteSaveTimer;
-  let noteFailed = false;
-  if (noteDraft) selectedNotesScope = noteDraft.scope;
-  renderNotesScope();
-  notesToggle.addEventListener("click", () => setNotesOpen(notesPanel.hidden));
-  document.getElementById("notes-close").addEventListener("click", () => setNotesOpen(false));
-  notesPanel.addEventListener("keydown", function (event) {
-    if (event.key === "Escape") { event.stopPropagation(); event.preventDefault(); setNotesOpen(false); }
-  });
-  function renderNotesScope() {
-    for (const tab of notesScopeTabs) {
-      const selected = tab.dataset.notesScope === selectedNotesScope;
-      tab.setAttribute("aria-selected", String(selected));
-      tab.tabIndex = selected ? 0 : -1;
-    }
-    document.getElementById("notes-content").setAttribute("aria-labelledby", "notes-tab-" + selectedNotesScope);
-  }
-  function selectNotesScope(tab) {
-    if (noteSending || noteMoving || noteDirty || tab.disabled || tab.dataset.notesScope === selectedNotesScope) return;
-    selectedNotesScope = tab.dataset.notesScope;
-    selectedNoteFolder = "";
-    try { localStorage.setItem("agentFactory.notes.scope", selectedNotesScope); } catch { /* Webview state is also saved. */ }
-    persist();
-    renderNotesScope();
-    loadNotes();
-  }
-  for (const [index, tab] of notesScopeTabs.entries()) {
-    tab.addEventListener("click", () => selectNotesScope(tab));
-    tab.addEventListener("keydown", function (event) {
-      if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
-      event.preventDefault();
-      const next = event.key === "Home" ? 0 : event.key === "End" ? notesScopeTabs.length - 1
-        : (index + (event.key === "ArrowRight" ? 1 : -1) + notesScopeTabs.length) % notesScopeTabs.length;
-      if (notesScopeTabs[next].disabled) return;
-      selectNotesScope(notesScopeTabs[next]);
-      notesScopeTabs[next].focus();
-    });
-  }
-  document.getElementById("notes-new").addEventListener("click", function () {
-    if (noteMoving) return;
-    if (noteSending || noteDirty) return;
-    noteDraft = { folder: selectedNoteFolder, scope: selectedNotesScope, id: crypto.randomUUID(), title: "", body: "", revision: 0 };
-    noteDirty = true;
-    noteFailed = false;
-    renderNoteEditor();
-    saveNote();
-    notesTitle.focus();
-  });
-  document.getElementById("notes-back").addEventListener("click", function () {
-    noteDraft = null;
-    persist();
-    loadNotes();
-  });
-  for (const field of [notesTitle, notesBody]) field.addEventListener("input", function () {
-    if (!noteDraft) return;
-    noteDraft.title = notesTitle.value;
-    noteDraft.body = notesBody.value;
-    noteDirty = true;
-    persist();
-    refreshNoteControls();
-    clearTimeout(noteSaveTimer);
-    noteSaveTimer = setTimeout(saveNote, 200);
-  });
-  document.getElementById("notes-copy").addEventListener("click", function () {
-    vscode.postMessage({ type: "message.copy", text: notesBody.value });
-  });
-  document.getElementById("notes-insert").addEventListener("click", function () {
-    prompt.value += (prompt.value && notesBody.value ? "\n\n" : "") + notesBody.value;
-    prompt.dispatchEvent(new Event("input", { bubbles: true }));
-    setNotesOpen(false);
-    prompt.focus();
-  });
-  document.getElementById("notes-save-copy").addEventListener("click", function () {
-    if (!noteDraft) return;
-    noteDraft.id = crypto.randomUUID();
-    noteDraft.revision = 0;
-    noteDirty = true;
-    noteFailed = false;
-    saveNote();
-  });
-  function setNotesOpen(open) {
-    notesPanel.hidden = !open;
-    notesToggle.hidden = open;
-    notesToggle.setAttribute("aria-expanded", String(open));
-    if (open) {
-      if (noteDraft) { renderNoteEditor(); if (noteDirty && !noteFailed) saveNote(); }
-      else loadNotes();
-    } else { saveNote(); notesToggle.focus(); }
-  }
-  function refreshNoteControls() {
-    const pending = Boolean(noteSending || noteDirty);
-    document.getElementById("notes-new").disabled = pending;
-    for (const tab of notesScopeTabs) tab.disabled = pending;
-    document.getElementById("notes-back").disabled = pending;
-    document.getElementById("notes-save-copy").hidden = !noteFailed;
-    if (!noteFailed) notesStatus.textContent = t(pending ? "notes.saving" : "notes.saved");
-  }
-  function renderNoteEditor() {
-    document.getElementById("notes-list-view").hidden = false;
-    document.getElementById("notes-editor").hidden = !noteDraft;
-    if (noteDraft) {
-      document.getElementById("notes-list-view").hidden = true;
-      selectedNotesScope = noteDraft.scope;
-      renderNotesScope();
-      notesTitle.value = noteDraft.title;
-      notesBody.value = noteDraft.body;
-    }
-    refreshNoteControls();
-  }
-  function loadNotes() {
-    noteDraft = null;
-    noteDirty = false;
-    noteFailed = false;
-    renderNoteEditor();
-    persist();
-    document.getElementById("notes-list").replaceChildren();
-    notesStatus.textContent = t("notes.loading");
-    vscode.postMessage({ type: "notes.list", scope: selectedNotesScope });
-  }
-  function saveNote() {
-    clearTimeout(noteSaveTimer);
-    if (!noteDraft || !noteDirty || noteSending || noteFailed) return;
-    noteSending = { ...noteDraft };
-    noteDirty = false;
-    const { scope, ...note } = noteSending;
-    vscode.postMessage({ type: "notes.save", scope, note });
-    refreshNoteControls();
-  }
-  document.getElementById("notes-folder-form").addEventListener("submit", event => {
-    event.preventDefault();
-    const input = document.getElementById("notes-folder-name");
-    if (!input.value.trim() || noteMoving) return;
-    vscode.postMessage({type: "notes.folder", scope: selectedNotesScope, folder: [selectedNoteFolder, input.value.trim()].filter(Boolean).join("/")});
-    input.value = "";
-  });
-  function moveNote(id, folder) {
-    const note = noteRecords.find(n => n.id === id);
-    if (!note || noteMoving || noteDraft || (note.folder || "") === folder) return;
-    noteMoving = {id, scope: selectedNotesScope};
-    notesStatus.textContent = t("notes.saving");
-    vscode.postMessage({type: "notes.save", scope: selectedNotesScope, note: {...note, folder}});
-  }
-  function folderDropTarget(element, folder) {
-    element.addEventListener("dragover", event => {
-      if (!event.dataTransfer.types.includes("application/x-agent-factory-note")) return;
-      event.preventDefault(); event.stopPropagation(); event.dataTransfer.dropEffect = "move"; element.classList.add("notes-drop-target");
-    });
-    element.addEventListener("dragleave", () => element.classList.remove("notes-drop-target"));
-    element.addEventListener("drop", event => {
-      event.preventDefault(); event.stopPropagation(); element.classList.remove("notes-drop-target");
-      moveNote(event.dataTransfer.getData("application/x-agent-factory-note"), folder);
-    });
-  }
-  const expandedNoteFolders = { global: new Set(), workspace: new Set() };
-  function renderNoteFolders() {
-    const list = document.getElementById("notes-list"), crumbs = document.getElementById("notes-breadcrumb");
-    list.replaceChildren(); crumbs.replaceChildren();
-    const root = document.createElement("button"); root.type = "button"; root.textContent = t("notes.folder.root");
-    root.addEventListener("click", () => {selectedNoteFolder = ""; renderNoteFolders();}); folderDropTarget(root, ""); crumbs.append(root);
-    const containers = new Map([["", list]]);
-    const folders = new Set(noteFolders);
-    for (const path of [...noteFolders, ...noteRecords.map(note => note.folder || "")]) {
-      const parts = path.split("/").filter(Boolean);
-      for (let i = 1; i <= parts.length; i++) folders.add(parts.slice(0, i).join("/"));
-    }
-    function selectFolder(folder) {
-      selectedNoteFolder = folder;
-      root.setAttribute("aria-current", String(!folder));
-      for (const summary of list.querySelectorAll("summary[data-folder]")) {
-        summary.setAttribute("aria-current", String(summary.dataset.folder === folder));
-      }
-    }
-    for (const folder of [...folders].sort()) {
-      const branch = document.createElement("details"); branch.className = "notes-branch";
-      branch.open = expandedNoteFolders[selectedNotesScope].has(folder);
-      const summary = document.createElement("summary"); summary.className = "notes-folder";
-      summary.textContent = folder.split("/").at(-1); summary.dataset.folder = folder;
-      summary.addEventListener("click", () => selectFolder(folder));
-      const scope = selectedNotesScope;
-      branch.addEventListener("toggle", () => {
-        if (!branch.isConnected) return;
-        if (branch.open) expandedNoteFolders[scope].add(folder);
-        else expandedNoteFolders[scope].delete(folder);
-      });
-      folderDropTarget(summary, folder);
-      const children = document.createElement("div"); children.className = "notes-children";
-      branch.append(summary, children);
-      containers.get(folder.split("/").slice(0, -1).join("/")).append(branch);
-      containers.set(folder, children);
-    }
-    selectFolder(selectedNoteFolder);
-    for (const note of noteRecords) {
-      const row = document.createElement("div"); row.className = "notes-entry";
-      const button = document.createElement("button"); button.type = "button"; button.textContent = note.title || t("notes.untitled"); button.draggable = true; button.dataset.noteId = note.id;
-      button.addEventListener("dragstart", event => {event.dataTransfer.setData("application/x-agent-factory-note", note.id); event.dataTransfer.effectAllowed = "move";});
-      button.addEventListener("click", () => {if(noteMoving) return; noteDraft = {...note, scope:selectedNotesScope}; noteDirty = false; renderNoteEditor(); notesBody.focus();});
-      row.append(button);
-      containers.get(note.folder || "").append(row);
-    }
-    if (!list.childElementCount) list.textContent = t("notes.empty");
-  }
-  function receiveNotes(message) {
-    if (message.type === "notes.list.result") {
-      if (message.scope !== selectedNotesScope || noteDraft) return;
-      const list = document.getElementById("notes-list");
-      list.replaceChildren();
-      notesStatus.textContent = message.error ? t("notes.failed", message.error) : "";
-      if (message.error) return;
-      noteRecords = message.notes; noteFolders = message.folders || [];
-      renderNoteFolders();
-      return;
-    }
-    if (noteMoving && message.scope === noteMoving.scope && message.id === noteMoving.id) {
-      noteMoving = null;
-      if (message.error) { notesStatus.textContent = t("notes.failed", message.error); renderNoteFolders(); }
-      else loadNotes();
-      return;
-    }
-    if (!noteSending || message.scope !== noteSending.scope || message.id !== noteSending.id) return;
-    noteSending = null;
-    if (message.error) {
-      noteDirty = true;
-      noteFailed = true;
-      notesStatus.textContent = t("notes.failed", message.error);
-    } else {
-      noteDraft.revision = message.note.revision;
-      if (noteDirty) saveNote();
-    }
-    persist();
-    refreshNoteControls();
-  }
-
-  const contractList = document.getElementById("contract-list");
-  contractList.querySelector("summary").addEventListener("keydown", handleSettingMenuKeydown);
-  contractList.addEventListener("toggle", function () {
-    if (this.open) {
-      document.getElementById("task-history").open = false;
-      document.getElementById("conversation-history").open = false;
-      document.getElementById("contract-list-list").replaceChildren(historyEmpty("contracts.loading"));
-      vscode.postMessage({ type: "contracts.request" });
-    }
-    positionTaskHistory();
-  });
-  document.querySelector("#task-history > summary").addEventListener("keydown", handleSettingMenuKeydown);
-  document.getElementById("task-history").addEventListener("toggle", positionTaskHistory);
-  window.addEventListener("resize", positionTaskHistory);
-  new ResizeObserver(positionTaskHistory).observe(submissionMenu);
-
-  const conversationHistory = document.getElementById("conversation-history");
-  const conversationList = document.getElementById("conversation-history-list");
-  const conversationReader = document.getElementById("conversation-reader");
-  const conversationMessages = document.getElementById("conversation-reader-messages");
-  const conversationOlder = document.getElementById("conversation-reader-older");
-  let conversationReadId = 0;
-  let selectedConversationId;
-  let conversationBefore;
-  let conversationAppending = false;
-  conversationList.append(historyEmpty("ui.conversation.empty"));
-  conversationHistory.querySelector("summary").addEventListener("keydown", handleSettingMenuKeydown);
-  conversationHistory.addEventListener("toggle", function () {
-    if (conversationHistory.open) {
-      contractList.open = false;
-      document.getElementById("task-history").open = false;
-      conversationList.replaceChildren(historyEmpty("ui.conversation.loading"));
-      vscode.postMessage({ type: "conversations.request" });
-    }
-    positionTaskHistory();
-  });
-  document.getElementById("task-history").addEventListener("toggle", function () {
-    if (this.open) { conversationHistory.open = false; contractList.open = false; }
-  });
-  document.getElementById("conversation-reader-close").addEventListener("click", () => conversationReader.close());
-  conversationReader.addEventListener("close", function () {
-    conversationReadId++;
-    submissionButton.focus();
-  });
-  conversationOlder.addEventListener("click", function () { readSavedConversation(true); });
 
   function historyEmpty(key) {
     const empty = document.createElement("p");
@@ -1633,102 +1046,6 @@
     empty.textContent = t(key);
     return empty;
   }
-
-  function readSavedConversation(append) {
-    conversationAppending = append;
-    conversationOlder.disabled = true;
-    if (!append) conversationMessages.replaceChildren(historyEmpty("ui.conversation.loading"));
-    vscode.postMessage({ type: "conversation.read", conversationId: selectedConversationId,
-      requestId: "conversation-read-" + (++conversationReadId), ...(append && conversationBefore ? { before: conversationBefore } : {}) });
-  }
-
-  function showConversationList(message) {
-    conversationList.replaceChildren();
-    if (message.error) {
-      const error = historyEmpty("ui.conversation.empty");
-      error.textContent = t("ui.conversation.failed", message.error);
-      conversationList.append(error);
-      return;
-    }
-    for (const entry of message.conversations || []) {
-      const button = document.createElement("button");
-      button.type = "button";
-      button.className = "setting-option conversation-history-entry";
-      const date = new Date(entry.startedAt);
-      button.textContent = t("ui.conversation.entry", Number.isNaN(date.getTime()) ? entry.startedAt : date.toLocaleString(), entry.runCount);
-      button.addEventListener("click", function () {
-        selectedConversationId = entry.conversationId;
-        conversationBefore = undefined;
-        conversationOlder.hidden = true;
-        closeSettingMenu(false);
-        conversationReader.showModal();
-        readSavedConversation(false);
-      });
-      conversationList.append(button);
-    }
-    if (!conversationList.children.length) conversationList.append(historyEmpty("ui.conversation.empty"));
-    positionTaskHistory();
-  }
-
-  function showSavedConversation(message) {
-    if (!conversationReader.open || message.requestId !== "conversation-read-" + conversationReadId) return;
-    conversationOlder.disabled = false;
-    if (message.error) {
-      const error = historyEmpty("ui.conversation.empty");
-      error.textContent = t("ui.conversation.failed", message.error);
-      if (conversationAppending) conversationMessages.prepend(error);
-      else conversationMessages.replaceChildren(error);
-      return;
-    }
-    if (!conversationAppending) conversationMessages.replaceChildren();
-    const fragment = document.createDocumentFragment();
-    for (const item of message.history.messages) {
-      const article = document.createElement("article");
-      const role = document.createElement("strong");
-      role.textContent = item.type === "user" ? t("ui.conversation.user") : "Agent";
-      const content = document.createElement("div");
-      if (item.type === "assistant") renderAssistantMarkdown(content, assistantDisplayText(item.text));
-      else { content.className = "history-user-text"; content.textContent = item.text; }
-      article.append(role, content);
-      fragment.append(article);
-    }
-    conversationMessages.prepend(fragment);
-    conversationBefore = message.history.nextBefore;
-    conversationOlder.hidden = !conversationBefore;
-    if (!conversationMessages.children.length && !conversationBefore) conversationMessages.append(historyEmpty("ui.conversation.empty"));
-  }
-
-  function positionTaskHistory() {
-    for (const id of ["contract-list", "task-history", "conversation-history"]) positionHistory(id);
-  }
-
-  function positionHistory(id) {
-    const history = document.getElementById(id);
-    const summary = history.querySelector("summary");
-    summary.setAttribute("aria-expanded", String(history.open));
-    if (!history.open || submissionMenu.hidden) return;
-    const list = document.getElementById(id + "-list");
-    const bounds = submissionMenu.getBoundingClientRect();
-    const leftSpace = bounds.left - 20;
-    const rightSpace = window.innerWidth - bounds.right - 20;
-    const inline = Math.max(leftSpace, rightSpace) < 240;
-    list.classList.toggle("is-flyout", !inline);
-    if (inline) {
-      list.style.removeProperty("left");
-      list.style.removeProperty("top");
-      list.style.removeProperty("height");
-      list.style.removeProperty("max-height");
-      list.style.removeProperty("width");
-      return;
-    }
-    const onLeft = leftSpace >= rightSpace;
-    const width = Math.min(440, onLeft ? leftSpace : rightSpace);
-    list.style.left = (onLeft ? bounds.left - width - 8 : bounds.right + 8) + "px";
-    list.style.top = bounds.top + "px";
-    list.style.height = bounds.height + "px";
-    list.style.width = width + "px";
-  }
-
 
   document.addEventListener("keydown", function (event) {
     if (event.key === "Escape" && !botSpeech.hidden) {
@@ -1866,29 +1183,7 @@
   document.getElementById("attachment-file-input").addEventListener("change", async function (event) {
     const files = Array.from(event.target.files || []);
     event.target.value = "";
-    let bytes = 0;
-    for (const file of files) {
-      if (!file.name || file.name.length > 255 || /[\\/\x00-\x1f]/.test(file.name) || [".", ".."].includes(file.name)) {
-        appendNotice("error", t("ui.local.file.read.failed"));
-        continue;
-      }
-      bytes += file.size;
-      if (file.type.startsWith("image/")) {
-        await addBrowserImages([file]);
-        continue;
-      }
-      const id = createId();
-      addAttachments([{ id, name: file.name, kind: "file", size: file.size, pending: true }]);
-      try {
-        const data = await readDataUrl(file);
-        vscode.postMessage({ type: "attachments.createFile", id, name: file.name, size: file.size, data: data.slice(data.indexOf(",") + 1) });
-      } catch {
-        state.attachments = state.attachments.filter(item => item.id !== id);
-        appendNotice("error", t("ui.local.file.read.failed"));
-        renderAttachments();
-        persist();
-      }
-    }
+    await addBrowserFiles(files);
   });
   modelButton.addEventListener("click", function () {
     openSetting("model");
@@ -1920,12 +1215,31 @@
     prompt.focus({ preventScroll: true });
     updateJumpToBottom();
   });
+  function pauseFollowingLatest() {
+    cancelAnimationFrame(autoScrollFrame);
+    followLatest = false;
+    updateAutoScrollControl();
+  }
+  // Upward input pauses before the browser applies it, so a pending render cannot pull the reader down.
+  timeline.addEventListener("wheel", function (event) {
+    if (event.deltaY < 0 && timeline.scrollTop > 0) pauseFollowingLatest();
+  }, { passive: true });
+  timeline.addEventListener("keydown", function (event) {
+    if (event.target.closest("input, textarea, select, [contenteditable]")) return;
+    if (["ArrowUp", "PageUp", "Home"].includes(event.key) || (event.key === " " && event.shiftKey)) pauseFollowingLatest();
+  });
   timeline.addEventListener("scroll", function () {
-    // Layout changes can emit scroll events before ResizeObserver runs.
-    // Preserve the previous follow intent until the new viewport is handled.
-    if (timelineViewportHeight === timeline.clientHeight) {
-      followLatest = timeline.scrollHeight - timeline.clientHeight - timeline.scrollTop <= 24;
+    const top = timeline.scrollTop;
+    const distance = timeline.scrollHeight - timeline.clientHeight - top;
+    if (top < timelineScrollTop && distance > 1) {
+      // Clamping and anchoring keep the bottom; moving away from it is a reader scrolling up.
+      followLatest = false;
+    } else if (timelineViewportHeight === timeline.clientHeight) {
+      // Layout changes can emit scroll events before ResizeObserver runs.
+      // Preserve the previous follow intent until the new viewport is handled.
+      followLatest = distance <= 24;
     }
+    timelineScrollTop = top;
     updateAutoScrollControl();
     updateJumpToBottom();
   }, { passive: true });
@@ -1954,10 +1268,10 @@
 
   document.addEventListener("keydown", function (event) {
     if (event.key === "Escape") {
-      if (unitDialog.open || document.getElementById("image-converter").open) return;
-      if (!notesPanel.hidden) {
+      if (chatWorkUnits.unitDialog.open || document.getElementById("image-converter").open) return;
+      if (!chatNotes.notesPanel.hidden) {
         event.preventDefault();
-        setNotesOpen(false);
+        chatNotes.setNotesOpen(false);
         return;
       }
       // Let the native picker consume Escape before closing its settings dialog.
@@ -2000,8 +1314,7 @@
   document.addEventListener("click", function (event) {
     const history = document.getElementById("task-history");
     if (!event.target.closest("#task-history")) history.open = false;
-    if (!event.target.closest("#contract-list")) contractList.open = false;
-    if (!event.target.closest("#conversation-history")) document.getElementById("conversation-history").open = false;
+    if (!event.target.closest("#contract-list")) chatHistory.contractList.open = false;
     const link = event.target.closest(".markdown-body a");
     if (link) {
       event.preventDefault();
@@ -2027,12 +1340,14 @@
       return;
     }
     let images = Array.from(event.clipboardData.files || []).filter(function (file) {
-      return file.type.startsWith("image/");
+      return Boolean(browserImageMediaType(file));
     });
     // Some screenshot tools expose the image only as a clipboard item, leaving files empty.
     if (!images.length) images = Array.from(event.clipboardData.items || []).filter(function (item) {
-      return item.kind === "file" && item.type.startsWith("image/");
-    }).map(function (item) { return item.getAsFile(); }).filter(Boolean);
+      return item.kind === "file";
+    }).map(function (item) { return item.getAsFile(); }).filter(function (file) {
+      return file && browserImageMediaType(file);
+    });
     if (images.length) {
       event.preventDefault();
       addBrowserImages(images);
@@ -2105,16 +1420,21 @@
         break;
       }
       case "agent.preset.result": {
-        agentPresetBusy = false;
+        chatAgentSettings.agentPresetBusy = false;
         if (message.error) {
-          pendingPresetName = "";
+          chatAgentSettings.pendingPresetName = "";
           const scopeControl = document.getElementById("agent-default-scope");
           if (scopeControl && state.agentSettingsScope) scopeControl.value = state.agentSettingsScope;
         }
         const status = document.getElementById("agent-preset-status"); status.hidden = !message.error; status.textContent = message.error || "";
-        if (!message.error && message.settings && message.scope && message.name) applyAgentSettingsToChat(message.settings, message.scope, message.name);
-        renderAgentDefaults();
-        renderAgentPresets();
+        if (!message.error && chatAgentSettings.pendingPresetAction === "save") {
+          document.getElementById("agent-preset-create").open = false;
+          document.getElementById("agent-preset-name").value = "";
+        }
+        chatAgentSettings.pendingPresetAction = "";
+        if (!message.error && message.settings && message.scope && message.name) chatAgentSettings.applyAgentSettingsToChat(message.settings, message.scope, message.name);
+        chatAgentSettings.renderAgentDefaults();
+        chatAgentSettings.renderAgentPresets();
         break;
       }
       case "usage.accounts":
@@ -2125,7 +1445,7 @@
         state.agentDefaults = message.settings;
         if (state.agentSettingsScope === "project" && !message.settings.projectAvailable) state.agentSettingsScope = "global";
         if (!state.agentSettingsScope) state.agentSettingsScope = message.settings.projectAvailable ? "project" : "global";
-        renderAgentDefaults();
+        chatAgentSettings.renderAgentDefaults();
         // Existing chat values are an independent snapshot and do not follow later default changes.
         updateModeControls();
         break;
@@ -2147,6 +1467,7 @@
         if (!state.running) state.cancellationRequested = false;
         state.model = normalizeModel(message.model);
         state.agentModels = message.agentModels || state.agentModels || {};
+        state.modelFastModes = normalizeModelFastModes(message.modelFastModes || state.modelFastModes);
         state.reasoning = normalizeSettingValue(message.reasoning, settingOptions.reasoning);
         state.agentSettingsScope = ["global", "project", "chat"].includes(message.agentSettingsScope) ? message.agentSettingsScope : state.agentSettingsScope;
         state.agentSettingsSet = typeof message.agentSettingsSet === "string" && message.agentSettingsSet.trim() ? message.agentSettingsSet.trim() : state.agentSettingsSet;
@@ -2172,7 +1493,7 @@
           state.runStartedAt = Date.now();
         } else if (!state.running) {
           state.runStartedAt = undefined;
-          if (currentTaskFlows().length === 0) state.runPanelExpanded = false;
+          if (chatTaskFlow.currentTaskFlows().length === 0) state.runPanelExpanded = false;
         }
         state.botsAvailable = message.botsAvailable !== false;
         state.companionAvailable = message.companionAvailable !== false;
@@ -2198,61 +1519,26 @@
         persist();
         break;
       case "syntax.theme":
-        void updateSyntaxTheme(message.selection || {});
+        void chatSyntax.updateSyntaxTheme(message.selection || {});
         break;
       case "worktree.created":
-        unitSetBusy(false); unitStatus.textContent = "";
-        if (message.error) {
-          unitError.textContent = message.error; unitError.hidden = false;
-          if (message.created) document.getElementById("unit-create-submit").disabled = true;
-        } else unitDialog.close();
+        chatWorkUnits.receiveUnitCreated(message);
         break;
       case "deploy.targets":
-        deployLoading = false;
-        deployTarget = message.target;
-        deployError = message.error || "";
-        renderWorktree();
+        chatWorkUnits.receiveDeployTargets(message);
         break;
       case "deploy.status":
-        if (message.error) {
-          if (deployDialog.open) { deploySetBusy(false); deployStatusNode.textContent = ""; deployErrorNode.textContent = message.error; deployErrorNode.hidden = false; }
-          else deployError = message.error;
-        } else if (message.run) {
-          deployRun = message.run; deployRepository = message.repository || deployRepository;
-          if (deployDialog.open) { deploySetBusy(false); deployDialog.close(); }
-        }
-        renderWorktree();
+        chatWorkUnits.receiveDeployStatus(message);
         break;
-      case "worktree.repositories": {
-        unitRepositories = message.repositories;
-        const list = document.getElementById("worktree-repositories");
-        list.replaceChildren();
-        for (const repo of message.repositories) {
-          const button = document.createElement("button"); button.type = "button"; button.className = "setting-option";
-          button.setAttribute("role", "menuitem"); button.classList.add("worktree-repository");
-          button.title = repo.path;
-          const name = document.createElement("strong"); name.textContent = repo.path.replace(/[\\/]+$/, "").split(/[\\/]/).at(-1) || repo.path;
-          const path = document.createElement("span"); path.className = "worktree-repository-path"; path.textContent = repo.path;
-          const action = document.createElement("span"); action.className = "worktree-repository-action"; action.textContent = "+ " + t("worktree.create");
-          button.append(name, path, action);
-          button.addEventListener("click", () => { openUnitCreate(repo.path); });
-          button.addEventListener("keydown", handleSettingMenuKeydown); list.append(button);
-        }
-        if (!message.repositories.length) {
-          const empty = document.createElement("p"); empty.className = "worktree-summary"; empty.textContent = t("worktree.empty"); list.append(empty);
-        }
-        positionWorktreeMenu();
+      case "worktree.repositories":
+        chatWorkUnits.receiveUnitRepositories(message);
         break;
-      }
       case "composer.prefill":
         prompt.value = message.text;
         prompt.dispatchEvent(new Event("input", { bubbles: true }));
         break;
       case "worktree.updated":
-        if (typeof message.supported === "boolean") worktreeSupported = message.supported;
-        if (typeof message.busy === "boolean") worktreeBusy = message.busy;
-        conversationWorktree = message.value;
-        renderWorktree();
+        chatWorkUnits.receiveWorktree(message);
         renderStatusBar();
         break;
       case "branch.updated":
@@ -2272,12 +1558,12 @@
         if (openSettingId === "model") renderSettingMenu("model", modelMenu);
         break;
       case "providers.status":
-        receiveProviders(message);
+        chatProviders.receiveProviders(message);
         break;
       case "providers.catalog":
-        providerCatalog = message.catalog;
-        providerVersionsRequested = false;
-        renderProviderSettings();
+        chatProviders.providerCatalog = message.catalog;
+        chatProviders.providerVersionsRequested = false;
+        chatProviders.renderProviderSettings();
         break;
       case "runtime.updated":
         state.runtimeAvailable = message.runtimeAvailable === true;
@@ -2299,7 +1585,7 @@
         }
         break;
       case "attachment.conversionResult":
-        showConversionResult(message);
+        chatImageConverter.showConversionResult(message);
         break;
       case "attachment.encode":
         void encodeAttachmentImage(message);
@@ -2344,20 +1630,10 @@
         }
         break;
       case "sudo.challenge":
-        sudoChallenge = message;
-        sudoPanel.setAttribute("aria-label", t("sudo.title"));
-        sudoPassword.setAttribute("aria-label", t("sudo.password"));
-        sudoTitle.textContent = t("sudo.title");
-        sudoCommand.textContent = message.command.map(arg => JSON.stringify(arg)).join(" ");
-        sudoContext.textContent = t("sudo.context", message.cwd || "", message.agentId || "", message.runId || "");
-        sudoSubmit.textContent = t("sudo.run");
-        sudoCancel.textContent = t("sudo.cancel");
-        sudoSubmit.disabled = false;
-        sudoPanel.hidden = false;
-        sudoPanel.scrollIntoView({ block: "nearest" });
+        chatSudo.openSudoPanel(message);
         break;
       case "sudo.closed":
-        closeSudoPanel();
+        chatSudo.closeSudoPanel();
         break;
       case "host.notice":
         if (message.level === "error") {
@@ -2428,7 +1704,7 @@
         break;
       case "notes.list.result":
       case "notes.save.result":
-        receiveNotes(message);
+        chatNotes.receiveNotes(message);
         break;
       case "contracts.list": {
         const list = document.getElementById("contract-list-list");
@@ -2449,14 +1725,14 @@
           button.addEventListener("click", () => vscode.postMessage({ type: "contract.open", id: contract.id }));
           list.append(button);
         }
-        positionTaskHistory();
+        chatHistory.positionTaskHistory();
         break;
       }
       case "conversations.list":
-        showConversationList(message);
+        chatHistory.showConversationList(message);
         break;
       case "conversation.read.result":
-        showSavedConversation(message);
+        chatHistory.showSavedConversation(message);
         break;
       case "conversation.history":
         if (message.agentId === state.agentId && message.history &&
@@ -2464,10 +1740,10 @@
             Array.isArray(message.history.messages)) {
           state.historyNextBefore = message.history.nextBefore;
           const restored = message.history.messages.filter(function (item) {
-            return item && ["user", "assistant"].includes(item.type) &&
+            return item && ["user", "assistant", "interview"].includes(item.type) &&
               typeof item.id === "string" && typeof item.runId === "string" && typeof item.text === "string";
           });
-          if (!state.timeline.some(function (item) { return ["user", "assistant", "activity"].includes(item.type); })) {
+          if (!state.timeline.some(function (item) { return ["user", "assistant", "interview", "activity"].includes(item.type); })) {
             state.timeline = restored;
           } else {
             const knownRuns = new Set(state.timeline.map(item => item.runId).filter(Boolean));
@@ -2511,14 +1787,18 @@
           // A temporarily incomplete session discovery must not erase accepted history.
           const key = snapshot => snapshot.loopId || snapshot.workflow?.id;
           const snapshots = new Map((state.workflows || []).map(snapshot => [key(snapshot), snapshot]));
-          for (const snapshot of message.workflows) snapshots.set(key(snapshot), snapshot);
+          for (const snapshot of message.workflows) {
+            snapshots.set(key(snapshot), snapshot);
+            // The decision took effect once the loop left its stop; a refresh of the same stop changes nothing.
+            if (snapshot.status !== "needs-human-decision") chatTaskFlow.workflowDecisionsPending.delete(snapshot.loopId);
+          }
           state.workflows = [...snapshots.values()].slice(-100);
         }
         state.childAgents = Array.isArray(message.agents) ? message.agents.filter(isChildAgent) : [];
         state.workUnits = summarizeChildAgents(state.childAgents);
         renderAgentsList();
         renderRunStatus();
-        renderWorkLoopPanel();
+        chatTaskFlow.renderWorkLoopPanel();
         scheduleTimelineRender();
         renderStatusBar();
         persist(false);
@@ -2539,6 +1819,19 @@
           persist(false);
         }
         break;
+      case "interview.question":
+        if (message.question && typeof message.question.id === "string" && typeof message.question.text === "string"
+            && Number.isSafeInteger(message.question.current) && Number.isSafeInteger(message.question.total)
+            && Array.isArray(message.question.options) && message.question.options.length >= 2 && message.question.options.length <= 3) {
+          const identity = "interview-" + (message.runId || "runtime") + "-" + message.question.id;
+          const existing = state.timeline.find(entry => entry.type === "interview" && entry.id === identity);
+          const entry = { type: "interview", id: identity, runId: message.runId, text: message.question.text, question: message.question };
+          if (existing) Object.assign(existing, entry);
+          else state.timeline.push(entry);
+          scheduleTimelineRender();
+          persist(false);
+        }
+        break;
       case "execution.updated":
         state.executionMode = message.mode;
         updateExecutionControl();
@@ -2551,9 +1844,9 @@
               entry.phase === (message.phase === "commentary" ? "commentary" : "final");
           })) break;
           if (isDuplicateCancellation(state.timeline.at(-1), { ...message, type: "assistant" })) break;
-          const incomingFlows = extractTaskFlows(message.text).flows;
+          const incomingFlows = chatTaskFlow.extractTaskFlows(message.text).flows;
           if (incomingFlows.length) {
-            const snapshots = new Map(currentTaskFlows().map(flow => [flow.id, flow]));
+            const snapshots = new Map(chatTaskFlow.currentTaskFlows().map(flow => [flow.id, flow]));
             for (const flow of incomingFlows) snapshots.set(flow.id, flow);
             state.taskFlows = [...snapshots.values()].slice(-100);
           }
@@ -2564,7 +1857,7 @@
           if (complete.phase === "final") dropLivePreviews(complete.runId);
           scheduleTimelineRender();
           renderRunStatus();
-          renderWorkLoopPanel();
+          chatTaskFlow.renderWorkLoopPanel();
           persist(false);
         }
         break;
@@ -2708,6 +2001,7 @@
         if (acknowledged && message.submission) acknowledged.submission = message.submission;
         state.startedMessageIds = [...new Set([...(state.startedMessageIds || []), message.id])].slice(-400);
         renderAll();
+        if (openSettingId === "model") chatAgentSettings.renderModelSettings(modelMenu, true);
         // Acceptance inserts the submitted request after the initial send scroll.
         // Reveal that request once, without changing the automatic-scroll preference.
         if (revealSubmission) {
@@ -2721,7 +2015,7 @@
       case "queue.updated":
         renderPendingQueue();
         state.queueCount = safeCount(message.count);
-        renderWorktree();
+        chatWorkUnits.renderWorktree();
         updateConversationClearControl();
         renderStatusBar();
         updateSendButton();
@@ -2767,14 +2061,14 @@
           totalCalled: safeCount(message.totalCalled)
         };
         renderStatusBar();
-        renderWorkLoopPanel();
+        chatTaskFlow.renderWorkLoopPanel();
         persist(false);
         break;
     }
   });
 
   function submit(action = "direct", workflow = "normal", asGoal = false, choiceAnswer = null) {
-    if (conversationClearing || (conversationWorktree?.worktree?.workUnit && conversationWorktree.worktree.phase === "merged")) return;
+    if (conversationClearing || (chatWorkUnits.conversationWorktree?.worktree?.workUnit && chatWorkUnits.conversationWorktree.worktree.phase === "merged")) return;
     if (!Object.hasOwn(taskModeNames(), action)) action = "direct";
     if (action === "direct") action = enterAction();
     const contextualRequest = workflow === "contract" ? t("submission.contract.request")
@@ -2817,12 +2111,12 @@
       }),
       execution: {
         ...(state.role === "main" ? { taskMode: action, businessMode: workflow } : {}),
-        agentModels: state.role === "main" ? effectiveDelegatedModels() : undefined,
+        agentModels: state.role === "main" ? chatAgentSettings.effectiveDelegatedModels() : undefined,
         agentPermissions: state.role === "main" ? Object.fromEntries(["main", "work", "verification"].map(role => [role, state.executionMode || "cli-default"])) : undefined,
         // Preserve an explicit selection so the host can reject an unavailable
         // provider instead of silently falling back to another model.
-        model: effectiveAgentValue("main", "model") || undefined,
-        reasoningEffort: currentCapabilities().reasoning ? effectiveAgentValue("main", "reasoningEffort") || undefined : undefined,
+        model: chatAgentSettings.effectiveAgentValue("main", "model") || undefined,
+        reasoningEffort: currentCapabilities().reasoning ? chatAgentSettings.effectiveAgentValue("main", "reasoningEffort") || undefined : undefined,
         fast: currentCapabilities().fast === true && state.fastMode,
         goal,
         ...(goal ? { goalObjective: text } : {})
@@ -2850,7 +2144,70 @@
   }
 
   function canAnswerInterview(event) {
+    if (event.type === "interview") {
+      const position = indexedTimeline().positions.get(event.id);
+      if (position === undefined || state.timeline.slice(position + 1).some(item => item.type === "user" || item.type === "interview")) return false;
+      return !event.choiceAnswer && !state.running && !state.pendingRequests?.length && state.runtimeAvailable;
+    }
     return indexedTimeline().latestTurn === event && !event.choiceAnswer && !state.running && !state.pendingRequests?.length && state.runtimeAvailable;
+  }
+
+  function renderStructuredInterview(content, event) {
+    const question = event.question;
+    if (!question || !Array.isArray(question.options)) return;
+    const korean = /[가-힣]/.test(question.text + question.options.map(option => option.label + option.pros + option.cons).join(""));
+    const heading = document.createElement("p");
+    const strong = document.createElement("strong");
+    strong.textContent = (korean ? "질문" : "Question") + ` [${question.current}/${question.total}]: ` + question.text;
+    heading.append(strong);
+    const table = document.createElement("table");
+    table.className = "interview-options";
+    const head = document.createElement("thead");
+    const headRow = document.createElement("tr");
+    for (const label of (korean ? ["선택지", "결정", "장점", "단점"] : ["Option", "Decision", "Advantages", "Disadvantages"])) {
+      const cell = document.createElement("th");
+      cell.textContent = label;
+      headRow.append(cell);
+    }
+    head.append(headRow);
+    table.append(head);
+    const body = document.createElement("tbody");
+    for (const [index, option] of question.options.entries()) {
+      const row = document.createElement("tr");
+      const choice = document.createElement("td");
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "interview-choice";
+      button.textContent = question.yesNo ? option.label : String(index + 1);
+      button.setAttribute("aria-label", `${index + 1}: ${option.label}`);
+      button.disabled = !canAnswerInterview(event);
+      button.addEventListener("click", function () {
+        if (!canAnswerInterview(event)) return;
+        if (submit("direct", "normal", false, option.value)) {
+          event.choiceAnswer = option.value;
+          renderAll();
+          persist();
+        }
+      });
+      choice.append(button);
+      row.append(choice);
+      for (const value of [option.label, option.pros, option.cons]) {
+        const cell = document.createElement("td");
+        cell.textContent = value;
+        row.append(cell);
+      }
+      body.append(row);
+    }
+    table.append(body);
+    content.append(heading, table);
+    const recommended = question.options.find(option => option.value === question.recommendedValue);
+    if (recommended) {
+      const note = document.createElement("p");
+      const label = document.createElement("strong");
+      label.textContent = korean ? "권고: " : "Recommendation: ";
+      note.append(label, recommended.label);
+      content.append(note);
+    }
   }
 
   function renderInterviewChoices(content, event) {
@@ -2935,6 +2292,7 @@
     if (typeof text !== "string" || !text) {
       return;
     }
+    if (level === "error") chatTaskFlow.releaseWorkflowDecisions();
     state.timeline.push({ type: "notice", id: createId(), level, text, localization });
     renderTimeline();
     persist();
@@ -2954,10 +2312,10 @@
       if (!index.positions.has(event.id)) index.positions.set(event.id, index.length);
       if (type === "assistant") {
         const text = event.text || "";
-        let parsed = taskFlowParseCache.get(event);
+        let parsed = chatTaskFlow.taskFlowParseCache.get(event);
         if (!parsed || parsed.text !== text) {
-          parsed = { text, flows: extractTaskFlows(text).flows };
-          taskFlowParseCache.set(event, parsed);
+          parsed = { text, flows: chatTaskFlow.extractTaskFlows(text).flows };
+          chatTaskFlow.taskFlowParseCache.set(event, parsed);
         }
         for (const flow of parsed.flows) {
           index.flows.set(flow.id, flow);
@@ -3013,7 +2371,7 @@
   const previewCaches = new WeakMap();
   function renderPreviewMarkdown(container, text, entry) {
     text = assistantDisplayText(text);
-    if (!markdown) {
+    if (!chatMarkdown.markdown) {
       container.textContent = text;
       return;
     }
@@ -3052,8 +2410,8 @@
 
   function previewFragment(text) {
     const fragment = document.createElement("div");
-    fragment.innerHTML = markdown.render(text);
-    renderMath(fragment);
+    fragment.innerHTML = chatMarkdown.markdown.render(text);
+    chatMarkdown.renderMath(fragment);
     for (const img of fragment.querySelectorAll("img[src]")) {
       if (/^(?:file:\/\/|\/|\.\.?\/)/i.test(img.getAttribute("src"))) img.removeAttribute("src");
     }
@@ -3126,7 +2484,7 @@
       typeof right.title === "string" &&
       isReadActivityTitle(left.title) &&
       (left.title === right.title ||
-        readActivityDisplayTitle(left.title, "completed") === readActivityDisplayTitle(right.title, "completed"));
+        chatTerminal.readActivityDisplayTitle(left.title, "completed") === chatTerminal.readActivityDisplayTitle(right.title, "completed"));
   }
 
   function isReadActivityTitle(title) {
@@ -3164,26 +2522,16 @@
       return;
     }
     const files = Array.from(dataTransfer.files || []);
-    const attachments = files.filter(function (file) { return !file.type.startsWith("image/"); }).map(function (file, index) {
-      const item = dataTransfer.items?.[index];
-      const entry = item?.webkitGetAsEntry?.();
-      return fileToAttachment(file, entry?.isDirectory === true ? "folder" : undefined);
+    const uris = dataTransfer.getData("text/uri-list").split(/\r?\n/).filter(function (uri) {
+      return uri && !uri.startsWith("#");
     });
-
-    const uriList = dataTransfer.getData("text/uri-list");
-    for (const uri of uriList.split(/\r?\n/)) {
-      if (!uri || uri.startsWith("#")) {
-        continue;
-      }
-      attachments.push({
-        id: createId(),
-        name: decodeURIComponent(uri.split("/").filter(Boolean).at(-1) || uri),
-        kind: "file",
-        uri
-      });
+    // URI drops (including VS Code Explorer and Finder) must be opened by the Extension Host.
+    // A Webview-only reference cannot stage image bytes or provide a usable local runtime path.
+    if (uris.length) {
+      vscode.postMessage({ type: "attachments.addUris", uris });
+      return;
     }
-    addAttachments(attachments);
-    await addBrowserImages(files.filter(function (file) { return file.type.startsWith("image/"); }));
+    await addBrowserFiles(files);
   }
 
   function hasAttachmentData(dataTransfer) {
@@ -3194,33 +2542,53 @@
     return types.includes("Files") || types.includes("text/uri-list");
   }
 
-  function fileToAttachment(file, forcedKind) {
-    const kind = forcedKind || (file.type.startsWith("image/") ? "image" : "file");
-    return {
-      id: createId(),
-      name: file.name || "attachment",
-      kind,
-      ...(kind === "image" ? { previewUri: URL.createObjectURL(file) } : {}),
-      mediaType: file.type || undefined,
-      size: Number.isFinite(file.size) ? file.size : undefined
-    };
+  async function addBrowserFiles(files) {
+    for (const file of files) {
+      if (!file.name || file.name.length > 255 || /[\\/\x00-\x1f]/.test(file.name) || [".", ".."].includes(file.name)) {
+        appendNotice("error", t("ui.local.file.read.failed"));
+        continue;
+      }
+      if (browserImageMediaType(file)) {
+        await addBrowserImages([file]);
+        continue;
+      }
+      const id = createId();
+      addAttachments([{ id, name: file.name, kind: "file", size: file.size, pending: true }]);
+      try {
+        const data = await readDataUrl(file);
+        vscode.postMessage({ type: "attachments.createFile", id, name: file.name, size: file.size, data: data.slice(data.indexOf(",") + 1) });
+      } catch {
+        state.attachments = state.attachments.filter(item => item.id !== id);
+        appendNotice("error", t("ui.local.file.read.failed"));
+        renderAttachments();
+        persist();
+      }
+    }
+  }
+
+  function browserImageMediaType(file) {
+    const accepted = ["image/png", "image/jpeg", "image/gif", "image/webp"];
+    if (accepted.includes(file.type)) return file.type;
+    if (file.type) return undefined;
+    return ({ png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg", gif: "image/gif", webp: "image/webp" })
+      [String(file.name || "").split(".").pop().toLowerCase()];
   }
 
   async function addBrowserImages(files) {
-    const accepted = ["image/png", "image/jpeg", "image/gif", "image/webp"];
     for (const file of files) {
+      const mediaType = browserImageMediaType(file);
       const imageCount = state.attachments.filter(function (item) { return item.kind === "image"; }).length;
       const imageBytes = state.attachments.filter(function (item) { return item.kind === "image"; })
         .reduce(function (total, item) { return total + (item.size || 0); }, 0);
-      if (!accepted.includes(file.type) || file.size < 1) {
+      if (!mediaType || file.size < 1) {
         appendNotice("error", t("ui.attach.up.to.8.png.jpeg.gif.or.webp.images.with.a.maximum.of.10.mib.each.and.20.mib.total"));
         continue;
       }
       const id = createId();
-      addAttachments([{ id, name: file.name || "image", kind: "image", previewUri: URL.createObjectURL(file), mediaType: file.type, size: file.size, pending: true }]);
+      addAttachments([{ id, name: file.name || "image", kind: "image", previewUri: URL.createObjectURL(file), mediaType, size: file.size, pending: true }]);
       try {
         const dataUrl = await readDataUrl(file);
-        vscode.postMessage({ type: "attachments.createImage", id, name: file.name || "image", mediaType: file.type, size: file.size, data: dataUrl.slice(dataUrl.indexOf(",") + 1) });
+        vscode.postMessage({ type: "attachments.createImage", id, name: file.name || "image", mediaType, size: file.size, data: dataUrl.slice(dataUrl.indexOf(",") + 1) });
       } catch (error) {
         state.attachments = state.attachments.filter(function (item) { return item.id !== id; });
         appendNotice("error", t("ui.unable.to.read.the.image"));
@@ -3246,7 +2614,7 @@
     renderAttachments();
     renderStatusBar();
     renderRunStatus();
-    renderWorkLoopPanel();
+    chatTaskFlow.renderWorkLoopPanel();
     updateSendButton();
     updateRunControls();
     updateModeControls();
@@ -3290,8 +2658,8 @@
       summary.append(name, document.createTextNode(" "), file);
     }
     details.append(summary);
-    renderTerminalCommand(details, event.text, event.phase);
-    renderCommandOutput(details, event.output, false);
+    chatTerminal.renderTerminalCommand(details, event.text, event.phase);
+    chatTerminal.renderCommandOutput(details, event.output, false);
     container.append(details);
   }
 
@@ -3377,8 +2745,8 @@
     details.append(summary);
     for (const event of events) {
       const raw = document.createElement("div");
-      renderTerminalCommand(raw, event.text, event.phase, event.title);
-      renderCommandOutput(raw, event.output, Boolean(event.title));
+      chatTerminal.renderTerminalCommand(raw, event.text, event.phase, event.title);
+      chatTerminal.renderCommandOutput(raw, event.output, Boolean(event.title));
       raw.querySelectorAll("details").forEach(function (item, index) {
         item.dataset.disclosureKey = event.id + ":" + index;
       });
@@ -3532,9 +2900,9 @@
       if (managedGroup && managedGroup.events[0] !== event) continue;
       retainedIds.add(event.id);
       const existing = existingMessages.get(event.id);
-      const renderKey = [eventVersion(event), syntaxRevision, uiLocale(),
+      const renderKey = [eventVersion(event), chatSyntax.syntaxRevision, uiLocale(),
         event.type === "assistant" ? assistantContext : null,
-        event.type === "assistant" ? canAnswerInterview(event) : null,
+        event.type === "assistant" || event.type === "interview" ? canAnswerInterview(event) : null,
         event.type === "assistant" && event.runId === state.pendingDecisionRunId && event.runId
           ? JSON.stringify([state.pendingDecisionRunId, state.pendingDecisionCanApprove, state.decisionSubmitting, state.running, state.runtimeAvailable]) : null,
         managedGroup ? state.role + ":" + (commandContexts.get(managedGroup.managed.agentId) || "") : null,
@@ -3552,16 +2920,16 @@
         if (focusIndex >= 0) focusedControl = { id: element.dataset.id, index: focusIndex };
         displayStates.set(element.dataset.id, {
           expanded: element.querySelector(".bash-command-toggle")?.getAttribute("aria-expanded") === "true",
-          details: Array.from(element.querySelectorAll("details")).map(function (details, index) { return { key: details.dataset.disclosureKey || details.className + ":" + index, open: details.open, hidden: details.hidden, loaded: lazyCommandOutputs.has(details) && Boolean(details.querySelector("pre")) }; }),
+          details: Array.from(element.querySelectorAll("details")).map(function (details, index) { return { key: details.dataset.disclosureKey || details.className + ":" + index, open: details.open, hidden: details.hidden, loaded: chatTerminal.lazyCommandOutputs.has(details) && Boolean(details.querySelector("pre")) }; }),
           scroll: Array.from(element.querySelectorAll("pre")).map(function (pre) { return { top: pre.scrollTop, left: pre.scrollLeft }; })
         });
       }
       const message = document.createElement("article");
-      message.className = "message message-" + event.type;
+      message.className = "message message-" + (event.type === "interview" ? "assistant" : event.type);
       message.dataset.id = event.id;
       const compaction = event.type === "activity" && event.category === "tool" &&
         ["Context compaction", "컨텍스트 압축", t("ui.context.compaction")].includes(event.title);
-      if (event.type === "assistant") {
+      if (event.type === "assistant" || event.type === "interview") {
         message.classList.add(event.phase === "commentary" ? "message-commentary" : "message-final");
       }
       if (event.type === "user") {
@@ -3584,7 +2952,7 @@
         message.dataset.category = event.category || "tool";
         message.dataset.phase = event.phase || "started";
       }
-      if (event.type === "user" || event.type === "assistant") {
+      if (event.type === "user" || event.type === "assistant" || event.type === "interview") {
         const marker = event.type === "user" ? document.createElement("span") : createTranscriptDot();
         marker.classList.add("transcript-marker");
         marker.setAttribute("aria-hidden", "true");
@@ -3623,19 +2991,21 @@
         content.append(mark, text);
       } else if (event.type === "assistant" && event.streaming) {
         renderPreviewMarkdown(content, event.text, event);
+      } else if (event.type === "interview") {
+        renderStructuredInterview(content, event);
       } else if (event.type === "assistant") {
-        const taskContent = extractTaskFlows(assistantDisplayText(localizedText(event.text, event.localization)));
+        const taskContent = chatTaskFlow.extractTaskFlows(assistantDisplayText(localizedText(event.text, event.localization)));
         const extracted = event.phase !== "commentary" && globalThis.agentFactoryExecutionReferences
-          ? globalThis.agentFactoryExecutionReferences.extract(taskContent.text, markdown)
+          ? globalThis.agentFactoryExecutionReferences.extract(taskContent.text, chatMarkdown.markdown)
           : { text: taskContent.text, references: [] };
         if (extracted.references.length) {
-          renderAssistantMarkdown(content, extracted.before);
-          renderExecutionReferences(content, extracted.references);
-          appendAssistantMarkdown(content, extracted.after);
+          chatMarkdown.renderAssistantMarkdown(content, extracted.before);
+          chatMarkdown.renderExecutionReferences(content, extracted.references);
+          chatMarkdown.appendAssistantMarkdown(content, extracted.after);
         } else {
-          renderAssistantMarkdown(content, extracted.text);
+          chatMarkdown.renderAssistantMarkdown(content, extracted.text);
         }
-        for (const flow of taskContent.flows) content.append(createTaskFlow(flow));
+        for (const flow of taskContent.flows) content.append(chatTaskFlow.createTaskFlow(flow));
         renderInterviewChoices(content, event);
         if (event.runId && event.runId === state.pendingDecisionRunId && event.phase !== "commentary") {
           renderDecisionActions(content, event.runId);
@@ -3654,13 +3024,14 @@
           renderSkillDocuments(content, skillDocuments, event);
         } else {
           renderCommandError(content, globalThis.agentFactoryExecutionReferences.commandOutcome(event));
-          renderTerminalCommand(content, event.text, event.phase, event.title);
-          renderCommandOutput(content, event.output, Boolean(event.title));
+          chatTerminal.renderTerminalCommand(content, event.text, event.phase, event.title);
+          chatTerminal.renderCommandOutput(content, event.output, Boolean(event.title));
         }
       } else if (event.type === "activity" && event.category === "file" && event.diff) {
-        renderGitDiff(content, event.diff, event.text, event.phase);
+        chatSyntax.renderGitDiff(content, event.diff, event.text, event.phase);
       } else {
         content.textContent = event.text;
+        if (event.type === "activity" && message.dataset.category === "tool" && event.text) content.title = event.text;
       }
       if (event.type === "user") renderSubmission(content, event.submission);
       if (event.type === "user" && Array.isArray(event.attachments)) renderHistoryAttachments(content, event.attachments);
@@ -3669,14 +3040,14 @@
       if (display) {
         const toggle = message.querySelector(".bash-command-toggle");
         const command = message.querySelector(".bash-command-text");
-        if (toggle && command && display.expanded) setCommandExpanded(command, toggle, true);
+        if (toggle && command && display.expanded) chatTerminal.setCommandExpanded(command, toggle, true);
         message.querySelectorAll("details").forEach(function (details, index) {
           const key = details.dataset.disclosureKey || details.className + ":" + index;
           const previous = display.details.find(function (item) { return item.key === key; });
           if (previous) {
             details.open = previous.open;
             details.hidden = previous.hidden && !previous.open;
-            if (previous.open || previous.loaded) lazyCommandOutputs.get(details)?.();
+            if (previous.open || previous.loaded) chatTerminal.lazyCommandOutputs.get(details)?.();
           }
         });
       }
@@ -3708,7 +3079,7 @@
       if (!retainedIds.has(id)) {
         messageViewStates.set(id, {
           expanded: element.querySelector(".bash-command-toggle")?.getAttribute("aria-expanded") === "true",
-          details: Array.from(element.querySelectorAll("details")).map((details, index) => ({ key: details.dataset.disclosureKey || details.className + ":" + index, open: details.open, hidden: details.hidden, loaded: lazyCommandOutputs.has(details) && Boolean(details.querySelector("pre")) })),
+          details: Array.from(element.querySelectorAll("details")).map((details, index) => ({ key: details.dataset.disclosureKey || details.className + ":" + index, open: details.open, hidden: details.hidden, loaded: chatTerminal.lazyCommandOutputs.has(details) && Boolean(details.querySelector("pre")) })),
           scroll: Array.from(element.querySelectorAll("pre")).map(pre => ({ top: pre.scrollTop, left: pre.scrollLeft }))
         });
         element.remove(); messageElements.delete(id);
@@ -3773,732 +3144,9 @@
     return t("ui.in.progress");
   }
 
-  function renderTerminalCommand(container, command, phaseValue, title) {
-    container.classList.add("terminal-command-content");
-    const row = document.createElement("div");
-    row.className = "terminal-command-row";
-    const prompt = document.createElement("span");
-    prompt.className = "terminal-command-prompt";
-    prompt.textContent = phaseValue === "failed" ? t("ui.failed.0f4f56") : phaseValue === "completed" ? t("ui.ran") : t("ui.running");
-    const text = document.createElement("div");
-    text.className = "bash-command-text";
-    if (title) {
-      const context = document.createElement("span");
-      context.className = "terminal-command-context";
-      context.textContent = readActivityDisplayTitle(title, phaseValue);
-      context.title = command;
-      text.append(context);
-      row.append(createActivityPhase(phaseValue), text);
-      container.append(row);
-      return;
-    }
-    const commandCode = document.createElement("span");
-    commandCode.className = "syntax-code";
-    commandCode.textContent = command;
-    text.append(prompt, commandCode);
-    row.append(createActivityPhase(phaseValue), text);
-    const toggle = document.createElement("button");
-    toggle.type = "button";
-    toggle.className = "bash-command-toggle";
-    toggle.setAttribute("aria-label", t("ui.expand.full.command"));
-    toggle.title = t("ui.expand.full.command");
-    toggle.setAttribute("aria-expanded", "false");
-    toggle.hidden = true;
-    const toggleIcon = document.createElementNS("http://www.w3.org/2000/svg", "svg");
-    toggleIcon.setAttribute("viewBox", "0 0 16 16");
-    toggleIcon.setAttribute("aria-hidden", "true");
-    toggleIcon.setAttribute("focusable", "false");
-    const togglePath = document.createElementNS("http://www.w3.org/2000/svg", "path");
-    togglePath.setAttribute("d", "m4 6 4 4 4-4");
-    toggleIcon.append(togglePath);
-    toggle.append(toggleIcon);
-    toggle.addEventListener("click", function () {
-      setCommandExpanded(text, toggle, !text.classList.contains("is-expanded"));
-    });
-    const commandBlock = document.createElement("div");
-    commandBlock.className = "terminal-command-block";
-    commandBlock.append(row, toggle);
-    container.append(commandBlock);
-    if (!commandDisclosureObserver) {
-      commandDisclosureObserver = new ResizeObserver(function () {
-        measureAllCommands = true;
-        scheduleCommandDisclosureMeasurement();
-      });
-      commandDisclosureObserver.observe(timeline);
-    }
-    scheduleCommandDisclosureMeasurement(commandBlock);
-    void applySyntaxHighlighting(commandCode, command, "bash").then(function () {
-      scheduleCommandDisclosureMeasurement(commandBlock);
-    });
-  }
-
-  function setCommandExpanded(text, toggle, expanded) {
-    text.classList.toggle("is-expanded", expanded);
-    toggle.classList.toggle("is-expanded", expanded);
-    toggle.setAttribute("aria-label", expanded ? t("ui.collapse.command") : t("ui.expand.full.command"));
-    toggle.title = expanded ? t("ui.collapse.command") : t("ui.expand.full.command");
-    toggle.setAttribute("aria-expanded", String(expanded));
-    if (expanded) toggle.hidden = false;
-  }
-
-  function scheduleCommandDisclosureMeasurement(block) {
-    if (block) dirtyCommandBlocks.add(block);
-    if (commandDisclosureFrame) return;
-    commandDisclosureFrame = requestAnimationFrame(function () {
-      commandDisclosureFrame = undefined;
-      const blocks = measureAllCommands ? timeline.querySelectorAll(".terminal-command-block") : dirtyCommandBlocks;
-      const updates = [];
-      for (const block of blocks) {
-        if (!block.isConnected) continue;
-        const text = block.querySelector(".bash-command-text");
-        const toggle = block.querySelector(".bash-command-toggle");
-        if (!text || !toggle || text.classList.contains("is-expanded")) continue;
-        updates.push([toggle, text.scrollHeight <= text.clientHeight + 1]);
-      }
-      dirtyCommandBlocks.clear();
-      measureAllCommands = false;
-      for (const [toggle, hidden] of updates) if (toggle.hidden !== hidden) toggle.hidden = hidden;
-    });
-  }
-
-  function readActivityDisplayTitle(title, phase) {
-    const skill = /^(?:Read Skill|Skill 읽기) · (.*)$/.exec(title);
-    if (skill) return t(phase === "started" ? "activity.skill.reading" : "activity.skill.read", skill[1]);
-    if (["Read run result", "실행 결과 읽기"].includes(title)) return t(phase === "started" ? "activity.result.reading" : "activity.result.read");
-    return title;
-  }
-
-  function createCommandOutput(text) {
-    const output = document.createElement("pre");
-    output.className = "terminal-command-output";
-    const marker = document.createElementNS("http://www.w3.org/2000/svg", "svg");
-    marker.setAttribute("viewBox", "0 0 16 24");
-    marker.setAttribute("aria-hidden", "true");
-    marker.setAttribute("focusable", "false");
-    const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
-    path.setAttribute("d", "M4 3v9h7");
-    path.setAttribute("fill", "none");
-    path.setAttribute("stroke", "currentColor");
-    marker.append(path);
-    output.append(marker, globalThis.agentFactoryAnsi
-      ? globalThis.agentFactoryAnsi.render(text, document)
-      : document.createTextNode(text));
-    return output;
-  }
-
-  function renderCommandOutput(container, output, collapsed) {
-    if (typeof output !== "string") return;
-    const block = document.createElement("div");
-    block.className = "terminal-output-block";
-    block.classList.toggle("terminal-output-collapsed", collapsed);
-    const text = output || t("ui.no.output");
-    block.classList.toggle("is-empty", !output);
-    // Bound preview work by both lines and bytes; full evidence stays available on demand.
-    let previewText = text.slice(0, 2048).split("\n").slice(0, 8).join("\n");
-    const truncated = previewText.length < text.length;
-    if (truncated) previewText += "\x1b[0m…";
-    const preview = createCommandOutput(previewText);
-    preview.classList.add("terminal-output-preview");
-    const details = document.createElement("details");
-    details.className = "terminal-output-details";
-    const summary = document.createElement("summary");
-    summary.textContent = t("ui.view.run.result");
-    details.append(summary);
-    let loaded = false;
-    function loadOutput() {
-      if (loaded) return;
-      loaded = true;
-      details.append(createCommandOutput(text));
-    }
-    lazyCommandOutputs.set(details, loadOutput);
-    summary.addEventListener("click", function () {
-      if (!details.open) loadOutput();
-    });
-    details.addEventListener("toggle", function () {
-      if (details.open) loadOutput();
-      scheduleCommandOutputMeasurement(block);
-    });
-    block.dataset.truncated = String(truncated);
-    block.append(preview, details);
-    container.append(block);
-    if (!commandOutputObserver) {
-      commandOutputObserver = new ResizeObserver(function () {
-        measureAllOutputs = true;
-        scheduleCommandOutputMeasurement();
-      });
-      commandOutputObserver.observe(timeline);
-    }
-    scheduleCommandOutputMeasurement(block);
-  }
-
-  function scheduleCommandOutputMeasurement(block) {
-    if (block) dirtyOutputBlocks.add(block);
-    if (commandOutputFrame) return;
-    commandOutputFrame = requestAnimationFrame(function () {
-      commandOutputFrame = undefined;
-      const blocks = measureAllOutputs ? timeline.querySelectorAll(".terminal-output-block") : dirtyOutputBlocks;
-      const updates = [];
-      for (const block of blocks) {
-        if (!block.isConnected) continue;
-        const preview = block.querySelector(".terminal-output-preview");
-        const details = block.querySelector(".terminal-output-details");
-        updates.push([details, !details.open && block.dataset.truncated !== "true" && !block.classList.contains("terminal-output-collapsed") && preview.scrollHeight <= preview.clientHeight + 1]);
-      }
-      dirtyOutputBlocks.clear();
-      measureAllOutputs = false;
-      for (const [details, hidden] of updates) if (details.hidden !== hidden) details.hidden = hidden;
-    });
-  }
-
-  function renderGitDiff(container, diff, fallbackText, phaseValue) {
-    container.classList.add("git-diff-content");
-    const files = parseGitDiff(diff);
-    const additions = files.reduce(function (sum, file) { return sum + file.additions; }, 0);
-    const deletions = files.reduce(function (sum, file) { return sum + file.deletions; }, 0);
-    const overview = document.createElement("div");
-    overview.className = "git-diff-overview";
-    overview.append(createActivityPhase(phaseValue));
-    const label = document.createElement("span");
-    label.append(document.createTextNode(t("ui.edited") + (files.length === 1 ? files[0].path : t("diff.files", files.length || 1)) + " "));
-    const stats = document.createElement("span");
-    stats.className = "git-diff-stats";
-    stats.append("(", createDiffCount("+" + additions, "addition"), " ", createDiffCount("−" + deletions, "deletion"), ")");
-    label.append(stats);
-    overview.append(label);
-    container.append(overview);
-
-    const list = document.createElement("div");
-    list.className = "git-diff-files";
-    if (files.length === 0) {
-      list.textContent = fallbackText;
-    } else {
-      files.forEach(function (file) {
-        const row = document.createElement("div");
-        row.className = "git-diff-file";
-        const path = document.createElement("span");
-        path.textContent = file.path;
-        const count = document.createElement("span");
-        count.className = "git-diff-file-stats";
-        count.append(createDiffCount("+" + file.additions, "addition"), " ", createDiffCount("−" + file.deletions, "deletion"));
-        row.append(path, count);
-        list.append(row);
-      });
-    }
-    if (files.length !== 1) container.append(list);
-    renderInlineDiff(container, diff);
-
-    const details = document.createElement("details");
-    details.className = "git-diff-preview";
-    details.open = false;
-    const summary = document.createElement("summary");
-    summary.textContent = t("ui.view.git.diff");
-    const pre = document.createElement("pre");
-    const code = document.createElement("code");
-    diff.split("\n").forEach(function (line) {
-      const span = document.createElement("span");
-      span.className = gitDiffLineClass(line);
-      span.textContent = line || " ";
-      code.append(span);
-    });
-    pre.append(code);
-    details.append(summary, pre);
-    container.append(details);
-    void applyDiffSyntaxHighlighting(code, diff);
-  }
-
-  function createDiffCount(text, kind) {
-    const count = document.createElement("span");
-    count.className = "git-diff-count-" + kind;
-    count.textContent = text;
-    return count;
-  }
-
-  function renderInlineDiff(container, diff) {
-    const preview = document.createElement("pre");
-    preview.className = "git-diff-inline";
-    let oldLine = 0;
-    let newLine = 0;
-    let inHunk = false;
-    let shown = 0;
-    const multipleFiles = parseGitDiff(diff).length > 1;
-    for (const [lineIndex, line] of diff.split("\n").entries()) {
-      const hunk = line.match(/^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@/);
-      if (hunk) {
-        oldLine = Number(hunk[1]);
-        newLine = Number(hunk[2]);
-        inHunk = true;
-        continue;
-      }
-      if (line.startsWith("diff --git ")) {
-        inHunk = false;
-        if (multipleFiles && shown < 12) {
-          const file = document.createElement("span");
-          file.className = "git-diff-inline-file";
-          const match = line.match(/^diff --git a\/(.+) b\/(.+)$/);
-          file.textContent = match ? match[2] : line.slice(11);
-          preview.append(file);
-        }
-        continue;
-      }
-      if (!inHunk || !/^[ +\-]/.test(line)) continue;
-      const number = line.startsWith("-") ? oldLine : newLine;
-      if (!line.startsWith("+")) oldLine++;
-      if (!line.startsWith("-")) newLine++;
-      if (shown++ >= 12) continue;
-      const row = document.createElement("span");
-      row.className = "git-diff-line" + (line.startsWith("+") ? " git-diff-addition" : line.startsWith("-") ? " git-diff-deletion" : "");
-      const gutter = document.createElement("span");
-      gutter.className = "git-diff-line-number";
-      gutter.textContent = String(number);
-      const sign = document.createElement("span");
-      sign.className = "git-diff-sign";
-      sign.textContent = line.slice(0, 1);
-      const source = document.createElement("span");
-      source.className = "git-diff-source";
-      source.textContent = line.slice(1);
-      row.append(gutter, sign, source);
-      source.dataset.diffIndex = String(lineIndex);
-      preview.append(row);
-    }
-    if (shown > 12) {
-      const more = document.createElement("span");
-      more.className = "git-diff-more";
-      more.textContent = t("diff.more", shown - 12);
-      preview.append(more);
-    }
-    if (shown > 0) {
-      container.append(preview);
-      void applyDiffSyntaxHighlighting(preview, diff, true);
-    }
-  }
-
-  async function applyDiffSyntaxHighlighting(code, diff, inline) {
-    const highlighter = globalThis.agentFactorySyntaxHighlighter;
-    if (!highlighter) return;
-    const revision = syntaxRevision;
-    const elements = inline
-      ? new Map(Array.from(code.querySelectorAll("[data-diff-index]")).map(function (element) { return [Number(element.dataset.diffIndex), element]; }))
-      : new Map(Array.from(code.children).map(function (element, index) { return [index, element]; }));
-    const sections = [];
-    let path = "";
-    let section;
-    diff.split("\n").forEach(function (line, index) {
-      if (line.startsWith("diff --git ")) {
-        const match = line.match(/^diff --git a\/(.+) b\/(.+)$/);
-        path = match ? match[2] : "";
-        section = undefined;
-      } else if (/^@@ -\d+(?:,\d+)? \+\d+(?:,\d+)? @@/.test(line)) {
-        section = { path, entries: [] };
-        sections.push(section);
-      } else if (section && /^[ +\-]/.test(line)) {
-        section.entries.push({ index, prefix: line.slice(0, 1), text: line.slice(1) });
-      }
-    });
-    await Promise.all(sections.map(async function (item) {
-      const language = highlighter.languageForPath(item.path);
-      if (!language || !item.entries.some(function (entry) { return elements.has(entry.index); })) return;
-      const lastVisible = inline ? Math.max(...item.entries.filter(function (entry) { return elements.has(entry.index); }).map(function (entry) { return entry.index; })) : Infinity;
-      await Promise.all(["old", "new"].map(async function (side) {
-        const entries = item.entries.filter(function (entry) {
-          return entry.index <= lastVisible && entry.prefix !== (side === "old" ? "+" : "-");
-        });
-        if (entries.length === 0) return;
-        try {
-          const highlighted = await highlighter.highlight(entries.map(function (entry) { return entry.text; }).join("\n"), language, currentSyntaxThemeClass() !== "light", isHighContrast());
-          if (revision !== syntaxRevision || !code.isConnected) return;
-          entries.forEach(function (entry, index) {
-            const element = elements.get(entry.index);
-            const tokens = highlighted[index];
-            if (element && tokens && (side === "new" || entry.prefix === "-")) renderHighlightedTokens(element, tokens, inline ? "" : entry.prefix);
-          });
-        } catch {
-        }
-      }));
-    }));
-  }
-
-  async function applySyntaxHighlighting(element, code, language) {
-    const highlighter = globalThis.agentFactorySyntaxHighlighter;
-    if (!highlighter) return;
-    const revision = syntaxRevision;
-    try {
-      const highlighted = await highlighter.highlight(
-        code,
-        language,
-        currentSyntaxThemeClass() !== "light",
-        isHighContrast()
-      );
-      if (revision !== syntaxRevision || !element.isConnected || highlighted.length === 0) return;
-      const fragment = document.createDocumentFragment();
-      highlighted.forEach(function (tokens, index) {
-        if (index > 0) fragment.append(document.createTextNode("\n"));
-        appendHighlightedTokens(fragment, tokens);
-      });
-      element.replaceChildren(fragment);
-    } catch {
-      // The original text is the progressive fallback when highlighting fails.
-    }
-  }
-
-  function renderHighlightedTokens(element, tokens, prefix) {
-    element.replaceChildren(document.createTextNode(prefix));
-    appendHighlightedTokens(element, tokens);
-  }
-
-  function appendHighlightedTokens(container, tokens) {
-    tokens.forEach(function (token) {
-      const span = document.createElement("span");
-      span.textContent = token.content;
-      if (token.color) span.style.color = token.color;
-      if (token.fontStyle & 1) span.style.fontStyle = "italic";
-      if (token.fontStyle & 2) span.style.fontWeight = "bold";
-      if (token.fontStyle & 4) span.style.textDecoration = "underline";
-      container.append(span);
-    });
-  }
-
-  async function updateSyntaxTheme(selection) {
-    const update = ++themeUpdate;
-    syntaxRevision += 1;
-    try {
-      if (globalThis.agentFactorySyntaxHighlighter) {
-        await globalThis.agentFactorySyntaxHighlighter.configureTheme(selection);
-      }
-      if (update !== themeUpdate) return;
-      if (selection.error) upsertThemeWarning(selection.error);
-      else state.timeline = state.timeline.filter(function (event) { return event.id !== "syntax-theme-warning"; });
-    } catch (error) {
-      if (update !== themeUpdate) return;
-      try { await globalThis.agentFactorySyntaxHighlighter?.configureTheme({}); } catch {}
-      if (update !== themeUpdate) return;
-      upsertThemeWarning(String(error));
-    }
-    if (update === themeUpdate) renderTimeline();
-  }
-
-  function upsertThemeWarning(message) {
-    const existing = state.timeline.find(function (event) { return event.id === "syntax-theme-warning"; });
-    if (existing) existing.text = message;
-    else state.timeline.push({ type: "notice", id: "syntax-theme-warning", level: "warning", text: message });
-  }
-
-  function isHighContrast() {
-    return document.body.classList.contains("vscode-high-contrast") ||
-      document.body.classList.contains("vscode-high-contrast-light");
-  }
-
-  function currentSyntaxThemeClass() {
-    return document.body.classList.contains("vscode-light") ||
-      document.body.classList.contains("vscode-high-contrast-light")
-      ? "light"
-      : "dark";
-  }
-
-  function parseGitDiff(diff) {
-    const files = [];
-    let current;
-    diff.split("\n").forEach(function (line) {
-      if (line.startsWith("diff --git ")) {
-        const match = line.match(/^diff --git a\/(.+) b\/(.+)$/);
-        current = { path: match ? match[2] : line.slice(11), additions: 0, deletions: 0 };
-        files.push(current);
-      } else if (current && line.startsWith("+") && !line.startsWith("+++")) {
-        current.additions += 1;
-      } else if (current && line.startsWith("-") && !line.startsWith("---")) {
-        current.deletions += 1;
-      }
-    });
-    return files;
-  }
-
-  function gitDiffLineClass(line) {
-    if (line.startsWith("+") && !line.startsWith("+++")) return "git-diff-line git-diff-addition";
-    if (line.startsWith("-") && !line.startsWith("---")) return "git-diff-line git-diff-deletion";
-    if (line.startsWith("@@")) return "git-diff-line git-diff-hunk";
-    return "git-diff-line";
-  }
-
-  function renderExecutionReferences(container, references) {
-    const list = document.createElement("ul");
-    list.className = "execution-references agents-list";
-    list.setAttribute("aria-label", t("ui.execution.identifiers"));
-    for (const reference of references) {
-      const row = document.createElement("li");
-      row.className = "execution-reference";
-      const expectedRole = reference.label === "Work Agent" ? "work" : reference.label === "예약된 Verification Agent" ? "verification" : undefined;
-      const canOpen = expectedRole && state.role === "main" && state.childAgents.some(function (agent) {
-        return agent.agentId === reference.id && agent.role === expectedRole;
-      });
-      const main = document.createElement(canOpen ? "button" : "div");
-      main.className = "agent-item execution-reference-main";
-      if (canOpen) {
-        main.type = "button";
-        main.title = reference.id + t("ui.chat.with.session");
-        main.addEventListener("click", function () {
-          if (state.childAgents.some(function (agent) { return agent.agentId === reference.id && agent.role === expectedRole; })) {
-            vscode.postMessage({ type: "agent.open", agentId: reference.id });
-          }
-        });
-      }
-      const label = document.createElement("span");
-      label.className = "agent-role";
-      label.textContent = ({ "Work Agent": t("reference.work.agent"), "Work Run": t("reference.work.run"), "Work Session": t("reference.work.session"), "Loop": t("reference.loop"), "예약된 Verification Agent": t("ui.reserved.verification.agent") })[reference.label] || reference.label;
-      const id = document.createElement("span");
-      id.className = "execution-reference-id";
-      id.textContent = reference.id;
-      main.append(label, id);
-      const copy = document.createElement("button");
-      copy.type = "button";
-      copy.className = "execution-reference-copy setting-button";
-      copy.textContent = t("ui.copy");
-      copy.setAttribute("aria-label", label.textContent + " " + reference.id + t("ui.copy.fafe60"));
-      copy.addEventListener("click", function () { vscode.postMessage({ type: "reference.copy", id: reference.id }); });
-      row.append(main, copy);
-      list.append(row);
-    }
-    container.append(list);
-  }
-
-  function renderAssistantMarkdown(container, text) {
-    if (!markdown) {
-      container.textContent = text;
-      return;
-    }
-    container.classList.add("markdown-body");
-    container.innerHTML = markdown.render(text);
-    finishAssistantMarkdown(container);
-  }
-
-  function appendAssistantMarkdown(container, text) {
-    if (!text) return;
-    if (!markdown) {
-      container.append(document.createTextNode(text));
-      return;
-    }
-    const fragment = document.createElement("template");
-    fragment.innerHTML = markdown.render(text);
-    container.append(fragment.content);
-    finishAssistantMarkdown(container);
-  }
-
-  // Math is tokenized before Markdown escapes so TeX backslashes survive; KaTeX renders MathML, which needs no inline styles under the CSP.
-  function markdownMath(md) {
-    const escape = md.utils.escapeHtml;
-    md.block.ruler.before("fence", "math_block", function (state, startLine, endLine, silent) {
-      if (state.sCount[startLine] - state.blkIndent >= 4) return false;
-      const first = state.src.slice(state.bMarks[startLine] + state.tShift[startLine], state.eMarks[startLine]);
-      const close = first.startsWith("$$") ? "$$" : first.startsWith("\\[") ? "\\]" : "";
-      if (!close) return false;
-      let content = first.slice(2).trimEnd();
-      let line = startLine;
-      let closed = content.endsWith(close);
-      if (closed) content = content.slice(0, -2);
-      while (!closed) {
-        if (++line >= endLine) return false;
-        const text = state.src.slice(state.bMarks[line] + state.tShift[line], state.eMarks[line]).trimEnd();
-        closed = text.endsWith(close);
-        content += "\n" + (closed ? text.slice(0, -2) : text);
-      }
-      if (!content.trim()) return false;
-      if (silent) return true;
-      const token = state.push("math_block", "div", 0);
-      token.block = true;
-      token.content = content.trim();
-      token.map = [startLine, line + 1];
-      state.line = line + 1;
-      return true;
-    }, { alt: ["paragraph", "reference", "blockquote", "list"] });
-    md.inline.ruler.before("escape", "math_inline", function (state, silent) {
-      const src = state.src;
-      const start = state.pos;
-      const open = src.startsWith("\\(", start) ? "\\(" : src.startsWith("$$", start) ? "$$" : src[start] === "$" ? "$" : "";
-      if (!open) return false;
-      const close = open === "\\(" ? "\\)" : open;
-      const from = start + open.length;
-      // Currency and shell variables stay text: `$` must hug its content and not close before a digit.
-      if (open === "$" && (!src[from] || /\s/.test(src[from]))) return false;
-      let end = from;
-      while ((end = src.indexOf(close, end)) !== -1) {
-        if (open !== "\\(" && src[end - 1] === "\\") { end += 1; continue; }
-        if (open === "$" && (/\s/.test(src[end - 1]) || /\d/.test(src[end + 1] || ""))) { end += 1; continue; }
-        break;
-      }
-      // Never reach across a code span.
-      if (end === -1 || end === from || src.slice(from, end).includes("`")) return false;
-      if (!silent) {
-        const token = state.push("math_inline", "span", 0);
-        token.content = src.slice(from, end);
-        token.info = open === "$$" ? "display" : "";
-      }
-      state.pos = end + close.length;
-      return true;
-    });
-    md.renderer.rules.math_inline = function (tokens, index) {
-      const token = tokens[index];
-      return '<span class="math-inline"' + (token.info ? ' data-display="true"' : "") + ' data-tex="' + escape(token.content) + '">' + escape(token.content) + "</span>";
-    };
-    md.renderer.rules.math_block = function (tokens, index) {
-      return '<div class="math-block" data-tex="' + escape(tokens[index].content) + '">' + escape(tokens[index].content) + "</div>\n";
-    };
-  }
-
-  // Model HTML stays escaped except attribute-free inline formatting tags, and table alignment
-  // becomes a class because the webview CSP drops inline style attributes.
-  function markdownSafeMarkup(md) {
-    const safeTags = new Set(["u", "mark", "sub", "sup", "kbd", "ins", "del", "s", "small", "br"]);
-    md.inline.ruler.after("escape", "safe_inline_tag", function (state, silent) {
-      if (state.src.charCodeAt(state.pos) !== 0x3C) return false;
-      const match = /^<(\/?)([a-z]+)\s*(\/?)>/i.exec(state.src.slice(state.pos));
-      if (!match) return false;
-      const tag = match[2].toLowerCase();
-      if (!safeTags.has(tag) || (match[1] && tag === "br")) return false;
-      if (!silent) {
-        const token = state.push("safe_inline_tag", tag, 0);
-        token.meta = { closing: Boolean(match[1]) };
-        token.markup = match[0];
-      }
-      state.pos += match[0].length;
-      return true;
-    });
-    md.renderer.rules.safe_inline_tag = function (tokens, index) {
-      const token = tokens[index];
-      return token.tag === "br" ? "<br>" : "<" + (token.meta.closing ? "/" : "") + token.tag + ">";
-    };
-    // Unmatched opening or closing tags fall back to their literal text.
-    md.core.ruler.push("safe_inline_tag_balance", function (state) {
-      for (const block of state.tokens) {
-        if (block.type !== "inline" || !block.children) continue;
-        const open = [];
-        const unmatched = new Set();
-        for (const token of block.children) {
-          if (token.type !== "safe_inline_tag" || token.tag === "br") continue;
-          if (!token.meta.closing) open.push(token);
-          else if (open.length && open[open.length - 1].tag === token.tag) open.pop();
-          else unmatched.add(token);
-        }
-        for (const token of open) unmatched.add(token);
-        for (const token of unmatched) { token.type = "text"; token.content = token.markup; }
-      }
-    });
-    md.core.ruler.push("table_align_class", function (state) {
-      for (const token of state.tokens) {
-        const style = token.attrGet && token.attrGet("style");
-        const align = style && /text-align:(left|center|right)/.exec(style);
-        if (!align) continue;
-        token.attrs = token.attrs.filter(function (attr) { return attr[0] !== "style"; });
-        token.attrJoin("class", "align-" + align[1]);
-      }
-    });
-  }
-
-  function loadVendorScript(file, name) {
-    if (globalThis[name]) return Promise.resolve(globalThis[name]);
-    if (!vendorBase) return Promise.reject(new Error(file));
-    if (!vendorLoads.has(file)) {
-      vendorLoads.set(file, new Promise(function (resolve, reject) {
-        const script = document.createElement("script");
-        script.nonce = scriptNonce;
-        script.src = new URL(file, vendorBase).href;
-        script.onload = function () { globalThis[name] ? resolve(globalThis[name]) : reject(new Error(file)); };
-        script.onerror = function () { vendorLoads.delete(file); reject(new Error(file)); };
-        document.head.append(script);
-      }));
-    }
-    return vendorLoads.get(file);
-  }
-
-  // Unrendered TeX stays visible as source until KaTeX is available; previews render only once it has loaded.
-  function renderMath(root) {
-    const nodes = Array.from(root.querySelectorAll(".math-inline[data-tex], .math-block[data-tex]"));
-    if (!nodes.length) return;
-    const apply = function (katex) {
-      for (const node of nodes) {
-        const tex = node.dataset.tex;
-        if (tex === undefined) continue;
-        try {
-          katex.render(tex, node, { displayMode: node.classList.contains("math-block") || node.dataset.display === "true", output: "mathml", throwOnError: false, strict: "ignore", trust: false });
-          delete node.dataset.tex;
-        } catch {
-          node.classList.add("math-error");
-        }
-      }
-    };
-    if (globalThis.katex) apply(globalThis.katex);
-    else void loadVendorScript("katex.min.js", "katex").then(apply, function () {});
-  }
-
-  // Diagrams become data: SVG images: the document CSP blocks Mermaid's inline <style>, an image document does not.
-  function renderMermaid(root) {
-    for (const code of root.querySelectorAll("pre > code.language-mermaid:not([data-mermaid])")) {
-      const source = code.textContent;
-      code.dataset.mermaid = "pending";
-      const place = function (src) {
-        const pre = code.parentElement;
-        if (!pre || pre.tagName !== "PRE") return;
-        const figure = document.createElement("figure");
-        figure.className = "mermaid-diagram";
-        const image = document.createElement("img");
-        image.alt = source;
-        image.src = src;
-        figure.append(image);
-        pre.replaceWith(figure);
-      };
-      if (mermaidImages.has(source)) { place(mermaidImages.get(source)); continue; }
-      mermaidQueue = mermaidQueue.then(function () {
-        return loadVendorScript("mermaid.min.js", "mermaid");
-      }).then(async function (mermaid) {
-        if (!mermaidImages.has(source)) {
-          const light = document.body.classList.contains("vscode-light") || document.body.classList.contains("vscode-high-contrast-light");
-          mermaid.initialize({ startOnLoad: false, securityLevel: "strict", theme: light ? "default" : "dark", htmlLabels: false, flowchart: { htmlLabels: false }, fontFamily: getComputedStyle(document.body).fontFamily });
-          const { svg } = await mermaid.render("af-mermaid-" + ++mermaidSequence, source);
-          mermaidImages.set(source, svgImageSource(svg));
-        }
-        place(mermaidImages.get(source));
-      }).catch(function () {
-        code.dataset.mermaid = "failed";
-      });
-    }
-  }
-
-  function svgImageSource(markup) {
-    const svg = new DOMParser().parseFromString(markup, "text/html").querySelector("svg");
-    const box = (svg.getAttribute("viewBox") || "").split(/[\s,]+/).map(Number);
-    if (box.length === 4 && box[2] > 0 && box[3] > 0) {
-      svg.setAttribute("width", String(Math.ceil(box[2])));
-      svg.setAttribute("height", String(Math.ceil(box[3])));
-      svg.removeAttribute("style");
-    }
-    const bytes = new TextEncoder().encode(new XMLSerializer().serializeToString(svg));
-    let binary = "";
-    for (let index = 0; index < bytes.length; index += 8192) binary += String.fromCharCode(...bytes.subarray(index, index + 8192));
-    return "data:image/svg+xml;base64," + btoa(binary);
-  }
-
-  function finishAssistantMarkdown(container) {
-    renderMath(container);
-    renderMermaid(container);
-    for (const img of container.querySelectorAll("img[src]")) {
-      const href = img.getAttribute("src");
-      if (img.dataset.localImage || !/^(?:file:\/\/|\/|\.\.?\/)/i.test(href)) continue;
-      img.dataset.localImage = href;
-      img.removeAttribute("src");
-      vscode.postMessage({ type: "image.resolve", href });
-    }
-    for (const code of container.querySelectorAll("pre > code")) {
-      if (code.dataset.highlighted === "true" || code.dataset.mermaid) continue;
-      code.dataset.highlighted = "true";
-      const languageClass = Array.from(code.classList).find(function (name) { return name.startsWith("language-"); });
-      void applySyntaxHighlighting(code, code.textContent, languageClass ? languageClass.slice(9) : "");
-    }
-    for (const link of container.querySelectorAll("a")) {
-      link.target = "_blank";
-      link.rel = "noopener noreferrer";
-    }
-  }
-
   function renderRunStatus() {
     runElapsed.hidden = !state.running;
-    const hasUnfinishedTasks = displayTaskFlows().some(unfinishedFlow);
+    const hasUnfinishedTasks = chatTaskFlow.displayTaskFlows().some(chatTaskFlow.unfinishedFlow);
     runStatus.hidden = !state.running && !hasUnfinishedTasks;
     if (!state.running) {
       stopElapsedTimer();
@@ -4525,364 +3173,6 @@
     }
   }
 
-  function extractTaskFlows(text) {
-    const flows = [];
-    const rest = text.replace(/^```task-flow\s*\n([\s\S]*?)^```\s*$/gm, function (block, json) {
-      try {
-        const flow = JSON.parse(json);
-        const validId = value => typeof value === "string" && /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(value);
-        const validText = value => typeof value === "string" && value.trim();
-        const statuses = ["pending", "running", "verifying", "completed", "failed", "blocked", "cancelled"];
-        if (!validId(flow.id) || !validText(flow.title) || !Array.isArray(flow.tasks) || !flow.tasks.length) return block;
-        if (!flow.tasks.every(task => task && validId(task.id) && validText(task.title) && statuses.includes(task.status) &&
-          (task.description === undefined || (typeof task.description === "string")) &&
-          (task.agentId === undefined || validId(task.agentId)) && (task.runId === undefined || validId(task.runId)))) return block;
-        if (new Set(flow.tasks.map(task => task.id)).size !== flow.tasks.length) return block;
-        flows.push(flow);
-        return "";
-      } catch { return block; }
-    });
-    return { text: rest, flows };
-  }
-
-  function currentTaskFlows() {
-    const index = indexedTimeline();
-    const inputs = [index, index.flowRevision, state.taskFlows,
-      state.childAgents, state.workflows, t("ui.verification")];
-    if (taskFlowSnapshot && inputs.every((value, index) => value === taskFlowSnapshot.inputs[index])) {
-      return taskFlowSnapshot.flows;
-    }
-    const flows = new Map(index.flows);
-    for (const savedFlow of state.taskFlows || []) {
-      for (const flow of extractTaskFlows("```task-flow\n" + JSON.stringify(savedFlow) + "\n```").flows) flows.set(flow.id, flow);
-    }
-    // Runtime-accepted task metadata is authoritative even when commentary is absent.
-    for (const agent of state.childAgents.slice().reverse()) {
-      const binding = agent.taskBinding;
-      if (!acceptedTaskAgent(agent) || !binding) continue;
-      const task = { id: binding.taskId, title: binding.title, description: binding.description,
-        status: agent.status === "completed" ? "pending" : agent.status === "needs-human-decision" ? "blocked" :
-          ["failed", "cancelled"].includes(agent.status) ? agent.status : agent.status === "running" ? (agent.role === "verification" ? "verifying" : "running") : "pending",
-        agentId: agent.agentId, runId: agent.runId, sessionRole: agent.role };
-      if (typeof binding.completionCriteria === "string") task.description += "\n\n" + binding.completionCriteria;
-      const candidate = { id: binding.workflowId, title: binding.workflowTitle, tasks: [task] };
-      if (!extractTaskFlows("```task-flow\n" + JSON.stringify(candidate) + "\n```").flows.length) continue;
-      const existing = flows.get(candidate.id);
-      const flow = existing ? { ...existing, tasks: [...existing.tasks] } : { ...candidate, tasks: [] };
-      const index = flow.tasks.findIndex(entry => entry.id === task.id);
-      if (index < 0) flow.tasks.push(task);
-      else {
-        const previous = flow.tasks[index];
-        flow.tasks[index] = { ...task, status: previous.status === "completed" && previous.runId === task.runId ? "completed" : task.status };
-      }
-      flows.set(flow.id, flow);
-    }
-    for (const snapshot of state.workflows || []) {
-      const workflow = snapshot.workflow;
-      if (!workflow || !Array.isArray(workflow.tasks)) continue;
-      const verification = ["work-verification", "plan-work-verification"].includes(snapshot.taskMode);
-      const tasks = workflow.tasks.flatMap((task, index) => {
-        const description = [task.description, task.completionCriteria].filter(Boolean).join("\n\n");
-        const stages = [{ id: verification ? "stage-" + index + ".work" : task.id, taskId: task.id, title: task.title, description, status: task.workStatus, sessionAgentId: task.workAgentId || snapshot.workAgentId, sessionRunId: task.workRunId, sessionRole: "work" }];
-        if (verification) stages.push({ id: "stage-" + index + ".verification", taskId: task.id, title: String(task.title).slice(0, 280) + " · " + t("ui.verification"), description, status: task.verificationStatus === "running" ? "verifying" : task.verificationStatus, sessionAgentId: task.verificationAgentId || snapshot.verificationAgentId, sessionRunId: task.verificationRunId, sessionRole: "verification" });
-        return stages;
-      });
-      const candidate = { id: workflow.id, title: workflow.title, tasks };
-      if (extractTaskFlows("```task-flow\n" + JSON.stringify(candidate) + "\n```").flows.length) flows.set(workflow.id, { ...candidate, engine: true, loopId: snapshot.loopId, workAgentId: snapshot.workAgentId, closable: snapshot.status === "runtime-error" });
-    }
-    const result = [...flows.values()];
-    taskFlowSnapshot = { inputs, flows: result };
-    return result;
-  }
-
-  function liveTaskStatus(task) {
-    let status = task.status;
-    const agent = task.agentId && task.runId && state.childAgents.find(agent => agent.agentId === task.agentId && agent.runId === task.runId);
-    if (agent && status !== "completed") {
-      if (["failed", "cancelled"].includes(agent.status)) status = agent.status;
-      else if (agent.status === "needs-human-decision") status = "blocked";
-      else if (agent.status === "running") status = agent.role === "verification" ? "verifying" : "running";
-      // A finished child is not proof that the whole task passed verification.
-      else if (["running", "verifying"].includes(status)) status = "pending";
-    }
-    return status;
-  }
-
-  function summarizeTaskFlow(flow, live) {
-    const groups = new Map();
-    const workers = new Set();
-    for (const task of flow.tasks) {
-      const id = task.taskId || task.id;
-      if (!groups.has(id)) groups.set(id, []);
-      groups.get(id).push(task);
-      const worker = task.sessionAgentId || task.agentId;
-      if (worker && task.sessionRole !== "verification") workers.add(worker);
-    }
-    const counts = { pending: 0, running: 0, verifying: 0, completed: 0, blocked: 0, failed: 0, cancelled: 0 };
-    const current = [];
-    const statusOf = task => live ? liveTaskStatus(task) : task.status;
-    for (const stages of groups.values()) {
-      const work = stages.find(task => task.sessionRole !== "verification") || stages[0];
-      const verification = stages.find(task => task.sessionRole === "verification");
-      // A finished Work stage still waits for its selected Verification stage.
-      const selected = statusOf(work) === "completed" && verification ? verification : work;
-      const status = statusOf(selected);
-      if (Object.hasOwn(counts, status)) counts[status] += 1;
-      if (["running", "verifying"].includes(status)) current.push(t("flow.summary.current.task", work.title, t("flow.status." + status)));
-    }
-    return { total: groups.size, workers: workers.size, counts, current };
-  }
-
-  function createTaskFlow(flow, live = false) {
-    const section = document.createElement("section");
-    section.className = "task-flow";
-    section.dataset.flowId = flow.id;
-    section.setAttribute("aria-label", flow.title);
-    const title = document.createElement("strong");
-    title.textContent = flow.title;
-    section.append(title);
-    if (live && flow.closable && state.role === "main") {
-      const close = document.createElement("button");
-      close.type = "button";
-      close.textContent = t("flow.close.failed");
-      close.addEventListener("click", () => {
-        vscode.postMessage({ type: "workflow.close", workAgentId: flow.workAgentId, loopId: flow.loopId });
-      });
-      section.append(close);
-    }
-    const totals = summarizeTaskFlow(flow, live);
-    const summary = document.createElement("div");
-    summary.className = "task-flow-summary";
-    summary.setAttribute("role", "group");
-    summary.setAttribute("aria-label", t("flow.summary.label"));
-    const size = document.createElement("strong");
-    size.className = "task-flow-total";
-    size.textContent = t("flow.task.count", totals.total);
-    const workers = document.createElement("span");
-    workers.className = "task-flow-workers";
-    workers.textContent = totals.workers ? t("flow.summary.workers", totals.workers) : t("flow.summary.workers.unknown");
-    summary.append(size, workers);
-    for (const [status, count] of Object.entries(totals.counts)) {
-      if (count === 0) continue;
-      const metric = document.createElement("span");
-      metric.dataset.summaryStatus = status;
-      metric.textContent = t("flow.summary.count", t("flow.status." + status), count);
-      summary.append(metric);
-    }
-    const current = document.createElement("p");
-    current.className = "task-flow-current";
-    current.textContent = totals.current.length ? t("flow.summary.current", totals.current.join(" · ")) : t("flow.summary.current.none");
-    if (live) {
-      current.setAttribute("role", "status");
-      current.setAttribute("aria-live", "polite");
-      current.setAttribute("aria-atomic", "true");
-    }
-    section.append(summary, current);
-    const list = document.createElement("ol");
-    list.className = "task-flow-list";
-    flow.tasks.forEach(function (task, index) {
-      const status = live ? liveTaskStatus(task) : task.status;
-      const item = document.createElement("li");
-      item.className = "task-flow-step";
-      item.dataset.status = status;
-      item.dataset.taskId = task.taskId || task.id;
-      if (task.sessionRunId || task.runId) item.dataset.runId = task.sessionRunId || task.runId;
-      if (["running", "verifying"].includes(status)) item.setAttribute("aria-current", "step");
-      const marker = document.createElement("span");
-      marker.className = "task-flow-number";
-      marker.textContent = String(index + 1);
-      const name = document.createElement("span");
-      name.className = "task-flow-name";
-      name.textContent = task.title;
-      const label = document.createElement("span");
-      label.className = "task-flow-state";
-      label.textContent = t("flow.status." + status);
-      item.append(marker, name, label);
-      if (task.description) {
-        const details = document.createElement("details");
-        details.className = "task-flow-description";
-        const summary = document.createElement("summary");
-        summary.textContent = t("flow.request.details");
-        const description = document.createElement("div");
-        description.textContent = task.description;
-        details.append(summary, description);
-        item.append(details);
-      }
-      const agentId = task.sessionAgentId || task.agentId;
-      const runId = task.sessionRunId || task.runId;
-      const validId = value => typeof value === "string" && /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(value);
-      if (validId(agentId) && validId(runId)) {
-        const agent = state.childAgents.find(agent => agent.agentId === agentId && agent.runId === runId && acceptedTaskAgent(agent));
-        if (task.sessionRunId || agent) {
-          const role = task.sessionRole || agent?.role;
-          const open = document.createElement("button");
-          open.type = "button";
-          open.className = "task-flow-open setting-button";
-          open.textContent = t(role === "verification" ? "flow.open.verification.session" : "flow.open.work.session");
-          open.setAttribute("aria-label", task.title + " · " + open.textContent);
-          open.title = agentId;
-          open.addEventListener("click", function () { vscode.postMessage({ type: "agent.open", agentId }); });
-          item.append(open);
-        }
-      }
-      list.append(item);
-    });
-    section.append(list);
-    return section;
-  }
-
-  function createTaskHistoryEntry(flow) {
-    const item = document.createElement("li");
-    const disclosure = document.createElement("details");
-    disclosure.className = "task-history-disclosure";
-    disclosure.dataset.historyId = flow.id;
-    const heading = document.createElement("summary");
-    const name = document.createElement("span");
-    name.className = "task-history-name";
-    name.textContent = flow.title;
-    const count = document.createElement("span");
-    count.className = "task-history-count";
-    count.textContent = t("flow.task.count", summarizeTaskFlow(flow, true).total);
-    heading.append(name, count);
-    disclosure.append(heading, createTaskFlow(flow, true));
-    item.append(disclosure);
-    return item;
-  }
-
-  function acceptedTaskAgent(agent) {
-    return Boolean(agent.runId) && ["accepted", "queued", "starting", "running", "cancelling", "needs-human-decision", "completed", "failed", "cancelled"].includes(agent.status);
-  }
-
-  function displayTaskFlows() {
-    const agents = state.childAgents.filter(acceptedTaskAgent);
-    const flows = currentTaskFlows().filter(flow => {
-      if (flow.engine) return true;
-      const bound = agents.filter(agent => flow.tasks.some(task => task.agentId === agent.agentId && task.runId === agent.runId));
-      if (!bound.length) return false;
-      // A cached plan is not a live workflow after its accepted runs have ended.
-      // Keep explicit terminal flow snapshots; unresolved legacy plans remain in chat.
-      return bound.some(agent => !["completed", "failed", "cancelled"].includes(agent.status)) ||
-        flow.tasks.every(task => ["completed", "failed", "cancelled"].includes(task.status));
-    });
-
-    return flows;
-  }
-
-  function unfinishedFlow(flow) {
-    return flow.tasks.some(task => ["pending", "running", "verifying", "blocked"].includes(liveTaskStatus(task)));
-  }
-
-  function renderWorkLoopPanel() {
-    const contractList = document.getElementById("contract-list");
-    const flows = displayTaskFlows();
-    const active = flows.filter(unfinishedFlow);
-    const history = flows.filter(flow => !unfinishedFlow(flow));
-    const boundRuns = new Set(flows.flatMap(flow => flow.tasks.map(task => task.agentId + "/" + task.runId)));
-    const legacyHistory = state.childAgents.filter(agent => acceptedTaskAgent(agent) &&
-      ["completed", "failed", "cancelled"].includes(agent.status) && !boundRuns.has(agent.agentId + "/" + agent.runId) &&
-      !(state.workflows || []).some(snapshot => snapshot.workflow?.id === agent.taskBinding?.workflowId));
-    const historyPanel = document.getElementById("task-history");
-    const historyList = document.getElementById("task-history-list");
-    contractList.hidden = state.role !== "main";
-    if (contractList.hidden) contractList.open = false;
-    historyPanel.hidden = state.role !== "main";
-    document.getElementById("conversation-history").hidden = state.role !== "main";
-    if (historyPanel.hidden) historyPanel.open = false;
-    const historySignature = JSON.stringify([history, state.childAgents, t("flow.status.pending")]);
-    if (historyList.dataset.signature !== historySignature) {
-      historyList.dataset.signature = historySignature;
-      const expanded = new Set(Array.from(historyList.querySelectorAll(".task-history-disclosure[open]"), item => item.dataset.historyId));
-      const list = document.createElement("ul");
-      list.className = "task-history-entries";
-      list.append(...history.map(createTaskHistoryEntry), ...legacyHistory.map(agent => {
-        const item = document.createElement("li");
-        item.append(createRunStage(agent));
-        return item;
-      }));
-      for (const item of list.querySelectorAll(".task-history-disclosure")) item.open = expanded.has(item.dataset.historyId);
-      historyList.replaceChildren(history.length || legacyHistory.length ? list : historyEmpty("ui.task.history.empty"));
-    }
-    const hasActive = active.length > 0;
-    if (hasActive && runDetails.dataset.hasActive !== "true") state.runPanelExpanded = true;
-    runDetails.dataset.hasActive = String(hasActive);
-    if (!hasActive) {
-      state.runPanelExpanded = false;
-      runStageList.replaceChildren();
-      delete runStageList.dataset.flowSignature;
-    }
-    const expandable = state.role === "main" && hasActive;
-    const expanded = expandable && state.runPanelExpanded && !runStatus.hidden;
-    runStatusToggle.disabled = !expandable;
-    runStatusToggle.setAttribute("aria-expanded", String(expanded));
-    runStatus.classList.toggle("is-expanded", expanded);
-    runStatus.classList.toggle("is-running", state.running);
-    runDetails.hidden = !expanded;
-    runStatusAgents.hidden = !expandable || state.workUnits.activeUnits === 0;
-    runStatusAgents.textContent = state.workUnits.activeUnits > 0
-      ? t("status.runningAgents", state.workUnits.workActive, state.workUnits.verificationActive) : "";
-    if (!expanded) return;
-    runDetailsSummary.textContent = active.length ? t("flow.task.count", active.reduce((sum, flow) => sum + summarizeTaskFlow(flow, true).total, 0)) : t("ui.preparing");
-    const signature = JSON.stringify([active, state.childAgents, t("flow.status.pending")]);
-    runStopButton.hidden = !state.running;
-    if (runStageList.dataset.flowSignature === signature) return;
-    runStageList.dataset.flowSignature = signature;
-    runStageList.replaceChildren(...active.map(flow => createTaskFlow(flow, true)));
-  }
-
-  function childTaskName(agent) {
-    const title = agent.taskBinding?.title;
-    if (typeof title === "string" && title.trim()) return title;
-    // Historical Main snapshots are usable only with the exact accepted run binding.
-    if (agent.runId) {
-      const flows = currentTaskFlows();
-      for (const flow of flows) {
-        const task = flow.tasks.find(task => task.agentId === agent.agentId && task.runId === agent.runId);
-        if (task) return task.title;
-      }
-    }
-    return t("ui.task.name.unavailable");
-  }
-
-  function createRunStage(agent) {
-    const item = document.createElement("button");
-    item.type = "button";
-    item.className = "run-stage";
-    item.dataset.status = agent.status;
-    item.title = agent.agentId + t("ui.open.session");
-    const marker = document.createElement("span");
-    marker.className = "run-stage-marker";
-    marker.setAttribute("aria-hidden", "true");
-    marker.textContent = childAgentStatusMarker(agent.status);
-    const copy = document.createElement("span");
-    copy.className = "run-stage-copy";
-    const name = document.createElement("span");
-    name.className = "run-stage-name";
-    name.textContent = agent.role === "work" ? t("ui.work") : t("ui.verification");
-    const id = document.createElement("span");
-    id.className = "run-stage-id";
-    id.textContent = childTaskName(agent);
-    copy.append(name, id);
-    const status = document.createElement("span");
-    status.className = "run-stage-status";
-    status.textContent = childAgentStatusLabel(agent.status);
-    item.append(marker, copy, status);
-    item.addEventListener("click", function () {
-      vscode.postMessage({ type: "agent.open", agentId: agent.agentId });
-    });
-    return item;
-  }
-
-  function countChildAgents(role) {
-    return state.childAgents.filter(function (agent) { return agent.role === role; }).length;
-  }
-
-  function childAgentStatusMarker(status) {
-    if (status === "completed") return "✓";
-    if (status === "failed" || status === "cancelled") return "×";
-    if (status === "needs-human-decision") return "!";
-    return "●";
-  }
-
   function stopElapsedTimer() {
     if (elapsedTimerId) {
       window.clearInterval(elapsedTimerId);
@@ -4902,72 +3192,9 @@
     return hours ? t("duration.hours", hours, minutes, seconds) : t("duration.minutes", minutes, seconds);
   }
 
-  let conversionDraft;
-  const converter = document.getElementById("image-converter");
-  const conversionFormat = document.getElementById("image-converter-format");
-  const conversionSubmit = document.getElementById("image-converter-submit");
-  const conversionReveal = document.getElementById("image-converter-reveal");
-  const conversionStatus = document.getElementById("image-converter-status");
-  document.getElementById("image-converter-close").addEventListener("click", () => converter.close());
-  converter.addEventListener("cancel", event => { if (conversionDraft?.busy) event.preventDefault(); });
-  conversionSubmit.addEventListener("click", function () {
-    if (!conversionDraft || conversionDraft.busy) return;
-    conversionDraft.requestId = createId();
-    conversionDraft.busy = true;
-    conversionSubmit.disabled = conversionFormat.disabled = true;
-    document.getElementById("image-converter-close").disabled = true;
-    conversionReveal.hidden = true;
-    conversionStatus.dataset.error = "false";
-    conversionStatus.textContent = t("attachment.convert.busy");
-    vscode.postMessage({ type: "attachment.convert", id: conversionDraft.attachment.id,
-      name: conversionDraft.attachment.name, requestId: conversionDraft.requestId, mediaType: conversionFormat.value });
+  const chatImageConverter = globalThis.AgentFactoryChat.imageConverter({
+    createId, t, vscode, state, renderAttachments, updateSendButton, persist
   });
-  conversionReveal.addEventListener("click", function () {
-    if (conversionDraft?.saved) vscode.postMessage({ type: "attachment.revealConverted", id: conversionDraft.requestId });
-  });
-  function openImageConverter(attachment) {
-    conversionDraft = { attachment, busy: false };
-    document.getElementById("image-converter-name").textContent = attachment.name;
-    document.getElementById("image-converter-name").title = attachment.name;
-    const preview = document.getElementById("image-converter-preview");
-    const icon = document.getElementById("image-converter-icon");
-    preview.hidden = !attachment.previewUri;
-    icon.hidden = Boolean(attachment.previewUri);
-    preview.onerror = function () { preview.hidden = true; icon.hidden = false; };
-    if (attachment.previewUri) preview.src = attachment.previewUri;
-    else preview.removeAttribute("src");
-    const sourceType = attachment.mediaType || ({ png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg", webp: "image/webp" })[attachment.name.split(".").pop().toLowerCase()];
-    conversionFormat.replaceChildren();
-    for (const [label, mediaType] of [["PNG", "image/png"], ["JPG", "image/jpeg"], ["WebP", "image/webp"]]) {
-      if (mediaType === sourceType) continue;
-      const option = document.createElement("option"); option.value = mediaType; option.textContent = label;
-      conversionFormat.append(option);
-    }
-    conversionStatus.textContent = "";
-    conversionStatus.dataset.error = "false";
-    conversionReveal.hidden = true;
-    conversionSubmit.disabled = conversionFormat.disabled = false;
-    document.getElementById("image-converter-close").disabled = false;
-    converter.showModal();
-    conversionFormat.focus();
-  }
-  function showConversionResult(message) {
-    if (!conversionDraft || conversionDraft.requestId !== message.id) return;
-    conversionDraft.busy = false;
-    conversionDraft.saved = Boolean(message.path && !message.error);
-    if (conversionDraft.saved) {
-      // Detach only from the draft; the original file and sent history remain intact.
-      state.attachments = state.attachments.filter(attachment => attachment.id !== conversionDraft.attachment.id);
-      renderAttachments();
-      updateSendButton();
-      persist();
-    }
-    conversionSubmit.disabled = conversionFormat.disabled = false;
-    document.getElementById("image-converter-close").disabled = false;
-    conversionReveal.hidden = !conversionDraft.saved;
-    conversionStatus.dataset.error = String(Boolean(message.error));
-    conversionStatus.textContent = message.error || t("attachment.convert.saved", message.path);
-  }
 
   function bindAttachmentConversion(element, attachment) {
     if (attachment.kind !== "image" || attachment.pending || !attachment.uri) return;
@@ -4975,7 +3202,7 @@
     const open = function (event) {
       event.preventDefault();
       event.stopPropagation();
-      openImageConverter(attachment);
+      chatImageConverter.openImageConverter(attachment);
     };
     element.addEventListener("contextmenu", open);
     element.addEventListener("keydown", function (event) {
@@ -5138,14 +3365,47 @@
   questionPositionObserver.observe(promptSurface);
   questionPositionObserver.observe(questionButton);
 
-  function openQuestionMenu() {
+  function selectQuestionTab(name, focus = true, requestHistory = true) {
+    if (name === "history" && state.role !== "main") name = "questions";
+    for (const tab of questionTabs) {
+      const selected = tab.dataset.questionTab === name;
+      tab.setAttribute("aria-selected", String(selected));
+      tab.tabIndex = selected ? 0 : -1;
+      document.getElementById(tab.getAttribute("aria-controls")).hidden = !selected;
+      if (selected && focus) tab.focus();
+    }
+    if (name === "questions") {
+      renderQuestionList();
+    } else if (requestHistory) {
+      chatHistory.conversationList.replaceChildren(historyEmpty("ui.conversation.loading"));
+      vscode.postMessage({ type: "conversations.request" });
+    }
+  }
+
+  for (const tab of questionTabs) {
+    tab.addEventListener("click", function () { selectQuestionTab(tab.dataset.questionTab); });
+    tab.addEventListener("keydown", function (event) {
+      const available = questionTabs.filter(item => !item.hidden);
+      const index = available.indexOf(tab);
+      let next;
+      if (matchesShortcut(event, shortcuts.settingsTabNext)) next = (index + 1) % available.length;
+      if (matchesShortcut(event, shortcuts.settingsTabPrevious)) next = (index + available.length - 1) % available.length;
+      if (matchesShortcut(event, shortcuts.settingsTabFirst)) next = 0;
+      if (matchesShortcut(event, shortcuts.settingsTabLast)) next = available.length - 1;
+      if (next === undefined) return;
+      event.preventDefault();
+      selectQuestionTab(available[next].dataset.questionTab);
+    });
+  }
+
+  function openQuestionMenu(tabName = "questions") {
     closeSettingMenu(false);
     closeSessionMenu(false);
     renderQuestionList();
     questionMenu.hidden = false;
-    positionQuestionMenu();
     questionButton.setAttribute("aria-expanded", "true");
-    questionList.querySelector("[data-question-id]")?.focus();
+    selectQuestionTab(tabName);
+    positionQuestionMenu();
   }
 
   function closeQuestionMenu(restoreFocus) {
@@ -5646,7 +3906,7 @@
       role.textContent = agent.role === "work" ? t("ui.work") : t("ui.verification");
       const id = document.createElement("span");
       id.className = "agent-id";
-      id.textContent = childTaskName(agent);
+      id.textContent = chatTaskFlow.childTaskName(agent);
       const status = document.createElement("span");
       status.className = "agent-status";
       status.textContent = childAgentStatusLabel(agent.status) + t("ui.click.to.chat");
@@ -5673,7 +3933,7 @@
   }
 
   function summarizeChildAgents(agents) {
-    const activeStatuses = new Set(["accepted", "queued", "starting", "running", "cancelling"]);
+    const activeStatuses = new Set(["accepted", "queued", "starting", "running", "verifying", "cancelling"]);
     return {
       activeUnits: agents.filter(function (agent) { return activeStatuses.has(agent.status); }).length,
       workActive: agents.filter(function (agent) { return agent.role === "work" && activeStatuses.has(agent.status); }).length,
@@ -5688,6 +3948,7 @@
       queued: t("ui.queued"),
       starting: t("ui.starting"),
       running: t("ui.running.73989d"),
+      verifying: t("flow.status.verifying"),
       cancelling: t("ui.cancelling"),
       completed: t("ui.completed"),
       failed: t("ui.failed.09fef5"),
@@ -5875,7 +4136,7 @@
 
   statusSettingsButton.addEventListener("click", function () {
     if (!statusSettings.hidden) { closeStatusSettings(); return; }
-    renderGeneralSettings();
+    chatAgentSettings.renderGeneralSettings();
     statusSettings.hidden = false;
     statusSettingsButton.setAttribute("aria-expanded", "true");
     renderStatusCatalog();
@@ -5951,7 +4212,7 @@
   }
   const settingsTabs = [...statusSettings.querySelectorAll("[data-settings-tab]")];
   function selectSettingsTab(tab) {
-    renderAgentDefaults();
+    chatAgentSettings.renderAgentDefaults();
     for (const item of settingsTabs) {
       const selected = item === tab;
       item.setAttribute("aria-selected", String(selected));
@@ -5960,10 +4221,10 @@
     }
     renderStatusCatalog();
     renderAccountUsage();
-    if (tab.dataset.settingsTab === "providers" && !providerVersionsRequested) {
-      providerVersionsRequested = true;
-      providerCatalog = null;
-      renderProviderSettings();
+    if (tab.dataset.settingsTab === "providers" && !chatProviders.providerVersionsRequested) {
+      chatProviders.providerVersionsRequested = true;
+      chatProviders.providerCatalog = null;
+      chatProviders.renderProviderSettings();
       vscode.postMessage({ type: "providers.versions.request" });
     }
     tab.focus();
@@ -6029,7 +4290,7 @@
       case "task": return main;
       case "model": case "reasoning": case "fast": return Boolean(supported[id]);
       case "elapsed": return Boolean(state.running && state.runStartedAt);
-      case "project": return Boolean(state.projectName || conversationWorktree?.workingDirectory);
+      case "project": return Boolean(state.projectName || chatWorkUnits.conversationWorktree?.workingDirectory);
       case "branch": return Boolean(state.branch);
       case "execution": return Boolean(state.executionMode);
       default: return true;
@@ -6048,7 +4309,7 @@
       role: { main: t("ui.main"), work: t("ui.work"), verification: t("ui.verify") }[state.role],
       agents: main ? state.workUnitsKnown ? t("status.agents", state.workUnits.workActive, state.workUnits.verificationActive) : t("ui.agents") : t("ui.agents.main.only"),
       agentsTotal: main ? t("ui.calls") + (state.workUnitsKnown ? count(state.workUnits.totalCalled) : "—") : t("ui.calls.main.only"),
-      project: t(conversationWorktree?.worktree && conversationWorktree.worktree.phase !== "merged" ? "worktree.status.tree" : "worktree.status.home"),
+      project: t(chatWorkUnits.conversationWorktree?.worktree && chatWorkUnits.conversationWorktree.worktree.phase !== "merged" ? "worktree.status.tree" : "worktree.status.home"),
       branch: state.branch || "—",
       context: contextStatusLabel(),
       contextUsed: contextUsedStatusLabel(),
@@ -6064,8 +4325,8 @@
       elapsed: state.running && state.runStartedAt ? t("ui.elapsed") + formatElapsed(Math.max(0, Date.now() - state.runStartedAt)) : t("ui.elapsed.54e60c"),
       queue: t("ui.queue") + Math.max(state.queueCount, (state.pendingRequests || []).length),
       runtime: state.runtimeAvailable ? t("ui.runtime.online") : t("ui.runtime.offline"),
-      model: t("ui.model.b32422") + (supported.model ? effectiveAgentValue("main", "model") || t("ui.default") : t("ui.unknown")),
-      reasoning: t("ui.reasoning.529e9c") + (supported.reasoning ? reasoningDisplayLabel(effectiveAgentValue("main", "reasoningEffort")) : t("ui.unknown")),
+      model: t("ui.model.b32422") + (supported.model ? chatAgentSettings.effectiveAgentValue("main", "model") || t("ui.default") : t("ui.unknown")),
+      reasoning: t("ui.reasoning.529e9c") + (supported.reasoning ? reasoningDisplayLabel(chatAgentSettings.effectiveAgentValue("main", "reasoningEffort")) : t("ui.unknown")),
       fast: t("ui.fast.314aef") + (supported.fast ? state.fastMode ? t("ui.on") : t("ui.off") : t("ui.unknown")),
       task: main ? t("ui.task") + taskModeNames()[enterAction()]?.replaceAll(t("ui.verification"), t("ui.verify")) : t("ui.task.main.only"),
       execution: t("ui.perms") + (executionLabels[state.executionMode] || "—"),
@@ -6181,16 +4442,16 @@
   }
 
   function updateSendButton() {
-    sendButton.disabled = conversationClearing || !state.runtimeAvailable || !state.capabilities || Boolean(conversationWorktree?.worktree?.workUnit && conversationWorktree.worktree.phase === "merged");
+    sendButton.disabled = conversationClearing || !state.runtimeAvailable || !state.capabilities || Boolean(chatWorkUnits.conversationWorktree?.worktree?.workUnit && chatWorkUnits.conversationWorktree.worktree.phase === "merged");
   }
 
   function updateRunControls() {
-    renderWorktree();
+    chatWorkUnits.renderWorktree();
     renderPendingQueue();
     updateExecutionControl();
     updateComposerControls();
     renderRunStatus();
-    renderWorkLoopPanel();
+    chatTaskFlow.renderWorkLoopPanel();
   }
 
   // Draft edits affect send/recovery controls, not queue contents or run panels.
@@ -6245,11 +4506,12 @@
   }
 
   function updateModeControls() {
-    if (openSettingId === "model" && document.getElementById("agent-default-scope").value === "chat") renderModelSettings(modelMenu);
+    if (openSettingId === "model" && document.getElementById("agent-default-scope").value === "chat") chatAgentSettings.renderModelSettings(modelMenu);
     updateExecutionControl();
     const supported = currentCapabilities();
     modelButton.parentElement.hidden = false;
     submissionButton.hidden = state.role !== "main";
+    fastModeSetting.hidden = supported.fast !== true;
     fastModeButton.hidden = supported.fast !== true;
     orchestrateModeButton.hidden = state.role !== "main";
     orchestrateModeButton.disabled = !orchestrateAvailable();
@@ -6261,8 +4523,9 @@
     fastModeButton.setAttribute("aria-pressed", String(state.fastMode));
     fastModeButton.setAttribute("aria-label", state.fastMode ? t("ui.fast.mode.on") : t("ui.fast.mode.off"));
     fastModeButton.title = state.fastMode ? t("ui.fast.mode.on") : t("ui.fast.mode.off");
-    promptSurface.classList.toggle("is-astra", /(?:^|[-/])astra(?:$|-)/i.test(effectiveAgentValue("main", "model")));
-    const modelText = (effectiveAgentValue("main", "model") ? modelOptionLabel(effectiveAgentValue("main", "model")) : t("ui.default")) + " · " + reasoningDisplayLabel(effectiveAgentValue("main", "reasoningEffort"));
+    fastModeValue.textContent = state.fastMode ? t("ui.on") : t("ui.off");
+    promptSurface.classList.toggle("is-astra", /(?:^|[-/])astra(?:$|-)/i.test(chatAgentSettings.effectiveAgentValue("main", "model")));
+    const modelText = (chatAgentSettings.effectiveAgentValue("main", "model") ? chatAgentSettings.modelOptionLabel(chatAgentSettings.effectiveAgentValue("main", "model")) : t("ui.default")) + " · " + reasoningDisplayLabel(chatAgentSettings.effectiveAgentValue("main", "reasoningEffort"));
     if (modelLabel.textContent !== modelText) modelLabel.textContent = modelText;
     modelButton.title = t("ui.models.and.reasoning");
     modelButton.setAttribute("aria-label", modelButton.title);
@@ -6281,685 +4544,20 @@
     closeQuestionMenu(false);
     openSettingId = setting;
     if (setting === "model") vscode.postMessage({ type: "models.request" });
-    if (setting === "worktree" && state.role === "main") requestDeployTargets();
+    if (setting === "worktree" && state.role === "main") chatWorkUnits.requestDeployTargets();
     const button = settingButton(setting);
     const menu = settingMenu(setting);
     renderSettingMenu(setting, menu);
     menu.hidden = false;
-    if (setting === "worktree") positionWorktreeMenu();
+    if (setting === "worktree") chatWorkUnits.positionWorktreeMenu();
     button.setAttribute("aria-expanded", "true");
     const selected = menu.querySelector('[aria-checked="true"]:not(:disabled)');
     (selected || menu.querySelector("button:not(:disabled), select:not(:disabled), details:not([hidden]) > summary"))?.focus();
   }
 
-  function agentSettingRole(role) {
-    return role === "main" ? state.role || "main" : role;
-  }
-  function effectiveAgentValue(role, field) {
-    const own = role === "main" ? (field === "model" ? state.model : state.reasoning) : state.agentModels?.[role]?.[field];
-    return own || "";
-  }
-  function effectiveDelegatedModels() {
-    return Object.fromEntries(["work", "workLight", "verification"].map(role => [role, Object.fromEntries(
-      ["model", "reasoningEffort"].map(field => [field, effectiveAgentValue(role, field) || undefined]))]));
-  }
-  function createAgentSettingControl(role, label, field, current, onChange, lockRoute = true) {
-    const wrapper = document.createElement("label");
-    const fieldLabel = field === "model" ? t("ui.model") : t("ui.reasoning");
-    const caption = document.createElement("span");
-    caption.className = "agent-model-caption";
-    caption.textContent = fieldLabel;
-    wrapper.append(caption);
-    const explicitValues = field === "model" ? [...new Set([...settingOptions.model, current].filter(value => typeof value === "string" && value.length > 0))] : settingOptions.reasoning.filter(Boolean);
-    const values = explicitValues;
-    const isReasoning = field === "reasoningEffort";
-    const control = document.createElement(isReasoning ? "input" : "select");
-    control.dataset.role = role;
-    control.dataset.field = field;
-    control.setAttribute("aria-label", label + " " + fieldLabel);
-    const output = document.createElement("span");
-    let slider;
-    let progress;
-    if (isReasoning) {
-      wrapper.classList.add("agent-reasoning-control");
-      output.className = "agent-reasoning-value";
-      control.type = "range";
-      control.min = "0";
-      control.max = String(values.length - 1);
-      control.step = "1";
-      control.value = String(Math.max(0, values.indexOf(current || "")));
-      wrapper.append(output);
-      slider = document.createElement("span");
-      slider.className = "agent-reasoning-slider";
-      progress = document.createElement("progress");
-      progress.max = values.length - 1;
-      progress.setAttribute("aria-hidden", "true");
-      const ticks = document.createElement("span");
-      ticks.className = "agent-reasoning-ticks";
-      ticks.setAttribute("aria-hidden", "true");
-      for (const value of values) {
-        const tick = document.createElement("span");
-        tick.title = reasoningDisplayLabel(value);
-        ticks.append(tick);
-      }
-      slider.append(progress, ticks);
-    } else {
-      control.id = "agent-model-" + role + "-" + createId();
-      wrapper.htmlFor = control.id; // The vendor tabs below are buttons; keep the label on the select.
-      renderModelPicker(wrapper, control, values, current || "", role === "main" && lockRoute);
-    }
-    const selectedValue = () => isReasoning ? values[Number(control.value)] : control.value;
-    const showEffort = () => {
-      if (!isReasoning) return;
-      const value = selectedValue();
-      const ultra = value === "max";
-      wrapper.classList.toggle("is-ultra", ultra);
-      output.textContent = ultra ? "ULTRA" : value && uiLocale() === "en" ? value.toUpperCase() : reasoningDisplayLabel(value);
-      output.title = ultra ? t("ui.ultra.max.reasoning.effort") : reasoningDisplayLabel(value);
-      control.setAttribute("aria-valuetext", reasoningDisplayLabel(value));
-      progress.value = Number(control.value);
-    };
-    showEffort();
-    control.disabled = currentCapabilities()[isReasoning ? "reasoning" : "model"] !== true;
-    if (isReasoning) {
-      control.addEventListener("input", function () {
-        if (control.disabled) return;
-        showEffort();
-      });
-      control.addEventListener("change", function () {
-        if (control.disabled) return;
-        showEffort();
-        onChange(selectedValue());
-      });
-    } else control.addEventListener("change", function () {
-      if (control.disabled) return;
-      onChange(selectedValue());
-    });
-    if (slider) {
-      slider.append(control);
-      wrapper.append(slider);
-    } else wrapper.append(control);
-    return wrapper;
-  }
-
-  // Vendor tabs group a long catalog. A route is the CLI that runs the model: Codex, Claude Code
-  // or Antigravity (gemini-* and antigravity/<id>, which may be another vendor's model).
-  const MODEL_VENDORS = [["openai", "OpenAI"], ["anthropic", "Anthropic"], ["google", "Google"]];
-  function modelRoute(model) {
-    return model.startsWith("antigravity/") || model.startsWith("gemini-") ? "antigravity" : model.startsWith("claude-") ? "claude" : "codex";
-  }
-  function modelVendor(model) {
-    const id = model.replace(/^antigravity\//, "");
-    return id.startsWith("claude-") ? "anthropic" : id.startsWith("gemini-") ? "google" : "openai";
-  }
-  function modelOptionLabel(model) {
-    return model.startsWith("antigravity/") ? model.slice("antigravity/".length) + " · Antigravity" : model;
-  }
-
-  function hasStartedModelConversation() {
-    return Boolean(state.running || state.pendingRequests?.some(item => !item.rejected) ||
-      state.startedMessageIds?.length || state.timeline?.some(item => item.type === "user" || item.type === "assistant"));
-  }
-
-  function renderModelPicker(wrapper, control, values, current, lockRoute) {
-    const models = values.filter(Boolean);
-    wrapper.classList.add("agent-model-picker");
-    // A started conversation keeps its provider; other routes apply to a new or cleared chat.
-    const locked = lockRoute && hasStartedModelConversation()
-      ? currentCapabilities().sessionProvider || (current ? modelRoute(current) : undefined)
-      : undefined;
-    const tabs = document.createElement("span");
-    tabs.className = "model-vendor-tabs";
-    tabs.setAttribute("role", "tablist");
-    tabs.setAttribute("aria-label", t("ui.model.vendor"));
-    let active = current ? modelVendor(current) : (MODEL_VENDORS.find(([vendor]) => models.some(m => modelVendor(m) === vendor)) || MODEL_VENDORS[0])[0];
-    let entries = [];
-    let selectedModel = current || "";
-    const show = () => {
-      for (const tab of tabs.children) tab.setAttribute("aria-selected", String(tab.dataset.vendor === active));
-      // Native select popups may ignore hidden on options/optgroups. Exclude other
-      // vendors from the actual select, retaining the nodes for subsequent tabs.
-      control.replaceChildren(...entries.filter(element => !element.dataset.vendor || element.dataset.vendor === active));
-      control.value = selectedModel;
-    };
-    for (const [vendor, name] of MODEL_VENDORS) {
-      const tab = document.createElement("button");
-      tab.type = "button";
-      tab.className = "model-vendor-tab";
-      tab.dataset.vendor = vendor;
-      tab.setAttribute("role", "tab");
-      tab.textContent = name;
-      tab.disabled = !models.some(model => modelVendor(model) === vendor && (!locked || modelRoute(model) === locked || model === current));
-      tab.addEventListener("click", () => {
-        if (tab.disabled || control.disabled) return;
-        active = vendor;
-        show();
-        control.focus();
-        try { control.showPicker?.(); } catch { /* Not every host allows opening a select programmatically. */ }
-      });
-      tabs.append(tab);
-    }
-    for (const [vendor] of MODEL_VENDORS) {
-      const own = models.filter(model => modelVendor(model) === vendor);
-      const routes = [...new Set(own.map(modelRoute))];
-      for (const route of routes) {
-        for (const model of own.filter(item => modelRoute(item) === route)) {
-          const option = document.createElement("option");
-          option.value = model;
-          option.dataset.vendor = vendor;
-          option.textContent = modelOptionLabel(model);
-          option.selected = model === current;
-          if (locked && route !== locked && model !== current) {
-            option.disabled = true;
-            option.title = t("ui.model.route.new.chat");
-          }
-          control.append(option);
-        }
-      }
-    }
-    // Long names are truncated in the closed select; the title keeps the full name and route.
-    const describe = () => { control.title = control.value ? modelOptionLabel(control.value) : ""; };
-    control.addEventListener("change", () => { selectedModel = control.value; describe(); if (control.value) { active = modelVendor(control.value); show(); } });
-    describe();
-    entries = [...control.children];
-    show();
-    wrapper.append(tabs);
-  }
-
-  function agentSettingsApplyError(values) {
-    const nextOwn = values?.[state.role === "main" ? "main" : state.role] || {};
-    const nextModel = nextOwn.model || state.model || settingOptions.model.find(Boolean);
-    const locked = hasStartedModelConversation() && (currentCapabilities().sessionProvider || modelRoute(state.model));
-    if (locked && modelRoute(nextModel) !== locked) return t("ui.model.route.new.chat");
-    if (currentCapabilities().model !== true && nextModel !== state.model) return t("ui.model.route.new.chat");
-    return "";
-  }
-
-  function applyAgentSettingsToChat(values, scope, name) {
-    const error = agentSettingsApplyError(values);
-    const status = document.getElementById("agent-preset-status");
-    if (error) { status.hidden = false; status.textContent = error; return false; }
-    const nextOwn = values?.[state.role === "main" ? "main" : state.role] || {};
-    state.model = nextOwn.model || state.model || settingOptions.model.find(Boolean);
-    state.reasoning = nextOwn.reasoningEffort || state.reasoning || "medium";
-    if (state.role === "main") state.agentModels = {
-      ...state.agentModels,
-      ...(values.work ? {work: {...values.work}} : {}),
-      ...(values.workLight || values.work ? {workLight: {...(values.work || {}), ...(values.workLight || {})}} : {}),
-      ...(values.verification ? {verification: {...values.verification}} : {})
-    };
-    state.agentSettingsScope = scope;
-    state.agentSettingsSet = name;
-    const scopeControl = document.getElementById("agent-default-scope");
-    if (scopeControl) scopeControl.value = scope;
-    status.textContent = "";
-    status.hidden = true;
-    persist();
-    saveComposerSettings();
-    updateModeControls();
-    return true;
-  }
-
-  function renderAgentDefaults() {
-    const container = document.getElementById("agent-default-fields");
-    const scopeControl = document.getElementById("agent-default-scope");
-    if (!container || !scopeControl) return;
-    const settings = state.agentDefaults || {};
-    if (!settings.projectAvailable && scopeControl.value === "project") scopeControl.value = "global";
-    scopeControl.querySelector('option[value="project"]').disabled = !settings.projectAvailable;
-    const scope = scopeControl.value;
-    if (scope === "chat") return; // Chat overrides are the model menu's own rows.
-    container.replaceChildren();
-    container.classList.add("aligned-settings");
-    renderAgentPresets();
-    const columns = document.createElement("div");
-    columns.className = "agent-settings-columns";
-    columns.setAttribute("aria-hidden", "true");
-    for (const key of ["ui.agent", "ui.model", "ui.reasoning"]) {
-      const column = document.createElement("span"); column.textContent = t(key); columns.append(column);
-    }
-    container.append(columns);
-    for (const role of ["main", "work", "workLight", "verification"]) {
-      const row = document.createElement("div"); row.className = "agent-model-row";
-      row.dataset.agentRole = role;
-      const heading = document.createElement("strong"); heading.textContent = t("ui.role." + role); heading.className = "agent-model-name"; heading.prepend(createAgentRoleIcon(role)); row.append(heading);
-      for (const field of ["model", "reasoningEffort"]) {
-        const current = settings[scope]?.[role]?.[field] || "";
-        row.append(createAgentSettingControl(role, t("ui.role." + role), field, current, value => {
-          const nextSettings = {...(settings[scope] || {}), [role]: {...(settings[scope]?.[role] || {}), [field]: value}};
-          const error = agentSettingsApplyError(nextSettings);
-          if (error) {
-            const status = document.getElementById("agent-preset-status"); status.hidden = false; status.textContent = error;
-            renderAgentDefaults();
-            return;
-          }
-          state.agentDefaults[scope] = nextSettings;
-          vscode.postMessage({ type: "agent.defaults.save", scope, role, field, value });
-          autoSavePresetField(role, field, value);
-          applyAgentSettingsToChat(nextSettings, scope, document.getElementById("agent-preset-select").value || "Default");
-        }, false));
-      }
-      container.append(row);
-    }
-    if (agentPresetBusy) for (const control of container.querySelectorAll("input, select, button")) control.disabled = true;
-  }
-
-  function autoSavePresetField(role, field, value) {
-    const name = document.getElementById("agent-preset-select").value;
-    if (!name) return;
-    vscode.postMessage({type: "agent.preset.field", scope: document.getElementById("agent-default-scope").value, name, role, field, value});
-  }
-  let agentPresetBusy = false;
-  let pendingPresetName = "";
-  function renderAgentPresets() {
-    const select = document.getElementById("agent-preset-select");
-    const scope = document.getElementById("agent-default-scope").value;
-    const presets = (state.agentDefaults?.presets || []).filter(preset => preset.scope === scope);
-    const desired = pendingPresetName || (state.agentSettingsScope === scope ? state.agentSettingsSet : "") || select.value;
-    const selected = presets.some(preset => preset.name === desired) ? desired : presets.find(preset => preset.isDefault)?.name || "";
-    select.replaceChildren();
-    const placeholder = document.createElement("option"); placeholder.value = ""; placeholder.textContent = t("preset.choose"); select.append(placeholder);
-    for (const preset of presets) {
-      const option = document.createElement("option"); option.value = preset.name; option.textContent = preset.isDefault ? t("preset.default") : preset.name; select.append(option);
-    }
-    select.value = Array.from(select.options).some(option => option.value === selected) ? selected : "";
-    if (select.value === pendingPresetName) pendingPresetName = "";
-    select.disabled = agentPresetBusy;
-    document.getElementById("agent-preset-delete").disabled = agentPresetBusy || !select.value || presets.find(preset => preset.name === select.value)?.isDefault === true;
-    document.getElementById("agent-preset-save").disabled = agentPresetBusy || !document.getElementById("agent-preset-name").value.trim();
-    document.getElementById("agent-preset-name").disabled = agentPresetBusy;
-    document.getElementById("agent-default-scope").disabled = agentPresetBusy;
-  }
-  function performPresetAction(action) {
-    if (agentPresetBusy) return;
-    const name = document.getElementById(action === "save" ? "agent-preset-name" : "agent-preset-select").value.trim();
-    if (!name) return;
-    const scope = document.getElementById("agent-default-scope").value;
-    if (action === "apply") {
-      const preset = state.agentDefaults?.presets?.find(item => item.scope === scope && item.name === name);
-      if (!preset) return;
-      const error = agentSettingsApplyError(preset.settings || {});
-      if (error) {
-        const status = document.getElementById("agent-preset-status"); status.hidden = false; status.textContent = error;
-        return;
-      }
-    }
-    if (action === "save" || action === "update" || action === "apply") pendingPresetName = name;
-    agentPresetBusy = true;
-    const status = document.getElementById("agent-preset-status"); status.hidden = false; status.textContent = t("preset.busy");
-    renderAgentDefaults();
-    renderAgentPresets();
-    if (scope === "chat" && action !== "delete") saveComposerSettings();
-    vscode.postMessage({type: "agent.preset", action, scope: document.getElementById("agent-default-scope").value, name});
-  }
-  for (const action of ["save", "delete"]) document.getElementById("agent-preset-" + action).addEventListener("click", () => performPresetAction(action));
-  document.getElementById("agent-preset-name").addEventListener("input", renderAgentPresets);
-  document.getElementById("agent-preset-select").addEventListener("change", () => performPresetAction("apply"));
-
-  document.getElementById("agent-default-scope")?.addEventListener("change", event => {
-    if (openSettingId !== "model") { renderAgentDefaults(); return; }
-    document.getElementById("agent-preset-select").value = "";
-    renderModelSettings(modelMenu, true);
-    event.currentTarget.focus(); // Re-rendering moves the select; keep keyboard focus on it.
-    performPresetAction("apply");
+  const chatProviders = globalThis.AgentFactoryChat.providers({
+    appendNotice, t, vscode
   });
-
-  function createAgentRoleIcon(role) {
-    const paths = {
-      main: "M4 5h16v11H9l-5 4V5Zm4 4h8m-8 3h5",
-      work: "M9 7V4h6v3M3 7h18v13H3V7Zm0 5h18m-11 0v3h4v-3",
-      workLight: "M9 7V4h6v3M3 7h18v13H3V7Zm5 7h8",
-      verification: "M12 3 3 7v5c0 5 9 9 9 9s9-4 9-9V7l-9-4Zm-4 9 3 3 5-6"
-    };
-    return createModeIcon(paths[role] || paths.main, "agent-role-icon");
-  }
-
-  function renderModelSettings(menu, preserveScope = false) {
-    // Scope and default controls are persistent nodes; park them so they stay in the document.
-    document.getElementById("agent-scope-parts").append(document.getElementById("agent-scope-row"), document.getElementById("agent-defaults-content"));
-    document.getElementById("agent-defaults-content").append(document.getElementById("agent-preset-content"));
-    document.getElementById("agent-scope-parts").append(document.getElementById("agent-preset-picker"), document.getElementById("agent-preset-create"), document.getElementById("agent-preset-delete"));
-    menu.replaceChildren();
-    menu.setAttribute("role", "dialog");
-    menu.setAttribute("aria-label", t("ui.models.and.reasoning"));
-    const header = document.createElement("div");
-    header.className = "agent-settings-heading";
-    const close = document.createElement("button");
-    close.type = "button";
-    close.className = "agent-settings-close";
-    close.setAttribute("aria-label", t("ui.close.agent.settings"));
-    close.append(createModeIcon("m6 6 12 12M18 6 6 18", "agent-settings-close-icon"));
-    close.addEventListener("click", function () { closeSettingMenu(true); });
-    // One panel edits every scope: this chat's overrides, or the project/global defaults beneath them.
-    // Keep the preset, scope and close controls together in one compact heading.
-    const scopeControl = document.getElementById("agent-default-scope");
-    if (!preserveScope && state.agentSettingsScope && (state.agentSettingsScope !== "project" || state.agentDefaults?.projectAvailable)) scopeControl.value = state.agentSettingsScope;
-    header.append(document.getElementById("agent-scope-row"), document.getElementById("agent-preset-picker"), document.getElementById("agent-preset-create"), document.getElementById("agent-preset-delete"), close);
-    menu.classList.add("aligned-settings");
-    menu.append(header);
-    renderAgentPresets();
-    if (scopeControl.value !== "chat") {
-      menu.append(document.getElementById("agent-defaults-content"));
-      renderAgentDefaults();
-      return;
-    }
-    const columns = document.createElement("div");
-    columns.className = "agent-settings-columns";
-    columns.setAttribute("aria-hidden", "true");
-    for (const text of [t("ui.agent"), t("ui.model"), t("ui.reasoning")]) {
-      const column = document.createElement("span");
-      column.textContent = text;
-      columns.append(column);
-    }
-    menu.append(columns);
-    const roles = state.role === "main" ? [["main", t("ui.role.main")], ["work", t("ui.role.work")], ["workLight", t("ui.role.workLight")], ["verification", t("ui.role.verification")]] : [["main", state.role === "work" ? t("ui.work") : t("ui.verification")]];
-    let initialized = false;
-    for (const [role, label] of roles) {
-      const row = document.createElement("div");
-      row.className = "agent-model-row";
-      row.dataset.agentRole = role;
-      row.setAttribute("role", "group");
-      row.setAttribute("aria-label", label);
-      const legend = document.createElement("strong");
-      legend.className = "agent-model-name";
-      legend.textContent = label;
-      legend.prepend(createAgentRoleIcon(state.role === "main" ? role : state.role));
-      row.append(legend);
-      for (const field of ["model", "reasoningEffort"]) {
-        const own = role === "main" ? (field === "model" ? state.model : state.reasoning) : state.agentModels?.[role]?.[field];
-        // The light Work profile starts from the Work profile, never from Main's model.
-        const current = own || effectiveAgentValue(role, field) || (role === "workLight" ? effectiveAgentValue("work", field) : "") || (field === "model" ? state.model || settingOptions.model.find(Boolean) || "" : state.reasoning || "medium");
-        if (!own && current) {
-          if (role === "main") state[field === "model" ? "model" : "reasoning"] = current;
-          else state.agentModels = { ...state.agentModels, [role]: { ...state.agentModels?.[role], [field]: current } };
-          initialized = true;
-        }
-        row.append(createAgentSettingControl(role, label, field, current, value => {
-          state.agentSettingsScope = "chat";
-          state.agentSettingsSet = document.getElementById("agent-preset-select").value || "Default";
-          if (role === "main") state[field === "reasoningEffort" ? "reasoning" : "model"] = value;
-          else state.agentModels = { ...state.agentModels, [role]: { ...state.agentModels?.[role], [field]: value || undefined } };
-          updateModeControls();
-          persist();
-          saveComposerSettings();
-          autoSavePresetField(agentSettingRole(role), field, value);
-        }));
-      }
-      menu.append(row);
-    }
-    menu.append(document.getElementById("agent-preset-content"));
-    if (initialized) { persist(); saveComposerSettings(); }
-  }
-
-  function renderGeneralSettings() {
-    const menu = document.getElementById("general-permissions");
-    menu.replaceChildren();
-    if (state.role === "main") {
-      const row = document.createElement("div");
-      row.className = "agent-permissions-row";
-      const legend = document.createElement("div");
-      legend.className = "agent-permissions-heading";
-      const name = document.createElement("strong");
-      name.textContent = t("ui.permissions");
-      legend.append(name);
-      const select = document.createElement("select");
-      select.dataset.setting = "permissions";
-      select.setAttribute("aria-label", t("ui.execution.permissions"));
-      for (const value of settingOptions.execution) {
-        const option = document.createElement("option");
-        option.value = value;
-        option.textContent = executionModeName(value);
-        option.selected = value === (state.executionMode ?? "cli-default");
-        select.append(option);
-      }
-      const help = document.createElement("p");
-      help.id = "agent-permissions-description";
-      select.setAttribute("aria-describedby", help.id);
-      const explain = () => { help.textContent = executionModeExplanation(select.value); help.hidden = !help.textContent; };
-      explain();
-      select.disabled = state.running;
-      select.addEventListener("change", function () {
-        if (state.running) return;
-        state.executionMode = select.value;
-        vscode.postMessage({ type: "execution.select", mode: select.value });
-        explain(); renderStatusBar(); persist(); saveComposerSettings();
-      });
-      row.append(legend, select, help);
-      menu.append(row);
-    }
-    renderProviderSettings();
-  }
-
-  const providerNames = { codex: "Codex", claude: "Claude Code", antigravity: "Antigravity" };
-  let providerSnapshot = { providers: [], busy: false, errors: {}, pluginUpdateMode: "auto", versions: {} };
-  const providerDrafts = new Map();
-  let providerNoticeShown = false;
-  let providerVersionsRequested = false;
-  let providerCatalog = null;
-  let missingProviderExpanded = false;
-  let factoryInstallVersion = "";
-  const providerInstallVersions = new Map();
-
-  function receiveProviders(message) {
-    const providers = Array.isArray(message.providers)
-      ? message.providers.filter(item => item && Object.hasOwn(providerNames, item.id)) : [];
-    providerSnapshot = {
-      providers,
-      busy: message.busy === true,
-      errors: message.errors && typeof message.errors === "object" ? message.errors : {},
-      pluginUpdateMode: message.pluginUpdateMode === "manual" ? "manual" : "auto",
-      versions: message.versions && typeof message.versions === "object" ? message.versions : {}
-    };
-    if (!providerSnapshot.busy) providerDrafts.clear();
-    // Without any CLI the chat stays open; point once to the place where a path can be set.
-    if (!providerSnapshot.busy && providers.length && !providers.some(item => item.detected) && !providerNoticeShown) {
-      providerNoticeShown = true;
-      appendNotice("warning", t("ui.providers.none.chat"));
-    }
-    if (providers.some(item => item.detected)) providerNoticeShown = false;
-    renderProviderSettings();
-  }
-
-  function populateVersionSelect(select, versions, selected, unavailable) {
-    const values = Array.isArray(versions) ? versions : [];
-    const placeholder = document.createElement("option");
-    placeholder.value = "";
-    placeholder.textContent = t(providerCatalog === null ? "ui.providers.version.loading"
-      : unavailable ? "ui.providers.version.unavailable"
-        : values.length ? "ui.providers.version.select" : "ui.providers.version.none");
-    select.append(placeholder);
-    for (const version of values) {
-      const option = document.createElement("option");
-      option.value = version;
-      option.textContent = version;
-      select.append(option);
-    }
-    select.value = values.includes(selected) ? selected : "";
-    select.disabled = providerSnapshot.busy || !values.length;
-  }
-
-  function renderProviderSettings() {
-    const root = document.getElementById("provider-settings");
-    if (!root) return;
-    const focused = root.contains(document.activeElement) ? document.activeElement.dataset.providerControl : undefined;
-    const section = document.createElement("section");
-    section.className = "provider-settings";
-    const hasDetected = providerSnapshot.providers.some(provider => provider.detected);
-    const update = document.createElement("button");
-    update.type = "button";
-    update.dataset.providerControl = "update-now";
-    update.textContent = t(providerSnapshot.busy ? "ui.providers.update.updating" : "ui.providers.update.now");
-    update.disabled = providerSnapshot.busy || !hasDetected;
-    update.addEventListener("click", function () { vscode.postMessage({ type: "providers.update" }); });
-    const factoryControls = document.createElement("div");
-    factoryControls.className = "provider-version-controls provider-factory-version-controls";
-    const factoryInput = document.createElement("select");
-    factoryInput.setAttribute("aria-label", t("ui.providers.factory.version.label"));
-    factoryInput.dataset.providerControl = "factory-install-version-select";
-    populateVersionSelect(factoryInput, providerCatalog?.factory, factoryInstallVersion, providerCatalog?.errors?.factory);
-    const factoryInstall = document.createElement("button");
-    factoryInstall.type = "button";
-    factoryInstall.dataset.providerControl = "factory-install-version";
-    factoryInstall.textContent = t("ui.providers.install");
-    const updateFactoryButton = () => { factoryInstall.disabled = providerSnapshot.busy || !hasDetected || !factoryInput.value; };
-    const submitFactoryVersion = () => {
-      if (factoryInstall.disabled) return;
-      vscode.postMessage({ type: "providers.update", version: factoryInput.value });
-    };
-    factoryInput.addEventListener("change", function () { factoryInstallVersion = factoryInput.value; updateFactoryButton(); });
-    factoryInstall.addEventListener("click", submitFactoryVersion);
-    updateFactoryButton();
-    factoryControls.append(factoryInput, factoryInstall, update);
-    section.append(factoryControls);
-    const missing = providerSnapshot.providers.filter(provider => !provider.detected);
-    let missingList;
-    let missingDetails;
-    if (missing.length) {
-      missingDetails = document.createElement("details");
-      missingDetails.className = "provider-missing";
-      missingDetails.open = !hasDetected || missingProviderExpanded;
-      missingDetails.addEventListener("toggle", function () {
-        if (hasDetected) missingProviderExpanded = missingDetails.open;
-      });
-      const summary = document.createElement("summary");
-      summary.textContent = t("ui.providers.add.path");
-      missingList = document.createElement("div");
-      missingList.className = "provider-missing-list";
-      missingDetails.append(summary, missingList);
-    }
-    for (const provider of providerSnapshot.providers) {
-      const row = document.createElement("div");
-      row.className = "provider-row";
-      const head = document.createElement("div");
-      head.className = "provider-row-head";
-      const name = document.createElement("span");
-      name.className = "provider-name";
-      name.textContent = providerNames[provider.id];
-      const status = document.createElement("span");
-      status.className = "provider-state";
-      status.dataset.detected = String(provider.detected === true);
-      status.textContent = provider.detected
-        ? t("ui.providers.detected") + " · " + t(provider.source === "configured" ? "ui.providers.source.configured" : "ui.providers.source.auto")
-        : "";
-      head.append(name);
-      if (provider.detected) head.append(status);
-      row.append(head);
-      const versions = providerSnapshot.versions[provider.id];
-      if (provider.detected && versions && (versions.cli || versions.plugin)) {
-        const versionLine = document.createElement("span");
-        versionLine.className = "provider-version";
-        versionLine.textContent = [
-          versions.cli ? t("ui.providers.version.cli", versions.cli) : undefined,
-          versions.plugin ? t("ui.providers.version.plugin", versions.plugin) : undefined
-        ].filter(Boolean).join(" · ");
-        row.append(versionLine);
-      }
-      if (provider.detected && versions && typeof versions.pluginCurrent === "boolean") {
-        const updateState = document.createElement("span");
-        updateState.className = "provider-update-state";
-        updateState.dataset.current = String(versions.pluginCurrent);
-        updateState.textContent = t(versions.pluginCurrent ? "ui.providers.update.current" : "ui.providers.update.available");
-        row.append(updateState);
-      }
-      if (provider.detected && provider.id !== "antigravity") {
-        const versionControls = document.createElement("div");
-        versionControls.className = "provider-version-controls";
-        const versionInput = document.createElement("select");
-        versionInput.setAttribute("aria-label", t("ui.providers.cli.version.label", providerNames[provider.id]));
-        versionInput.dataset.providerControl = provider.id + ":install-version-select";
-        populateVersionSelect(versionInput, providerCatalog?.cli?.[provider.id], providerInstallVersions.get(provider.id) ?? "", providerCatalog?.errors?.[provider.id]);
-        const installVersion = document.createElement("button");
-        installVersion.type = "button";
-        installVersion.dataset.providerControl = provider.id + ":install-version";
-        installVersion.textContent = t("ui.providers.install");
-        const updateVersionButton = () => { installVersion.disabled = providerSnapshot.busy || !versionInput.value; };
-        const submitVersion = () => {
-          const version = versionInput.value;
-          if (installVersion.disabled) return;
-          vscode.postMessage({ type: "providers.cli.install", provider: provider.id, version });
-        };
-        versionInput.addEventListener("change", function () {
-          providerInstallVersions.set(provider.id, versionInput.value);
-          updateVersionButton();
-        });
-        installVersion.addEventListener("click", submitVersion);
-        updateVersionButton();
-        versionControls.append(versionInput, installVersion);
-        row.append(versionControls);
-      } else if (provider.detected) {
-        const unsupported = document.createElement("span");
-        unsupported.className = "provider-version";
-        unsupported.textContent = t("ui.providers.cli.version.unsupported");
-        row.append(unsupported);
-      }
-      const problems = [];
-      if (!provider.detected && provider.configuredInvalid && typeof provider.configuredPath === "string") problems.push(t("ui.providers.configured.invalid"));
-      if (typeof providerSnapshot.errors[provider.id] === "string") problems.push(t("ui.providers.plugin.failed", providerSnapshot.errors[provider.id]));
-      for (const text of problems) {
-        const problem = document.createElement("p");
-        problem.className = "provider-error";
-        problem.textContent = text;
-        row.append(problem);
-      }
-      const edit = document.createElement("div");
-      edit.className = "provider-path-edit";
-      const input = document.createElement("input");
-      input.type = "text";
-      input.spellcheck = false;
-      input.dataset.providerControl = provider.id + ":input";
-      // A failed manual override can fall back to a working auto-detected executable.
-      // Show the executable actually used for this provider, not the stale override.
-      const displayedPath = provider.detected && typeof provider.path === "string"
-        ? provider.path : provider.configuredPath ?? "";
-      input.value = providerDrafts.get(provider.id) ?? displayedPath;
-      input.placeholder = t("ui.providers.path.placeholder");
-      input.setAttribute("aria-label", t("ui.providers.path", providerNames[provider.id]));
-      input.disabled = providerSnapshot.busy;
-      let lastSubmittedPath = displayedPath;
-      const submit = () => {
-        const path = input.value.trim();
-        if (providerSnapshot.busy || !path || path === lastSubmittedPath) return;
-        lastSubmittedPath = path;
-        vscode.postMessage({ type: "providers.configure", provider: provider.id, path });
-      };
-      input.addEventListener("input", function () { providerDrafts.set(provider.id, input.value); });
-      input.addEventListener("blur", function (event) {
-        if (!edit.contains(event.relatedTarget)) submit();
-      });
-      input.addEventListener("keydown", function (event) {
-        if (event.key !== "Enter" || event.isComposing) return;
-        event.preventDefault();
-        submit();
-      });
-      const pick = document.createElement("button");
-      pick.type = "button";
-      pick.dataset.providerControl = provider.id + ":pick";
-      pick.textContent = t("ui.providers.pick");
-      pick.disabled = providerSnapshot.busy;
-      pick.addEventListener("click", function () { vscode.postMessage({ type: "providers.pick", provider: provider.id }); });
-      const clear = document.createElement("button");
-      clear.type = "button";
-      clear.dataset.providerControl = provider.id + ":clear";
-      clear.textContent = t("ui.providers.clear");
-      clear.disabled = providerSnapshot.busy;
-      clear.setAttribute("aria-pressed", String(provider.detected ? provider.source !== "configured" : !provider.configuredPath));
-      clear.addEventListener("click", function () {
-        providerDrafts.delete(provider.id);
-        vscode.postMessage({ type: "providers.configure", provider: provider.id, path: "" });
-      });
-      edit.append(input, pick, clear);
-      row.append(edit);
-      if (provider.detected) section.append(row);
-      else missingList?.append(row);
-    }
-    if (missingDetails) section.append(missingDetails);
-    root.replaceChildren(section);
-    if (focused) {
-      const target = root.querySelector('[data-provider-control="' + focused + '"]');
-      if (target && !target.disabled) target.focus();
-      else if (providerSnapshot.busy) root.querySelector('[data-provider-control$=":input"]')?.focus();
-    }
-  }
 
   function setConversationClearing(busy) {
     // The clear button spins while clearing; its label carries the status for assistive technology.
@@ -7049,8 +4647,8 @@
   }
 
   function renderSettingMenu(setting, menu) {
-    if (setting === "model") renderModelSettings(menu);
-    else if (setting === "worktree") { renderWorktree(); vscode.postMessage({ type: "worktree.repositories" }); }
+    if (setting === "model") chatAgentSettings.renderModelSettings(menu);
+    else if (setting === "worktree") { chatWorkUnits.renderWorktree(); vscode.postMessage({ type: "worktree.repositories" }); }
     else renderSubmissionMenu(menu);
   }
 
@@ -7129,9 +4727,8 @@
     const menu = settingMenu(openSettingId);
     menu.hidden = true;
     if (openSettingId === "submission") {
-      contractList.open = false;
+      chatHistory.contractList.open = false;
       document.getElementById("task-history").open = false;
-      document.getElementById("conversation-history").open = false;
     }
     button.setAttribute("aria-expanded", "false");
     openSettingId = undefined;
@@ -7140,8 +4737,8 @@
     }
   }
 
-  function settingButton(setting) { return setting === "model" ? modelButton : setting === "worktree" ? worktreeButton : submissionButton; }
-  function settingMenu(setting) { return setting === "model" ? modelMenu : setting === "worktree" ? worktreeMenu : submissionMenu; }
+  function settingButton(setting) { return setting === "model" ? modelButton : setting === "worktree" ? chatWorkUnits.worktreeButton : submissionButton; }
+  function settingMenu(setting) { return setting === "model" ? modelMenu : setting === "worktree" ? chatWorkUnits.worktreeMenu : submissionMenu; }
 
   function executionModeName(mode) {
     return ({
@@ -7200,8 +4797,8 @@
       shortcutDefaultsVersion: shortcutDefaultsVersion,
       startedMessageIds: state.startedMessageIds,
       pendingRequests: state.pendingRequests,
-      notesScope: selectedNotesScope,
-      noteDraft: noteDraft && (noteDirty || noteSending) ? { ...noteDraft } : null,
+      notesScope: chatNotes.selectedNotesScope,
+      noteDraft: chatNotes.noteDraft && (chatNotes.noteDirty || chatNotes.noteSending) ? { ...chatNotes.noteDraft } : null,
       panelId: state.panelId,
       agentId: state.agentId,
       conversationId: state.conversationId,
@@ -7223,7 +4820,7 @@
         const { previewUri, ...persisted } = attachment;
         return persisted;
       }),
-      taskFlows: currentTaskFlows().slice(-100),
+      taskFlows: chatTaskFlow.currentTaskFlows().slice(-100),
       timeline: state.timeline.filter(function (event) { return !event.streaming; }).slice(-200).map(function (event) {
         if (!Array.isArray(event.attachments)) return event;
         return {
@@ -7240,6 +4837,7 @@
       runtimeAvailable: state.runtimeAvailable,
       running: state.running,
       agentModels: state.agentModels,
+      modelFastModes: state.modelFastModes,
       model: state.model,
       reasoning: state.reasoning,
       agentSettingsScope: state.agentSettingsScope,
@@ -7282,6 +4880,7 @@
     vscode.postMessage({
       type: "composer.settings",
       agentModels: state.agentModels,
+      modelFastModes: state.modelFastModes,
       model: state.model || undefined,
       reasoning: state.reasoning || undefined,
       agentSettingsScope: state.agentSettingsScope,
@@ -7350,6 +4949,11 @@
     item.replaceChildren(label, meter);
   }
 
+  function normalizeModelFastModes(value) {
+    if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+    return Object.fromEntries(Object.entries(value).filter(([model, enabled]) =>
+      /^[A-Za-z0-9][A-Za-z0-9._:/-]{0,99}$/.test(model) && typeof enabled === "boolean"));
+  }
   function normalizeModel(value) {
     return typeof value === "string" && /^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$|^antigravity\/[A-Za-z0-9][A-Za-z0-9._-]{0,80}$/.test(value) ? value : "";
   }
@@ -7384,9 +4988,9 @@
     inputFeedback.textContent = localizedText(inputFeedback.textContent, feedback);
     renderAll();
     renderStatusCatalog();
-    renderModelSettings(modelMenu);
+    chatAgentSettings.renderModelSettings(modelMenu);
     renderSubmissionMenu(submissionMenu);
-    renderGeneralSettings();
+    chatAgentSettings.renderGeneralSettings();
     renderQuestionList();
     renderSessionList();
     renderAgentsList();

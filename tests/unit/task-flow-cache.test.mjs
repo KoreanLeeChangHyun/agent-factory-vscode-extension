@@ -1,9 +1,9 @@
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
-import { runInNewContext } from 'node:vm';
 import test from 'node:test';
+import { readChatSource, runChatInNewContext as runInNewContext } from "../support/chat-source.mjs";
 
-const source = await readFile(new URL('../../static/js/chat.js', import.meta.url), 'utf8');
+const source = await readChatSource();
 const indexSource = source.slice(source.indexOf('  function indexedTimeline()'), source.indexOf('  function upsertActivity('));
 const aggregation = source.slice(source.indexOf('  function currentTaskFlows() {'), source.indexOf('  function liveTaskStatus('));
 

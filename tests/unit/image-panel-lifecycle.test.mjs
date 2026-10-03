@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, mkdir, stat, rm } from "node:fs/promises";
+import { mkdtemp, mkdir, stat, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createRequire } from "node:module";
@@ -14,10 +14,14 @@ const output = await build({
   bundle: true, write: false, platform: "node", format: "cjs", target: "node18", external: ["vscode"]
 });
 function uri(path) {
-  return { fsPath: path, path, toString: () => pathToFileURL(path).href };
+  return { scheme: "file", fsPath: path, path, toString: () => pathToFileURL(path).href };
 }
 const vscode = {
-  Uri: { joinPath: (base, ...parts) => uri(join(base.fsPath, ...parts)) },
+  Uri: {
+    joinPath: (base, ...parts) => uri(join(base.fsPath, ...parts)),
+    parse: value => uri(fileURLToPath(value))
+  },
+  FileType: { Directory: 2 },
   workspace: { fs: { createDirectory: value => mkdir(value.fsPath, { recursive: true }), stat: value => stat(value.fsPath) } }
 };
 const module = { exports: {} };
@@ -54,6 +58,13 @@ test("image staging and restoration keep panel options stable and panel-scoped",
       assert.ok(path.startsWith(join(root, "chat-images", "panel-one") + "/"));
       assert.equal((await stat(path)).size, content.length);
     }
+    const droppedPath = join(root, "Finder image.png");
+    await writeFile(droppedPath, content);
+    await manager.addUriAttachments(managed, [pathToFileURL(droppedPath).href]);
+    assert.equal(posted.at(-1).type, "attachments.add");
+    assert.equal(posted.at(-1).attachments[0].kind, "image");
+    assert.equal(posted.at(-1).attachments[0].name, "Finder image.png");
+    assert.notEqual(fileURLToPath(posted.at(-1).attachments[0].uri), droppedPath);
     await manager.restoreImageAttachments(managed, [
       { id: "aa-first", name: "first.png", target: "composer" },
       { id: "bb-second", name: "second.png", target: "history" }
