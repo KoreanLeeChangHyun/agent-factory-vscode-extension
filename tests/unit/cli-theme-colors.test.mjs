@@ -1,13 +1,9 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
-import { build } from "esbuild";
+import { importTypeScript } from "../support/import-typescript.mjs";
 
-const result = await build({
-  entryPoints: [new URL("../../src/webview/cli-theme-colors.ts", import.meta.url).pathname],
-  bundle: true, platform: "node", format: "esm", target: "node18", write: false
-});
-const { normalizeCliTheme } = await import(`data:text/javascript;base64,${Buffer.from(result.outputFiles[0].text).toString("base64")}`);
+const { normalizeCliTheme } = await importTypeScript("src/webview/cli-theme-colors.ts");
 const rule = foreground => ({ scope: "keyword", settings: { foreground } });
 const restored = (result, index = 0) => {
   const color = result.theme.settings[index].settings.foreground;

@@ -1,13 +1,9 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { build } from 'esbuild';
-async function load(name) {
-  const result = await build({ entryPoints: [new URL('../../src/' + name, import.meta.url).pathname], bundle: true, format: 'esm', platform: 'node', write: false });
-  return import(`data:text/javascript;base64,${Buffer.from(result.outputFiles[0].text).toString('base64')}`);
-}
-const { parseAgentPermissions } = await load('common/types/agent-permissions.ts');
-const { restoreChatState } = await load('modules/chat/chat-state.ts');
-const { executionPolicyArguments } = await load('infrastructure/agent-factory/agent-client.ts');
+import { importTypeScript } from '../support/import-typescript.mjs';
+const { parseAgentPermissions } = await importTypeScript('src/common/types/agent-permissions.ts');
+const { restoreChatState } = await importTypeScript('src/modules/chat/chat-state.ts');
+const { executionPolicyArguments } = await importTypeScript('src/infrastructure/agent-factory/agent-client.ts');
 test('role overrides reject unknown modes and preserve omitted inheritance', () => {
   assert.deepEqual(parseAgentPermissions({ main: 'bypass', verification: 'workspace-write' }), { main: 'bypass', verification: 'workspace-write' });
   assert.deepEqual(parseAgentPermissions({}), {});

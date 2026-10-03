@@ -226,6 +226,7 @@ test('webview acceptance replay promotes exactly once and preserves queued image
   const context = {
     state: { pendingRequests: [{ id: 'one', execution: { taskMode: 'plan-work', businessMode: 'design', goal: false }, attachments: [{ name: 'input.png', previewUri: 'safe-preview' }] }], timeline: [] },
     message: { type: 'chat.started', id: 'one', text: 'request', attachments: [] },
+    openSettingId: undefined,
     summarizeChildAgents: () => ({}), renderAll() {}, persist() {},
     timeline: { scrollTop: 0, scrollHeight: 1000 }, updateAutoScrollControl() {}, updateJumpToBottom() {}
   };

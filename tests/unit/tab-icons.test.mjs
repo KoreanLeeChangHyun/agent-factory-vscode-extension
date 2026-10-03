@@ -11,11 +11,18 @@ const require = createRequire(import.meta.url);
 const extensionRoot = new URL("../..", import.meta.url).pathname.replace(/\/$/, "");
 const vscodeUri = { file: value => ({ fsPath: value }), joinPath: (base, ...parts) => ({ fsPath: [base.fsPath, ...parts].join("/") }) };
 
+// Share immutable bundle text only; each load keeps a fresh VM and mock state.
+const bundles = new Map();
 async function load(entry, vscode) {
-  const output = await build({
-    entryPoints: [join(extensionRoot, "src/infrastructure/vscode", entry)],
-    bundle: true, write: false, platform: "node", format: "cjs", target: "node18", external: ["vscode"]
-  });
+  if (!bundles.has(entry)) {
+    const pending = build({
+      entryPoints: [join(extensionRoot, "src/infrastructure/vscode", entry)],
+      bundle: true, write: false, platform: "node", format: "cjs", target: "node18", external: ["vscode"]
+    });
+    bundles.set(entry, pending);
+    pending.catch(() => { if (bundles.get(entry) === pending) bundles.delete(entry); });
+  }
+  const output = await bundles.get(entry);
   const module = { exports: {} };
   runInNewContext(output.outputFiles[0].text, {
     module, exports: module.exports, Buffer, console, process, URL, setTimeout, clearTimeout, global: { Date },
@@ -24,9 +31,12 @@ async function load(entry, vscode) {
   return module.exports;
 }
 
-async function temporary(t) {
+async function temporary(t, beforeRemove = async () => {}) {
   const directory = await mkdtemp(join(tmpdir(), "af-tab-icons-"));
-  t.after(() => rm(directory, { recursive: true, force: true }));
+  t.after(async () => {
+    await beforeRemove();
+    await rm(directory, { recursive: true, force: true });
+  });
   return directory;
 }
 
@@ -77,7 +87,11 @@ test("tab loading combines the Main run with every durable active child run", as
 });
 
 test("revived chat tabs and running frames use stable icons that survive extension updates", async t => {
-  const storage = await temporary(t);
+  let manager;
+  const storage = await temporary(t, async () => {
+    manager?.dispose();
+    await manager?.tabIconPreparation;
+  });
   const listeners = () => ({ dispose() {} });
   const panels = [];
   const panel = () => {
@@ -100,12 +114,11 @@ test("revived chat tabs and running frames use stable icons that survive extensi
     }
   };
   const { ChatPanelManager } = await load("chat-panel-manager.ts", vscode);
-  const manager = new ChatPanelManager(
+  manager = new ChatPanelManager(
     { extensionUri: { fsPath: extensionRoot }, globalStorageUri: { fsPath: storage }, globalState: { get: (_key, fallback) => fallback, async update() {} }, subscriptions: [] },
     { localResourceRoots: [], render: async () => "<html></html>" }, () => [],
     async () => ({ available: false, diagnostic: "Runtime unavailable in fixture" })
   );
-  t.after(() => manager.dispose());
   const stable = join(storage, "tab-icons");
 
   const restored = panel();
@@ -125,7 +138,11 @@ test("revived chat tabs and running frames use stable icons that survive extensi
 });
 
 test("revived Main tabs restore and poll aggregate child loading from durable status", async t => {
-  const storage = await temporary(t);
+  let manager;
+  const storage = await temporary(t, async () => {
+    manager?.dispose();
+    await manager?.tabIconPreparation;
+  });
   const listeners = () => ({ dispose() {} });
   const created = {
     active: false, visible: false, iconPath: undefined, title: "",
@@ -148,11 +165,10 @@ test("revived Main tabs restore and poll aggregate child loading from durable st
   ];
   const client = { async listChildSessions() { return children; }, async advanceWorkflows() { return undefined; } };
   const { ChatPanelManager } = await load("chat-panel-manager.ts", vscode);
-  const manager = new ChatPanelManager(
+  manager = new ChatPanelManager(
     { extensionUri: { fsPath: extensionRoot }, globalStorageUri: { fsPath: storage }, globalState: { get: (_key, fallback) => fallback, async update() {} }, subscriptions: [] },
     { localResourceRoots: [], render: async () => "<html></html>" }, () => [], async () => ({ available: true, client })
   );
-  t.after(() => manager.dispose());
   await manager.revive(created, { panelId: "restored-child", title: "Main", role: "main", agentId: "main-parent" });
   const managed = manager.panels.get("restored-child");
 

@@ -319,7 +319,7 @@ test("image and other file links use the registered editor while line links reta
   const managed = { panel: { webview: { async postMessage(message) { notices.push(message); return true; } } } };
   const before = textOpens.length;
   for (const [href, expected] of [
-    ['/home/deus/workspace/agent-factory/extension/out/astra-stars/stars-795-0.png', '/home/deus/workspace/agent-factory/extension/out/astra-stars/stars-795-0.png'],
+    ['/home/deus/workspace/agent-factory/docs/artifact/extension-out/astra-stars/stars-795-0.png', '/home/deus/workspace/agent-factory/docs/artifact/extension-out/astra-stars/stars-795-0.png'],
     ['file:///tmp/star%20preview.PNG', '/tmp/star preview.PNG'],
     ['./out/preview.webp', '/workspace/out/preview.webp'],
     ['/tmp/report.pdf', '/tmp/report.pdf'],

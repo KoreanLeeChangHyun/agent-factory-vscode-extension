@@ -1,38 +1,25 @@
 import assert from "node:assert/strict";
-import { build } from "esbuild";
+import { createTypeScriptImporter, importTypeScript } from "../support/import-typescript.mjs";
 import { readFile, mkdir, mkdtemp, writeFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
 import test from "node:test";
 
-async function importTypeScript(relativePath, mockExtensionImports = false) {
-  const sourcePath = new URL(`../../${relativePath}`, import.meta.url).pathname;
-  const plugins = mockExtensionImports ? [{
-    name: "activation-test-mocks",
-    setup(buildApi) {
-      buildApi.onResolve({ filter: /^vscode$/ }, () => ({ path: "vscode", namespace: "mock" }));
-      buildApi.onResolve({ filter: /core\/bootstrap$/ }, () => ({ path: "bootstrap", namespace: "mock" }));
-      buildApi.onResolve({ filter: /plugin-dependency$/ }, (args) => ({ path: /claude-plugin-dependency$/.test(args.path) ? "claude-dependency" : /antigravity-plugin-dependency$/.test(args.path) ? "antigravity-dependency" : "dependency", namespace: "mock" }));
-      buildApi.onLoad({ filter: /.*/, namespace: "mock" }, (args) => {
-        if (args.path === "vscode") return { contents: "export const ExtensionMode = { Production: 1, Development: 2, Test: 3 }; export const ProgressLocation = { Notification: 15 }; export const window = {};" };
-        if (args.path === "bootstrap") return { contents: "export function bootstrap() {}" };
-        if (args.path === "claude-dependency") return { contents: "export async function ensureAgentFactoryClaudePlugin() {} export async function installedClaudePluginVersion() { return undefined; }" };
-        if (args.path === "antigravity-dependency") return { contents: "export async function ensureAgentFactoryAntigravityPlugin() {} export async function isAntigravityAvailable() { return false; } export async function installedAntigravityPluginVersion() { return undefined; }" };
-        return { contents: "export async function ensureAgentFactoryPlugin() {} export function semanticBase(value) { return String(value).split('+')[0]; } export async function installedCodexPluginVersion() { return undefined; }" };
-      });
-    }
-  }] : [];
-  const output = await build({
-    entryPoints: [sourcePath],
-    bundle: true,
-    format: "esm",
-    platform: "node",
-    target: "node18",
-    write: false,
-    plugins
-  });
-  return import(`data:text/javascript;base64,${Buffer.from(output.outputFiles[0].text).toString("base64")}`);
-}
+const importActivation = createTypeScriptImporter({ plugins: [{
+  name: "activation-test-mocks",
+  setup(buildApi) {
+    buildApi.onResolve({ filter: /^vscode$/ }, () => ({ path: "vscode", namespace: "mock" }));
+    buildApi.onResolve({ filter: /core\/bootstrap$/ }, () => ({ path: "bootstrap", namespace: "mock" }));
+    buildApi.onResolve({ filter: /plugin-dependency$/ }, (args) => ({ path: /claude-plugin-dependency$/.test(args.path) ? "claude-dependency" : /antigravity-plugin-dependency$/.test(args.path) ? "antigravity-dependency" : "dependency", namespace: "mock" }));
+    buildApi.onLoad({ filter: /.*/, namespace: "mock" }, (args) => {
+      if (args.path === "vscode") return { contents: "export const ExtensionMode = { Production: 1, Development: 2, Test: 3 }; export const ProgressLocation = { Notification: 15 }; export const window = {};" };
+      if (args.path === "bootstrap") return { contents: "export function bootstrap() {}" };
+      if (args.path === "claude-dependency") return { contents: "export async function ensureAgentFactoryClaudePlugin() {} export async function installedClaudePluginVersion() { return undefined; }" };
+      if (args.path === "antigravity-dependency") return { contents: "export async function ensureAgentFactoryAntigravityPlugin() {} export async function isAntigravityAvailable() { return false; } export async function installedAntigravityPluginVersion() { return undefined; }" };
+      return { contents: "export async function ensureAgentFactoryPlugin() {} export function semanticBase(value) { return String(value).split('+')[0]; } export async function installedCodexPluginVersion() { return undefined; }" };
+    });
+  }
+}] });
 
 const dependency = await importTypeScript("src/infrastructure/agent-factory/plugin-dependency.ts");
 const codexSetup = await importTypeScript("src/infrastructure/agent-factory/codex-plugin-setup.ts");
@@ -64,7 +51,7 @@ test("development activation uses live local sources and allows a different plug
     if (previous === undefined) delete process.env.AGENT_FACTORY_DEV_PLUGIN_ROOT;
     else process.env.AGENT_FACTORY_DEV_PLUGIN_ROOT = previous;
   });
-  const { activate } = await importTypeScript("src/extension.ts", true);
+  const { activate } = await importActivation("src/extension.ts");
   let bootstraps = 0;
   const errors = [];
   const services = {
@@ -98,7 +85,7 @@ test("production activation ignores an inherited development plugin root", async
     if (previous === undefined) delete process.env.AGENT_FACTORY_DEV_PLUGIN_ROOT;
     else process.env.AGENT_FACTORY_DEV_PLUGIN_ROOT = previous;
   });
-  const { activate } = await importTypeScript("src/extension.ts", true);
+  const { activate } = await importActivation("src/extension.ts");
   let installedChecks = 0;
   let bootstraps = 0;
   await activate({ extensionMode: 1, extension: { packageJSON: { version: "1.0.2" } } }, {
@@ -342,7 +329,7 @@ test("legacy top-level and plugins-array schemas remain compatible", async () =>
 });
 
 test("activation keeps chat available when plugin setup fails", async () => {
-  const { activate } = await importTypeScript("src/extension.ts", true);
+  const { activate } = await importActivation("src/extension.ts");
   const context = { extension: { packageJSON: { version: "1.0.2" } } };
   const events = [];
   const services = {
@@ -367,7 +354,7 @@ test("activation keeps chat available when plugin setup fails", async () => {
 });
 
 test("the Antigravity plugin is ensured after startup and its failure only warns", async () => {
-  const { activate } = await importTypeScript("src/extension.ts", true);
+  const { activate } = await importActivation("src/extension.ts");
   const events = [];
   let release;
   const antigravity = new Promise(resolve => { release = resolve; });
@@ -458,7 +445,7 @@ test("concurrent dependency checks share one installation and later calls rechec
 });
 
 test("activation Retry reruns dependencies and concurrent activation bootstraps once", async () => {
-  const { activate } = await importTypeScript("src/extension.ts", true);
+  const { activate } = await importActivation("src/extension.ts");
   const context = { extension: { packageJSON: { version: "1.0.2" } } };
   let attempts = 0;
   let bootstraps = 0;
@@ -483,7 +470,7 @@ test("activation Retry reruns dependencies and concurrent activation bootstraps 
 });
 
 test("dismissing dependency error leaves activation retryable without bootstrap", async () => {
-  const { activate } = await importTypeScript("src/extension.ts", true);
+  const { activate } = await importActivation("src/extension.ts");
   const context = { extension: { packageJSON: { version: "1.0.2" } } };
   let bootstraps = 0;
   const services = {
@@ -501,7 +488,7 @@ test("dismissing dependency error leaves activation retryable without bootstrap"
 });
 
 test("dismissed startup failure leaves the open command registered with recovery guidance and Retry", async () => {
-  const { activate } = await importTypeScript("src/extension.ts", true);
+  const { activate } = await importActivation("src/extension.ts");
   const context = { extension: { packageJSON: { version: "1.0.2" } } };
   const commands = new Map();
   let attempts = 0;
@@ -563,7 +550,7 @@ test("malformed marketplace list blocks registration", async () => {
 });
 
 test("WSL handoff is deduplicated and never starts the Windows plugin or chat runtime", async () => {
-  const { activate } = await importTypeScript("src/extension.ts", true);
+  const { activate } = await importActivation("src/extension.ts");
   const context = { extension: { packageJSON: { version: "1.0.13" } }, subscriptions: [] };
   let opens = 0;
   let handler, notice;
@@ -586,7 +573,7 @@ test("WSL handoff is deduplicated and never starts the Windows plugin or chat ru
 });
 
 test("Claude-only hosts activate with an installed plugin and never redirect or install through Codex", async () => {
-  const { activate } = await importTypeScript("src/extension.ts", true);
+  const { activate } = await importActivation("src/extension.ts");
   const context = { extension: { packageJSON: { version: "1.0.14" } }, subscriptions: [] };
   const calls = [];
   const services = {
@@ -609,7 +596,7 @@ test("Claude-only hosts activate with an installed plugin and never redirect or 
 });
 
 test("with both CLIs, both plugins are managed and a Claude plugin failure only warns", async () => {
-  const { activate } = await importTypeScript("src/extension.ts", true);
+  const { activate } = await importActivation("src/extension.ts");
   const context = { extension: { packageJSON: { version: "1.0.17" } }, subscriptions: [] };
   const calls = [];
   const services = {
@@ -627,7 +614,7 @@ test("with both CLIs, both plugins are managed and a Claude plugin failure only 
 });
 
 test("Claude-only activation stays available when the Claude plugin cannot be installed", async () => {
-  const { activate } = await importTypeScript("src/extension.ts", true);
+  const { activate } = await importActivation("src/extension.ts");
   const context = { extension: { packageJSON: { version: "1.0.17" } }, subscriptions: [] };
   const warnings = [];
   let bootstraps = 0;
@@ -649,7 +636,7 @@ test("Claude-only activation stays available when the Claude plugin cannot be in
 });
 
 test("with no provider CLI the chat still starts without plugin checks and warns once", async () => {
-  const { activate } = await importTypeScript("src/extension.ts", true);
+  const { activate } = await importActivation("src/extension.ts");
   const context = { extension: { packageJSON: { version: "1.0.14" } }, subscriptions: [] };
   const calls = [];
   const services = {
@@ -670,7 +657,7 @@ test("with no provider CLI the chat still starts without plugin checks and warns
 });
 
 test("an Antigravity-only host waits for its plugin before requiring the installed runtime", async () => {
-  const { activate } = await importTypeScript("src/extension.ts", true);
+  const { activate } = await importActivation("src/extension.ts");
   const context = { extension: { packageJSON: { version: "1.0.21" } }, subscriptions: [] };
   const calls = [];
   const services = {
@@ -688,7 +675,7 @@ test("an Antigravity-only host waits for its plugin before requiring the install
 });
 
 test("sidebar placeholder claims the view during startup and releases it before bootstrap", async () => {
-  const { activate } = await importTypeScript("src/extension.ts", true);
+  const { activate } = await importActivation("src/extension.ts");
   const events = [];
   const view = { message: undefined, dispose() { events.push("dispose"); } };
   const services = {

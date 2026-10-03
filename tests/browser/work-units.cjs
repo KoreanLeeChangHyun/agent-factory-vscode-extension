@@ -12,7 +12,7 @@ async function checkWorkUnits(page) {
   await emit({ type: 'worktree.repositories', repositories: [{ path: '/projects/one', branches: ['main'], defaultBranch: 'main' }, { path: '/projects/two', branches: ['main'], defaultBranch: 'main' }] });
   assert.equal(await page.locator('#worktree-repositories button').count(), 2);
   const fs = require('node:fs'); const path = require('node:path');
-  const output = path.resolve(__dirname, '../../out/worktree-menu'); fs.mkdirSync(output, { recursive: true });
+  const output = path.resolve(__dirname, '../../../docs/artifact/worktree-menu'); fs.mkdirSync(output, { recursive: true });
   for (const width of [795, 380]) {
     await page.setViewportSize({ width, height: 740 });
     await page.evaluate(() => new Promise(requestAnimationFrame));

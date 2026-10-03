@@ -83,7 +83,7 @@ async function checkFactoryRendering(page) {
   assert.deepEqual(overflowing, [], 'Card headings must fit narrow panels');
   const fs = require('node:fs');
   const path = require('node:path');
-  const artifactDir = path.resolve(__dirname, '../../out/factory-rendering');
+  const artifactDir = path.resolve(__dirname, '../../../docs/artifact/factory-rendering');
   fs.mkdirSync(artifactDir, { recursive: true });
   await page.locator('[data-id="long-loop-heading"]').screenshot({ path: path.join(artifactDir, 'narrow-card.png') });
   await page.setViewportSize({ width: 795, height: 900 });

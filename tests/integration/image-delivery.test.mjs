@@ -7,15 +7,10 @@ import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { promisify } from "node:util";
 import test from "node:test";
-import { build } from "esbuild";
+import { importTypeScript } from "../support/import-typescript.mjs";
 
 const execFileAsync = promisify(execFile);
 
-async function importTypeScript(relativePath) {
-  const sourcePath = new URL(`../../${relativePath}`, import.meta.url).pathname;
-  const output = await build({ entryPoints: [sourcePath], bundle: true, format: "esm", platform: "node", target: "node18", write: false });
-  return import(`data:text/javascript;base64,${Buffer.from(output.outputFiles[0].text).toString("base64")}`);
-}
 
 test("browser image bytes reach the plugin contract on submit and send", async function (t) {
   const root = await mkdtemp(join(tmpdir(), "af-image-delivery-"));
