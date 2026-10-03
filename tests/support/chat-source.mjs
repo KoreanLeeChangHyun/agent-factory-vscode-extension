@@ -1,5 +1,5 @@
 import { readdirSync, readFileSync } from "node:fs";
-import { runInNewContext } from "node:vm";
+import { isContext, runInContext, runInNewContext } from "node:vm";
 
 const directory = new URL("../../static/js/", import.meta.url);
 
@@ -22,11 +22,17 @@ const featureInstances = [...readFileSync(new URL("chat.js", directory), "utf8")
  * define those members directly on the context, so each missing name forwards to the
  * context itself.
  */
+// `const`/`let` declared by an evaluated section are not properties of the context object.
+function lexicalBinding(context, key) {
+  if (typeof key !== "string" || !/^[A-Za-z_$][\w$]*$/.test(key) || !isContext(context)) return undefined;
+  try { return runInContext(key, context); } catch { return undefined; }
+}
+
 export function withChatFeatures(context) {
   for (const name of [...featureInstances, "host"]) {
     if (name in context) continue;
     context[name] = new Proxy({}, {
-      get: (_target, key) => context[key],
+      get: (_target, key) => key in context ? context[key] : lexicalBinding(context, key),
       set: (_target, key, value) => { context[key] = value; return true; },
       has: (_target, key) => key in context
     });

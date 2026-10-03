@@ -157,92 +157,17 @@
   let openSettingId;
 
   const saved = vscode.getState();
-  // Every chat action is bindable. Prompt-scoped actions read the draft; the
-  // rest run anywhere in the chat. Bindings are "Mod+Alt+Shift+Key" strings.
-  const shortcutGroups = [
-    { id: "composer", label: () => t("ui.shortcuts.group.composer") },
-    { id: "document", label: () => t("ui.document.main") },
-    { id: "workflow", label: () => t("ui.task.workflow") },
-    { id: "history", label: () => t("ui.shortcuts.group.history") },
-    { id: "bot", bot: true, label: () => t("ui.bot") },
-    { id: "basic", label: () => t("ui.shortcuts.group.basic") }
-  ];
-  const submitShortcut = (id, group, fallback, label, action, workflow, goal) =>
-    ({ id: id, group: group, fallback: fallback, submit: { action: action, workflow: workflow, goal: goal }, label: label });
-  const shortcutActions = [
-    { id: "send", group: "composer", scope: "prompt", required: true, fallback: "Enter", label: () => t("ui.send.message") },
-    { id: "bot", group: "composer", scope: "prompt", bot: true, fallback: "Mod+Shift+Enter", label: () => t("bot.named.shortcut", botDisplayName()) },
-    { id: "newLine", group: "composer", scope: "prompt", fallback: "Shift+Enter", label: () => t("ui.new.line") },
-    submitShortcut("submitPlanning", "document", "Alt+Shift+P", () => businessModeNames().planning, "direct", "planning", false),
-    submitShortcut("submitInterview", "document", "Alt+Shift+I", () => businessModeNames().interview, "direct", "interview", false),
-    submitShortcut("submitMigration", "document", "Alt+Shift+M", () => businessModeNames().migration, "direct", "migration", false),
-    submitShortcut("submitLessons", "document", "Alt+Shift+L", () => businessModeNames().lessons, "direct", "lessons", false),
-    submitShortcut("submitContract", "workflow", "Alt+Shift+C", () => t("ui.contract"), "direct", "contract", false),
-    submitShortcut("submitWork", "workflow", "Alt+Shift+W", () => t("ui.work"), "work", "normal", false),
-    submitShortcut("submitWorkVerification", "workflow", "Alt+Shift+V", () => t("submission.work.verification.label"), "work-verification", "normal", false),
-    submitShortcut("submitPipeline", "workflow", "Alt+Shift+D", () => businessModeNames().pipeline, "direct", "pipeline", false),
-    submitShortcut("submitGoal", "workflow", "Alt+Shift+G", () => t("ui.goal"), "direct", "normal", true),
-    { id: "openContracts", group: "history", fallback: "Alt+Shift+K", history: "contract-list", label: () => t("contracts.title") },
-    { id: "openTaskHistory", group: "history", fallback: "Alt+Shift+T", history: "task-history", label: () => t("flow.history") },
-    { id: "openConversationHistory", group: "history", fallback: "Alt+Shift+H", questionTab: "history", label: () => t("ui.conversation.history") },
-    { id: "botMenu", group: "bot", bot: true, fallback: "Alt+Shift+B", label: () => t("ui.shortcuts.bot.menu", botDisplayName()) },
-    { id: "botFeed", group: "bot", bot: true, fallback: "Alt+Shift+1", button: '[data-bot-action="feed"]', label: () => t("bot.feed") },
-    { id: "botPlay", group: "bot", bot: true, fallback: "Alt+Shift+2", button: '[data-bot-action="play"]', label: () => t("bot.play") },
-    { id: "botSleep", group: "bot", bot: true, fallback: "Alt+Shift+3", button: '[data-bot-action="sleep"]', label: () => t("bot.sleep") },
-    { id: "botPet", group: "bot", bot: true, fallback: "Alt+Shift+4", button: '[data-companion-action="pet"]', label: () => t("bot.pet") },
-    { id: "botPraise", group: "bot", bot: true, fallback: "Alt+Shift+5", button: '[data-companion-action="praise"]', label: () => t("bot.praise") },
-    { id: "botCall", group: "bot", bot: true, fallback: "Alt+Shift+6", button: '[data-companion-action="call"]', label: () => t("bot.call") },
-    // Basic controls keep their browser behavior on the default key and are
-    // emulated when rebound, so the default key stops acting once replaced.
-    { id: "close", group: "basic", required: true, native: "Escape", fallback: "Escape", label: () => t("ui.close.settings.or.an.open.menu") },
-    { id: "focusNext", group: "basic", required: true, native: "Tab", fallback: "Tab", label: () => t("ui.shortcuts.focus.next") },
-    { id: "focusPrevious", group: "basic", required: true, native: "Shift+Tab", fallback: "Shift+Tab", label: () => t("ui.shortcuts.focus.previous") },
-    { id: "settingsTabPrevious", group: "basic", scope: "tabs", fallback: "ArrowLeft", label: () => t("ui.shortcuts.tab.previous") },
-    { id: "settingsTabNext", group: "basic", scope: "tabs", fallback: "ArrowRight", label: () => t("ui.shortcuts.tab.next") },
-    { id: "settingsTabFirst", group: "basic", scope: "tabs", fallback: "Home", label: () => t("ui.shortcuts.tab.first") },
-    { id: "settingsTabLast", group: "basic", scope: "tabs", fallback: "End", label: () => t("ui.shortcuts.tab.last") }
-  ];
-  const legacyShortcuts = { enter: "Enter", "mod-enter": "Mod+Enter", "alt-enter": "Alt+Enter", "mod-shift-enter": "Mod+Shift+Enter", none: "" };
-  const shortcutApple = /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent || "");
-  const shortcutKeyNames = { Mod: shortcutApple ? "⌘" : "Ctrl", Alt: shortcutApple ? "⌥" : "Alt", ArrowUp: "↑", ArrowDown: "↓", ArrowLeft: "←", ArrowRight: "→", Plus: "+", Escape: "Esc" };
-  const shortcutList = document.getElementById("shortcut-bindings");
-  const shortcutStatus = document.getElementById("shortcuts-status");
-  // Recording flow: choose an action, press the keys, then confirm or cancel.
-  let shortcutRecording;
-  const shortcuts = {};
-  // Version 1 stored "" for actions that had no default yet; give them one.
-  const shortcutDefaultsVersion = 2;
-  const legacyEmpty = saved?.shortcutDefaultsVersion !== shortcutDefaultsVersion;
-  for (const action of shortcutActions) {
-    let value = saved?.shortcuts?.[action.id];
-    if (legacyEmpty && value === "" && !Object.values(saved?.shortcuts || {}).includes(action.fallback)) value = action.fallback;
-    if (Object.hasOwn(legacyShortcuts, value)) value = legacyShortcuts[value];
-    const valid = typeof value === "string" && (value ? !shortcutProblem(action, value) : !action.required) &&
-      !(value && Object.values(shortcuts).includes(value));
-    shortcuts[action.id] = valid ? value : action.fallback;
-  }
-  if (new Set(Object.values(shortcuts).filter(Boolean)).size !== Object.values(shortcuts).filter(Boolean).length) {
-    for (const action of shortcutActions) shortcuts[action.id] = action.fallback;
-  }
-  function shortcutFromEvent(event) {
-    if (event.ctrlKey && event.metaKey) return "";
-    const code = event.code || "";
-    const raw = /^Key[A-Z]$/.test(code) ? code.slice(3) : /^Digit\d$/.test(code) ? code.slice(5) : event.key;
-    if (!raw || ["Control", "Meta", "Shift", "Alt", "AltGraph", "CapsLock", "Process", "Unidentified", "Dead"].includes(raw)) return "";
-    const key = raw === " " ? "Space" : raw === "+" ? "Plus" : raw.length === 1 ? raw.toUpperCase() : raw;
-    return [event.ctrlKey || event.metaKey ? "Mod" : "", event.altKey ? "Alt" : "", event.shiftKey ? "Shift" : "", key].filter(Boolean).join("+");
-  }
-  function shortcutProblem(action, binding) {
-    const parts = binding.split("+"), key = parts.at(-1);
-    if (parts.includes("Mod") || parts.includes("Alt")) return "";
-    // Unmodified typing and editing keys would stop working in text fields.
-    if (key.length === 1 || key === "Space" || key === "Backspace" || key === "Delete") return "ui.shortcuts.needs.modifier";
-    if (key === "Enter" && action.scope !== "prompt") return "ui.shortcuts.needs.modifier";
-    if (/^(Arrow|Page)|^(Home|End)$/.test(key) && action.scope !== "tabs") return "ui.shortcuts.needs.modifier";
-    return "";
-  }
-  function shortcutComposing(event) {
-    return event.isComposing || event.nativeEvent?.isComposing || event.keyCode === 229;
+  const chatShortcuts = globalThis.AgentFactoryChat.shortcuts({
+    t, botDisplayName, businessModeNames, saved, sendButton, factoryBot, persist,
+    submissionOptionDisabled, closeSettingMenu, submit, openSetting,
+    get state() { return state; },
+    get botTalkButton() { return chatBot.botTalkButton; },
+    get botMenu() { return chatBot.botMenu; },
+    get openSettingId() { return openSettingId; },
+    get chatNavigation() { return chatNavigation; }
+  });
+  function botDisplayName() {
+    return t(state.companionAvailable ? "bot.name.lumi" : "bot.name.factory");
   }
   const state = {
     panelId: typeof saved?.panelId === "string" ? saved.panelId : undefined,
@@ -315,296 +240,65 @@
       totalCalled: Number.isInteger(saved?.workUnits?.totalCalled) ? saved.workUnits.totalCalled : 0
     }
   };
-  let botOutcome;
-  let botWaveTimer;
-  let botIdleTimer;
-  let botIdleSince;
-  let botCareTimer;
-  const botMenu = document.getElementById("bot-menu");
-  let companionSnapshot;
-  let botReplyEmotion;
-  let companionWorking = 0;
-  let companionOutcome;
-  let companionOutcomeUntil = 0;
-  let companionTimer;
-  let companionReactionDismissedUntil = 0;
-  let companionPetStart;
-  let companionPetDistance = 0;
-  function interactCompanion(action) {
-    if (state.botsEnabled && state.companionAvailable) vscode.postMessage({ type: "bot.interact", action: action });
-  }
-  const companionRasterCache = new Map();
-  const companionSources = new Map();
-  function smoothCompanionSheet(sprite, scale) {
-    if (!companionSources.has(sprite.dataset.sheet)) {
-      sprite.style.backgroundImage = "";
-      companionSources.set(sprite.dataset.sheet, getComputedStyle(sprite).backgroundImage);
-    }
-    const source = companionSources.get(sprite.dataset.sheet);
-    sprite.dataset.source = source;
-    const pixels = Math.max(1, Math.round(1254 * scale * window.devicePixelRatio));
-    const key = source + ":" + pixels;
-    if (sprite.dataset.rasterKey === key) return;
-    sprite.dataset.rasterKey = key;
-    sprite.style.backgroundImage = source;
-    delete sprite.dataset.smoothed;
-    if (!companionRasterCache.has(key)) {
-      // Resample once at physical display resolution, rather than repeatedly
-      // sampling the full atlas with the CSS background minification filter.
-      const raster = (async function () {
-        const sourceImage = new Image();
-        sourceImage.src = source.slice(4, -1).replace(/^["']|["']$/g, "");
-        await sourceImage.decode();
-        const canvas = document.createElement("canvas");
-        canvas.width = canvas.height = pixels;
-        const context = canvas.getContext("2d");
-        context.imageSmoothingEnabled = true;
-        context.imageSmoothingQuality = "high";
-        context.drawImage(sourceImage, 0, 0, pixels, pixels);
-        return canvas.toDataURL("image/png");
-      })();
-      companionRasterCache.set(key, raster);
-    }
-    companionRasterCache.get(key).then(function (url) {
-      if (sprite.dataset.rasterKey !== key) return;
-      sprite.style.backgroundImage = 'url("' + url + '")';
-      sprite.dataset.smoothed = String(pixels);
-    }).catch(function (error) {
-      companionRasterCache.delete(key);
-      if (sprite.dataset.rasterKey === key) delete sprite.dataset.rasterKey;
-      console.warn("Companion resampling failed; keeping the source image", error);
-    });
-  }
-  window.addEventListener("resize", function () { renderCompanion(); });
-  function renderCompanion() {
-    clearTimeout(companionTimer);
-    const bubble = document.getElementById("companion-reaction");
-    if (!state.companionAvailable || !companionSnapshot || !state.botsEnabled || !state.botVisible || document.hidden) {
-      if (bubble) bubble.hidden = true;
-      return;
-    }
-    const now = Date.now();
-    const talking = !!botTalkPending || botSpeechVisible;
-    const reacting = companionSnapshot.reactionUntil > now && !(talking && companionSnapshot.emotion === "sleepy");
-    const asleep = !talking && now - companionSnapshot.lastInteractionAt >= 60000;
-    const replyEmotion = botSpeechVisible && !botTalkPending ? botReplyEmotion : undefined;
-    const emotion = replyEmotion ? replyEmotion
-      : reacting ? companionSnapshot.emotion : asleep && !companionWorking ? "sleepy" : "calm";
-    const positions = { happy: [0, 0], shy: [0, 1], love: [1, 1], surprised: [3, 0], playful: [2, 1], sleepy: [3, 2] };
-    const sprite = factoryBot.querySelector(".companion-sprite");
-    const outcome = !reacting && !companionWorking && companionOutcomeUntil > now ? companionOutcome : undefined;
-    const activity = !replyEmotion ? (!reacting || emotion === "calm") && outcome !== "failed" : emotion === "calm";
-    const idle = emotion === "calm" && activity && !reacting && !asleep && !companionWorking && !state.running && !outcome;
-    const animateIdle = idle && state.botAnimations && !botReducedMotion.matches;
-    const beats = [[0, 2800], [1, 150], [0, 1800], [2, 240], [0, 200], [3, 240], [0, 1400]];
-    let phase = (now - companionSnapshot.lastInteractionAt) % 6830;
-    let idleFrame = 0;
-    let frameDelay = 0;
-    if (animateIdle) {
-      for (const [frame, duration] of beats) {
-        if (phase < duration) { idleFrame = frame; frameDelay = duration - phase; break; }
-        phase -= duration;
-      }
-    }
-    const motion = replyEmotion ? "" : reacting && companionSnapshot.action === "feed" ? "eating"
-      : !reacting && (companionWorking > 0 || state.running) ? "working" : "";
-    let motionFrame = 0;
-    if (motion && state.botAnimations && !botReducedMotion.matches) {
-      const duration = motion === "working" ? 320 : 650;
-      const elapsed = Math.max(0, now - companionSnapshot.lastInteractionAt);
-      motionFrame = Math.floor(elapsed / duration) % 2;
-      frameDelay = duration - elapsed % duration;
-    }
-    sprite.dataset.motion = motion;
-    sprite.dataset.sheet = motion ? "work-food" : idle ? "idle" : activity ? "activities" : "emotions";
-    sprite.dataset.frame = motion ? String(motionFrame) : idle ? String(idleFrame) : "";
-    let position = positions[emotion] || [0, 0];
-    if (activity) position = companionWorking ? [1, 0] : outcome === "completed" ? [0, 1] : asleep ? [1, 1] : [0, 0];
-    else if (outcome === "failed") position = [2, 2];
-    if (idle) position = [idleFrame % 2, Math.floor(idleFrame / 2)];
-    if (motion) position = [motionFrame, motion === "eating" ? 1 : 0];
-    // These are illustration sheets, not evenly spaced sprite atlases.
-    // Exclude the next row's ear tips and preserve each source rectangle's aspect ratio.
-    const rows = (activity || motion) ? [[0, 627], [627, 1254]] : [[0, 410], [414, 810], [812, 1220]];
-    const sourceWidth = (activity || motion) ? 627 : 313.5;
-    const sourceX = position[0] * sourceWidth;
-    const sourceY = rows[position[1]][0];
-    const sourceHeight = rows[position[1]][1] - sourceY;
-    // Largest opaque character component, excluding floating decorative marks.
-    const bodies = activity
-      ? [[[98,5,525,617],[711,5,1158,627]],[[82,632,532,1223],[627,733,1217,1197]]]
-      : [[[10,8,295,408],[325,13,619,405],[628,77,940,406],[952,9,1240,407]],
-        [[12,437,311,797],[328,417,618,804],[646,423,933,810],[952,420,1240,803]],
-        [[8,815,314,1202],[326,819,617,1206],[629,882,939,1206],[949,817,1249,1206]]];
-    const idleBodies = [[[120,16,563,620],[693,16,1137,620]],[[118,633,563,1234],[692,635,1136,1234]]];
-    const motionBodies = [[[88,14,559,624],[695,12,1165,625]],[[86,635,570,1235],[687,635,1168,1235]]];
-    const body = (motion ? motionBodies : idle ? idleBodies : bodies)[position[1]][position[0]];
-    const scale = Math.min((factoryBot.clientWidth - 4) / (body[2] - body[0]), 64 / (motion ? (motion === "working" ? 613 : 600) : idle ? 604 : body[3] - body[1]));
-    sprite.style.left = ((factoryBot.clientWidth - (body[2] - body[0]) * scale) / 2 - (body[0] - sourceX) * scale) + "px";
-    sprite.style.top = (factoryBot.clientHeight - (body[3] - sourceY) * scale) + "px";
-    sprite.style.width = (sourceWidth * scale) + "px";
-    sprite.style.height = (sourceHeight * scale) + "px";
-    sprite.style.backgroundSize = (1254 * scale) + "px " + (1254 * scale) + "px";
-    sprite.style.backgroundPosition = (-sourceX * scale) + "px " + (-sourceY * scale) + "px";
-    smoothCompanionSheet(sprite, scale);
-    factoryBot.dataset.emotion = emotion;
-    factoryBot.dataset.interaction = reacting ? companionSnapshot.action : "";
-    const ko = uiLocale().startsWith("ko");
-    const phrases = ko ? { pet: "기분 좋아요!", praise: "칭찬해 주셔서 기뻐요!", feed: "잘 먹겠습니다!", play: "같이 놀아요!", sleep: "잠깐 쉬고 있을게요.", call: emotion === "surprised" ? "앗, 부르셨나요?" : "네, 여기 있어요!" }
-      : { pet: "That feels nice!", praise: "Thank you!", feed: "Yum, thank you!", play: "Let's play!", sleep: "Time for a nap.", call: emotion === "surprised" ? "Oh! You called?" : "I'm here!" };
-    bubble.textContent = reacting ? (companionWorking && motion !== "eating" ? (ko ? "조금만 기다려 주세요. 작업 중이에요!" : "One moment, I'm working!") : phrases[companionSnapshot.action]) : "";
-    syncBotSpeechVisibility();
-    factoryBot.title = botDisplayName() + " · " + (companionWorking ? (ko ? "작업 중 " : "Working: ") + companionWorking : emotion);
-    factoryBot.setAttribute("aria-label", factoryBot.title);
-    const next = reacting ? companionSnapshot.reactionUntil - now : outcome ? companionOutcomeUntil - now : 60000 - (now - companionSnapshot.lastInteractionAt);
-    const delay = frameDelay > 0 ? Math.min(frameDelay, next > 0 ? next : Infinity) : next;
-    if (delay > 0) companionTimer = setTimeout(function () { renderCompanion(); }, delay + 5);
-  }
-  botMenu.addEventListener("click", function (event) {
-    const button = event.target.closest("[data-companion-action]");
-    if (!button || button.disabled) return;
-    if (!state.companionAvailable) {
-      const action = button.dataset.companionAction;
-      botIdleSince = Date.now();
-      renderFactoryBot();
-      state.botCare = { ...state.botCare, happiness: Math.min(100, state.botCare.happiness + (action === "call" ? 0 : 10)), careCount: state.botCare.careCount + (action === "call" ? 0 : 1) };
-      clearTimeout(botGestureTimer);
-      factoryBot.dataset.gesture = { pet: "shy", praise: "bow", call: "wave" }[action];
-      botGestureTimer = setTimeout(function () { botGestureTimer = undefined; renderFactoryBot(); }, 5000);
-      renderBotCare();
-      persist();
-    } else interactCompanion(button.dataset.companionAction);
-    closeBotMenu(true);
+  const chatBot = globalThis.AgentFactoryChat.bot({
+    state, vscode, factoryBot, uiLocale, botDisplayName, persist, t, prompt, chatShortcuts
   });
-  factoryBot.addEventListener("pointerdown", function (event) {
-    companionPetStart = { x: event.clientX, y: event.clientY };
-    companionPetDistance = 0;
-  });
-  factoryBot.addEventListener("pointermove", function (event) {
-    if (!companionPetStart || !event.buttons) return;
-    companionPetDistance += Math.hypot(event.clientX - companionPetStart.x, event.clientY - companionPetStart.y);
-    companionPetStart = { x: event.clientX, y: event.clientY };
-  });
-  factoryBot.addEventListener("pointerleave", function () { companionPetStart = undefined; });
-
-  let botRestingSince;
-  let botGestureTimer;
-  const botTalkButton = document.getElementById("bot-talk");
-  const botSpeech = document.getElementById("bot-speech");
-  // Escape the composer's stacking context so long replies stay interactive over the timeline.
-  document.body.append(botSpeech, document.getElementById("companion-reaction"));
-  const botSpeechText = document.getElementById("bot-speech-text");
-  let botTalkPending;
-  let botTalkSequence = 0;
-  let botDraftRevision = 0;
-  let botSpeechVisible = false;
-  const botCharacterSelect = document.getElementById("bot-character");
-  let botCharacter = "factory";
-  let localBotAvailable = false;
-  const botPromptDrafts = new Map();
-  function receiveBotCharacter(message) {
-    if (typeof message.localCompanionAvailable === "boolean") localBotAvailable = message.localCompanionAvailable;
-    else if (message.type === "host.initialize") localBotAvailable = message.companionAvailable !== false;
-    const next = message.botCharacter || (message.type === "host.initialize" ? (message.companionAvailable === false ? "factory" : "lumi") : botCharacter);
-    if (next !== botCharacter) {
-      botPromptDrafts.set(botCharacter, { draft: botPromptEditor.value, saved: botPromptSaved });
-      botCharacter = next;
-      const cached = botPromptDrafts.get(next);
-      botPromptSaved = cached?.saved || "";
-      botPromptEditor.value = cached?.draft || "";
-      botPromptStatus.textContent = "";
-      botSpeechVisible = false;
-      companionSnapshot = undefined;
-      botReplyEmotion = undefined;
-    }
-    state.companionAvailable = next === "lumi" && localBotAvailable;
-    factoryBot.classList.toggle("sd-companion", state.companionAvailable);
-    botMenu.querySelectorAll("[data-companion-action]").forEach(button => { button.hidden = false; });
-    botCharacterSelect.value = next;
-    botCharacterSelect.disabled = !!botPromptPending || !!botTalkPending;
-  }
-  botCharacterSelect.addEventListener("change", () => {
-    botCharacterSelect.disabled = true;
-    vscode.postMessage({ type: "bot.character.save", character: botCharacterSelect.value });
-  });
-  const botModelSelect = document.getElementById("bot-model");
-  const botModelStatus = document.getElementById("bot-model-status");
-  let botModelSaved = "";
-  let botModelOptions = ["gpt-5.6-luna", "claude-haiku-4-5-20251001"];
-  function renderBotModels() {
-    const models = ["", ...new Set([...botModelOptions, botModelSaved].filter(Boolean))];
-    botModelSelect.replaceChildren(...models.map(model => {
-      const option = document.createElement("option");
-      option.value = model;
-      option.textContent = model || t("bot.model.auto");
-      return option;
-    }));
-    botModelSelect.value = botModelSaved;
-  }
-  botModelSelect.addEventListener("focus", () => vscode.postMessage({ type: "models.request" }));
-  botModelSelect.addEventListener("change", function () {
-    botModelSelect.disabled = true;
-    botModelStatus.textContent = t("bot.prompt.saving");
-    vscode.postMessage({ type: "bot.model.save", model: botModelSelect.value });
-  });
-  const botPromptEditor = document.getElementById("bot-prompt");
-  const botPromptSave = document.getElementById("bot-prompt-save");
-  const botPromptReset = document.getElementById("bot-prompt-reset");
-  const botPromptStatus = document.getElementById("bot-prompt-status");
-  let botPromptSaved = "";
-  let botDefaultPrompt = "";
-  let botPromptPending;
-  let botPromptSequence = 0;
-
-  function updateBotPromptControls() {
-    botCharacterSelect.disabled = !!botPromptPending || !!botTalkPending;
-    botPromptSave.disabled = !!botPromptPending || botPromptEditor.value === botPromptSaved;
-    botPromptReset.disabled = !!botPromptPending || botPromptEditor.value === botDefaultPrompt;
-  }
-  function receiveBotPrompt(value) {
-    if (typeof value !== "string") return;
-    if (!botPromptPending && botPromptEditor.value === botPromptSaved) botPromptEditor.value = value;
-    botPromptSaved = value;
-    updateBotPromptControls();
-  }
-  botPromptEditor.addEventListener("input", function () {
-    botPromptStatus.textContent = "";
-    updateBotPromptControls();
-  });
-  botPromptReset.addEventListener("click", function () {
-    botPromptEditor.value = botDefaultPrompt;
-    botPromptEditor.dispatchEvent(new Event("input"));
-    botPromptEditor.focus();
-  });
-  botPromptSave.addEventListener("click", function () {
-    if (botPromptSave.disabled || botPromptPending) return;
-    botPromptPending = { requestId: "bot-prompt-" + Date.now() + "-" + (++botPromptSequence), prompt: botPromptEditor.value, character: botCharacter };
-    botPromptStatus.textContent = t("bot.prompt.saving");
-    updateBotPromptControls();
-    vscode.postMessage({ type: "bot.prompt.save", ...botPromptPending });
-  });
-  let botReactionTimer;
-  let botGestureKey;
-  const botPlayActivities = ["dance", "balance", "stretch", "wave", "read"];
-  let botLastPlayActivity;
-  let botGlanceTimer;
-  let botNextGlanceAt = 0;
-  const botReducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
   let elapsedTimerId;
   let followLatest = true;
   let autoScrollFrame;
   let timelineViewportHeight;
   let timelineScrollTop = 0;
+  const chatNavigation = globalThis.AgentFactoryChat.navigation({
+    closeSettingMenu, sessionMenu, state, vscode, prompt, questionMenu, questionButton,
+    promptSurface, questionTabs, historyEmpty, matchesShortcut: chatShortcuts.matchesShortcut, shortcuts: chatShortcuts.shortcuts, indexedTimeline, uiLocale,
+    eventVersion, t, questionList, createModeIcon, renderTimeline, updateAutoScrollControl,
+    sessionList,
+    get chatHistory() { return chatHistory; },
+    get questionSourceId() { return questionSourceId; },
+    set questionSourceId(value) { questionSourceId = value; },
+    get questionPageStart() { return questionPageStart; },
+    set questionPageStart(value) { questionPageStart = value; },
+    get questionListKey() { return questionListKey; },
+    set questionListKey(value) { questionListKey = value; },
+    get questionElements() { return questionElements; },
+    get autoScrollFrame() { return autoScrollFrame; },
+    get followLatest() { return followLatest; },
+    set followLatest(value) { followLatest = value; },
+    get messageElements() { return messageElements; },
+    get timelineEndId() { return timelineEndId; },
+    set timelineEndId(value) { timelineEndId = value; }
+  });
+  const chatStatusBar = globalThis.AgentFactoryChat.statusBar({
+    chatBot, statusBar, statusCatalog, state, uiLocale, agentsMenu, t, renderContextStatus,
+    normalizeStatusItems, persist, statusAnnouncement, vscode, statusSettings, statusCatalogList,
+    statusSettingsButton, safeCountOrUndefined, currentCapabilities, safePercentOrUndefined,
+    safeResetsAtOrUndefined, chatWorkUnits, contextStatusLabel, contextUsedStatusLabel,
+    contextRemainingTokensLabel, contextUsedPercentLabel, formatPercent, formatResetsAt,
+    formatElapsed, reasoningDisplayLabel, taskModeNames, enterAction,
+    get statusDragId() { return statusDragId; },
+    set statusDragId(value) { statusDragId = value; },
+    get statusRenderPending() { return statusRenderPending; },
+    set statusRenderPending(value) { statusRenderPending = value; },
+    get statusElements() { return statusElements; },
+    get chatAgents() { return chatAgents; },
+    get statusRenderKeys() { return statusRenderKeys; },
+    get goalError() { return goalError; },
+    get nativeGoal() { return nativeGoal; },
+    get chatAgentSettings() { return chatAgentSettings; }
+  });
+  const chatAgents = globalThis.AgentFactoryChat.agents({
+    agentsMenu, state, renderStatusBar: chatStatusBar.renderStatusBar, vscode, agentsList, t,
+    get chatTaskFlow() { return chatTaskFlow; }
+  });
   const chatTaskFlow = globalThis.AgentFactoryChat.taskFlow({
-    indexedTimeline, state, t, vscode, runStageList, selectQuestionTab, historyEmpty, runDetails,
+    indexedTimeline, state, t, vscode, runStageList, selectQuestionTab: chatNavigation.selectQuestionTab, historyEmpty, runDetails,
     runStatus, runStatusToggle, runStatusAgents, runDetailsSummary, runStopButton,
-    childAgentStatusLabel
+    childAgentStatusLabel: chatAgents.childAgentStatusLabel
   });
   const messageRenderKeys = new WeakMap();
   const eventVersions = new WeakMap();
   const managedCommandCache = new WeakMap();
   let nextEventVersion = 0;
-  let botRenderKey;
   const statusElements = new Map();
   const statusRenderKeys = new WeakMap();
   const timelineIndexes = new WeakMap();
@@ -618,11 +312,25 @@
   const messageViewStates = new Map();
   let timelineEndId;
 
+  const chatAttachments = globalThis.AgentFactoryChat.attachments({
+    vscode, attachmentList, state, t, updateSendButton, persist, appendNotice, createId,
+    get chatImageConverter() { return chatImageConverter; }
+  });
+  const chatPendingQueue = globalThis.AgentFactoryChat.pendingQueue({
+    state, t, pendingQueueRows, vscode, cancelRun, uiLocale, submissionFromExecution,
+    hasComposerContent, renderSubmission, prompt, renderAll, resizePrompt, persist
+  });
+  const chatActivities = globalThis.AgentFactoryChat.activities({
+    state, t, vscode, activityPhaseAccessibleLabel, chatTerminal, taskModeNames, chatAgents
+  });
+  const chatInterview = globalThis.AgentFactoryChat.interview({
+    indexedTimeline, state, submit, renderAll, persist
+  });
   const chatAgentSettings = globalThis.AgentFactoryChat.agentSettings({
     state, t, fastModeButton, currentCapabilities, settingOptions, reasoningDisplayLabel, createId,
     uiLocale, normalizeModelFastModes, persist, saveComposerSettings, updateModeControls, vscode,
     modelMenu, createModeIcon, fastModeSetting, closeSettingMenu, executionModeName,
-    executionModeExplanation, renderStatusBar,
+    executionModeExplanation, renderStatusBar: chatStatusBar.renderStatusBar,
     get openSettingId() { return openSettingId; },
     get chatProviders() { return chatProviders; }
   });
@@ -660,291 +368,88 @@
     renderTimeline();
   }).observe(document.body, { attributes: true, attributeFilter: ["class"] });
 
-  document.addEventListener("pointermove", maybeGlanceAtPointer, { passive: true });
-  document.documentElement.addEventListener("pointerleave", clearBotGlance);
-  window.addEventListener("blur", clearBotGlance);
+  document.addEventListener("pointermove", chatBot.maybeGlanceAtPointer, { passive: true });
+  document.documentElement.addEventListener("pointerleave", chatBot.clearBotGlance);
+  window.addEventListener("blur", chatBot.clearBotGlance);
   document.addEventListener("visibilitychange", function () {
-    clearBotGlance();
+    chatBot.clearBotGlance();
     if (document.hidden) {
-      botRestingSince = Date.now();
+      chatBot.botRestingSince = Date.now();
       persist();
-    } else if (botRestingSince !== undefined && !companionSnapshot) {
+    } else if (chatBot.botRestingSince !== undefined && !chatBot.companionSnapshot) {
       state.botCare = { ...state.botCare,
-        energy: Math.min(100, state.botCare.energy + Math.max(0, Date.now() - botRestingSince) / 30000),
+        energy: Math.min(100, state.botCare.energy + Math.max(0, Date.now() - chatBot.botRestingSince) / 30000),
         updatedAt: Date.now() };
-      botRestingSince = undefined;
+      chatBot.botRestingSince = undefined;
     }
     document.documentElement.dataset.afHidden = String(document.hidden);
     if (document.hidden && elapsedTimerId) {
       clearInterval(elapsedTimerId);
       elapsedTimerId = undefined;
     }
-    renderFactoryBot();
+    chatBot.renderFactoryBot();
     if (!document.hidden) renderRunStatus();
   });
-  botReducedMotion.addEventListener("change", function () { clearBotGlance(); renderFactoryBot(); });
-  factoryBot.addEventListener("pointerenter", wakeFactoryBot);
+  chatBot.botReducedMotion.addEventListener("change", function () { chatBot.clearBotGlance(); chatBot.renderFactoryBot(); });
+  factoryBot.addEventListener("pointerenter", chatBot.wakeFactoryBot);
 
-  function closeBotMenu(restoreFocus = false) {
-    clearTimeout(botCareTimer); botCareTimer = undefined;
-    botMenu.hidden = true;
-    factoryBot.setAttribute("aria-expanded", "false");
-    if (restoreFocus) factoryBot.focus();
-  }
-  function positionBotMenu() {
-    if (botMenu.hidden) return;
-    const box = factoryBot.getBoundingClientRect();
-    botMenu.style.left = Math.max(8, Math.min(window.innerWidth - botMenu.offsetWidth - 8, box.right - botMenu.offsetWidth)) + "px";
-    botMenu.style.top = Math.max(8, box.top - botMenu.offsetHeight - 8) + "px";
-  }
-  window.addEventListener("resize", positionBotMenu);
-  window.addEventListener("resize", function () { positionBotSpeech(); positionAboveCompanion(document.getElementById("companion-reaction")); });
-  function talkToBot() {
-    if (botTalkButton.disabled || botTalkPending || !state.botsEnabled || !prompt.value.trim()) return;
-    startBotConversation(prompt.value, true);
-  }
-  function startBotConversation(text, fromComposer) {
-    if (botTalkPending || !state.botsEnabled || !text.trim()) return;
-    botReplyEmotion = undefined;
-    botTalkPending = { requestId: "bot-" + Date.now() + "-" + (++botTalkSequence),
-      text, fromComposer, revision: botDraftRevision };
-    if (fromComposer) {
-      prompt.value = "";
-      prompt.dispatchEvent(new Event("input", { bubbles: true }));
-    }
-    botTalkPending.revision = botDraftRevision;
-    persist();
-    closeBotMenu();
-    prompt.focus({ preventScroll: true });
-    showBotSpeech(t("bot.thinking"));
-    renderBotTalk();
-    vscode.postMessage({ type: "bot.talk", requestId: botTalkPending.requestId, text: botTalkPending.text });
-  }
-  botTalkButton.addEventListener("click", talkToBot);
-  function matchesShortcut(event, binding) {
-    return !!binding && !shortcutComposing(event) && shortcutFromEvent(event) === binding;
-  }
-  function shortcutLabel(binding) {
-    return binding ? binding.split("+").map(part => shortcutKeyNames[part] || part).join(" + ") : t("ui.shortcuts.none");
-  }
-  function shortcutAria(binding) {
-    if (!binding) return "";
-    const keys = binding.split("+").map(part => part === "Space" ? "Space" : part === "Plus" ? "+" : part);
-    return keys.includes("Mod") ? ["Control", "Meta"].map(mod => keys.map(part => part === "Mod" ? mod : part).join("+")).join(" ") : keys.join("+");
-  }
-  function shortcutButton(text, handler, className) {
-    const button = document.createElement("button");
-    button.type = "button";
-    button.textContent = text;
-    if (className) button.className = className;
-    button.addEventListener("click", handler);
-    return button;
-  }
-  function renderShortcutRow(action) {
-      const row = document.createElement("div");
-      row.id = action.id === "bot" ? "bot-talk-shortcut-row" : "shortcut-row-" + action.id;
-      row.dataset.shortcutAction = action.id;
-      row.hidden = !!action.bot && !state.botsAvailable;
-      const term = document.createElement("dt"), detail = document.createElement("dd");
-      const label = document.createElement("label");
-      label.textContent = action.label();
-      term.append(label);
-      const recording = shortcutRecording?.id === action.id;
-      const value = document.createElement("kbd");
-      value.className = "shortcut-binding";
-      value.id = "shortcut-" + action.id;
-      value.dataset.binding = recording ? shortcutRecording.binding || "" : shortcuts[action.id];
-      if (recording) {
-        row.dataset.recording = shortcutRecording.binding ? "pending" : "listening";
-        value.textContent = shortcutRecording.binding ? shortcutLabel(shortcutRecording.binding) : t("ui.shortcuts.recording");
-        const confirm = shortcutButton(t("ui.shortcuts.confirm"), confirmShortcut, "shortcut-confirm");
-        confirm.disabled = !shortcutRecording.binding || !!shortcutRecording.problem;
-        detail.append(value, confirm, shortcutButton(t("ui.shortcuts.cancel"), () => cancelShortcut(true), "shortcut-cancel"));
-      } else {
-        const change = shortcutButton(t("ui.shortcuts.change"), () => startShortcut(action.id), "shortcut-change");
-        change.setAttribute("aria-label", t("ui.shortcuts.change.named", action.label()));
-        value.textContent = shortcutLabel(shortcuts[action.id]);
-        detail.append(value, change);
-        if (!action.required) {
-          const clear = shortcutButton(t("ui.shortcuts.clear"), () => clearShortcut(action.id), "shortcut-clear");
-          clear.disabled = !shortcuts[action.id];
-          clear.setAttribute("aria-label", t("ui.shortcuts.clear.named", action.label()));
-          detail.append(clear);
-        }
-      }
-      label.htmlFor = value.id;
-      row.append(term, detail);
-      return row;
-  }
-  function renderShortcuts() {
-    shortcutList.replaceChildren(...shortcutGroups.map(group => {
-      const section = document.createElement("section");
-      section.className = "shortcut-group";
-      section.dataset.shortcutGroup = group.id;
-      section.hidden = !!group.bot && !state.botsAvailable;
-      const heading = document.createElement("h3");
-      heading.id = "shortcut-group-" + group.id;
-      heading.textContent = group.label();
-      const list = document.createElement("dl");
-      list.className = "settings-shortcuts";
-      list.setAttribute("aria-labelledby", heading.id);
-      list.append(...shortcutActions.filter(action => action.group === group.id).map(renderShortcutRow));
-      section.append(heading, list);
-      return section;
-    }));
-    const sendLabel = shortcutLabel(shortcuts.send);
-    sendButton.title = t("ui.send.message") + " (" + sendLabel + ")";
-    for (const [button, action] of [[sendButton, "send"], [botTalkButton, "bot"]]) {
-      if (shortcuts[action]) button.setAttribute("aria-keyshortcuts", shortcutAria(shortcuts[action]));
-      else button.removeAttribute("aria-keyshortcuts");
-    }
-    for (const action of shortcutActions.filter(action => action.button)) {
-      const button = botMenu.querySelector(action.button);
-      if (shortcuts[action.id]) button.setAttribute("aria-keyshortcuts", shortcutAria(shortcuts[action.id]));
-      else button.removeAttribute("aria-keyshortcuts");
-    }
-    if (shortcuts.botMenu) factoryBot.setAttribute("aria-keyshortcuts", shortcutAria(shortcuts.botMenu));
-    else factoryBot.removeAttribute("aria-keyshortcuts");
-  }
-  function focusShortcutControl(id, selector) {
-    document.querySelector('[data-shortcut-action="' + id + '"] ' + selector)?.focus({ preventScroll: true });
-  }
-  function startShortcut(id) {
-    shortcutRecording = { id: id };
-    shortcutStatus.textContent = id === "close" ? t("ui.shortcuts.recording.plain") : t("ui.shortcuts.recording.hint", shortcutLabel(shortcuts.close));
-    renderShortcuts();
-    focusShortcutControl(id, ".shortcut-cancel");
-  }
-  function cancelShortcut(restoreFocus) {
-    if (!shortcutRecording) return;
-    const id = shortcutRecording.id;
-    shortcutRecording = undefined;
-    shortcutStatus.textContent = t("ui.shortcuts.scope");
-    renderShortcuts();
-    if (restoreFocus) focusShortcutControl(id, ".shortcut-change");
-  }
-  function confirmShortcut() {
-    if (!shortcutRecording?.binding || shortcutRecording.problem) return;
-    const id = shortcutRecording.id;
-    shortcuts[id] = shortcutRecording.binding;
-    shortcutRecording = undefined;
-    shortcutStatus.textContent = t("ui.shortcuts.saved", shortcutLabel(shortcuts[id]));
-    renderShortcuts();
-    persist();
-    focusShortcutControl(id, ".shortcut-change");
-  }
-  function clearShortcut(id) {
-    shortcuts[id] = "";
-    shortcutStatus.textContent = t("ui.shortcuts.scope");
-    renderShortcuts();
-    persist();
-    focusShortcutControl(id, ".shortcut-change");
-  }
+  window.addEventListener("resize", chatBot.positionBotMenu);
+  window.addEventListener("resize", function () { chatBot.positionBotSpeech(); chatBot.positionAboveCompanion(document.getElementById("companion-reaction")); });
+  chatBot.botTalkButton.addEventListener("click", chatBot.talkToBot);
   // Capture before every other handler so recorded keys never trigger actions.
   document.addEventListener("keydown", function (event) {
-    if (!shortcutRecording) return;
-    const listening = !shortcutRecording.binding;
+    if (!chatShortcuts.shortcutRecording) return;
+    const listening = !chatShortcuts.shortcutRecording.binding;
     // The close shortcut cancels, except while recording the close shortcut itself.
-    if (shortcutRecording.id !== "close" && shortcutFromEvent(event) === shortcuts.close && !shortcutComposing(event)) {
+    if (chatShortcuts.shortcutRecording.id !== "close" && chatShortcuts.shortcutFromEvent(event) === chatShortcuts.shortcuts.close && !chatShortcuts.shortcutComposing(event)) {
       event.preventDefault();
       event.stopImmediatePropagation();
-      cancelShortcut(true);
+      chatShortcuts.cancelShortcut(true);
       return;
     }
-    if (!listening || shortcutComposing(event)) return;
+    if (!listening || chatShortcuts.shortcutComposing(event)) return;
     event.preventDefault();
     event.stopImmediatePropagation();
-    const binding = shortcutFromEvent(event);
+    const binding = chatShortcuts.shortcutFromEvent(event);
     if (!binding || event.repeat) return;
-    const action = shortcutActions.find(item => item.id === shortcutRecording.id);
-    const problem = shortcutProblem(action, binding);
-    if (problem) { shortcutStatus.textContent = t(problem); return; }
-    const owner = shortcutActions.find(item => item.id !== action.id && shortcuts[item.id] === binding);
-    shortcutRecording.binding = binding;
-    shortcutRecording.problem = owner ? "conflict" : "";
-    shortcutStatus.textContent = owner ? t("ui.shortcuts.conflict.named", owner.label()) : t("ui.shortcuts.pending", shortcutLabel(binding));
-    renderShortcuts();
-    focusShortcutControl(action.id, owner ? ".shortcut-cancel" : ".shortcut-confirm");
+    const action = chatShortcuts.shortcutActions.find(item => item.id === chatShortcuts.shortcutRecording.id);
+    const problem = chatShortcuts.shortcutProblem(action, binding);
+    if (problem) { chatShortcuts.shortcutStatus.textContent = t(problem); return; }
+    const owner = chatShortcuts.shortcutActions.find(item => item.id !== action.id && chatShortcuts.shortcuts[item.id] === binding);
+    chatShortcuts.shortcutRecording.binding = binding;
+    chatShortcuts.shortcutRecording.problem = owner ? "conflict" : "";
+    chatShortcuts.shortcutStatus.textContent = owner ? t("ui.shortcuts.conflict.named", owner.label()) : t("ui.shortcuts.pending", chatShortcuts.shortcutLabel(binding));
+    chatShortcuts.renderShortcuts();
+    chatShortcuts.focusShortcutControl(action.id, owner ? ".shortcut-cancel" : ".shortcut-confirm");
   }, true);
   document.addEventListener("pointerdown", function (event) {
-    if (shortcutRecording && !event.target.closest?.('[data-shortcut-action="' + shortcutRecording.id + '"]')) cancelShortcut(false);
+    if (chatShortcuts.shortcutRecording && !event.target.closest?.('[data-shortcut-action="' + chatShortcuts.shortcutRecording.id + '"]')) chatShortcuts.cancelShortcut(false);
   }, true);
   document.getElementById("shortcuts-reset").addEventListener("click", () => {
-    shortcutRecording = undefined;
-    for (const action of shortcutActions) shortcuts[action.id] = action.fallback;
-    shortcutStatus.textContent = t("ui.shortcuts.scope");
-    renderShortcuts();
+    chatShortcuts.shortcutRecording = undefined;
+    for (const action of chatShortcuts.shortcutActions) chatShortcuts.shortcuts[action.id] = action.fallback;
+    chatShortcuts.shortcutStatus.textContent = t("ui.shortcuts.scope");
+    chatShortcuts.renderShortcuts();
     persist();
   });
-  function runShortcut(action) {
-    if (action.submit) {
-      const { action: mode, workflow, goal } = action.submit;
-      if (submissionOptionDisabled(mode, goal)) return;
-      closeSettingMenu(false);
-      submit(mode, workflow, goal);
-      return;
-    }
-    if (action.history) {
-      const details = document.getElementById(action.history);
-      if (details.hidden) return;
-      if (openSettingId !== "submission") openSetting("submission");
-      details.open = true;
-      details.querySelector("summary").focus({ preventScroll: true });
-      return;
-    }
-    if (action.questionTab) {
-      if (state.role !== "main") return;
-      openQuestionMenu(action.questionTab);
-      return;
-    }
-    if (action.id === "botMenu") { factoryBot.click(); return; }
-    const button = botMenu.querySelector(action.button);
-    if (!button || button.disabled || button.hidden) return;
-    // Menu actions restore focus to the bot; a shortcut keeps the Human's place.
-    const focused = document.activeElement;
-    button.click();
-    if (focused && focused !== document.body && document.contains(focused)) focused.focus({ preventScroll: true });
-  }
-  function runGlobalShortcut(event, action) {
-    if (document.querySelector("dialog[open]")) return false;
-    if (action.bot && (!state.botsEnabled || factoryBot.hidden)) return false;
-    event.preventDefault();
-    if (!event.repeat) runShortcut(action);
-    return true;
-  }
-  function moveFocus(step) {
-    const root = document.querySelector("dialog[open]") || document;
-    const items = [...root.querySelectorAll("a[href], button, input, select, textarea, summary, [tabindex]")].filter(item =>
-      !item.disabled && item.tabIndex >= 0 && !item.closest("[hidden], [inert]") && item.getClientRects().length);
-    if (!items.length) return;
-    const index = items.indexOf(document.activeElement);
-    items[index < 0 ? (step > 0 ? 0 : items.length - 1) : (index + step + items.length) % items.length].focus();
-  }
-  function emulateEscape() {
-    const target = document.activeElement || document.body;
-    const escape = new KeyboardEvent("keydown", { key: "Escape", code: "Escape", bubbles: true, cancelable: true });
-    if (!target.dispatchEvent(escape)) return;
-    const dialog = document.querySelector("dialog[open]");
-    if (dialog && dialog.dispatchEvent(new Event("cancel", { cancelable: true }))) dialog.close();
-  }
   // Routes trusted keys first: rebound basic controls, displaced default keys
   // and every chat-wide action.
   window.addEventListener("keydown", function (event) {
-    if (shortcutRecording || !event.isTrusted || shortcutComposing(event)) return;
-    const binding = shortcutFromEvent(event);
+    if (chatShortcuts.shortcutRecording || !event.isTrusted || chatShortcuts.shortcutComposing(event)) return;
+    const binding = chatShortcuts.shortcutFromEvent(event);
     if (!binding) return;
-    const action = shortcutActions.find(item => shortcuts[item.id] === binding);
+    const action = chatShortcuts.shortcutActions.find(item => chatShortcuts.shortcuts[item.id] === binding);
     if (action?.native) {
       if (binding === action.native) return;
       event.preventDefault();
       event.stopImmediatePropagation();
-      if (action.id === "close") { if (!event.repeat) emulateEscape(); }
-      else moveFocus(action.id === "focusNext" ? 1 : -1);
+      if (action.id === "close") { if (!event.repeat) chatShortcuts.emulateEscape(); }
+      else chatShortcuts.moveFocus(action.id === "focusNext" ? 1 : -1);
       return;
     }
-    const displaced = shortcutActions.some(item => item.native === binding);
+    const displaced = chatShortcuts.shortcutActions.some(item => item.native === binding);
     if (action && !action.scope) {
-      if (runGlobalShortcut(event, action) && displaced) event.stopImmediatePropagation();
+      if (chatShortcuts.runGlobalShortcut(event, action) && displaced) event.stopImmediatePropagation();
       return;
     }
     if (displaced && !action) {
@@ -953,90 +458,27 @@
     }
   }, true);
   prompt.addEventListener("keydown", function (event) {
-    if (!matchesShortcut(event, shortcuts.bot)) return;
+    if (!chatShortcuts.matchesShortcut(event, chatShortcuts.shortcuts.bot)) return;
     event.preventDefault();
     event.stopImmediatePropagation();
-    if (!event.repeat) talkToBot();
+    if (!event.repeat) chatBot.talkToBot();
   }, true);
-  renderShortcuts();
+  chatShortcuts.renderShortcuts();
   document.getElementById("bot-speech-close").addEventListener("click", function () {
-    botSpeechVisible = false;
-    renderBotTalk();
+    chatBot.botSpeechVisible = false;
+    chatBot.renderBotTalk();
     prompt.focus({ preventScroll: true });
   });
 
-  function showBotSpeech(text) {
-    botSpeechText.textContent = text;
-    botSpeechVisible = true;
-    renderBotTalk();
-  }
-
-  function positionBotSpeech() {
-    if (botSpeech.hidden) return;
-    const box = factoryBot.getBoundingClientRect();
-    botSpeech.style.width = Math.min(300, window.innerWidth - 16) + "px";
-    botSpeech.style.maxHeight = Math.max(1, box.top - 16) + "px";
-    botSpeechText.style.maxHeight = Math.max(1, box.top - 42) + "px";
-    positionAboveCompanion(botSpeech);
-  }
-  function positionAboveCompanion(bubble) {
-    if (bubble.hidden) return;
-    const box = factoryBot.getBoundingClientRect();
-    bubble.style.maxHeight = Math.max(1, box.top - 16) + "px";
-    bubble.style.left = Math.max(8, Math.min(window.innerWidth - bubble.offsetWidth - 8, box.right - bubble.offsetWidth)) + "px";
-    bubble.style.top = Math.max(8, box.top - bubble.offsetHeight - 8) + "px";
-    bubble.dataset.placement = "above";
-  }
-
-  // Conversation owns the speech surface while thinking or showing an answer.
-  // Consume suppressed greetings so closing the answer cannot bring them back.
-  function syncBotSpeechVisibility() {
-    const reaction = document.getElementById("companion-reaction");
-    const until = companionSnapshot?.reactionUntil || 0;
-    if (botTalkPending || botSpeechVisible) {
-      companionReactionDismissedUntil = Math.max(companionReactionDismissedUntil, until);
-    }
-    reaction.hidden = !botVisualsActive() || !!botTalkPending || botSpeechVisible ||
-      until <= Math.max(Date.now(), companionReactionDismissedUntil);
-    positionAboveCompanion(reaction);
-  }
-
-  function botDisplayName() {
-    return t(state.companionAvailable ? "bot.name.lumi" : "bot.name.factory");
-  }
-
-  function renderBotIdentity() {
-    renderBotModels();
-    const name = botDisplayName();
-    botMenu.querySelector("strong").textContent = t("bot.named.care", name);
-    botMenu.setAttribute("aria-label", t("bot.named.care", name));
-    document.getElementById("settings-tab-bot").textContent = t("ui.bot");
-    document.getElementById("bot-current-character").textContent = t("bot.current.character", name);
-    botPromptEditor.setAttribute("aria-label", t("bot.named.prompt", name));
-    renderShortcuts();
-  }
-
-  function renderBotTalk() {
-    const label = t("bot.named.talk", botDisplayName());
-    botTalkButton.querySelector('[data-i18n="bot.talk"]').textContent = label;
-    botTalkButton.setAttribute("aria-label", label);
-    botTalkButton.title = label;
-    botCharacterSelect.disabled = !!botPromptPending || !!botTalkPending;
-    botTalkButton.disabled = !state.botsEnabled || !prompt.value.trim() || !!botTalkPending;
-    botSpeech.hidden = !botSpeechVisible || !botVisualsActive();
-    syncBotSpeechVisibility();
-    positionBotSpeech();
-    renderCompanion();
-  }
   document.addEventListener("pointerdown", function (event) {
-    if (!botMenu.contains(event.target) && !factoryBot.contains(event.target)) closeBotMenu();
+    if (!chatBot.botMenu.contains(event.target) && !factoryBot.contains(event.target)) chatBot.closeBotMenu();
   });
   const chatNotes = globalThis.AgentFactoryChat.notes({
     saved, persist, vscode, prompt, t
   });
 
   const chatHistory = globalThis.AgentFactoryChat.history({
-    handleSettingMenuKeydown, vscode, submissionMenu, questionButton, t, closeQuestionMenu,
+    handleSettingMenuKeydown, vscode, submissionMenu, questionButton, t, closeQuestionMenu: chatNavigation.closeQuestionMenu,
     renderAssistantMarkdown: chatMarkdown.renderAssistantMarkdown, assistantDisplayText, historyEmpty
   });
 
@@ -1048,91 +490,91 @@
   }
 
   document.addEventListener("keydown", function (event) {
-    if (event.key === "Escape" && !botSpeech.hidden) {
+    if (event.key === "Escape" && !chatBot.botSpeech.hidden) {
       event.preventDefault();
       event.stopImmediatePropagation();
-      botSpeechVisible = false;
-      renderBotTalk();
+      chatBot.botSpeechVisible = false;
+      chatBot.renderBotTalk();
       factoryBot.focus();
       return;
     }
-    if (event.key === "Escape" && !botMenu.hidden) {
+    if (event.key === "Escape" && !chatBot.botMenu.hidden) {
       event.preventDefault();
       event.stopImmediatePropagation();
-      closeBotMenu(true);
+      chatBot.closeBotMenu(true);
     }
   }, true);
-  botMenu.addEventListener("click", function (event) {
+  chatBot.botMenu.addEventListener("click", function (event) {
     const button = event.target.closest("[data-bot-action]");
     if (!button || button.disabled) return;
     const action = button.dataset.botAction;
-    if (action === "play" && botTalkPending) return;
+    if (action === "play" && chatBot.botTalkPending) return;
     if (state.companionAvailable && ["feed", "play", "sleep"].includes(action)) {
-      interactCompanion(action);
-      closeBotMenu(true);
-      if (action === "play") startBotConversation(t("bot.play.prompt"), false);
+      chatBot.interactCompanion(action);
+      chatBot.closeBotMenu(true);
+      if (action === "play") chatBot.startBotConversation(t("bot.play.prompt"), false);
       return;
     }
     if (!["feed", "play", "sleep"].includes(action)) return;
-    updateBotCare();
+    chatBot.updateBotCare();
     const care = state.botCare;
     state.botCare = { ...care,
       fullness: Math.min(100, care.fullness + (action === "feed" ? 25 : 0)),
       happiness: Math.min(100, care.happiness + (action === "play" ? 20 : action === "feed" ? 5 : 0)),
       energy: Math.max(0, care.energy - (action === "play" ? 5 : 0)),
       careCount: care.careCount + 1 };
-    closeBotMenu(true);
-    clearBotGlance();
-    clearTimeout(botGestureTimer);
-    botGestureTimer = undefined;
+    chatBot.closeBotMenu(true);
+    chatBot.clearBotGlance();
+    clearTimeout(chatBot.botGestureTimer);
+    chatBot.botGestureTimer = undefined;
     if (action === "sleep") {
-      botIdleSince = Date.now() - 60000;
-      renderFactoryBot();
+      chatBot.botIdleSince = Date.now() - 60000;
+      chatBot.renderFactoryBot();
     } else {
       let gesture = action;
       if (action === "play") {
-        const choices = botPlayActivities.filter(activity =>
-          activity !== botLastPlayActivity && activity !== factoryBot.dataset.gesture);
+        const choices = chatBot.botPlayActivities.filter(activity =>
+          activity !== chatBot.botLastPlayActivity && activity !== factoryBot.dataset.gesture);
         gesture = choices[Math.floor(Math.random() * choices.length)];
-        botLastPlayActivity = gesture;
+        chatBot.botLastPlayActivity = gesture;
       }
       delete factoryBot.dataset.gesture;
       factoryBot.getBoundingClientRect();
       factoryBot.dataset.gesture = gesture;
-      botGestureTimer = window.setTimeout(function () {
-        botGestureTimer = undefined;
-        renderFactoryBot();
+      chatBot.botGestureTimer = window.setTimeout(function () {
+        chatBot.botGestureTimer = undefined;
+        chatBot.renderFactoryBot();
       }, 8000);
     }
-    renderBotCare();
+    chatBot.renderBotCare();
     persist();
-    if (action === "play") startBotConversation(t("bot.play.prompt"), false);
+    if (action === "play") chatBot.startBotConversation(t("bot.play.prompt"), false);
   });
   factoryBot.addEventListener("click", function () {
-    const pet = companionPetStart && companionPetDistance >= 20;
-    companionPetStart = undefined;
-    if (pet) { interactCompanion("pet"); return; }
-    const opening = botMenu.hidden;
-    wakeFactoryBot();
-    clearTimeout(botReactionTimer);
+    const pet = chatBot.companionPetStart && chatBot.companionPetDistance >= 20;
+    chatBot.companionPetStart = undefined;
+    if (pet) { chatBot.interactCompanion("pet"); return; }
+    const opening = chatBot.botMenu.hidden;
+    chatBot.wakeFactoryBot();
+    clearTimeout(chatBot.botReactionTimer);
     delete factoryBot.dataset.reacting;
-    botMenu.hidden = !opening;
-    if (opening) { botSpeechVisible = false; renderBotTalk(); }
-    renderBotCare();
+    chatBot.botMenu.hidden = !opening;
+    if (opening) { chatBot.botSpeechVisible = false; chatBot.renderBotTalk(); }
+    chatBot.renderBotCare();
     factoryBot.setAttribute("aria-expanded", String(opening));
     if (opening) {
-      positionBotMenu();
-      const first = botMenu.querySelector("button:not(:disabled)");
+      chatBot.positionBotMenu();
+      const first = chatBot.botMenu.querySelector("button:not(:disabled)");
       if (first) first.focus();
     }
   });
-  document.addEventListener("pointerdown", wakeFactoryBot);
-  document.addEventListener("keydown", wakeFactoryBot);
-  document.addEventListener("input", wakeFactoryBot);
+  document.addEventListener("pointerdown", chatBot.wakeFactoryBot);
+  document.addEventListener("keydown", chatBot.wakeFactoryBot);
+  document.addEventListener("input", chatBot.wakeFactoryBot);
 
   prompt.addEventListener("input", function () {
-    botDraftRevision++;
-    renderBotTalk();
+    chatBot.botDraftRevision++;
+    chatBot.renderBotTalk();
     state.draft = prompt.value;
     persist(false, 150);
     if (composerLayoutFrame !== undefined) return;
@@ -1145,12 +587,12 @@
   prompt.addEventListener("blur", function () { persist(); });
 
   prompt.addEventListener("keydown", function (event) {
-    if (shortcuts.newLine !== "Shift+Enter" && !shortcutComposing(event) && shortcutFromEvent(event) === "Shift+Enter" &&
-      !shortcutActions.some(action => action.scope === "prompt" && shortcuts[action.id] === "Shift+Enter")) {
+    if (chatShortcuts.shortcuts.newLine !== "Shift+Enter" && !chatShortcuts.shortcutComposing(event) && chatShortcuts.shortcutFromEvent(event) === "Shift+Enter" &&
+      !chatShortcuts.shortcutActions.some(action => action.scope === "prompt" && chatShortcuts.shortcuts[action.id] === "Shift+Enter")) {
       event.preventDefault();
       return;
     }
-    if (shortcuts.newLine !== "Shift+Enter" && matchesShortcut(event, shortcuts.newLine)) {
+    if (chatShortcuts.shortcuts.newLine !== "Shift+Enter" && chatShortcuts.matchesShortcut(event, chatShortcuts.shortcuts.newLine)) {
       event.preventDefault();
       if (!document.execCommand("insertText", false, "\n")) {
         prompt.setRangeText("\n", prompt.selectionStart, prompt.selectionEnd, "end");
@@ -1159,7 +601,7 @@
       return;
     }
     if (
-      matchesShortcut(event, shortcuts.send) &&
+      chatShortcuts.matchesShortcut(event, chatShortcuts.shortcuts.send) &&
       !event.isComposing &&
       !event.nativeEvent?.isComposing
     ) {
@@ -1183,7 +625,7 @@
   document.getElementById("attachment-file-input").addEventListener("change", async function (event) {
     const files = Array.from(event.target.files || []);
     event.target.value = "";
-    await addBrowserFiles(files);
+    await chatAttachments.addBrowserFiles(files);
   });
   modelButton.addEventListener("click", function () {
     openSetting("model");
@@ -1198,9 +640,9 @@
   prompt.addEventListener("input", function () { inputFeedback.hidden = true; });
   questionButton.addEventListener("click", function () {
     if (questionMenu.hidden) {
-      openQuestionMenu();
+      chatNavigation.openQuestionMenu();
     } else {
-      closeQuestionMenu(true);
+      chatNavigation.closeQuestionMenu(true);
     }
   });
 
@@ -1276,7 +718,7 @@
       }
       // Let the native picker consume Escape before closing its settings dialog.
       if (CSS.supports("selector(select:open)") && document.querySelector("#model-menu select:open, #status-settings select:open")) return;
-      if (!statusSettings.hidden) { event.preventDefault(); closeStatusSettings(); return; }
+      if (!statusSettings.hidden) { event.preventDefault(); chatStatusBar.closeStatusSettings(); return; }
       if (document.getElementById("conversation-reader").open) return;
       const history = document.querySelector(".task-history[open]") || document.getElementById("task-history");
       if (history.open) {
@@ -1287,12 +729,12 @@
       }
       if (!sessionMenu.hidden) {
         event.preventDefault();
-        closeSessionMenu(true);
+        chatNavigation.closeSessionMenu(true);
         return;
       }
       if (!questionMenu.hidden) {
         event.preventDefault();
-        closeQuestionMenu(true);
+        chatNavigation.closeQuestionMenu(true);
         return;
       }
       if (openSettingId) {
@@ -1302,7 +744,7 @@
       }
       if (!agentsMenu.hidden) {
         event.preventDefault();
-        closeAgentsMenu();
+        chatAgents.closeAgentsMenu();
         return;
       }
       event.preventDefault();
@@ -1325,13 +767,13 @@
       closeSettingMenu(false);
     }
     if (!sessionMenu.hidden && !event.target.closest(".session-picker")) {
-      closeSessionMenu(false);
+      chatNavigation.closeSessionMenu(false);
     }
     if (!questionMenu.hidden && !event.target.closest(".question-picker")) {
-      closeQuestionMenu(false);
+      chatNavigation.closeQuestionMenu(false);
     }
     if (!agentsMenu.hidden && !event.target.closest(".agents-menu") && !event.target.closest(".work-unit-activity")) {
-      closeAgentsMenu();
+      chatAgents.closeAgentsMenu();
     }
   });
 
@@ -1340,17 +782,17 @@
       return;
     }
     let images = Array.from(event.clipboardData.files || []).filter(function (file) {
-      return Boolean(browserImageMediaType(file));
+      return Boolean(chatAttachments.browserImageMediaType(file));
     });
     // Some screenshot tools expose the image only as a clipboard item, leaving files empty.
     if (!images.length) images = Array.from(event.clipboardData.items || []).filter(function (item) {
       return item.kind === "file";
     }).map(function (item) { return item.getAsFile(); }).filter(function (file) {
-      return file && browserImageMediaType(file);
+      return file && chatAttachments.browserImageMediaType(file);
     });
     if (images.length) {
       event.preventDefault();
-      addBrowserImages(images);
+      chatAttachments.addBrowserImages(images);
       return;
     }
     const text = event.clipboardData.getData("text/plain");
@@ -1368,7 +810,7 @@
 
   let dragDepth = 0;
   document.addEventListener("dragenter", function (event) {
-    if (!hasAttachmentData(event.dataTransfer)) {
+    if (!chatAttachments.hasAttachmentData(event.dataTransfer)) {
       return;
     }
     event.preventDefault();
@@ -1376,7 +818,7 @@
     dropOverlay.hidden = false;
   });
   document.addEventListener("dragover", function (event) {
-    if (!hasAttachmentData(event.dataTransfer)) {
+    if (!chatAttachments.hasAttachmentData(event.dataTransfer)) {
       return;
     }
     event.preventDefault();
@@ -1385,7 +827,7 @@
     }
   });
   document.addEventListener("dragleave", function (event) {
-    if (!hasAttachmentData(event.dataTransfer)) {
+    if (!chatAttachments.hasAttachmentData(event.dataTransfer)) {
       return;
     }
     event.preventDefault();
@@ -1395,7 +837,7 @@
     }
   });
   document.addEventListener("drop", function (event) {
-    if (!hasAttachmentData(event.dataTransfer)) {
+    if (!chatAttachments.hasAttachmentData(event.dataTransfer)) {
       return;
     }
     event.preventDefault();
@@ -1404,7 +846,7 @@
     if (document.activeElement === document.body || document.activeElement === attachButton) {
       prompt.focus({ preventScroll: true });
     }
-    addDroppedData(event.dataTransfer);
+    chatAttachments.addDroppedData(event.dataTransfer);
   });
 
   window.addEventListener("message", function (event) {
@@ -1497,24 +939,24 @@
         }
         state.botsAvailable = message.botsAvailable !== false;
         state.companionAvailable = message.companionAvailable !== false;
-        if (!state.companionAvailable) companionSnapshot = undefined;
+        if (!state.companionAvailable) chatBot.companionSnapshot = undefined;
         factoryBot.classList.toggle("sd-companion", state.companionAvailable);
-        botMenu.querySelectorAll("[data-companion-action]").forEach(button => { button.hidden = false; });
+        chatBot.botMenu.querySelectorAll("[data-companion-action]").forEach(button => { button.hidden = false; });
         state.botsEnabled = state.botsAvailable && message.botsEnabled !== false;
         document.getElementById("settings-tab-bot").style.display = state.botsAvailable ? "" : "none";
-        renderShortcuts();
-        receiveBotCharacter(message);
-        if (typeof message.botDefaultPrompt === "string") botDefaultPrompt = message.botDefaultPrompt;
-        receiveBotPrompt(message.botPrompt);
-        if (typeof message.botModel === "string") botModelSaved = message.botModel;
-        renderBotModels();
+        chatShortcuts.renderShortcuts();
+        chatBot.receiveBotCharacter(message);
+        if (typeof message.botDefaultPrompt === "string") chatBot.botDefaultPrompt = message.botDefaultPrompt;
+        chatBot.receiveBotPrompt(message.botPrompt);
+        if (typeof message.botModel === "string") chatBot.botModelSaved = message.botModel;
+        chatBot.renderBotModels();
         state.statusItems = normalizeStatusItems(message.statusItems);
         updateModeControls();
         vscode.postMessage({ type: "providers.request" });
         if (state.agentId && state.role === "main") vscode.postMessage({ type: "goal.control", action: "get" });
         renderTimeline();
-        renderStatusBar();
-        renderStatusCatalog();
+        chatStatusBar.renderStatusBar();
+        chatStatusBar.renderStatusCatalog();
         updateRunControls();
         persist();
         break;
@@ -1539,11 +981,11 @@
         break;
       case "worktree.updated":
         chatWorkUnits.receiveWorktree(message);
-        renderStatusBar();
+        chatStatusBar.renderStatusBar();
         break;
       case "branch.updated":
         state.branch = typeof message.branch === "string" ? message.branch : undefined;
-        renderStatusBar();
+        chatStatusBar.renderStatusBar();
         break;
       case "goal.updated":
         nativeGoal = message.goal || null;
@@ -1570,12 +1012,12 @@
         if (message.capabilities) state.capabilities = message.capabilities;
         updateModeControls();
         updateSendButton();
-        renderStatusBar();
+        chatStatusBar.renderStatusBar();
         break;
       case "models.list":
         if (Array.isArray(message.models)) {
-          botModelOptions = message.models.filter(model => /^(gpt-|codex-|claude-)[A-Za-z0-9._-]+$/.test(model));
-          renderBotModels();
+          chatBot.botModelOptions = message.models.filter(model => /^(gpt-|codex-|claude-)[A-Za-z0-9._-]+$/.test(model));
+          chatBot.renderBotModels();
           settingOptions.model = ["", ...new Set(message.models.map(normalizeModel).filter(Boolean))];
           if (openSettingId === "model") {
             const focused = modelMenu.contains(document.activeElement) ? { role: document.activeElement.dataset.role, field: document.activeElement.dataset.field } : undefined;
@@ -1588,17 +1030,17 @@
         chatImageConverter.showConversionResult(message);
         break;
       case "attachment.encode":
-        void encodeAttachmentImage(message);
+        void chatAttachments.encodeAttachmentImage(message);
         break;
       case "attachments.add":
         if (Array.isArray(message.attachments)) {
-          addAttachments(message.attachments);
+          chatAttachments.addAttachments(message.attachments);
         }
         break;
       case "attachments.restored":
         if (Array.isArray(message.attachments)) {
           const composer = message.attachments.filter(function (item) { return item.target === "composer"; });
-          if (composer.length) addAttachments(composer.map(function ({ target, ...item }) { return item; }));
+          if (composer.length) chatAttachments.addAttachments(composer.map(function ({ target, ...item }) { return item; }));
           for (const restored of message.attachments.filter(function (item) { return item.target === "history"; })) {
             for (const event of [...state.timeline, ...state.pendingRequests]) {
               if (!Array.isArray(event.attachments)) continue;
@@ -1617,7 +1059,7 @@
         const rejected = state.attachments.find(function (item) { return item.id === message.id; });
         if (rejected?.previewUri?.startsWith("blob:")) URL.revokeObjectURL(rejected.previewUri);
         state.attachments = state.attachments.filter(function (item) { return item.id !== message.id; });
-        renderAttachments();
+        chatAttachments.renderAttachments();
         updateSendButton();
         persist();
         break;
@@ -1639,16 +1081,16 @@
         if (message.level === "error") {
           state.cancellationRequested = false;
           renderRunStatus();
-          renderStatusBar();
-          botOutcome = "failed"; renderFactoryBot();
+          chatStatusBar.renderStatusBar();
+          chatBot.botOutcome = "failed"; chatBot.renderFactoryBot();
         }
         appendNotice(message.level, message.text, message.localization?.text);
         break;
       case "status.updated":
         if (Array.isArray(message.items)) {
           state.statusItems = normalizeStatusItems(message.items);
-          renderStatusBar();
-          renderStatusCatalog();
+          chatStatusBar.renderStatusBar();
+          chatStatusBar.renderStatusCatalog();
           persist();
         }
         break;
@@ -1656,7 +1098,7 @@
         if (typeof message.title === "string" && message.title) {
           state.title = message.title;
           document.title = message.title;
-          renderStatusBar();
+          chatStatusBar.renderStatusBar();
           persist();
         }
         break;
@@ -1685,7 +1127,7 @@
             renderTimeline();
           }
           updateModeControls();
-          closeSessionMenu(false);
+          chatNavigation.closeSessionMenu(false);
           persist();
         }
         break;
@@ -1771,14 +1213,14 @@
         }
         break;
       case "sessions.open":
-        openSessionMenu();
+        chatNavigation.openSessionMenu();
         break;
       case "sessions.list":
         state.sessionsLoading = false;
         state.sessions = Array.isArray(message.sessions) ? message.sessions.filter(function (session) {
           return session && typeof session.agentId === "string" && session.agentId;
         }) : [];
-        renderSessionList();
+        chatNavigation.renderSessionList();
         break;
       case "agents.list":
         state.workUnitsKnown = Array.isArray(message.agents);
@@ -1794,22 +1236,22 @@
           }
           state.workflows = [...snapshots.values()].slice(-100);
         }
-        state.childAgents = Array.isArray(message.agents) ? message.agents.filter(isChildAgent) : [];
-        state.workUnits = summarizeChildAgents(state.childAgents);
-        renderAgentsList();
+        state.childAgents = Array.isArray(message.agents) ? message.agents.filter(chatAgents.isChildAgent) : [];
+        state.workUnits = chatAgents.summarizeChildAgents(state.childAgents);
+        chatAgents.renderAgentsList();
         renderRunStatus();
         chatTaskFlow.renderWorkLoopPanel();
         scheduleTimelineRender();
-        renderStatusBar();
+        chatStatusBar.renderStatusBar();
         persist(false);
         break;
       case "decision.pending":
         state.pendingDecisionCanApprove = Boolean(message.runId) && message.canApprove === true;
         state.pendingDecisionRunId = typeof message.runId === "string" ? message.runId : undefined;
         state.decisionSubmitting = false;
-        renderPendingQueue();
+        chatPendingQueue.renderPendingQueue();
         scheduleTimelineRender();
-        renderStatusBar();
+        chatStatusBar.renderStatusBar();
         updateConversationClearControl();
         break;
       case "chat.human-decision":
@@ -1835,7 +1277,7 @@
       case "execution.updated":
         state.executionMode = message.mode;
         updateExecutionControl();
-        renderStatusBar();
+        chatStatusBar.renderStatusBar();
         break;
       case "chat.assistant":
         if (typeof message.text === "string" && message.text) {
@@ -1877,84 +1319,84 @@
         break;
       case "bots.updated":
         state.botsEnabled = message.enabled === true;
-        receiveBotCharacter(message);
-        if (typeof message.botDefaultPrompt === "string") botDefaultPrompt = message.botDefaultPrompt;
-        receiveBotPrompt(message.botPrompt);
-        if (typeof message.botModel === "string") botModelSaved = message.botModel;
-        renderBotModels();
-        renderFactoryBot();
+        chatBot.receiveBotCharacter(message);
+        if (typeof message.botDefaultPrompt === "string") chatBot.botDefaultPrompt = message.botDefaultPrompt;
+        chatBot.receiveBotPrompt(message.botPrompt);
+        if (typeof message.botModel === "string") chatBot.botModelSaved = message.botModel;
+        chatBot.renderBotModels();
+        chatBot.renderFactoryBot();
         break;
       case "bot.reply.partial":
-        if (state.botsEnabled && botTalkPending && message.requestId === botTalkPending.requestId && typeof message.text === "string") {
-          botSpeechText.textContent = message.text;
-          renderBotTalk();
+        if (state.botsEnabled && chatBot.botTalkPending && message.requestId === chatBot.botTalkPending.requestId && typeof message.text === "string") {
+          chatBot.botSpeechText.textContent = message.text;
+          chatBot.renderBotTalk();
         }
         break;
       case "bot.reply": {
-        if (!state.botsEnabled || !botTalkPending || message.requestId !== botTalkPending.requestId) break;
-        const pending = botTalkPending;
-        botTalkPending = undefined;
+        if (!state.botsEnabled || !chatBot.botTalkPending || message.requestId !== chatBot.botTalkPending.requestId) break;
+        const pending = chatBot.botTalkPending;
+        chatBot.botTalkPending = undefined;
         const success = message.failed !== true && typeof message.text === "string" && message.text.trim().length > 0;
-        if (!success && pending.fromComposer && prompt.value === "" && botDraftRevision === pending.revision) {
+        if (!success && pending.fromComposer && prompt.value === "" && chatBot.botDraftRevision === pending.revision) {
           prompt.value = pending.text;
           prompt.dispatchEvent(new Event("input", { bubbles: true }));
           persist();
         }
-        botReplyEmotion = success && ["calm", "happy", "shy", "love", "surprised", "playful", "sleepy"].includes(message.emotion) ? message.emotion : undefined;
+        chatBot.botReplyEmotion = success && ["calm", "happy", "shy", "love", "surprised", "playful", "sleepy"].includes(message.emotion) ? message.emotion : undefined;
         const replyMoods = { calm: "calm", happy: "cheerful", shy: "curious", love: "cheerful", surprised: "curious", playful: "cheerful", sleepy: "calm" };
-        if (botReplyEmotion) factoryBot.dataset.mood = replyMoods[botReplyEmotion];
-        showBotSpeech(success ? message.text : t("bot.talk.failed"));
-        renderFactoryBot();
+        if (chatBot.botReplyEmotion) factoryBot.dataset.mood = replyMoods[chatBot.botReplyEmotion];
+        chatBot.showBotSpeech(success ? message.text : t("bot.talk.failed"));
+        chatBot.renderFactoryBot();
         break;
       }
       case "bot.model.saved":
-        botModelSelect.disabled = false;
-        botModelSaved = message.model;
-        renderBotModels();
-        botModelStatus.textContent = t(message.failed ? "bot.model.failed" : "bot.prompt.saved");
+        chatBot.botModelSelect.disabled = false;
+        chatBot.botModelSaved = message.model;
+        chatBot.renderBotModels();
+        chatBot.botModelStatus.textContent = t(message.failed ? "bot.model.failed" : "bot.prompt.saved");
         break;
       case "bot.prompt.saved": {
-        if (!botPromptPending || message.requestId !== botPromptPending.requestId) break;
-        const submitted = botPromptPending;
-        botPromptPending = undefined;
-        if (submitted.character !== botCharacter) {
-          if (!message.failed) botPromptDrafts.set(submitted.character, { draft: submitted.prompt, saved: submitted.prompt });
-          updateBotPromptControls();
+        if (!chatBot.botPromptPending || message.requestId !== chatBot.botPromptPending.requestId) break;
+        const submitted = chatBot.botPromptPending;
+        chatBot.botPromptPending = undefined;
+        if (submitted.character !== chatBot.botCharacter) {
+          if (!message.failed) chatBot.botPromptDrafts.set(submitted.character, { draft: submitted.prompt, saved: submitted.prompt });
+          chatBot.updateBotPromptControls();
           break;
         }
         if (!message.failed && typeof message.prompt === "string") {
-          botPromptSaved = message.prompt;
-          if (botPromptEditor.value === submitted.prompt) botPromptEditor.value = message.prompt;
-          botPromptStatus.textContent = t("bot.prompt.saved");
-        } else botPromptStatus.textContent = t("bot.prompt.failed");
-        updateBotPromptControls();
+          chatBot.botPromptSaved = message.prompt;
+          if (chatBot.botPromptEditor.value === submitted.prompt) chatBot.botPromptEditor.value = message.prompt;
+          chatBot.botPromptStatus.textContent = t("bot.prompt.saved");
+        } else chatBot.botPromptStatus.textContent = t("bot.prompt.failed");
+        chatBot.updateBotPromptControls();
         break;
       }
       case "bot.companion":
         if (!state.companionAvailable) break;
-        companionSnapshot = message.companion;
-        companionWorking = message.working;
-        companionOutcome = message.outcome;
-        companionOutcomeUntil = message.outcomeUntil || 0;
-        state.botCare = { ...companionSnapshot };
-        botIdleSince = companionSnapshot.lastInteractionAt;
-        renderFactoryBot();
+        chatBot.companionSnapshot = message.companion;
+        chatBot.companionWorking = message.working;
+        chatBot.companionOutcome = message.outcome;
+        chatBot.companionOutcomeUntil = message.outcomeUntil || 0;
+        state.botCare = { ...chatBot.companionSnapshot };
+        chatBot.botIdleSince = chatBot.companionSnapshot.lastInteractionAt;
+        chatBot.renderFactoryBot();
         break;
       case "bot.mood":
-        if (!state.botsEnabled || (botSpeechVisible && botReplyEmotion)) break;
+        if (!state.botsEnabled || (chatBot.botSpeechVisible && chatBot.botReplyEmotion)) break;
         factoryBot.dataset.mood = ["calm", "curious", "cheerful", "focused"].includes(message.mood) ? message.mood : "";
         factoryBot.dataset.brain = factoryBot.dataset.mood ? "luna" : message.unavailable === true ? "unavailable" : "local";
-        renderFactoryBot();
+        chatBot.renderFactoryBot();
         break;
       case "run.observed":
-        botOutcome = message.status;
-        renderFactoryBot();
+        chatBot.botOutcome = message.status;
+        chatBot.renderFactoryBot();
         break;
       case "run.state":
         if (message.running === true && !state.running) {
-          botOutcome = undefined;
-          clearTimeout(botWaveTimer);
-          botWaveTimer = undefined;
+          chatBot.botOutcome = undefined;
+          clearTimeout(chatBot.botWaveTimer);
+          chatBot.botWaveTimer = undefined;
         }
         state.running = message.running === true;
         if (!state.running) state.cancellationRequested = false;
@@ -1968,13 +1410,13 @@
         }
         updateRunControls();
         scheduleTimelineRender();
-        renderStatusBar();
+        chatStatusBar.renderStatusBar();
         persist(false);
         break;
       case "chat.rejected": {
         const pending = (state.pendingRequests || []).find(function (item) { return item.id === message.id; });
         if (pending) pending.rejected = true;
-        renderPendingQueue();
+        chatPendingQueue.renderPendingQueue();
         persist(false);
         break;
       }
@@ -1992,7 +1434,7 @@
           state.pendingDecisionRunId = undefined;
           state.decisionSubmitting = false;
           // Keep accepted background workflows during a new Main conversation turn.
-          state.workUnits = summarizeChildAgents([]);
+          state.workUnits = chatAgents.summarizeChildAgents([]);
           state.runStartedAt = Date.now();
           state.runProgress = t("ui.main.agent.running");
           state.runProgressLocalization = globalThis.AgentFactoryI18n.describe(state.runProgress);
@@ -2013,11 +1455,11 @@
         break;
       }
       case "queue.updated":
-        renderPendingQueue();
+        chatPendingQueue.renderPendingQueue();
         state.queueCount = safeCount(message.count);
         chatWorkUnits.renderWorktree();
         updateConversationClearControl();
-        renderStatusBar();
+        chatStatusBar.renderStatusBar();
         updateSendButton();
         break;
       case "run.progress":
@@ -2035,7 +1477,7 @@
         state.fiveHourUsedPercent = safePercentOrUndefined(message.fiveHourUsedPercent);
         state.weeklyResetsAt = safeResetsAtOrUndefined(message.weeklyResetsAt);
         state.fiveHourResetsAt = safeResetsAtOrUndefined(message.fiveHourResetsAt);
-        renderStatusBar();
+        chatStatusBar.renderStatusBar();
         persist(false);
         break;
       case "run.activity":
@@ -2060,7 +1502,7 @@
           verificationActive: safeCount(message.verificationActive),
           totalCalled: safeCount(message.totalCalled)
         };
-        renderStatusBar();
+        chatStatusBar.renderStatusBar();
         chatTaskFlow.renderWorkLoopPanel();
         persist(false);
         break;
@@ -2143,115 +1585,6 @@
     return true;
   }
 
-  function canAnswerInterview(event) {
-    if (event.type === "interview") {
-      const position = indexedTimeline().positions.get(event.id);
-      if (position === undefined || state.timeline.slice(position + 1).some(item => item.type === "user" || item.type === "interview")) return false;
-      return !event.choiceAnswer && !state.running && !state.pendingRequests?.length && state.runtimeAvailable;
-    }
-    return indexedTimeline().latestTurn === event && !event.choiceAnswer && !state.running && !state.pendingRequests?.length && state.runtimeAvailable;
-  }
-
-  function renderStructuredInterview(content, event) {
-    const question = event.question;
-    if (!question || !Array.isArray(question.options)) return;
-    const korean = /[가-힣]/.test(question.text + question.options.map(option => option.label + option.pros + option.cons).join(""));
-    const heading = document.createElement("p");
-    const strong = document.createElement("strong");
-    strong.textContent = (korean ? "질문" : "Question") + ` [${question.current}/${question.total}]: ` + question.text;
-    heading.append(strong);
-    const table = document.createElement("table");
-    table.className = "interview-options";
-    const head = document.createElement("thead");
-    const headRow = document.createElement("tr");
-    for (const label of (korean ? ["선택지", "결정", "장점", "단점"] : ["Option", "Decision", "Advantages", "Disadvantages"])) {
-      const cell = document.createElement("th");
-      cell.textContent = label;
-      headRow.append(cell);
-    }
-    head.append(headRow);
-    table.append(head);
-    const body = document.createElement("tbody");
-    for (const [index, option] of question.options.entries()) {
-      const row = document.createElement("tr");
-      const choice = document.createElement("td");
-      const button = document.createElement("button");
-      button.type = "button";
-      button.className = "interview-choice";
-      button.textContent = question.yesNo ? option.label : String(index + 1);
-      button.setAttribute("aria-label", `${index + 1}: ${option.label}`);
-      button.disabled = !canAnswerInterview(event);
-      button.addEventListener("click", function () {
-        if (!canAnswerInterview(event)) return;
-        if (submit("direct", "normal", false, option.value)) {
-          event.choiceAnswer = option.value;
-          renderAll();
-          persist();
-        }
-      });
-      choice.append(button);
-      row.append(choice);
-      for (const value of [option.label, option.pros, option.cons]) {
-        const cell = document.createElement("td");
-        cell.textContent = value;
-        row.append(cell);
-      }
-      body.append(row);
-    }
-    table.append(body);
-    content.append(heading, table);
-    const recommended = question.options.find(option => option.value === question.recommendedValue);
-    if (recommended) {
-      const note = document.createElement("p");
-      const label = document.createElement("strong");
-      label.textContent = korean ? "권고: " : "Recommendation: ";
-      note.append(label, recommended.label);
-      content.append(note);
-    }
-  }
-
-  function renderInterviewChoices(content, event) {
-    if (event.phase === "commentary") return;
-    for (const table of content.querySelectorAll("table")) {
-      // Explanatory paragraphs may separate an explicitly designated question and its table.
-      let preceding = table.previousElementSibling;
-      let designated = false;
-      while (preceding && /^(?:P|H[1-6])$/.test(preceding.tagName)) {
-        const heading = preceding.textContent.trim();
-        if (/^(?:질문|Question)\s*\[\d+\s*\/\s*\d+(?:\s*,[^\]\n]+)?\]\s*:/i.test(heading)) {
-          designated = true;
-          break;
-        }
-        if (/^H[1-6]$/.test(preceding.tagName) || /^(?:권고|이전 결정|Recommendation|Previous decision)\s*:/i.test(heading)) break;
-        preceding = preceding.previousElementSibling;
-      }
-      if (!designated) continue;
-      if (!/^(?:선택지?|Option)$/i.test(table.querySelector("th")?.textContent.trim() || "")) continue;
-      const rows = Array.from(table.querySelectorAll("tbody tr"));
-      if (rows.length < 2 || rows.length > 3 || rows.some((row, index) => row.cells[0]?.textContent.trim() !== String(index + 1))) continue;
-      table.classList.add("interview-options");
-      const yesNo = rows.length === 2 && rows[0].cells[1]?.textContent.trim() === "Yes" && rows[1].cells[1]?.textContent.trim() === "No";
-      for (const row of rows) {
-        const number = row.cells[0].textContent.trim();
-        const button = document.createElement("button");
-        button.type = "button";
-        button.className = "interview-choice";
-        button.textContent = yesNo ? row.cells[1].textContent.trim() : number;
-        button.setAttribute("aria-label", number + ": " + row.cells[1].textContent.trim());
-        button.disabled = !canAnswerInterview(event);
-        button.addEventListener("click", function () {
-          if (!canAnswerInterview(event)) return;
-          if (submit("direct", "normal", false, number)) {
-            event.choiceAnswer = number;
-            renderAll();
-            persist();
-          }
-        });
-        row.cells[0].replaceChildren(button);
-      }
-    }
-  }
-
   function orchestrateAvailable() {
     return state.role === "main" && currentCapabilities().taskModes?.includes("orchestrate") === true;
   }
@@ -2268,7 +1601,7 @@
     state.cancellationRequested = true;
     vscode.postMessage({ type: "run.cancel" });
     renderRunStatus();
-    renderStatusBar();
+    chatStatusBar.renderStatusBar();
   }
 
   function isDuplicateCancellation(previous, current) {
@@ -2493,266 +1826,18 @@
       title.startsWith("Skill 읽기 · ") || title === "실행 결과 읽기";
   }
 
-  function addAttachments(attachments) {
-    const existing = new Set(state.attachments.map(function (item) {
-      return item.uri || item.name + ":" + item.size;
-    }));
-    for (const attachment of attachments) {
-      const key = attachment.uri || attachment.name + ":" + attachment.size;
-      const sameId = state.attachments.findIndex(function (item) { return item.id === attachment.id; });
-      if (sameId >= 0) {
-        const previous = state.attachments[sameId];
-        if (previous.previewUri?.startsWith("blob:") && previous.previewUri !== attachment.previewUri) URL.revokeObjectURL(previous.previewUri);
-        state.attachments[sameId] = attachment;
-        existing.add(key);
-      } else if (!existing.has(key) && state.attachments.length < 100) {
-        state.attachments.push(attachment);
-        existing.add(key);
-      } else if (attachment.previewUri?.startsWith("blob:")) {
-        URL.revokeObjectURL(attachment.previewUri);
-      }
-    }
-    renderAttachments();
-    updateSendButton();
-    persist();
-  }
-
-  async function addDroppedData(dataTransfer) {
-    if (!dataTransfer) {
-      return;
-    }
-    const files = Array.from(dataTransfer.files || []);
-    const uris = dataTransfer.getData("text/uri-list").split(/\r?\n/).filter(function (uri) {
-      return uri && !uri.startsWith("#");
-    });
-    // URI drops (including VS Code Explorer and Finder) must be opened by the Extension Host.
-    // A Webview-only reference cannot stage image bytes or provide a usable local runtime path.
-    if (uris.length) {
-      vscode.postMessage({ type: "attachments.addUris", uris });
-      return;
-    }
-    await addBrowserFiles(files);
-  }
-
-  function hasAttachmentData(dataTransfer) {
-    if (!dataTransfer) {
-      return false;
-    }
-    const types = Array.from(dataTransfer.types || []);
-    return types.includes("Files") || types.includes("text/uri-list");
-  }
-
-  async function addBrowserFiles(files) {
-    for (const file of files) {
-      if (!file.name || file.name.length > 255 || /[\\/\x00-\x1f]/.test(file.name) || [".", ".."].includes(file.name)) {
-        appendNotice("error", t("ui.local.file.read.failed"));
-        continue;
-      }
-      if (browserImageMediaType(file)) {
-        await addBrowserImages([file]);
-        continue;
-      }
-      const id = createId();
-      addAttachments([{ id, name: file.name, kind: "file", size: file.size, pending: true }]);
-      try {
-        const data = await readDataUrl(file);
-        vscode.postMessage({ type: "attachments.createFile", id, name: file.name, size: file.size, data: data.slice(data.indexOf(",") + 1) });
-      } catch {
-        state.attachments = state.attachments.filter(item => item.id !== id);
-        appendNotice("error", t("ui.local.file.read.failed"));
-        renderAttachments();
-        persist();
-      }
-    }
-  }
-
-  function browserImageMediaType(file) {
-    const accepted = ["image/png", "image/jpeg", "image/gif", "image/webp"];
-    if (accepted.includes(file.type)) return file.type;
-    if (file.type) return undefined;
-    return ({ png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg", gif: "image/gif", webp: "image/webp" })
-      [String(file.name || "").split(".").pop().toLowerCase()];
-  }
-
-  async function addBrowserImages(files) {
-    for (const file of files) {
-      const mediaType = browserImageMediaType(file);
-      const imageCount = state.attachments.filter(function (item) { return item.kind === "image"; }).length;
-      const imageBytes = state.attachments.filter(function (item) { return item.kind === "image"; })
-        .reduce(function (total, item) { return total + (item.size || 0); }, 0);
-      if (!mediaType || file.size < 1) {
-        appendNotice("error", t("ui.attach.up.to.8.png.jpeg.gif.or.webp.images.with.a.maximum.of.10.mib.each.and.20.mib.total"));
-        continue;
-      }
-      const id = createId();
-      addAttachments([{ id, name: file.name || "image", kind: "image", previewUri: URL.createObjectURL(file), mediaType, size: file.size, pending: true }]);
-      try {
-        const dataUrl = await readDataUrl(file);
-        vscode.postMessage({ type: "attachments.createImage", id, name: file.name || "image", mediaType, size: file.size, data: dataUrl.slice(dataUrl.indexOf(",") + 1) });
-      } catch (error) {
-        state.attachments = state.attachments.filter(function (item) { return item.id !== id; });
-        appendNotice("error", t("ui.unable.to.read.the.image"));
-        renderAttachments();
-        persist();
-      }
-    }
-  }
-
-  function readDataUrl(file) {
-    return new Promise(function (resolvePromise, rejectPromise) {
-      const reader = new FileReader();
-      reader.addEventListener("load", function () { typeof reader.result === "string" ? resolvePromise(reader.result) : rejectPromise(new Error(t("ui.invalid.image"))); });
-      reader.addEventListener("error", function () { rejectPromise(reader.error || new Error(t("ui.image.read.failed"))); });
-      reader.readAsDataURL(file);
-    });
-  }
-
   function renderAll() {
     updateAutoScrollControl();
-    renderPendingQueue();
+    chatPendingQueue.renderPendingQueue();
     renderTimeline();
-    renderAttachments();
-    renderStatusBar();
+    chatAttachments.renderAttachments();
+    chatStatusBar.renderStatusBar();
     renderRunStatus();
     chatTaskFlow.renderWorkLoopPanel();
     updateSendButton();
     updateRunControls();
     updateModeControls();
-    updateQuestionControl();
-  }
-
-  function renderDecisionActions(content, runId) {
-    if (!state.pendingDecisionCanApprove) return;
-    const actions = document.createElement("div");
-    actions.className = "decision-actions";
-    actions.setAttribute("role", "group");
-    actions.setAttribute("aria-label", t("ui.respond.to.the.proposal.above"));
-    const approve = document.createElement("button");
-    approve.type = "button";
-    approve.textContent = t("ui.proceed.as.proposed");
-    approve.disabled = state.running || state.decisionSubmitting || !state.runtimeAvailable;
-    approve.addEventListener("click", function () {
-      if (!state.pendingDecisionCanApprove || state.running || state.decisionSubmitting || state.pendingDecisionRunId !== runId) return;
-      state.decisionSubmitting = true;
-      approve.disabled = true;
-      vscode.postMessage({ type: "decision.approve", runId });
-    });
-    actions.append(approve);
-    content.append(actions);
-  }
-
-  function renderSkillDocuments(container, documents, event) {
-    container.classList.add("skill-read-card");
-    const details = document.createElement("details");
-    details.className = "skill-read-details";
-    const summary = document.createElement("summary");
-    summary.className = "skill-read-document";
-    summary.title = activityPhaseAccessibleLabel(event.phase);
-    for (const documentInfo of documents) {
-      if (summary.childNodes.length) summary.append(document.createTextNode(" · "));
-      const name = document.createElement("strong");
-      name.textContent = documentInfo.skill;
-      const file = document.createElement("span");
-      file.textContent = documentInfo.document;
-      file.title = documentInfo.path;
-      summary.append(name, document.createTextNode(" "), file);
-    }
-    details.append(summary);
-    chatTerminal.renderTerminalCommand(details, event.text, event.phase);
-    chatTerminal.renderCommandOutput(details, event.output, false);
-    container.append(details);
-  }
-
-  function renderCommandError(container, outcome) {
-    if (!outcome.detail) return;
-    const detail = document.createElement("div");
-    detail.className = "command-error-summary";
-    detail.textContent = outcome.detail;
-    container.append(detail);
-  }
-
-  function renderFactoryScripts(container, scripts, documents, event) {
-    container.classList.add("managed-agent-card");
-    const outcome = globalThis.agentFactoryExecutionReferences.commandOutcome(event);
-    container.dataset.status = outcome.status;
-    const row = document.createElement("div");
-    row.className = "managed-agent-heading";
-    const heading = document.createElement("strong");
-    const labels = { doctor: t("ui.check.execution.environment"), capabilities: t("ui.check.supported.features"), submit: t("ui.submit.task"), send: t("ui.send.follow.up"), status: t("ui.check.task.status"), result: t("ui.read.task.result"), start: t("ui.start.task") };
-    heading.textContent = scripts.map(function (script) {
-      if (script.skill === "agent" && ["exec.py", "loop.py"].includes(script.script) && labels[script.action]) return labels[script.action];
-      return script.script + (script.action ? " · " + script.action : "");
-    }).join(" / ");
-    const badge = document.createElement("span");
-    badge.className = "managed-agent-status";
-    badge.textContent = outcome.status === "completed" ? t(scripts.some(script => ["start", "submit", "send"].includes(script.action)) ? "activity.request.command.completed" : "activity.command.completed") : activityPhaseAccessibleLabel(outcome.status === "running" ? "started" : outcome.status);
-    row.append(heading, badge);
-    container.append(row);
-    renderCommandError(container, outcome);
-    // Keep mixed commands and failures intact, including their non-Factory output.
-    renderSkillDocuments(container, documents.length ? documents : scripts.map(function (script) {
-      return { skill: "agent-factory:" + script.skill, document: script.script, path: script.path };
-    }), event);
-  }
-
-  function renderManagedAgent(container, managed, events) {
-    container.classList.add("managed-agent-card");
-    const child = state.childAgents.find(function (agent) { return agent.agentId === managed.agentId; });
-    const pendingRequest = ["submit", "send", "start", "resume"].includes(managed.action) && !managed.runId;
-    const matchesRun = managed.kind !== "loop" && child && !pendingRequest && (!managed.runId || child.runId === managed.runId);
-    const role = managed.role || child?.role;
-    const last = events[events.length - 1];
-    const outcome = globalThis.agentFactoryExecutionReferences.commandOutcome(last);
-    const status = pendingRequest && outcome.status === "failed" ? "failed" : matchesRun ? child.status : managed.observedStatus || "unknown";
-    container.dataset.status = status;
-    const heading = document.createElement("div");
-    heading.className = "managed-agent-heading";
-    const label = document.createElement("strong");
-    label.textContent = managed.taskMode === "plan" ? t("ui.plan.work.agent") : managed.kind === "loop" ? taskModeNames()[managed.taskMode] || t("ui.work.verification") : role === "verification" ? t("ui.verification.agent") : role === "work" ? t("ui.work.agent") : t("ui.agent");
-    const badge = document.createElement("span");
-    badge.className = "managed-agent-status";
-    badge.textContent = status === "active" ? t("ui.in.progress") : status === "runtime-error" ? t("ui.runtime.error") : childAgentStatusLabel(status);
-    if (["work", "plan-work"].includes(managed.taskMode) && status === "completed") badge.textContent += t("ui.no.separate.verification.requested");
-    heading.append(label, badge);
-    const identity = document.createElement("div");
-    identity.className = "managed-agent-identity";
-    identity.textContent = managed.agentId + (managed.runId ? " · " + managed.runId : "");
-    const progress = document.createElement("div");
-    progress.className = "managed-agent-progress";
-    const actions = { submit: t("ui.submit.run"), start: t("ui.start.work"), send: t("ui.send.follow.up"), status: t("ui.check.status"), result: t("ui.get.result"), updates: t("ui.get.updates"), cancel: t("ui.cancel"), resume: t("ui.resume"), reconcile: t("ui.reconcile.work"), "recover-receipt": t("ui.recover.run"), skip: t("ui.skip.verification") };
-    progress.textContent = (actions[managed.action] || t("ui.check.run")) + (outcome.status === "failed" ? t("ui.failed") : outcome.status === "running" ? t("ui.in.progress.3d921e") : pendingRequest ? t("ui.acceptance.unconfirmed") : t("ui.processed"));
-    if (["submit", "send", "start", "resume"].includes(managed.action)) {
-      progress.textContent = outcome.status === "failed" ? t("activity.request.failed") :
-        outcome.status === "running" ? t("activity.request.pending") :
-        managed.runId && (matchesRun || ["accepted", "queued", "starting", "running", "active", "completed", "failed", "cancelled", "needs-human-decision"].includes(managed.observedStatus)) ? t("activity.request.accepted") : t("activity.request.unconfirmed");
-    }
-    container.append(heading, identity, progress);
-    renderCommandError(container, outcome);
-    if (child && state.role === "main") {
-      const open = document.createElement("button");
-      open.type = "button";
-      open.className = "managed-agent-open setting-button";
-      open.textContent = t("ui.open.chat");
-      open.addEventListener("click", function () {
-        if (state.childAgents.some(function (agent) { return agent.agentId === managed.agentId; })) vscode.postMessage({ type: "agent.open", agentId: managed.agentId });
-      });
-      container.append(open);
-    }
-    const details = document.createElement("details");
-    details.className = "managed-agent-details";
-    const summary = document.createElement("summary");
-    summary.textContent = t("ui.command.and.run.history") + events.length;
-    details.append(summary);
-    for (const event of events) {
-      const raw = document.createElement("div");
-      chatTerminal.renderTerminalCommand(raw, event.text, event.phase, event.title);
-      chatTerminal.renderCommandOutput(raw, event.output, Boolean(event.title));
-      raw.querySelectorAll("details").forEach(function (item, index) {
-        item.dataset.disclosureKey = event.id + ":" + index;
-      });
-      details.append(raw);
-    }
-    container.append(details);
+    chatNavigation.updateQuestionControl();
   }
 
   // Event fields are replaced at ingestion, including attachments and submission.
@@ -2902,7 +1987,7 @@
       const existing = existingMessages.get(event.id);
       const renderKey = [eventVersion(event), chatSyntax.syntaxRevision, uiLocale(),
         event.type === "assistant" ? assistantContext : null,
-        event.type === "assistant" || event.type === "interview" ? canAnswerInterview(event) : null,
+        event.type === "assistant" || event.type === "interview" ? chatInterview.canAnswerInterview(event) : null,
         event.type === "assistant" && event.runId === state.pendingDecisionRunId && event.runId
           ? JSON.stringify([state.pendingDecisionRunId, state.pendingDecisionCanApprove, state.decisionSubmitting, state.running, state.runtimeAvailable]) : null,
         managedGroup ? state.role + ":" + (commandContexts.get(managedGroup.managed.agentId) || "") : null,
@@ -2992,7 +2077,7 @@
       } else if (event.type === "assistant" && event.streaming) {
         renderPreviewMarkdown(content, event.text, event);
       } else if (event.type === "interview") {
-        renderStructuredInterview(content, event);
+        chatInterview.renderStructuredInterview(content, event);
       } else if (event.type === "assistant") {
         const taskContent = chatTaskFlow.extractTaskFlows(assistantDisplayText(localizedText(event.text, event.localization)));
         const extracted = event.phase !== "commentary" && globalThis.agentFactoryExecutionReferences
@@ -3006,9 +2091,9 @@
           chatMarkdown.renderAssistantMarkdown(content, extracted.text);
         }
         for (const flow of taskContent.flows) content.append(chatTaskFlow.createTaskFlow(flow));
-        renderInterviewChoices(content, event);
+        chatInterview.renderInterviewChoices(content, event);
         if (event.runId && event.runId === state.pendingDecisionRunId && event.phase !== "commentary") {
-          renderDecisionActions(content, event.runId);
+          chatActivities.renderDecisionActions(content, event.runId);
         }
       } else if (event.type === "activity" && event.category === "command") {
         const skillDocuments = globalThis.agentFactoryExecutionReferences?.skillDocuments(event.text) || [];
@@ -3016,14 +2101,14 @@
         const factoryScripts = runtimeScripts.length ? runtimeScripts : globalThis.agentFactoryExecutionReferences?.scriptInvocations(event.text) || [];
         if (managedGroup) {
           message.classList.add("message-activity-agent");
-          renderManagedAgent(content, managedGroup.managed, managedGroup.events);
+          chatActivities.renderManagedAgent(content, managedGroup.managed, managedGroup.events);
         } else if (factoryScripts.length) {
           message.classList.add("message-activity-agent");
-          renderFactoryScripts(content, factoryScripts, skillDocuments, event);
+          chatActivities.renderFactoryScripts(content, factoryScripts, skillDocuments, event);
         } else if (skillDocuments.length) {
-          renderSkillDocuments(content, skillDocuments, event);
+          chatActivities.renderSkillDocuments(content, skillDocuments, event);
         } else {
-          renderCommandError(content, globalThis.agentFactoryExecutionReferences.commandOutcome(event));
+          chatActivities.renderCommandError(content, globalThis.agentFactoryExecutionReferences.commandOutcome(event));
           chatTerminal.renderTerminalCommand(content, event.text, event.phase, event.title);
           chatTerminal.renderCommandOutput(content, event.output, Boolean(event.title));
         }
@@ -3034,7 +2119,7 @@
         if (event.type === "activity" && message.dataset.category === "tool" && event.text) content.title = event.text;
       }
       if (event.type === "user") renderSubmission(content, event.submission);
-      if (event.type === "user" && Array.isArray(event.attachments)) renderHistoryAttachments(content, event.attachments);
+      if (event.type === "user" && Array.isArray(event.attachments)) chatAttachments.renderHistoryAttachments(content, event.attachments);
       message.append(content);
       const display = displayStates.get(event.id);
       if (display) {
@@ -3086,7 +2171,7 @@
       }
     }
     while (messageViewStates.size > 2000) messageViewStates.delete(messageViewStates.keys().next().value);
-    updateQuestionControl();
+    chatNavigation.updateQuestionControl();
     timeline.setAttribute("aria-busy", String(state.running));
     if (shouldFollowLatest) {
       autoScrollFrame = requestAnimationFrame(function () {
@@ -3164,10 +2249,10 @@
     runElapsed.textContent = formatElapsed(elapsed);
     const elapsedItem = statusBar.querySelector('[data-item-id="elapsed"]');
     if (elapsedItem) {
-      elapsedItem.textContent = statusLabel("elapsed");
+      elapsedItem.textContent = chatStatusBar.statusLabel("elapsed");
       elapsedItem.setAttribute("aria-label", elapsedItem.textContent + t("ui.move.with.alt.left.right"));
     }
-    refreshStatusPreview();
+    chatStatusBar.refreshStatusPreview();
     if (!elapsedTimerId && !document.hidden) {
       elapsedTimerId = window.setInterval(renderRunStatus, 1000);
     }
@@ -3193,447 +2278,8 @@
   }
 
   const chatImageConverter = globalThis.AgentFactoryChat.imageConverter({
-    createId, t, vscode, state, renderAttachments, updateSendButton, persist
+    createId, t, vscode, state, renderAttachments: chatAttachments.renderAttachments, updateSendButton, persist
   });
-
-  function bindAttachmentConversion(element, attachment) {
-    if (attachment.kind !== "image" || attachment.pending || !attachment.uri) return;
-    element.tabIndex = 0;
-    const open = function (event) {
-      event.preventDefault();
-      event.stopPropagation();
-      chatImageConverter.openImageConverter(attachment);
-    };
-    element.addEventListener("contextmenu", open);
-    element.addEventListener("keydown", function (event) {
-      if (event.key === "ContextMenu" || (event.shiftKey && event.key === "F10")) open(event);
-    });
-  }
-
-  async function encodeAttachmentImage(message) {
-    let canvas;
-    try {
-      const image = new Image();
-      image.src = message.source;
-      await image.decode();
-      canvas = document.createElement("canvas");
-      canvas.width = image.naturalWidth;
-      canvas.height = image.naturalHeight;
-      const context = canvas.getContext("2d");
-      if (!context || !canvas.width || !canvas.height) throw new Error("Invalid image");
-      if (message.mediaType === "image/jpeg") {
-        context.fillStyle = "#ffffff";
-        context.fillRect(0, 0, canvas.width, canvas.height);
-      }
-      context.drawImage(image, 0, 0);
-      const blob = await new Promise(resolve => canvas.toBlob(resolve, message.mediaType, 0.92));
-      if (!blob || blob.type !== message.mediaType) throw new Error("Unsupported encoder");
-      const dataUrl = await new Promise((resolve, reject) => {
-        const reader = new FileReader();
-        reader.onload = () => resolve(reader.result);
-        reader.onerror = reject;
-        reader.readAsDataURL(blob);
-      });
-      vscode.postMessage({ type: "attachment.converted", id: message.id, name: message.name,
-        mediaType: blob.type, size: blob.size, data: dataUrl.slice(dataUrl.indexOf(",") + 1) });
-    } catch {
-      vscode.postMessage({ type: "attachment.conversionFailed", id: message.id });
-    } finally {
-      if (canvas) { canvas.width = 0; canvas.height = 0; }
-    }
-  }
-
-  function renderAttachments() {
-    attachmentList.replaceChildren();
-    for (const attachment of state.attachments) {
-      const chip = document.createElement("div");
-      chip.className = "attachment-chip" + (attachment.kind === "image" ? " attachment-image" : "");
-      chip.title = attachment.uri || attachment.name;
-      bindAttachmentConversion(chip, attachment);
-      const name = document.createElement("span");
-      name.className = "attachment-chip-name";
-      name.textContent = attachment.name;
-      if (attachment.kind === "image" && attachment.previewUri) {
-        chip.classList.add("is-loading");
-        const preview = document.createElement("img");
-        preview.className = "attachment-preview";
-        preview.src = attachment.previewUri;
-        preview.alt = attachment.name;
-        if (attachment.uri && !attachment.pending) {
-          preview.tabIndex = 0;
-          preview.setAttribute("role", "button");
-          preview.setAttribute("aria-label", t("attachment.open", attachment.name));
-          preview.addEventListener("click", function () { vscode.postMessage({ type: "attachment.open", id: attachment.id }); });
-          preview.addEventListener("keydown", function (event) {
-            if (event.key === "Enter" || event.key === " ") { event.preventDefault(); vscode.postMessage({ type: "attachment.open", id: attachment.id }); }
-          });
-        }
-        preview.addEventListener("load", function () {
-          chip.classList.remove("is-loading");
-        });
-        preview.addEventListener("error", function () {
-          chip.classList.remove("is-loading");
-          chip.classList.add("preview-failed");
-        });
-        chip.append(preview);
-      }
-      const remove = document.createElement("button");
-      remove.className = "attachment-remove";
-      remove.type = "button";
-      remove.textContent = "×";
-      remove.setAttribute("aria-label", t("attachment.remove", attachment.name));
-      remove.addEventListener("click", function () {
-        if (attachment.previewUri?.startsWith("blob:")) {
-          URL.revokeObjectURL(attachment.previewUri);
-        }
-        state.attachments = state.attachments.filter(function (item) {
-          return item.id !== attachment.id;
-        });
-        if (attachment.uri) vscode.postMessage({ type: "attachment.remove", id: attachment.id });
-        renderAttachments();
-        updateSendButton();
-        persist();
-      });
-      chip.append(name, remove);
-      attachmentList.append(chip);
-    }
-  }
-
-  function renderHistoryAttachments(container, attachments) {
-    const gallery = document.createElement("div");
-    gallery.className = "history-attachments";
-    for (const attachment of attachments) {
-      if (attachment.kind !== "image") {
-        const reference = document.createElement("div");
-        reference.className = "attachment-chip history-reference";
-        reference.title = attachment.uri || attachment.name;
-        const name = document.createElement("span");
-        name.className = "attachment-chip-name";
-        name.textContent = attachment.name;
-        reference.append(name);
-        gallery.append(reference);
-        continue;
-      }
-      const item = document.createElement(attachment.previewUri ? "button" : "div");
-      item.className = "history-attachment";
-      item.title = attachment.name;
-      bindAttachmentConversion(item, attachment);
-      if (attachment.previewUri) {
-        item.type = "button";
-        item.setAttribute("aria-label", t("attachment.open", attachment.name));
-        item.addEventListener("click", function () { vscode.postMessage({ type: "attachment.open", id: attachment.id }); });
-        const preview = document.createElement("img");
-        preview.src = attachment.previewUri;
-        preview.alt = attachment.name;
-        item.append(preview);
-      }
-      const name = document.createElement("span");
-      name.textContent = attachment.name;
-      item.append(name);
-      gallery.append(item);
-    }
-    if (gallery.childElementCount) container.append(gallery);
-  }
-
-  function openSessionMenu() {
-    closeSettingMenu(false);
-    closeQuestionMenu(false);
-    sessionMenu.hidden = false;
-    state.sessionsLoading = true;
-    renderSessionList();
-    vscode.postMessage({ type: "sessions.request" });
-  }
-
-  function closeSessionMenu(restoreFocus) {
-    sessionMenu.hidden = true;
-    if (restoreFocus) {
-      prompt.focus();
-    }
-  }
-
-  function positionQuestionMenu() {
-    if (questionMenu.hidden) return;
-    const anchor = questionButton.getBoundingClientRect();
-    const width = Math.min(440, window.innerWidth - 16);
-    questionMenu.style.width = width + "px";
-    questionMenu.style.left = Math.max(8, Math.min(anchor.right - width, window.innerWidth - width - 8)) + "px";
-    questionMenu.style.bottom = Math.max(8, window.innerHeight - anchor.top + 8) + "px";
-    questionMenu.style.maxHeight = Math.max(48, Math.min(320, anchor.top - 16)) + "px";
-  }
-  window.addEventListener("resize", positionQuestionMenu);
-  const questionPositionObserver = new ResizeObserver(positionQuestionMenu);
-  questionPositionObserver.observe(promptSurface);
-  questionPositionObserver.observe(questionButton);
-
-  function selectQuestionTab(name, focus = true, requestHistory = true) {
-    if (name === "history" && state.role !== "main") name = "questions";
-    for (const tab of questionTabs) {
-      const selected = tab.dataset.questionTab === name;
-      tab.setAttribute("aria-selected", String(selected));
-      tab.tabIndex = selected ? 0 : -1;
-      document.getElementById(tab.getAttribute("aria-controls")).hidden = !selected;
-      if (selected && focus) tab.focus();
-    }
-    if (name === "questions") {
-      renderQuestionList();
-    } else if (requestHistory) {
-      chatHistory.conversationList.replaceChildren(historyEmpty("ui.conversation.loading"));
-      vscode.postMessage({ type: "conversations.request" });
-    }
-  }
-
-  for (const tab of questionTabs) {
-    tab.addEventListener("click", function () { selectQuestionTab(tab.dataset.questionTab); });
-    tab.addEventListener("keydown", function (event) {
-      const available = questionTabs.filter(item => !item.hidden);
-      const index = available.indexOf(tab);
-      let next;
-      if (matchesShortcut(event, shortcuts.settingsTabNext)) next = (index + 1) % available.length;
-      if (matchesShortcut(event, shortcuts.settingsTabPrevious)) next = (index + available.length - 1) % available.length;
-      if (matchesShortcut(event, shortcuts.settingsTabFirst)) next = 0;
-      if (matchesShortcut(event, shortcuts.settingsTabLast)) next = available.length - 1;
-      if (next === undefined) return;
-      event.preventDefault();
-      selectQuestionTab(available[next].dataset.questionTab);
-    });
-  }
-
-  function openQuestionMenu(tabName = "questions") {
-    closeSettingMenu(false);
-    closeSessionMenu(false);
-    renderQuestionList();
-    questionMenu.hidden = false;
-    questionButton.setAttribute("aria-expanded", "true");
-    selectQuestionTab(tabName);
-    positionQuestionMenu();
-  }
-
-  function closeQuestionMenu(restoreFocus) {
-    questionMenu.hidden = true;
-    questionButton.setAttribute("aria-expanded", "false");
-    if (restoreFocus) {
-      questionButton.focus();
-    }
-  }
-
-  function renderQuestionList() {
-    const index = indexedTimeline();
-    const questions = index.questions;
-    if (questionSourceId !== index.id) {
-      questionSourceId = index.id;
-      questionPageStart = 0;
-      questionListKey = undefined;
-      questionElements.clear();
-    }
-    const pageSize = 100;
-    questionPageStart = Math.min(questionPageStart, Math.max(0, Math.floor((questions.length - 1) / pageSize) * pageSize));
-    const visible = questions.slice(questionPageStart, questionPageStart + pageSize);
-    const key = [index.id, questionPageStart, questions.length, uiLocale(), ...visible.map(eventVersion)].join(":");
-    if (questionListKey === key) return;
-    questionListKey = key;
-    const fragment = document.createDocumentFragment();
-    const retained = new Set();
-    function pageButton(direction, label, enabled, offset) {
-      const button = document.createElement("button");
-      button.type = "button";
-      button.className = "question-item question-page";
-      button.dataset.questionPage = direction;
-
-      button.textContent = t(label);
-      button.disabled = !enabled;
-      button.addEventListener("click", function (event) {
-        // Replacing the page detaches this button before the outside-click handler.
-        event.stopPropagation();
-        questionPageStart += offset;
-        renderQuestionList();
-        questionList.querySelector("[data-question-id]")?.focus();
-      });
-      button.addEventListener("keydown", handleQuestionListKeydown);
-      fragment.append(button);
-    }
-    if (questions.length > pageSize) pageButton("previous", "ui.history.previous", questionPageStart > 0, -pageSize);
-    visible.forEach(function (question) {
-      retained.add(question.id);
-      let item = questionElements.get(question.id);
-      if (!item) {
-        item = document.createElement("button");
-        item.type = "button";
-        item.className = "question-item";
-        item.dataset.questionId = question.id;
-
-        const text = document.createElement("span");
-        text.className = "question-item-text";
-        item.append(text);
-        item.addEventListener("click", function () {
-          closeQuestionMenu(false);
-          jumpToQuestion(question.id);
-        });
-        item.addEventListener("keydown", handleQuestionListKeydown);
-        const row = document.createElement("div");
-        row.className = "question-row";
-        const copy = document.createElement("button");
-        copy.type = "button";
-        copy.className = "question-copy setting-button";
-        copy.append(createModeIcon("M9 9h12v12H9z M6 15H3V3h12v3", "question-copy-icon"));
-        copy.addEventListener("click", function () {
-          const position = indexedTimeline().positions.get(question.id);
-          const current = position === undefined ? undefined : state.timeline[position];
-          if (typeof current?.text === "string" && current.text.length) {
-            vscode.postMessage({ type: "message.copy", text: current.text });
-          }
-        });
-        copy.addEventListener("keydown", handleQuestionListKeydown);
-        row.append(item, copy);
-        questionElements.set(question.id, item);
-      }
-      const copy = item.parentElement.querySelector(".question-copy");
-      copy.title = t("ui.copy.question");
-      copy.setAttribute("aria-label", t("ui.copy.question"));
-      copy.disabled = typeof question.text !== "string" || !question.text.length;
-      const attachmentNames = (Array.isArray(question.attachments) ? question.attachments : [])
-        .map(function (attachment) { return attachment.name; }).filter(Boolean);
-      item.firstElementChild.textContent = question.text?.trim() || (attachmentNames.length ? t("ui.attachments.c53076") + attachmentNames.join(", ") : t("ui.message.with.attachments"));
-      fragment.append(item.parentElement);
-    });
-    if (questions.length > pageSize) pageButton("next", "ui.history.next", questionPageStart + pageSize < questions.length, pageSize);
-    if (!questions.length) fragment.append(sessionEmpty(t("ui.no.user.questions.yet")));
-    questionList.replaceChildren(fragment);
-    for (const id of questionElements.keys()) if (!retained.has(id)) questionElements.delete(id);
-  }
-
-  function handleQuestionListKeydown(event) {
-    const copy = event.currentTarget.classList.contains("question-copy");
-    if (event.key === "ArrowLeft" || event.key === "ArrowRight") {
-      const row = event.currentTarget.closest(".question-row");
-      const target = row?.querySelector(event.key === "ArrowRight" ? ".question-copy:not(:disabled)" : ".question-item");
-      if (target) { event.preventDefault(); target.focus(); }
-      return;
-    }
-    if (event.key !== "ArrowDown" && event.key !== "ArrowUp") return;
-    const items = Array.from(questionList.querySelectorAll(copy ? ".question-copy:not(:disabled)" : ".question-item:not(:disabled)"));
-    const index = items.indexOf(event.currentTarget);
-    const offset = event.key === "ArrowDown" ? 1 : -1;
-    event.preventDefault();
-    items[(index + offset + items.length) % items.length]?.focus();
-  }
-
-  function jumpToQuestion(id) {
-    const position = indexedTimeline().positions.get(id);
-    if (position === undefined || state.timeline[position].type !== "user") return;
-    cancelAnimationFrame(autoScrollFrame);
-    followLatest = false;
-    if (!messageElements.has(id)) {
-      const end = Math.min(state.timeline.length, (Math.floor(position / 200) + 1) * 200);
-      timelineEndId = end === state.timeline.length ? undefined : state.timeline[end - 1].id;
-      renderTimeline();
-    }
-    const target = messageElements.get(id);
-    if (!target) return;
-    updateAutoScrollControl();
-    target.scrollIntoView({ block: "center" });
-    target.focus({ preventScroll: true });
-    target.classList.add("message-jump-target");
-    window.setTimeout(function () {
-      target.classList.remove("message-jump-target");
-    }, 1200);
-  }
-
-  function renderSessionList() {
-    sessionList.replaceChildren();
-    if (state.sessionsLoading) {
-      sessionList.append(sessionEmpty(t("ui.loading.sessions")));
-      return;
-    }
-    if (state.sessions.length === 0) {
-      sessionList.append(sessionEmpty(t("ui.no.main.agent.sessions.to.load")));
-      return;
-    }
-    for (const session of state.sessions) {
-      const item = document.createElement("button");
-      item.type = "button";
-      item.className = "session-item";
-      item.setAttribute("role", "option");
-      item.setAttribute("aria-selected", String(session.agentId === state.agentId));
-      const name = document.createElement("span");
-      name.className = "session-item-name";
-      name.textContent = session.agentId;
-      const meta = document.createElement("span");
-      meta.className = "session-item-meta";
-      meta.textContent = [session.model, formatSessionDate(session.updatedAt)].filter(Boolean).join(" · ") || t("ui.main.agent");
-      item.append(name, meta);
-      item.addEventListener("click", function () {
-        vscode.postMessage({ type: "session.select", agentId: session.agentId });
-      });
-      item.addEventListener("keydown", handleSessionListKeydown);
-      sessionList.append(item);
-    }
-  }
-
-  function sessionEmpty(text) {
-    const empty = document.createElement("div");
-    empty.className = "session-empty";
-    empty.textContent = text;
-    return empty;
-  }
-
-  function formatSessionDate(value) {
-    if (typeof value !== "string") {
-      return "";
-    }
-    const date = new Date(value);
-    return Number.isNaN(date.getTime()) ? "" : date.toLocaleString(uiLocale());
-  }
-
-  function handleSessionListKeydown(event) {
-    if (event.key !== "ArrowDown" && event.key !== "ArrowUp") {
-      return;
-    }
-    const items = Array.from(event.currentTarget.parentElement.querySelectorAll('[role="option"]:not(:disabled)'));
-    const index = items.indexOf(event.currentTarget);
-    const offset = event.key === "ArrowDown" ? 1 : -1;
-    event.preventDefault();
-    items[(index + offset + items.length) % items.length]?.focus();
-  }
-
-  function updateQuestionControl() {
-    const count = indexedTimeline().questions.length;
-    questionButton.title = t("toolbar.questions", count);
-    questionButton.setAttribute("aria-label", questionButton.title);
-  }
-
-  function clearBotGlance() {
-    clearTimeout(botGlanceTimer);
-    botGlanceTimer = undefined;
-    delete factoryBot.dataset.glance;
-  }
-
-  function maybeGlanceAtPointer(event) {
-    if (!state.botsEnabled || event.pointerType !== "mouse" || document.hidden || !state.botVisible ||
-        !state.botAnimations || botReducedMotion.matches || factoryBot.dataset.state !== "idle") return;
-    const now = Date.now();
-    if (now < botNextGlanceAt) return;
-    // Sample once per interval, including misses, so frequent events cannot force a glance.
-    botNextGlanceAt = now + 12000;
-    if (Math.random() >= 0.2) return;
-    const box = factoryBot.getBoundingClientRect();
-    const dx = Math.max(-1, Math.min(1, (event.clientX - box.x - box.width / 2) / 160));
-    const dy = Math.max(-1, Math.min(1, (event.clientY - box.y - box.height / 2) / 160));
-    factoryBot.style.setProperty("--bot-glance-x", (dx * 2.5) + "px");
-    factoryBot.style.setProperty("--bot-glance-y", (dy * 2) + "px");
-    factoryBot.style.setProperty("--bot-glance-tilt", (dx * 6) + "deg");
-    factoryBot.dataset.glance = "true";
-    botGlanceTimer = window.setTimeout(clearBotGlance, 1500);
-  }
-
-  function wakeFactoryBot() {
-    if (!state.botsEnabled) return;
-    if (!companionSnapshot) botIdleSince = Date.now();
-    if (["drowsy", "sleeping"].includes(factoryBot.dataset.state)) renderFactoryBot();
-  }
-
-  function botVisualsActive() {
-    return state.botsEnabled && state.botVisible && !document.hidden;
-  }
 
   // Only a fixed-size snapshot is retained; no care log or animation frames.
   function restoreBotCare(value) {
@@ -3646,500 +2292,12 @@
       updatedAt: now };
   }
 
-  function updateBotCare() {
-    if (companionSnapshot) return;
-    const care = state.botCare;
-    const now = Date.now();
-    const minutes = Math.max(0, (now - care.updatedAt) / 60000);
-    if (minutes < 1) return;
-    // Hidden/disabled time is rest, not neglect. Evaluate elapsed time lazily.
-    const resting = !botVisualsActive() || ["sleeping", "offline"].includes(factoryBot.dataset.state) || minutes > 5;
-    state.botCare = { ...care,
-      fullness: Math.max(0, care.fullness - (resting ? 0 : minutes * .5)),
-      happiness: Math.max(0, care.happiness - (resting ? 0 : minutes * .25)),
-      energy: Math.max(0, Math.min(100, care.energy + minutes * (resting ? 2 : -.5))),
-      updatedAt: now };
-  }
-
-  function renderBotCare() {
-    clearTimeout(botCareTimer); botCareTimer = undefined;
-    updateBotCare();
-    if (botMenu.hidden || !botVisualsActive()) return;
-    for (const key of ["fullness", "happiness", "energy"]) {
-      const value = Math.round(state.botCare[key]);
-      document.getElementById("bot-" + key).value = value;
-      document.getElementById("bot-" + key + "-value").textContent = String(value);
-    }
-    document.getElementById("bot-care-growth").textContent = t("bot.growth", 1 + Math.floor(state.botCare.careCount / 5), state.botCare.careCount);
-    // One minute timer only while the care panel is visible. Reuse gesture ticks otherwise.
-    botCareTimer = window.setTimeout(renderBotCare, 60000);
-  }
-
-  function factoryBotKey() {
-    return [state.botsEnabled, state.botVisible, state.botAnimations, state.pendingDecisionRunId,
-      state.runtimeAvailable, state.running, botOutcome, uiLocale()].join(":");
-  }
-
-  function updateBotGesture(mode) {
-    const mood = factoryBot.dataset.mood || "calm";
-    const key = mode + ":" + mood;
-    if (key !== botGestureKey || mode !== "idle") {
-      clearTimeout(botGestureTimer);
-      botGestureTimer = undefined;
-      botGestureKey = key;
-    }
-    if (mode !== "idle" || !botVisualsActive() || !state.botAnimations || botReducedMotion.matches) {
-      clearTimeout(botGestureTimer);
-      botGestureTimer = undefined;
-      delete factoryBot.dataset.gesture;
-      return;
-    }
-    if (botGestureTimer !== undefined) return;
-    const pools = {
-      calm: ["breathe", "stretch", "coffee", "read", "bow", "look"],
-      curious: ["look", "read", "balance", "wave", "stretch", "shy"],
-      cheerful: ["dance", "wave", "bow", "balance", "stretch", "shy"],
-      focused: ["read", "coffee", "look", "breathe", "stretch", "bow"]
-    };
-    const care = state.botCare;
-    if (care.careCount >= 5) pools.calm = pools.calm.concat(["dance", "balance"]);
-    const preferred = care.energy < 30 ? ["breathe", "read"]
-      : care.fullness < 30 ? ["look", "breathe"]
-      : care.happiness < 35 ? ["shy", "look", "read"] : pools[mood] || pools.calm;
-    const choices = preferred.filter(function (gesture) {
-      return gesture !== factoryBot.dataset.gesture;
-    });
-    factoryBot.dataset.gesture = choices[Math.floor(Math.random() * choices.length)];
-    botGestureTimer = window.setTimeout(function () {
-      botGestureTimer = undefined;
-      renderFactoryBot();
-    }, 8000);
-  }
-
-  function renderFactoryBot() {
-    renderBotIdentity();
-    if (!state.botsEnabled) { botTalkPending = undefined; botSpeechVisible = false; botSpeechText.textContent = ""; }
-    renderBotTalk();
-    renderBotCare();
-    botRenderKey = factoryBotKey();
-    document.getElementById("bots-disabled").checked = !state.botsEnabled;
-    factoryBot.hidden = !state.botsEnabled || !state.botVisible;
-    const dock = document.getElementById("companion-dock");
-    dock.hidden = factoryBot.hidden;
-    document.getElementById("bot-visible").disabled = !state.botsEnabled;
-    document.getElementById("bot-animations").disabled = !state.botsEnabled;
-    if (!state.botsEnabled) {
-      clearTimeout(botIdleTimer); botIdleTimer = undefined;
-      clearTimeout(botGestureTimer); botGestureTimer = undefined;
-      clearTimeout(botWaveTimer); botWaveTimer = undefined;
-      clearTimeout(botReactionTimer); botReactionTimer = undefined;
-      botIdleSince = undefined;
-      botGestureKey = undefined;
-      delete factoryBot.dataset.gesture;
-      delete factoryBot.dataset.reacting;
-      delete factoryBot.dataset.mood;
-      delete factoryBot.dataset.brain;
-      clearBotGlance();
-      closeBotMenu();
-      renderCompanion();
-      return;
-    }
-    factoryBot.dataset.animations = String(state.botAnimations);
-    let mode = companionWorking > 0 ? "working" : state.pendingDecisionRunId ? "waiting"
-      : !state.runtimeAvailable ? "offline"
-      : state.running ? "working"
-      : botOutcome === "completed" ? "complete"
-      : botOutcome === "failed" ? "error" : "idle";
-    clearTimeout(botIdleTimer);
-    botIdleTimer = undefined;
-    if (mode === "idle") {
-      if (state.botCare.energy < 15 && botIdleSince === undefined) botIdleSince = Date.now() - 60000;
-      if (botIdleSince === undefined) botIdleSince = Date.now();
-      const elapsed = Date.now() - botIdleSince;
-      if (botTalkPending || botSpeechVisible) mode = "idle";
-      else if (elapsed >= 60000) mode = "sleeping";
-      else {
-        if (elapsed >= 45000) mode = "drowsy";
-        if (botVisualsActive()) botIdleTimer = window.setTimeout(renderFactoryBot, (elapsed < 45000 ? 45000 : 60000) - elapsed);
-      }
-    } else {
-      botIdleSince = companionSnapshot ? companionSnapshot.lastInteractionAt : undefined;
-    }
-    const labels = { drowsy: t("ui.getting.sleepy"), sleeping: t("ui.sleeping"), idle: t("ui.ready"), working: t("ui.working"), waiting: t("ui.waiting.for.your.reply"), complete: t("ui.completed"), error: t("ui.needs.attention"), offline: t("ui.resting.runtime.offline") };
-    factoryBot.dataset.state = mode;
-    if (botMenu) {
-      const available = mode === "idle" || mode === "drowsy" || mode === "sleeping";
-      botMenu.querySelectorAll("[data-bot-action], [data-companion-action]").forEach(button => { button.disabled = !available && (!state.companionAvailable || button.hasAttribute("data-bot-action")); });
-      document.getElementById("bot-menu-note").hidden = available;
-      if (!state.botVisible) closeBotMenu();
-    }
-    if (mode !== "idle" || !state.botVisible || !state.botAnimations || botReducedMotion.matches) clearBotGlance();
-    updateBotGesture(mode);
-    factoryBot.title = botDisplayName() + " · " + labels[mode] + (factoryBot.dataset.brain === "luna" ? t("ui.luna.none") : factoryBot.dataset.brain === "unavailable" ? t("ui.local.animation.luna.unavailable") : "");
-    factoryBot.setAttribute("aria-label", factoryBot.title);
-    renderCompanion();
-    if (mode === "complete" && !botWaveTimer) {
-      botWaveTimer = window.setTimeout(function () {
-        botWaveTimer = undefined;
-        if (botOutcome === "completed") botOutcome = undefined;
-        renderFactoryBot();
-      }, 2400);
-    }
-  }
-
-  function renderStatusBar() {
-    if (botRenderKey !== factoryBotKey()) renderFactoryBot();
-    if (statusDragId) { statusRenderPending = true; return; }
-    const focusedId = statusBar.contains(document.activeElement) ? document.activeElement.dataset.itemId : undefined;
-    const catalog = statusCatalog();
-    const retained = new Set();
-    let previous;
-    for (const itemId of state.statusItems.filter(statusItemAvailable)) {
-      retained.add(itemId);
-      let item = statusElements.get(itemId);
-      if (!item) {
-        item = document.createElement("span");
-        item.draggable = true;
-        item.tabIndex = 0;
-        item.dataset.itemId = itemId;
-        bindStatusDrag(item, itemId, false);
-        item.addEventListener("click", function () {
-          if (itemId === "agents" && state.role === "main") openAgentsMenu();
-        });
-        item.addEventListener("keydown", function (event) {
-          if (itemId === "agents" && state.role === "main" && ["Enter", " "].includes(event.key)) {
-            event.preventDefault();
-            openAgentsMenu();
-          } else if (event.altKey && ["ArrowLeft", "ArrowRight"].includes(event.key)) {
-            event.preventDefault();
-            moveStatus(itemId, event.key === "ArrowLeft" ? -1 : 1);
-          }
-        });
-        statusElements.set(itemId, item);
-      }
-      const label = statusLabel(itemId);
-      const renderKey = JSON.stringify([label, catalog[itemId], uiLocale(),
-        itemId === "runtime" ? state.runtimeAvailable : null,
-        itemId === "agents" ? [state.role, state.workUnitsKnown, state.workUnits.activeUnits, state.workUnits.totalCalled, agentsMenu.hidden] : null,
-        itemId === "context" ? [state.contextUsedTokens, state.contextWindowTokens] : null]);
-      const sibling = previous ? previous.nextElementSibling : statusBar.firstElementChild;
-      if (sibling !== item) statusBar.insertBefore(item, sibling);
-      previous = item;
-      if (statusRenderKeys.get(item) === renderKey) continue;
-      statusRenderKeys.set(item, renderKey);
-      item.className = "status-item";
-      for (const attr of ["role", "aria-haspopup", "aria-expanded", "data-active"]) item.removeAttribute(attr);
-      if (itemId === "runtime" && !state.runtimeAvailable) {
-        item.classList.add("runtime-offline");
-      }
-      item.textContent = label;
-      item.title = catalog[itemId][1];
-      item.setAttribute("aria-description", catalog[itemId][1]);
-      item.setAttribute("aria-label", catalog[itemId][0] + ": " + item.textContent + t("ui.move.with.alt.left.right"));
-      if (itemId === "agents" && state.role === "main") {
-        item.classList.add("work-unit-activity");
-        item.dataset.active = String(state.workUnits.activeUnits > 0);
-        item.title = state.workUnitsKnown ? t("ui.active.agent.tasks") + state.workUnits.activeUnits + t("ui.total.calls") + state.workUnits.totalCalled : t("ui.agent.status.unavailable.click.to.refresh");
-        item.setAttribute("role", "button");
-        item.setAttribute("aria-haspopup", "listbox");
-        item.setAttribute("aria-expanded", String(!agentsMenu.hidden));
-      } else if (itemId === "context" && state.contextUsedTokens !== undefined && state.contextWindowTokens > 0) {
-        renderContextStatus(item);
-      }
-      if ((itemId === "agents" && state.role === "main") || (itemId === "runtime" && !state.runtimeAvailable)) {
-        const indicator = document.createElementNS("http://www.w3.org/2000/svg", "svg");
-        indicator.setAttribute("viewBox", "0 0 8 8");
-        indicator.setAttribute("aria-hidden", "true");
-        indicator.setAttribute("focusable", "false");
-        indicator.classList.add("status-indicator");
-        const circle = document.createElementNS("http://www.w3.org/2000/svg", "circle");
-        circle.setAttribute("cx", "4"); circle.setAttribute("cy", "4"); circle.setAttribute("r", "3");
-        circle.setAttribute("fill", "currentColor");
-        indicator.append(circle);
-        item.prepend(indicator);
-      }
-    }
-    for (const [id, item] of statusElements) {
-      if (!retained.has(id)) { item.remove(); statusElements.delete(id); }
-    }
-    if (focusedId && document.activeElement?.dataset.itemId !== focusedId) statusBar.querySelector('[data-item-id="' + focusedId + '"]')?.focus();
-    refreshStatusPreview();
-  }
-
-  function openAgentsMenu() {
-    if (!agentsMenu.hidden) {
-      closeAgentsMenu();
-      return;
-    }
-    state.agentsLoading = true;
-    agentsMenu.hidden = false;
-    renderAgentsList();
-    renderStatusBar();
-    vscode.postMessage({ type: "agents.request" });
-  }
-
-  function closeAgentsMenu() {
-    agentsMenu.hidden = true;
-    renderStatusBar();
-  }
-
-  function renderAgentsList() {
-    agentsList.replaceChildren();
-    if (state.agentsLoading) {
-      agentsList.append(emptyAgentItem(t("ui.loading.called.agents")));
-      return;
-    }
-    if (state.childAgents.length === 0) {
-      agentsList.append(emptyAgentItem(t("ui.no.work.or.verification.agents.have.been.called.yet")));
-      return;
-    }
-    for (const agent of state.childAgents) {
-      const item = document.createElement("button");
-      item.type = "button";
-      item.className = "agent-item";
-      item.setAttribute("role", "option");
-      item.title = agent.agentId + t("ui.chat.with.session");
-      const main = document.createElement("span");
-      main.className = "agent-item-main";
-      const role = document.createElement("span");
-      role.className = "agent-role";
-      role.textContent = agent.role === "work" ? t("ui.work") : t("ui.verification");
-      const id = document.createElement("span");
-      id.className = "agent-id";
-      id.textContent = chatTaskFlow.childTaskName(agent);
-      const status = document.createElement("span");
-      status.className = "agent-status";
-      status.textContent = childAgentStatusLabel(agent.status) + t("ui.click.to.chat");
-      main.append(role, id);
-      item.append(main, status);
-      item.addEventListener("click", function () {
-        closeAgentsMenu();
-        vscode.postMessage({ type: "agent.open", agentId: agent.agentId });
-      });
-      agentsList.append(item);
-    }
-  }
-
-  function emptyAgentItem(text) {
-    const item = document.createElement("div");
-    item.className = "session-empty";
-    item.textContent = text;
-    return item;
-  }
-
-  function isChildAgent(agent) {
-    return agent && typeof agent.agentId === "string" &&
-      ["work", "verification"].includes(agent.role) && typeof agent.status === "string";
-  }
-
-  function summarizeChildAgents(agents) {
-    const activeStatuses = new Set(["accepted", "queued", "starting", "running", "verifying", "cancelling"]);
-    return {
-      activeUnits: agents.filter(function (agent) { return activeStatuses.has(agent.status); }).length,
-      workActive: agents.filter(function (agent) { return agent.role === "work" && activeStatuses.has(agent.status); }).length,
-      verificationActive: agents.filter(function (agent) { return agent.role === "verification" && activeStatuses.has(agent.status); }).length,
-      totalCalled: agents.length
-    };
-  }
-
-  function childAgentStatusLabel(status) {
-    const labels = {
-      accepted: t("ui.queued"),
-      queued: t("ui.queued"),
-      starting: t("ui.starting"),
-      running: t("ui.running.73989d"),
-      verifying: t("flow.status.verifying"),
-      cancelling: t("ui.cancelling"),
-      completed: t("ui.completed"),
-      failed: t("ui.failed.09fef5"),
-      cancelled: t("ui.cancelled"),
-      "needs-human-decision": t("ui.user.decision.required"),
-      unknown: t("ui.status.unknown")
-    };
-    return labels[status] || status;
-  }
-
-  function setStatusItems(items, announcement) {
-    state.statusItems = normalizeStatusItems(items);
-    renderStatusBar();
-    renderStatusCatalog();
-    persist();
-    statusAnnouncement.textContent = announcement || t("ui.displayed.information.updated");
-    vscode.postMessage({ type: "status.reorder", items: state.statusItems });
-  }
-
-  function reorderStatus(sourceId, targetId, after = false) {
-    const items = state.statusItems.slice();
-    if (sourceId === targetId || !items.includes(sourceId) || !items.includes(targetId)) return;
-    items.splice(items.indexOf(sourceId), 1);
-    items.splice(items.indexOf(targetId) + (after ? 1 : 0), 0, sourceId);
-    setStatusItems(items, statusCatalog()[sourceId][0] + t("ui.position.updated"));
-  }
-
-  function moveStatus(itemId, offset, order) {
-    const visible = order || state.statusItems.filter(statusItemAvailable);
-    const index = visible.indexOf(itemId);
-    const target = visible[index + offset];
-    if (index >= 0 && target) reorderStatus(itemId, target, offset > 0);
-  }
-
-  function clearStatusDropTargets() {
-    for (const element of document.querySelectorAll(".status-drop-before, .status-drop-after")) {
-      element.classList.remove("status-drop-before", "status-drop-after");
-    }
-  }
-
-  function bindStatusDrag(element, itemId, vertical) {
-    element.draggable = true;
-    element.addEventListener("dragstart", function (event) {
-      if (!state.statusItems.includes(itemId)) { event.preventDefault(); return; }
-      statusDragId = itemId;
-      event.stopPropagation();
-      event.dataTransfer?.setData("text/status-item", itemId);
-      if (event.dataTransfer) event.dataTransfer.effectAllowed = "move";
-      element.classList.add("dragging");
-    });
-    element.addEventListener("dragend", function () {
-      statusDragId = undefined;
-      element.classList.remove("dragging");
-      clearStatusDropTargets();
-      if (statusRenderPending) { statusRenderPending = false; renderStatusBar(); renderStatusCatalog(); }
-    });
-    function isAfter(event) {
-      const rect = element.getBoundingClientRect();
-      return vertical ? event.clientY > rect.top + rect.height / 2 : event.clientX > rect.left + rect.width / 2;
-    }
-    element.addEventListener("dragover", function (event) {
-      if (!statusDragId || statusDragId === itemId || !state.statusItems.includes(itemId)) return;
-      event.preventDefault();
-      event.stopPropagation();
-      if (event.dataTransfer) event.dataTransfer.dropEffect = "move";
-      clearStatusDropTargets();
-      element.classList.add(isAfter(event) ? "status-drop-after" : "status-drop-before");
-    });
-    element.addEventListener("dragleave", function (event) {
-      if (!element.contains(event.relatedTarget)) element.classList.remove("status-drop-before", "status-drop-after");
-    });
-    element.addEventListener("drop", function (event) {
-      const sourceId = statusDragId;
-      if (!sourceId || event.dataTransfer?.getData("text/status-item") !== sourceId) return;
-      event.preventDefault();
-      event.stopPropagation();
-      statusDragId = undefined;
-      statusRenderPending = false;
-      clearStatusDropTargets();
-      reorderStatus(sourceId, itemId, isAfter(event));
-    });
-  }
-
-  function renderStatusCatalog() {
-    if (statusDragId) { statusRenderPending = true; return; }
-    if (statusSettings.hidden) return;
-    const focusKey = statusCatalogList.contains(document.activeElement) ? document.activeElement.dataset.focusKey : undefined;
-    statusCatalogList.replaceChildren();
-    // The catalog is fixed: every item stays listed so settings do not shift with model or run state.
-    // Availability only decides whether a selected item currently appears in the status bar.
-    const visible = state.statusItems.slice();
-    const ids = [...visible, ...Object.keys(statusCatalog()).filter(id => !state.statusItems.includes(id))];
-    statusCatalogList.dataset.available = Object.keys(statusCatalog()).filter(statusItemAvailable).join(",");
-    let previousGroup;
-    for (const id of ids) {
-      const selected = state.statusItems.includes(id);
-      if (previousGroup !== selected) {
-        const heading = document.createElement("h3");
-        heading.className = "status-catalog-heading";
-        heading.textContent = selected ? t("ui.visible") + visible.length : t("ui.available");
-        statusCatalogList.append(heading);
-        previousGroup = selected;
-      }
-      const row = document.createElement("div");
-      row.className = "status-catalog-row";
-      row.dataset.itemId = id;
-      row.dataset.selected = String(selected);
-      const available = statusItemAvailable(id);
-      row.dataset.available = String(available);
-      const label = document.createElement("label");
-      const checkbox = document.createElement("input");
-      checkbox.type = "checkbox";
-      checkbox.checked = selected;
-      checkbox.dataset.focusKey = id + "-select";
-      checkbox.addEventListener("change", function () {
-        setStatusItems(checkbox.checked ? [...state.statusItems, id] : state.statusItems.filter(item => item !== id));
-      });
-      const name = document.createElement("span");
-      name.textContent = statusCatalog()[id][0];
-      const checkboxControl = document.createElement("span");
-      checkboxControl.className = "status-checkbox";
-      const check = document.createElementNS("http://www.w3.org/2000/svg", "svg");
-      check.setAttribute("viewBox", "0 0 16 16");
-      check.setAttribute("aria-hidden", "true");
-      check.setAttribute("focusable", "false");
-      const checkPath = document.createElementNS("http://www.w3.org/2000/svg", "path");
-      checkPath.setAttribute("d", "m3 8 3 3 7-7");
-      check.append(checkPath);
-      checkboxControl.append(checkbox, check);
-      label.append(checkboxControl, name);
-      label.title = statusCatalog()[id][1];
-      checkbox.setAttribute("aria-description", statusCatalog()[id][1]);
-      const preview = document.createElement("span");
-      preview.className = "status-preview";
-      preview.dataset.previewId = id;
-      preview.textContent = available ? statusLabel(id) : t("ui.status.item.unavailable");
-      if (!available) preview.title = t("ui.status.item.unavailable.hint");
-      const actions = document.createElement("div");
-      actions.className = "status-order-actions";
-      for (const [offset, title] of [[-1, t("ui.earlier")], [1, t("ui.later")]]) {
-        const button = document.createElement("button");
-        button.type = "button";
-        const icon = document.createElementNS("http://www.w3.org/2000/svg", "svg");
-        icon.setAttribute("viewBox", "0 0 16 16");
-        icon.setAttribute("aria-hidden", "true");
-        icon.setAttribute("focusable", "false");
-        const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
-        path.setAttribute("d", offset < 0 ? "m4 10 4-4 4 4" : "m4 6 4 4 4-4");
-        icon.append(path);
-        button.append(icon);
-        button.title = title + t("ui.move");
-        button.dataset.focusKey = id + "-" + offset;
-        button.setAttribute("aria-label", statusCatalog()[id][0] + " " + title + t("ui.move"));
-        const index = visible.indexOf(id);
-        button.disabled = !selected || index + offset < 0 || index + offset >= visible.length;
-        button.addEventListener("click", function () { moveStatus(id, offset, visible); });
-        actions.append(button);
-      }
-      actions.hidden = !selected;
-      row.append(label, actions, preview);
-      if (selected) bindStatusDrag(row, id, true);
-      statusCatalogList.append(row);
-    }
-    if (focusKey) {
-      const target = statusCatalogList.querySelector('[data-focus-key="' + focusKey + '"]');
-      (target?.disabled ? target.closest(".status-catalog-row").querySelector("input") : target)?.focus();
-    }
-  }
-
-  function refreshStatusPreview() {
-    if (statusSettings.hidden) return;
-    if (statusCatalogList.dataset.available !== Object.keys(statusCatalog()).filter(statusItemAvailable).join(",")) {
-      renderStatusCatalog();
-    }
-    for (const preview of statusCatalogList.querySelectorAll("[data-preview-id]")) {
-      if (statusItemAvailable(preview.dataset.previewId)) preview.textContent = statusLabel(preview.dataset.previewId);
-    }
-  }
-
-  function closeStatusSettings() {
-    statusSettings.hidden = true;
-    statusSettingsButton.setAttribute("aria-expanded", "false");
-    statusSettingsButton.focus();
-  }
-
   statusSettingsButton.addEventListener("click", function () {
-    if (!statusSettings.hidden) { closeStatusSettings(); return; }
+    if (!statusSettings.hidden) { chatStatusBar.closeStatusSettings(); return; }
     chatAgentSettings.renderGeneralSettings();
     statusSettings.hidden = false;
     statusSettingsButton.setAttribute("aria-expanded", "true");
-    renderStatusCatalog();
+    chatStatusBar.renderStatusCatalog();
     renderAccountUsage();
     vscode.postMessage({ type: "usage.refresh" });
     statusSettings.querySelector('[role="tab"][aria-selected="true"]')?.focus();
@@ -4219,7 +2377,7 @@
       item.tabIndex = selected ? 0 : -1;
       document.getElementById(item.getAttribute("aria-controls")).hidden = !selected;
     }
-    renderStatusCatalog();
+    chatStatusBar.renderStatusCatalog();
     renderAccountUsage();
     if (tab.dataset.settingsTab === "providers" && !chatProviders.providerVersionsRequested) {
       chatProviders.providerVersionsRequested = true;
@@ -4234,10 +2392,10 @@
     tab.addEventListener("keydown", function (event) {
       const index = settingsTabs.indexOf(tab);
       let next;
-      if (matchesShortcut(event, shortcuts.settingsTabNext)) next = (index + 1) % settingsTabs.length;
-      if (matchesShortcut(event, shortcuts.settingsTabPrevious)) next = (index + settingsTabs.length - 1) % settingsTabs.length;
-      if (matchesShortcut(event, shortcuts.settingsTabFirst)) next = 0;
-      if (matchesShortcut(event, shortcuts.settingsTabLast)) next = settingsTabs.length - 1;
+      if (chatShortcuts.matchesShortcut(event, chatShortcuts.shortcuts.settingsTabNext)) next = (index + 1) % settingsTabs.length;
+      if (chatShortcuts.matchesShortcut(event, chatShortcuts.shortcuts.settingsTabPrevious)) next = (index + settingsTabs.length - 1) % settingsTabs.length;
+      if (chatShortcuts.matchesShortcut(event, chatShortcuts.shortcuts.settingsTabFirst)) next = 0;
+      if (chatShortcuts.matchesShortcut(event, chatShortcuts.shortcuts.settingsTabLast)) next = settingsTabs.length - 1;
       if (next === undefined) return;
       event.preventDefault();
       selectSettingsTab(settingsTabs[next]);
@@ -4246,7 +2404,7 @@
   document.getElementById("bots-disabled").addEventListener("change", function (event) {
     if (!state.botsAvailable) return;
     state.botsEnabled = !event.target.checked;
-    renderFactoryBot();
+    chatBot.renderFactoryBot();
     vscode.postMessage({ type: "bots.configure", enabled: state.botsEnabled });
   });
   for (const [id, key] of [["bot-visible", "botVisible"], ["bot-animations", "botAnimations"]]) {
@@ -4254,192 +2412,20 @@
     control.checked = state[key];
     control.addEventListener("change", function () {
       state[key] = control.checked;
-      renderFactoryBot();
+      chatBot.renderFactoryBot();
       persist();
     });
   }
-  document.getElementById("status-settings-close").addEventListener("click", closeStatusSettings);
+  document.getElementById("status-settings-close").addEventListener("click", chatStatusBar.closeStatusSettings);
   document.getElementById("status-reset").addEventListener("click", function () {
-    setStatusItems(defaultStatusItems, t("ui.default.status.items.and.order.restored"));
+    chatStatusBar.setStatusItems(defaultStatusItems, t("ui.default.status.items.and.order.restored"));
   });
   statusSettings.addEventListener("keydown", function (event) {
     if (event.key === "Escape") {
       if (CSS.supports("selector(select:open)") && statusSettings.querySelector("select:open")) return;
-      event.preventDefault(); event.stopPropagation(); closeStatusSettings();
+      event.preventDefault(); event.stopPropagation(); chatStatusBar.closeStatusSettings();
     }
   });
-
-  function statusItemAvailable(id) {
-    const main = state.role === "main";
-    const hasUsage = safeCountOrUndefined(state.contextUsedTokens) !== undefined;
-    const hasWindow = state.contextWindowTokens > 0;
-    const supported = currentCapabilities();
-    switch (id) {
-      case "context": case "contextRemainingTokens": case "contextUsedPercent": return hasUsage && hasWindow;
-      case "contextUsed": return hasUsage;
-      case "contextWindow": return hasWindow;
-      case "fiveHour": case "fiveHourRemaining": return safePercentOrUndefined(state.fiveHourUsedPercent) !== undefined;
-      case "weekly": case "weeklyRemaining": return safePercentOrUndefined(state.weeklyUsedPercent) !== undefined;
-      case "fiveHourReset": return safeResetsAtOrUndefined(state.fiveHourResetsAt) !== undefined;
-      case "weeklyReset": return safeResetsAtOrUndefined(state.weeklyResetsAt) !== undefined;
-      case "agents": case "agentsTotal": return main && state.workUnitsKnown;
-      case "goalTokens": return main && !goalError && safeCountOrUndefined(nativeGoal?.tokensUsed) !== undefined;
-      case "goalTime": return main && !goalError && safeCountOrUndefined(nativeGoal?.timeUsedSeconds) !== undefined;
-      case "goalBudget": return main && !goalError && safeCountOrUndefined(nativeGoal?.tokenBudget) !== undefined;
-      case "goal": return main && !goalError && Boolean(nativeGoal || supported.goal);
-      case "task": return main;
-      case "model": case "reasoning": case "fast": return Boolean(supported[id]);
-      case "elapsed": return Boolean(state.running && state.runStartedAt);
-      case "project": return Boolean(state.projectName || chatWorkUnits.conversationWorktree?.workingDirectory);
-      case "branch": return Boolean(state.branch);
-      case "execution": return Boolean(state.executionMode);
-      default: return true;
-    }
-  }
-
-  function statusLabel(itemId) {
-    const main = state.role === "main";
-    const count = value => safeCountOrUndefined(value) === undefined ? "—" : value.toLocaleString(uiLocale());
-    const goalLabels = { active: t("ui.active.a733b8"), paused: t("ui.paused"), blocked: t("ui.awaiting.input"), usageLimited: t("ui.usage.limit"), budgetLimited: t("ui.budget.limit"), complete: t("ui.done") };
-    const executionLabels = { "cli-default": t("ui.cli.default"), "workspace-write": t("ui.workspace"), "danger-full-access": t("ui.full.access"), bypass: t("ui.full.bypass"), "read-only": t("ui.read.only") };
-    const supported = currentCapabilities();
-    const labels = {
-      agent: state.title,
-      status: state.cancellationRequested ? t("ui.cancellation.requested") : state.pendingDecisionRunId ? t("ui.awaiting.input") : state.running ? t("ui.running.73989d") : state.runtimeAvailable ? t("ui.idle") : t("ui.offline"),
-      role: { main: t("ui.main"), work: t("ui.work"), verification: t("ui.verify") }[state.role],
-      agents: main ? state.workUnitsKnown ? t("status.agents", state.workUnits.workActive, state.workUnits.verificationActive) : t("ui.agents") : t("ui.agents.main.only"),
-      agentsTotal: main ? t("ui.calls") + (state.workUnitsKnown ? count(state.workUnits.totalCalled) : "—") : t("ui.calls.main.only"),
-      project: t(chatWorkUnits.conversationWorktree?.worktree && chatWorkUnits.conversationWorktree.worktree.phase !== "merged" ? "worktree.status.tree" : "worktree.status.home"),
-      branch: state.branch || "—",
-      context: contextStatusLabel(),
-      contextUsed: contextUsedStatusLabel(),
-      contextRemainingTokens: contextRemainingTokensLabel(),
-      contextUsedPercent: contextUsedPercentLabel(),
-      contextWindow: t("ui.ctx.window") + (state.contextWindowTokens > 0 ? count(state.contextWindowTokens) : "—") + t("ui.tokens"),
-      fiveHour: t("ui.5h.used") + (state.fiveHourUsedPercent === undefined ? "—" : formatPercent(state.fiveHourUsedPercent)),
-      fiveHourRemaining: t("ui.5h.left") + (state.fiveHourUsedPercent === undefined ? "—" : formatPercent(100 - state.fiveHourUsedPercent)),
-      weekly: t("ui.wk.used") + (state.weeklyUsedPercent === undefined ? "—" : formatPercent(state.weeklyUsedPercent)),
-      weeklyRemaining: t("ui.wk.left") + (state.weeklyUsedPercent === undefined ? "—" : formatPercent(100 - state.weeklyUsedPercent)),
-      fiveHourReset: t("ui.5h.reset") + formatResetsAt(state.fiveHourResetsAt),
-      weeklyReset: t("ui.wk.reset") + formatResetsAt(state.weeklyResetsAt),
-      elapsed: state.running && state.runStartedAt ? t("ui.elapsed") + formatElapsed(Math.max(0, Date.now() - state.runStartedAt)) : t("ui.elapsed.54e60c"),
-      queue: t("ui.queue") + Math.max(state.queueCount, (state.pendingRequests || []).length),
-      runtime: state.runtimeAvailable ? t("ui.runtime.online") : t("ui.runtime.offline"),
-      model: t("ui.model.b32422") + (supported.model ? chatAgentSettings.effectiveAgentValue("main", "model") || t("ui.default") : t("ui.unknown")),
-      reasoning: t("ui.reasoning.529e9c") + (supported.reasoning ? reasoningDisplayLabel(chatAgentSettings.effectiveAgentValue("main", "reasoningEffort")) : t("ui.unknown")),
-      fast: t("ui.fast.314aef") + (supported.fast ? state.fastMode ? t("ui.on") : t("ui.off") : t("ui.unknown")),
-      task: main ? t("ui.task") + taskModeNames()[enterAction()]?.replaceAll(t("ui.verification"), t("ui.verify")) : t("ui.task.main.only"),
-      execution: t("ui.perms") + (executionLabels[state.executionMode] || "—"),
-      goal: !main ? t("ui.goal.main.only") : goalError ? t("ui.goal.0c4444") : nativeGoal ? t("ui.goal.8c9d70") + (goalLabels[nativeGoal.status] || "—") : t("ui.goal.8c9d70") + t("ui.off"),
-      goalTokens: t("ui.goal.used") + (main && !goalError ? count(nativeGoal?.tokensUsed) : "—") + t("ui.tokens"),
-      goalBudget: t("ui.goal.budget") + (main && !goalError ? count(nativeGoal?.tokenBudget) : "—") + t("ui.tokens"),
-      goalTime: t("ui.goal.time") + (main && !goalError && safeCountOrUndefined(nativeGoal?.timeUsedSeconds) !== undefined ? formatElapsed(nativeGoal.timeUsedSeconds * 1000) : "—")
-    };
-    return labels[itemId] || itemId;
-  }
-
-  function renderPendingQueue() {
-    const queue = document.getElementById("pending-message-queue");
-    const toggle = document.getElementById("pending-queue-toggle");
-    const label = document.getElementById("pending-queue-label");
-    const pending = state.pendingRequests || [];
-    const expanded = pending.length > 0 && toggle.getAttribute("aria-expanded") === "true";
-    toggle.hidden = pending.length === 0;
-    toggle.setAttribute("aria-expanded", String(expanded));
-    label.textContent = t("queue.count", pending.length);
-    toggle.setAttribute("aria-label", t("queue.items", pending.length));
-    toggle.title = t("queue.expand", pending.length);
-    toggle.onclick = function () {
-      const open = toggle.getAttribute("aria-expanded") !== "true";
-      toggle.setAttribute("aria-expanded", String(open));
-      renderPendingQueue();
-    };
-    queue.hidden = !expanded;
-    if (!expanded) {
-      if (queue.childNodes.length) queue.replaceChildren();
-      pendingQueueRows.clear();
-      return;
-    }
-    const nodes = [];
-    const description = queue.querySelector(".pending-queue-description") || document.createElement("p");
-    description.className = "pending-queue-description";
-    description.textContent = state.pendingDecisionRunId ? t("ui.queued.messages.will.run.together.after.your.decision") : t("ui.queued.messages.retain.their.execution.action.only.matching.actions.run.together");
-    nodes.push(description);
-    if (pending.some(function (item) { return !item.rejected; }) && !state.running && !state.pendingDecisionRunId) {
-      const resume = queue.querySelector("[data-queue-resume]") || document.createElement("button");
-      resume.dataset.queueResume = "true";
-      resume.type = "button";
-      resume.textContent = t("ui.check.run.status.and.resume.queue");
-      resume.onclick = function () { vscode.postMessage({ type: "queue.resume" }); };
-      nodes.push(resume);
-    }
-    if (pending.some(function (item) { return !item.rejected; }) && state.running && !state.pendingDecisionRunId) {
-      // Stopping the current run dispatches the queue next; unlike Escape it always retries.
-      const sendNow = queue.querySelector("[data-queue-send-now]") || document.createElement("button");
-      sendNow.dataset.queueSendNow = "true";
-      sendNow.type = "button";
-      sendNow.textContent = t("ui.stop.current.run.and.send.queued.messages.now");
-      sendNow.onclick = function () { cancelRun(true); };
-      nodes.push(sendNow);
-    }
-    const ids = new Set(pending.map(function (item) { return item.id; }));
-    for (const id of pendingQueueRows.keys()) {
-      if (!ids.has(id)) pendingQueueRows.delete(id);
-    }
-    pending.forEach(function (item) {
-      const key = JSON.stringify([uiLocale(), item.text, item.attachments.map(function (attachment) { return attachment.name; }), submissionFromExecution(item.execution), Boolean(item.rejected)]);
-      const cached = pendingQueueRows.get(item.id);
-      if (cached?.key === key) {
-        const recover = cached.nodes[1];
-        if (recover) recover.disabled = hasComposerContent();
-        nodes.push(...cached.nodes);
-        return;
-      }
-      const rowNodes = [];
-      const entry = document.createElement("div");
-      entry.textContent = item.text + (item.attachments.length ? " · " + item.attachments.map(function (attachment) { return attachment.name; }).join(", ") : "");
-      renderSubmission(entry, submissionFromExecution(item.execution));
-      rowNodes.push(entry);
-      if (item.rejected) {
-        const recover = document.createElement("button");
-        recover.type = "button";
-        recover.textContent = t("ui.submission.unconfirmed.restore.to.input");
-        recover.dataset.queueRecover = "true";
-        recover.disabled = hasComposerContent();
-        recover.addEventListener("click", function () {
-          if (hasComposerContent()) return;
-          const request = state.pendingRequests.find(function (pending) { return pending.id === item.id; });
-          if (!request) return;
-          state.pendingRequests = state.pendingRequests.filter(function (request) { return request.id !== item.id; });
-          state.draft = request.text;
-          prompt.value = request.text;
-          state.attachments = request.attachments;
-          state.taskMode = "direct";
-          state.businessMode = "normal";
-          state.model = request.execution.model;
-          state.agentModels = request.execution.agentModels || {};
-          state.reasoning = request.execution.reasoningEffort;
-          state.fastMode = request.execution.fast;
-          renderAll();
-          resizePrompt();
-          persist();
-        });
-        rowNodes.push(recover);
-      }
-      pendingQueueRows.set(item.id, { key, nodes: rowNodes });
-      nodes.push(...rowNodes);
-    });
-    // Remove obsolete nodes first so retained buttons keep their focus.
-    const retained = new Set(nodes);
-    for (const node of Array.from(queue.childNodes)) {
-      if (!retained.has(node)) node.remove();
-    }
-    let cursor = queue.firstChild;
-    for (const node of nodes) {
-      if (node === cursor) cursor = cursor.nextSibling;
-      else queue.insertBefore(node, cursor);
-    }
-  }
 
   function updateSendButton() {
     sendButton.disabled = conversationClearing || !state.runtimeAvailable || !state.capabilities || Boolean(chatWorkUnits.conversationWorktree?.worktree?.workUnit && chatWorkUnits.conversationWorktree.worktree.phase === "merged");
@@ -4447,7 +2433,7 @@
 
   function updateRunControls() {
     chatWorkUnits.renderWorktree();
-    renderPendingQueue();
+    chatPendingQueue.renderPendingQueue();
     updateExecutionControl();
     updateComposerControls();
     renderRunStatus();
@@ -4463,7 +2449,7 @@
     const queuesMessage = (state.running || (state.pendingRequests || []).length > 0) && hasContent;
     sendButton.classList.toggle("is-running", state.running && !queuesMessage);
     sendButton.setAttribute("aria-label", queuesMessage ? t("ui.add.message.to.queue") : state.running ? t("ui.stop.current.run") : t("ui.send.message"));
-    const sendKey = shortcutLabel(shortcuts.send);
+    const sendKey = chatShortcuts.shortcutLabel(chatShortcuts.shortcuts.send);
     sendButton.title = (queuesMessage ? t("ui.add.to.queue.enter") : state.running ? t("ui.stop.current.run.esc") : t("ui.send.enter")).replace(/Enter/g, sendKey);
     const goalActive = state.role === "main" && !goalError && nativeGoal?.status === "active";
     const stopsRun = state.running && !queuesMessage;
@@ -4484,7 +2470,7 @@
   function toggleMode(key) {
     state[key] = !state[key];
     updateModeControls();
-    renderStatusBar();
+    chatStatusBar.renderStatusBar();
     persist();
     saveComposerSettings();
   }
@@ -4531,7 +2517,7 @@
     modelButton.setAttribute("aria-label", modelButton.title);
     if (openSettingId === "submission") renderSubmissionMenu(submissionMenu);
     updateComposerControls();
-    renderStatusBar();
+    chatStatusBar.renderStatusBar();
   }
 
   function openSetting(setting) {
@@ -4540,8 +2526,8 @@
       return;
     }
     closeSettingMenu(false);
-    closeSessionMenu(false);
-    closeQuestionMenu(false);
+    chatNavigation.closeSessionMenu(false);
+    chatNavigation.closeQuestionMenu(false);
     openSettingId = setting;
     if (setting === "model") vscode.postMessage({ type: "models.request" });
     if (setting === "worktree" && state.role === "main") chatWorkUnits.requestDeployTargets();
@@ -4610,7 +2596,7 @@
     menu = menu.querySelector("#submission-options");
     menu.replaceChildren();
     const entry = id => {
-      const item = shortcutActions.find(action => action.id === id);
+      const item = chatShortcuts.shortcutActions.find(action => action.id === id);
       return [item.label(), item.submit.action, item.submit.workflow, item.submit.goal, id];
     };
     const groups = [
@@ -4629,8 +2615,8 @@
         option.type = "button"; option.className = "setting-option"; option.setAttribute("role", "menuitem");
         option.dataset.action = action; option.dataset.workflow = workflow; option.dataset.goal = String(goal);
         option.disabled = submissionOptionDisabled(action, goal);
-        option.title = option.disabled ? t("ui.requires.a.compatible.runtime") : t("submission.send", label) + (shortcuts[shortcutId] ? " (" + shortcutLabel(shortcuts[shortcutId]) + ")" : "");
-        if (shortcuts[shortcutId]) option.setAttribute("aria-keyshortcuts", shortcutAria(shortcuts[shortcutId]));
+        option.title = option.disabled ? t("ui.requires.a.compatible.runtime") : t("submission.send", label) + (chatShortcuts.shortcuts[shortcutId] ? " (" + chatShortcuts.shortcutLabel(chatShortcuts.shortcuts[shortcutId]) + ")" : "");
+        if (chatShortcuts.shortcuts[shortcutId]) option.setAttribute("aria-keyshortcuts", chatShortcuts.shortcutAria(chatShortcuts.shortcuts[shortcutId]));
         const name = document.createElement("span"); name.textContent = label;
         const icon = goal ? createModeIcon("M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18Zm0 5a4 4 0 1 0 0 8 4 4 0 0 0 0-8Z", "task-mode-icon") : workflow !== "normal" ? createBusinessModeIcon(workflow) : createTaskModeIcon(action);
         option.append(icon, name, createModeIcon("M12 19V5m-6 6 6-6 6 6", "submit-icon"));
@@ -4793,8 +2779,8 @@
 
   function persistNow() {
     const next = persistenceSnapshot({
-      shortcuts: { ...shortcuts },
-      shortcutDefaultsVersion: shortcutDefaultsVersion,
+      shortcuts: { ...chatShortcuts.shortcuts },
+      shortcutDefaultsVersion: chatShortcuts.shortcutDefaultsVersion,
       startedMessageIds: state.startedMessageIds,
       pendingRequests: state.pendingRequests,
       notesScope: chatNotes.selectedNotesScope,
@@ -4984,17 +2970,17 @@
     displayLanguage = state.uiLanguage;
     document.documentElement.lang = uiLocale();
     globalThis.AgentFactoryI18n.apply(document, uiLocale());
-    renderShortcuts();
+    chatShortcuts.renderShortcuts();
     inputFeedback.textContent = localizedText(inputFeedback.textContent, feedback);
     renderAll();
-    renderStatusCatalog();
+    chatStatusBar.renderStatusCatalog();
     chatAgentSettings.renderModelSettings(modelMenu);
     renderSubmissionMenu(submissionMenu);
     chatAgentSettings.renderGeneralSettings();
-    renderQuestionList();
-    renderSessionList();
-    renderAgentsList();
-    renderFactoryBot();
+    chatNavigation.renderQuestionList();
+    chatNavigation.renderSessionList();
+    chatAgents.renderAgentsList();
+    chatBot.renderFactoryBot();
     persist();
   });
 })();
