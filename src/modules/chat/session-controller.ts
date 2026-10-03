@@ -17,6 +17,7 @@ export interface SessionControllerEvents {
   readonly onAssistantText: (text: string, phase?: "commentary" | "final", runId?: string, localization?: LocalizedMessage) => void;
   /** Appends generated text to a live preview identified by run, stream and provider block id. */
   readonly onAssistantDelta?: (delta: { readonly runId: string; readonly stream: "commentary" | "final"; readonly id: string; readonly text: string }) => void;
+  readonly onInterviewQuestion?: (question: import("../../common/types/business-mode").InterviewQuestion, runId: string) => void;
   readonly onProgress: (text: string) => void;
   readonly onUsage: (
     usedTokens: number, contextWindowTokens: number, weeklyUsedPercent?: number, fiveHourUsedPercent?: number,
@@ -342,7 +343,8 @@ export class ChatSessionController {
           this.events.onQueueChanged?.(this.queuedSends.length);
         }
         attempted = true;
-        const merged = mergePendingSends(next);
+        const advertised = await this.delegationCapabilities(next[0]!.execution);
+        const merged = mergePendingSends(next, advertised.workProfile, advertised.failureClass);
         if (next.length > 1) this.events.onProgress(localize("ui.submitting.0.queued.messages.as.one.request.task.mode.model.and.reasoning.use.the.first.message.settings.permissions.use.their.common.allowed.scope", next.length));
         await this.sendOne(merged.text, merged.attachments, merged.execution, (preparationGuidance) => {
           started = true;
@@ -386,6 +388,17 @@ export class ChatSessionController {
     this.busy = false;
     if (!this.disposed) this.events.onRunningChanged(false);
     await Promise.all(retainedCompletions);
+  }
+
+  /** What the installed runtime advertises: it accepts `--work-profile` (an older one rejects the unknown flag) and reports `failureClass`. */
+  private async delegationCapabilities(execution: ExecutionOptions): Promise<{ readonly workProfile: boolean; readonly failureClass: boolean }> {
+    const none = { workProfile: false, failureClass: false };
+    if ((execution.taskMode ?? "direct") === "direct") return none;
+    // Same cached probe the dispatch itself uses; a failed probe only omits the instructions.
+    try {
+      const { submit } = await this.runtime.capabilities(this.agentId, execution.model);
+      return { workProfile: submit.workProfile === true, failureClass: submit.failureClass === true };
+    } catch { return none; }
   }
 
   private async sendOne(
@@ -598,7 +611,9 @@ Answer the Human's current question without cancelling these workflows. For task
           continue;
         }
         flushDelta();
-        if (update.kind === "commentary") {
+        if (update.kind === "interviewQuestion") {
+          this.events.onInterviewQuestion?.(update.question, runId);
+        } else if (update.kind === "commentary") {
           if (update.text.trim() && update.text !== lastCommentary) {
             this.events.onAssistantText(update.text, "commentary", runId);
             lastCommentary = update.text;
@@ -679,12 +694,12 @@ Answer the Human's current question without cancelling these workflows. For task
   }
 }
 
-function mergePendingSends(items: readonly PendingSend[]): Pick<PendingSend, "text" | "attachments" | "execution"> & { submissions: MessageSubmission[] } {
+function mergePendingSends(items: readonly PendingSend[], workProfileRecorded = false, failureClassReported = false): Pick<PendingSend, "text" | "attachments" | "execution"> & { submissions: MessageSubmission[] } {
   const first = items[0]!;
   const mode = first.execution.taskMode ?? "direct";
   const modelGuidance = mode === "direct"
     ? ""
-    : (mode === "orchestrate" ? orchestratorGuidance : backgroundWorkflowGuidance) + delegatedModelGuidance(first.execution.agentModels) + delegatedPermissionGuidance(first.execution.agentPermissions);
+    : (mode === "orchestrate" ? orchestratorModeGuidance(workProfileRecorded, failureClassReported) : backgroundWorkflowGuidance) + delegatedModelGuidance(first.execution.agentModels, workProfileRecorded) + delegatedPermissionGuidance(first.execution.agentPermissions);
   const inspectionGuidance = first.execution.inspectionOnly ? withInspectionGuidance("") : "";
   const workflowGuidanceParts: string[] = [];
   const submissions = items.map(item => {
@@ -778,12 +793,14 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-export function delegatedModelGuidance(settings: ExecutionOptions["agentModels"]): string {
+/** `workProfileRecorded`: the runtime advertises --work-profile; an older runtime rejects the unknown flag. */
+export function delegatedModelGuidance(settings: ExecutionOptions["agentModels"], workProfileRecorded = false): string {
   if (!settings || !Object.keys(settings).length) return "";
   const profiles = settings.workLight?.model
     ? " Work profiles: `work` is the heavy profile and `workLight` the light profile. Use workLight for bounded, already-decided changes and work for multi-file, design or unknown-cause tasks; if a workLight attempt fails, retry that task once with the work profile. Pass their exact model IDs and reasoning efforts as --work-model/--work-reasoning-effort; never pass a profile name such as light or heavy as a model."
+      + (workProfileRecorded ? " Name the chosen profile with --work-profile work or --work-profile workLight on the same loop.py start, and --work-profile work on that retry." : "")
     : "";
-  return `\n\n[Delegated agent model settings for this request]\n${JSON.stringify(settings)}\nApply each specified role override when dispatching its agent.${profiles} For exec.py submit/send use --model and --reasoning-effort. For loop.py start use --work-model/--work-reasoning-effort and --verification-model/--verification-reasoning-effort. Plan uses the Work settings in the same Work session. Preserve these overrides on revision turns. Omitted fields use the runtime default; do not substitute Main's model. These settings do not authorize extra agents or change the selected route. If the runtime does not support a requested flag, report the limitation instead of silently dropping the setting.\n[End delegated agent model settings]`;
+  return `\n\n[Delegated agent model settings for this request]\n${JSON.stringify(settings)}\nApply each specified role override when dispatching its agent.${profiles} For exec.py submit/send use --model, --reasoning-effort and --fast/--no-fast. For loop.py start use --work-model/--work-reasoning-effort/--work-fast (or --no-work-fast) and --verification-model/--verification-reasoning-effort/--verification-fast (or --no-verification-fast). Fast is the Codex service tier and is independent from reasoning effort; preserve both exact values. A non-Codex role omits Fast. Plan uses the Work settings in the same Work session. Preserve these overrides on revision turns. Omitted fields use the runtime default; do not substitute Main's model. These settings do not authorize extra agents or change the selected route. If the runtime does not support a requested flag, report the limitation instead of silently dropping the setting.\n[End delegated agent model settings]`;
 }
 
 function delegatedPermissionGuidance(settings: ExecutionOptions["agentPermissions"]): string {
@@ -793,13 +810,25 @@ function delegatedPermissionGuidance(settings: ExecutionOptions["agentPermission
 }
 
 // Orchestrator mode is the default route, not an explicit dispatch request.
-export const orchestratorGuidance = `
+export function orchestratorModeGuidance(workProfileRecorded: boolean, failureClassReported = false): string {
+  // Only a runtime that advertises failureClass is told how to act on it; it never re-dispatches Work itself.
+  const failureActions = failureClassReported
+    ? " A stopped loop reports failureClass; act on it: contract - the runtime's automatic receipt recovery already ran, so report a run that still ended failed; transient - run loop.py reconcile, read the status once more, then decide; environment - stop and report the cause to the Human; human - pass the decision to the Human; provider - report the provider's message and do not dispatch again unless the Human asks. The one retry of a failed workLight attempt with the work profile applies only when its failureClass is contract or absent."
+    : "";
+  // Only a runtime that advertises the flag is told to use it.
+  const profileRecord = workProfileRecorded
+    ? " Also pass --work-profile work or --work-profile workLight matching the profile you chose, including --work-profile work on the one retry after a failed workLight attempt; it only records your choice for the task panel and selects no model."
+    : "";
+  return `
 
 [Orchestrator mode]
-This is ordinary conversation in orchestrator mode, not a Human-selected workflow. Answer greetings, questions, planning, Interview and light lookups of local project files directly without dispatch.
-When the request needs a project change, or any web search or external lookup (research, however small), delegate it with a brief instead of a work contract. Write one request file inside this run's directory with four short parts: Goal (one or two sentences), Scope (target files or research topic, and what not to do, such as no commits), Done (what must be true when finished) and Report (result summary and changed paths; sources for research). Then run the installed loop.py start --project-root PROJECT --task-mode work --work-agent UNIQUE_ID --request-file BRIEF with the Work profile flags from the delegated model settings. Do not write a task-list JSON, run announce-tasks, print a task-flow block, bind a contract, create progress documents or retrieve lessons for a brief; the runtime derives the single task shown in the task panel. Use --task-mode work-verification with --verification-agent only when the Human explicitly asks for verification.
-Before dispatch, check that the conversation gives enough to act; if a target, desired outcome or constraint is genuinely missing, ask one focused question instead of guessing. After the runtime accepts the brief, finish this turn promptly with the accepted loop and agent IDs so the Human can keep talking; do not poll the child. When the completion notification arrives, acknowledge the exact result or receipt and report it without reviewing the implementation or rerunning its checks. Report separate Verification as not requested unless it ran. Keep Main Goal disabled for delegated routes. A dispatch acknowledgement is not completion; never invent results.
+This is ordinary conversation in orchestrator mode, not a Human-selected workflow. Answer greetings, questions, planning, Interview and light lookups of local project files directly without dispatch. Questions about causes or options, consultation, discussion and unclear messages are conversation: answer them and ask before any change.
+When the Human explicitly asks for a project change, or the request needs any web search or external lookup (research, however small), delegate it with a brief instead of a work contract. Write one request file inside this run's directory with four short parts: Goal (one or two sentences), Scope (target files or research topic, and what not to do, such as no commits), Done (what must be true when finished) and Report (result summary and changed paths; sources for research). Then run the installed loop.py start --project-root PROJECT --task-mode work --work-agent UNIQUE_ID --request-file BRIEF with the Work profile flags from the delegated model settings.${profileRecord} Do not write a task-list JSON, run announce-tasks, print a task-flow block, bind a contract, create progress documents or retrieve lessons for a brief; the runtime derives the single task shown in the task panel. Use --task-mode work-verification with --verification-agent only when the Human explicitly asks for verification.
+Before dispatch, check that the conversation gives enough to act; if a target, desired outcome or constraint is genuinely missing, ask one focused question instead of guessing. After the runtime accepts the brief, finish this turn promptly with the accepted loop and agent IDs so the Human can keep talking; do not poll the child. When the completion notification arrives, acknowledge the exact result or receipt and report it without reviewing the implementation or rerunning its checks. Report separate Verification as not requested unless it ran. Keep Main Goal disabled for delegated routes. A dispatch acknowledgement is not completion; never invent results.${failureActions}
 [End orchestrator mode]`;
+}
+
+export const orchestratorGuidance = orchestratorModeGuidance(false);
 
 const backgroundWorkflowGuidance = `
 

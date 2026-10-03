@@ -1,15 +1,17 @@
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
+import { readdir, readFile } from "node:fs/promises";
 import test from "node:test";
 import { createRequire } from "node:module";
 import { runUiInNewContext } from "../support/ui-localization.mjs";
+import { readChatSource } from "../support/chat-source.mjs";
 const ui = createRequire(import.meta.url)("../../static/js/localization.js");
 const nls = JSON.parse(await readFile(new URL("../../package.nls.json", import.meta.url), "utf8"));
 const nlsKo = JSON.parse(await readFile(new URL("../../package.nls.ko.json", import.meta.url), "utf8"));
 
 const packageJson = JSON.parse(await readFile(new URL("../../package.json", import.meta.url), "utf8"));
 const template = await readFile(new URL("../../templates/chat.html", import.meta.url), "utf8");
-const chatScript = await readFile(new URL("../../static/js/chat.js", import.meta.url), "utf8");
+const chatScript = await readChatSource();
+const templateRenderer = await readFile(new URL("../../src/infrastructure/vscode/chat-template-renderer.ts", import.meta.url), "utf8");
 const chatStyles = await readFile(new URL("../../static/css/chat.css", import.meta.url), "utf8");
 const agentClient = await readFile(new URL("../../src/infrastructure/agent-factory/agent-client.ts", import.meta.url), "utf8");
 const panelManager = await readFile(new URL("../../src/infrastructure/vscode/chat-panel-manager.ts", import.meta.url), "utf8");
@@ -103,12 +105,20 @@ test("user question picker lists prompts and jumps to the selected message", fun
   assert.match(template, /id="question-button"[^>]*aria-controls="question-menu"/);
   assert.match(template, /id="question-button"[^>]*>[\s\S]*?<svg/);
   assert.match(template, /id="question-menu"[^>]*role="dialog"/);
+  assert.match(template, /class="question-tabs"[^>]*role="tablist"/);
+  assert.match(template, /id="question-tab-questions"[^>]*role="tab"[^>]*aria-selected="true"[^>]*aria-controls="question-panel-questions"/);
+  assert.match(template, /id="question-tab-history"[^>]*role="tab"[^>]*aria-selected="false"[^>]*aria-controls="question-panel-history"/);
+  assert.match(template, /id="question-panel-questions"[^>]*role="tabpanel"[^>]*aria-labelledby="question-tab-questions"/);
+  assert.match(template, /id="question-panel-history"[^>]*role="tabpanel"[^>]*aria-labelledby="question-tab-history"/);
   assert.match(template, /id="question-list"/);
+  assert.match(template, /id="conversation-history-list"/);
+  assert.doesNotMatch(template, /<details id="conversation-history"/);
   assert.match(chatScript, /event\.type === "user"/);
   assert.match(chatScript, /jumpToQuestion\(question\.id\)/);
   assert.match(chatScript, /target\.scrollIntoView\(\{ block: "center" \}\)/);
   assert.match(chatScript, /target\.focus\(\{ preventScroll: true \}\)/);
   assert.match(chatStyles, /\.question-item/);
+  assert.match(chatStyles, /\.question-tab-panel[^}]*overflow-y:\s*auto/);
   assert.match(chatStyles, /\.message-user\.message-jump-target/);
 });
 
@@ -118,7 +128,7 @@ test("history and user question lists share one popup width", function () {
   assert.match(chatStyles, /\.utility-list-menu \{[\s\S]*width: min\(440px, calc\(100vw - 36px\)\);/);
 });
 
-test("composer groups model, reasoning and permissions beside submission actions", function () {
+test("composer keeps Fast inside agent settings while preserving submission actions", function () {
   assert.match(template, /id="model-button"/);
   assert.match(template, /id="model-menu"[^>]*role="dialog"/);
   assert.match(template, /id="submission-menu"[^>]*role="menu"/);
@@ -127,6 +137,8 @@ test("composer groups model, reasoning and permissions beside submission actions
   assert.match(chatScript, /select.dataset.setting = "permissions"/);
   assert.match(chatScript, /type: "execution\.select", mode: select.value/);
   assert.match(template, /id="fast-mode-button"/);
+  assert.match(template, /id="agent-scope-parts"[\s\S]*id="agent-fast-setting"[\s\S]*id="fast-mode-button"/);
+  assert.match(chatScript, /appendFastSetting\(menu\)/);
   assert.doesNotMatch(template, /id="goal-mode-button"/);
   assert.match(chatScript, /submit\(action, workflow, goal\)/);
 });
@@ -243,12 +255,13 @@ test("running state appears above the composer as an expandable work loop panel"
   assert.match(chatStyles, /@keyframes run-status-text-scan\s*\{[\s\S]*?from\s*\{\s*background-position: 98% 0;[\s\S]*?to\s*\{\s*background-position: 2% 0;/);
   assert.match(chatStyles, /\.run-status-label\s*\{[^}]*background-size: 230% 100%;[^}]*background-repeat: no-repeat;/);
   assert.match(template, /class="run-status-copy"[\s\S]*run-status-label[\s\S]*run-status-meta/);
-  assert.match(chatStyles, /\.run-status-label\s*\{[^}]*color: var\(--vscode-foreground\)[^}]*background-clip: text[^}]*animation: run-status-text-scan/);
-  assert.match(chatStyles, /var\(--vscode-foreground\) 45%,[\s\S]*color-mix\(in srgb, var\(--vscode-foreground\) 70%, var\(--af-chat-background\)\) 50%,[\s\S]*var\(--vscode-foreground\) 55%/);
+  assert.match(chatStyles, /\.run-status\.is-running\s*\{[^}]*--run-status-active-color: var\(--vscode-progressBar-background, var\(--vscode-focusBorder, var\(--af-color-accent\)\)\)[^}]*--run-status-text-color: var\(--run-status-active-color\)/);
+  assert.match(chatStyles, /\.run-status-label\s*\{[^}]*color: var\(--run-status-text-color\)[^}]*background-clip: text[^}]*animation: run-status-text-scan/);
+  assert.match(chatStyles, /var\(--run-status-text-color\) 45%,[\s\S]*color-mix\(in srgb, var\(--run-status-text-color\) 70%, var\(--af-chat-background\)\) 50%,[\s\S]*var\(--run-status-text-color\) 55%/);
   assert.doesNotMatch(chatStyles.match(/\.run-status-label\s*\{[^}]*\}/)[0], /ansiCyan|#94e2d5/);
   assert.doesNotMatch(chatStyles.match(/\.run-status-copy\s*\{[^}]*\}/)[0], /animation|transparent|background-image/);
-  assert.match(chatStyles, /\.run-status-meta\s*\{[^}]*color: var\(--vscode-foreground\)/);
-  assert.match(chatStyles, /prefers-reduced-motion: reduce[\s\S]*\.run-status-label[\s\S]*color: var\(--vscode-foreground\)[\s\S]*animation: none/);
+  assert.match(chatStyles, /\.run-status-meta\s*\{[^}]*color: var\(--run-status-text-color\)/);
+  assert.match(chatStyles, /prefers-reduced-motion: reduce[\s\S]*\.run-status-label[\s\S]*color: var\(--run-status-text-color\)[\s\S]*animation: none/);
   assert.doesNotMatch(chatStyles, /\.run-status::after/);
   assert.doesNotMatch(chatStyles, /\.message-running/);
   assert.match(chatScript, /state\.runPanelExpanded = !state\.runPanelExpanded/);
@@ -366,6 +379,20 @@ test("Git changes render a bounded unified diff preview with file statistics", f
   assert.match(chatStyles, /\.git-diff-addition/);
   assert.match(chatStyles, /\.git-diff-deletion/);
   assert.match(chatStyles, /\.git-diff-hunk/);
+});
+
+test("every chat feature module is loaded before chat.js and installed once", async function () {
+  const modules = (await readdir(new URL("../../static/js/", import.meta.url))).filter(name => /^chat-[a-z-]+\.js$/.test(name));
+  assert.ok(modules.length > 0);
+  const chatIndex = template.indexOf('src="{{scriptUri}}"');
+  for (const name of modules) {
+    const tagIndex = template.indexOf(`src="{{chatModuleBaseUri}}/${name}"`);
+    assert.ok(tagIndex > 0 && tagIndex < chatIndex, name + " must load before chat.js");
+    const feature = name.slice(5, -3).replace(/-([a-z])/g, (_match, letter) => letter.toUpperCase());
+    assert.equal(chatScript.split(`globalThis.AgentFactoryChat.${feature} = function (host)`).length, 2, name + " defines its feature");
+    assert.equal(chatScript.split(`= globalThis.AgentFactoryChat.${feature}({`).length, 2, name + " is installed once");
+  }
+  assert.match(templateRenderer, /"\{\{chatModuleBaseUri\}\}": webview\.asWebviewUri\(vscode\.Uri\.joinPath\(this\.extensionUri, "static", "js"\)\)/);
 });
 
 test("assistant responses render safe local Markdown", function () {

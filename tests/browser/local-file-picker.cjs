@@ -21,6 +21,9 @@ async function checkLocalFilePicker(page) {
   await page.waitForFunction(() => window.saved.attachments.filter(a => a.uri?.startsWith('file:///remote/uploads/')).length === 2);
   await page.locator('#attachment-file-input').setInputFiles({ name: 'picked.png', mimeType: 'image/png', buffer: Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a9XcAAAAASUVORK5CYII=', 'base64') });
   await page.waitForFunction(() => window.sentMessages.some(m => m.type === 'attachments.createImage'));
+  const imageCount = await page.evaluate(() => window.sentMessages.filter(m => m.type === 'attachments.createImage').length);
+  await page.locator('#attachment-file-input').setInputFiles({ name: 'macos-empty-mime.png', mimeType: '', buffer: Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a9XcAAAAASUVORK5CYII=', 'base64') });
+  await page.waitForFunction(count => window.sentMessages.filter(m => m.type === 'attachments.createImage').length > count, imageCount);
   const before = await page.evaluate(() => window.sentMessages.length);
   await page.locator('#attachment-file-input').setInputFiles([]);
   assert.equal(await page.evaluate(() => window.sentMessages.length), before);

@@ -35,6 +35,7 @@ export class ChatTemplateRenderer {
       "{{nonce}}": nonce,
       "{{styleUri}}": styleUri.toString(),
       "{{scriptUri}}": scriptUri.toString(),
+      "{{chatModuleBaseUri}}": webview.asWebviewUri(vscode.Uri.joinPath(this.extensionUri, "static", "js")).toString(),
       "{{markdownScriptUri}}": markdownScriptUri.toString(),
       "{{syntaxScriptUri}}": syntaxScriptUri.toString(),
       "{{ansiScriptUri}}": webview.asWebviewUri(vscode.Uri.joinPath(this.extensionUri, "static", "js", "ansi-renderer.js")).toString(),

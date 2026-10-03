@@ -3,8 +3,9 @@ import { COMPANION_ACTIONS, type CompanionAction } from "../modules/chat/compani
 import { validNoteFolder } from "../infrastructure/vscode/note-store";
 import { AGENT_ROLES, validAgentValue } from "../core/config/agent-settings";
 import { parseAgentPermissions } from "../common/types/agent-permissions";
-import { parseAgentModels } from "../common/types/agent-models";
+import { parseAgentModels, parseModelFastModes } from "../common/types/agent-models";
 import { BUSINESS_MODES, type BusinessMode } from "../common/types/business-mode";
+export { parseInterviewQuestion } from "../common/types/business-mode";
 import { TASK_SELECTIONS, type TaskSelection } from "../modules/chat/task-selection";
 import { STATUS_ITEM_IDS, type StatusItemId } from "../core/config/types";
 import type { AttachmentKind, AttachmentReference } from "../common/types/attachment";
@@ -12,7 +13,7 @@ import type { ClientMessage } from "./messages";
 import { PROVIDER_IDS, PLUGIN_UPDATE_MODES, type ProviderId, type PluginUpdateMode } from "../infrastructure/agent-factory/provider-detection";
 
 const clientMessageTypes = new Set([
-  "agent.defaults.save", "agent.preset", "agent.preset.field",
+  "agent.defaults.save", "agent.defaults.fast", "agent.preset", "agent.preset.field", "agent.preset.fast",
   "client.ready",
   "worktree.create", "worktree.merge", "worktree.refresh", "worktree.repositories",
   "deploy.detect", "deploy.run", "deploy.token",
@@ -54,8 +55,10 @@ const clientMessageTypes = new Set([
   "conversations.request",
   "conversation.read",
   "workflow.close",
+  "workflow.decision",
   "agent.open",
   "attachments.pick",
+  "attachments.addUris",
   "attachments.createText",
   "attachments.createImage",
   "attachments.createFile",
@@ -210,16 +213,22 @@ export function parseClientMessage(value: unknown): ClientMessage | undefined {
       return { type: value.type, scope: value.scope, note: { folder: (note.folder as string) || "", id: note.id, title: note.title, body: note.body, revision: Number(note.revision) } };
     }
     case "agent.preset.field":
-      if ((value.scope !== "global" && value.scope !== "project" && value.scope !== "chat") || typeof value.name !== "string" || !value.name.trim() || !AGENT_ROLES.includes(value.role as typeof AGENT_ROLES[number]) || !["model", "reasoningEffort"].includes(String(value.field)) || typeof value.value !== "string" || !validAgentValue(value.field as "model" | "reasoningEffort", value.value)) return undefined;
-      return {type: value.type, scope: value.scope, name: value.name.trim(), role: value.role as typeof AGENT_ROLES[number], field: value.field as "model" | "reasoningEffort", value: value.value};
+      if ((value.scope !== "global" && value.scope !== "project" && value.scope !== "chat") || typeof value.name !== "string" || !value.name.trim() || !AGENT_ROLES.includes(value.role as typeof AGENT_ROLES[number]) || !["model", "reasoningEffort", "fast"].includes(String(value.field)) || !validAgentValue(String(value.field), value.value)) return undefined;
+      return {type: value.type, scope: value.scope, name: value.name.trim(), role: value.role as typeof AGENT_ROLES[number], field: value.field as "model" | "reasoningEffort" | "fast", value: value.value as string | boolean};
+    case "agent.preset.fast":
+      if ((value.scope !== "global" && value.scope !== "project" && value.scope !== "chat") || typeof value.name !== "string" || !value.name.trim() || !validAgentValue("model", value.model) || typeof value.value !== "boolean") return undefined;
+      return {type: value.type, scope: value.scope, name: value.name.trim(), model: value.model as string, value: value.value};
     case "agent.preset":
       if ((value.action !== "save" && value.action !== "apply" && value.action !== "update" && value.action !== "delete") || (value.scope !== "global" && value.scope !== "project" && value.scope !== "chat") || typeof value.name !== "string" || !value.name.trim()) return undefined;
       return {type: value.type, action: value.action, scope: value.scope, name: value.name.trim()};
     case "agent.defaults.save":
       if ((value.scope !== "global" && value.scope !== "project") ||
           !AGENT_ROLES.includes(value.role as typeof AGENT_ROLES[number]) ||
-          (value.field !== "model" && value.field !== "reasoningEffort") || !validAgentValue(value.field, value.value)) return undefined;
+          (value.field !== "model" && value.field !== "reasoningEffort" && value.field !== "fast") || !validAgentValue(value.field, value.value)) return undefined;
       return { type: value.type, scope: value.scope, role: value.role as typeof AGENT_ROLES[number], field: value.field, value: value.value };
+    case "agent.defaults.fast":
+      if ((value.scope !== "global" && value.scope !== "project") || !validAgentValue("model", value.model) || typeof value.value !== "boolean") return undefined;
+      return { type: value.type, scope: value.scope, model: value.model as string, value: value.value };
     case "client.ready":
     case "queue.resume":
     case "run.cancel":
@@ -235,6 +244,10 @@ export function parseClientMessage(value: unknown): ClientMessage | undefined {
     case "agents.request":
     case "attachments.pick":
       return { type: value.type };
+    case "attachments.addUris":
+      if (!Array.isArray(value.uris) || value.uris.length < 1 || value.uris.length > 100 ||
+          !value.uris.every(uri => typeof uri === "string" && uri.length <= 4096 && !/[\u0000-\u001f]/.test(uri))) return undefined;
+      return { type: value.type, uris: value.uris as string[] };
     case "providers.update":
       if (value.provider !== undefined) return undefined;
       if (value.version === undefined) return { type: value.type };
@@ -257,6 +270,11 @@ export function parseClientMessage(value: unknown): ClientMessage | undefined {
     case "workflow.close":
       if (![value.workAgentId, value.loopId].every(id => typeof id === "string" && /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(id))) return undefined;
       return { type: value.type, workAgentId: value.workAgentId as string, loopId: value.loopId as string };
+    case "workflow.decision":
+      // Exactly the two revision-limit decisions; accepting failed Verification stays an explicit runtime command.
+      if (![value.workAgentId, value.loopId].every(id => typeof id === "string" && /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(id))
+        || (value.decision !== "continue" && value.decision !== "stop")) return undefined;
+      return { type: value.type, workAgentId: value.workAgentId as string, loopId: value.loopId as string, decision: value.decision };
     case "session.select":
     case "agent.open":
       if (typeof value.agentId !== "string" || !/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(value.agentId)) {
@@ -268,6 +286,7 @@ export function parseClientMessage(value: unknown): ClientMessage | undefined {
         (value.businessMode !== undefined && !BUSINESS_MODES.includes(value.businessMode as BusinessMode)) ||
         (value.taskMode !== undefined && !TASK_SELECTIONS.includes(value.taskMode as TaskSelection)) ||
         (value.agentModels !== undefined && !parseAgentModels(value.agentModels)) ||
+        (value.modelFastModes !== undefined && !parseModelFastModes(value.modelFastModes)) ||
         (value.agentPermissions !== undefined && !parseAgentPermissions(value.agentPermissions)) ||
         (value.model !== undefined && (typeof value.model !== "string" || value.model.length > 100)) ||
         (value.reasoning !== undefined && (typeof value.reasoning !== "string" || !reasoningEfforts.has(value.reasoning))) ||
@@ -282,6 +301,7 @@ export function parseClientMessage(value: unknown): ClientMessage | undefined {
       return {
         type: value.type,
         ...(value.agentModels !== undefined ? { agentModels: parseAgentModels(value.agentModels) } : {}),
+        ...(value.modelFastModes !== undefined ? { modelFastModes: parseModelFastModes(value.modelFastModes) } : {}),
         ...(value.agentPermissions !== undefined ? { agentPermissions: parseAgentPermissions(value.agentPermissions) } : {}),
         ...(typeof value.model === "string" && value.model ? { model: value.model } : {}),
         ...(typeof value.reasoning === "string"

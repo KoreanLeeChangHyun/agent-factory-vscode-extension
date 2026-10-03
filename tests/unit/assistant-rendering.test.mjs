@@ -2,8 +2,9 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import vm from "node:vm";
 import test from "node:test";
+import { readChatSource } from "../support/chat-source.mjs";
 
-const script = await readFile(new URL("../../static/js/chat.js", import.meta.url), "utf8");
+const script = await readChatSource();
 const helper = script.slice(script.indexOf("  function assistantDisplayText("), script.indexOf("  function reasoningDisplayLabel("));
 const context = {};
 vm.runInNewContext(helper, context);

@@ -2,6 +2,7 @@ import type { AgentPermissions } from "../common/types/agent-permissions";
 import type { AgentModels } from "../common/types/agent-models";
 import type { StatusItemId } from "../core/config/types";
 import type { AttachmentReference } from "../common/types/attachment";
+import type { InterviewQuestion } from "../common/types/business-mode";
 
 /** Captured submission intent and app-added guidance, never the full provider prompt. */
 export interface MessageSubmission {
@@ -13,12 +14,14 @@ export interface MessageSubmission {
 }
 
 export type ClientMessage =
-  | { readonly type: "agent.preset.field"; readonly scope: import("../core/config/agent-settings").AgentPresetScope; readonly name: string; readonly role: "main" | "work" | "workLight" | "verification"; readonly field: "model" | "reasoningEffort"; readonly value: string }
+  | { readonly type: "agent.preset.field"; readonly scope: import("../core/config/agent-settings").AgentPresetScope; readonly name: string; readonly role: "main" | "work" | "workLight" | "verification"; readonly field: "model" | "reasoningEffort" | "fast"; readonly value: string | boolean }
+  | { readonly type: "agent.preset.fast"; readonly scope: import("../core/config/agent-settings").AgentPresetScope; readonly name: string; readonly model: string; readonly value: boolean }
   | { readonly type: "bot.interact"; readonly action: import("../modules/chat/companion").CompanionAction }
   | { readonly type: "contract.open"; readonly id: string }
   | { readonly type: "contracts.request" }
   | { readonly type: "agent.preset"; readonly action: "save" | "apply" | "update" | "delete"; readonly scope: "global" | "project" | "chat"; readonly name: string }
-  | { readonly type: "agent.defaults.save"; readonly scope: "global" | "project"; readonly role: "main" | "work" | "workLight" | "verification"; readonly field: "model" | "reasoningEffort"; readonly value: string }
+  | { readonly type: "agent.defaults.save"; readonly scope: "global" | "project"; readonly role: "main" | "work" | "workLight" | "verification"; readonly field: "model" | "reasoningEffort" | "fast"; readonly value: string | boolean }
+  | { readonly type: "agent.defaults.fast"; readonly scope: "global" | "project"; readonly model: string; readonly value: boolean }
   | { readonly type: "worktree.create"; readonly repository: string; readonly name: string; readonly base: string }
   | { readonly type: "worktree.merge" | "worktree.refresh" | "worktree.repositories" }
   | { readonly type: "deploy.detect" }
@@ -72,12 +75,14 @@ export type ClientMessage =
   | { readonly type: "providers.updateMode.select"; readonly mode: import("../infrastructure/agent-factory/provider-detection").PluginUpdateMode }
   | { readonly type: "session.select"; readonly agentId: string }
   | { readonly type: "workflow.close"; readonly workAgentId: string; readonly loopId: string }
+  | { readonly type: "workflow.decision"; readonly workAgentId: string; readonly loopId: string; readonly decision: "continue" | "stop" }
   | { readonly type: "conversations.request" }
   | { readonly type: "conversation.read"; readonly conversationId: string | null; readonly before?: string; readonly requestId: string }
   | { readonly type: "history.request"; readonly before: string }
   | { readonly type: "agents.request" }
   | { readonly type: "agent.open"; readonly agentId: string }
   | { readonly type: "attachments.pick" }
+  | { readonly type: "attachments.addUris"; readonly uris: readonly string[] }
   | { readonly type: "attachments.createText"; readonly text: string }
   | { readonly type: "attachments.createImage"; readonly id: string; readonly name: string; readonly mediaType: string; readonly size: number; readonly data: string }
   | { readonly type: "attachments.createFile"; readonly id: string; readonly name: string; readonly size: number; readonly data: string }
@@ -92,6 +97,7 @@ export type ClientMessage =
       readonly type: "composer.settings";
       readonly model?: string;
       readonly agentModels?: AgentModels;
+      readonly modelFastModes?: import("../common/types/agent-models").ModelFastModes;
   readonly agentPermissions?: AgentPermissions;
       readonly reasoning?: "none" | "low" | "medium" | "high" | "xhigh" | "max";
       readonly fastMode: boolean;
@@ -117,6 +123,7 @@ export interface AccountUsage {
 }
 
 export type HostMessage =
+  | { readonly type: "interview.question"; readonly question: InterviewQuestion; readonly runId?: string }
   | { readonly type: "usage.accounts"; readonly accounts: Readonly<Record<string, AccountUsage>> }
   | { readonly type: "agent.preset.field.result"; readonly error?: string }
   | { readonly type: "contracts.list"; readonly contracts: readonly import("../infrastructure/filesystem/contracts").ContractEntry[]; readonly error?: string }
@@ -173,6 +180,7 @@ export type HostMessage =
       readonly statusItems: readonly StatusItemId[];
       readonly model?: string;
       readonly agentModels?: AgentModels;
+      readonly modelFastModes?: import("../common/types/agent-models").ModelFastModes;
   readonly agentPermissions?: AgentPermissions;
       readonly reasoning?: "none" | "low" | "medium" | "high" | "xhigh" | "max";
       readonly fastMode: boolean;
@@ -237,7 +245,11 @@ export type HostMessage =
         readonly agentId: string;
         readonly role: "work" | "verification";
         readonly status: string;
+        readonly model?: string;
+        readonly reasoningEffort?: string;
+        readonly workProfile?: import("../common/types/agent-models").WorkProfile;
         readonly updatedAt?: string;
+        readonly dispatchedAt?: string;
       }[];
     }
   | { readonly type: "decision.pending"; readonly runId: string | null; readonly canApprove?: boolean }

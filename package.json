@@ -368,6 +368,15 @@
             "max"
           ]
         },
+        "agentFactory.agents.fastByModel": {
+          "type": "object",
+          "default": {},
+          "scope": "resource",
+          "description": "%agentFactory.agents.fastByModel.description%",
+          "additionalProperties": {
+            "type": "boolean"
+          }
+        },
         "agentFactory.agents.work.model": {
           "type": "string",
           "default": "",
@@ -453,15 +462,15 @@
           "id": "agentFactory.agents",
           "name": "%agentFactory.agents.name%"
         }
-      ]
-    }
+          ]
+        }
   },
   "scripts": {
     "build": "node scripts/build.mjs",
     "release": "node scripts/release.mjs",
     "watch": "node scripts/build.mjs --watch",
     "check": "npm run typecheck && npm run check:static && npm run test && npm run build",
-    "check:static": "node --check static/js/localization.js && node --check static/js/chat.js && node --check static/js/contracts.js && node --check static/js/ansi-renderer.js && node --check static/js/execution-references.js && node --check static/js/loading-animation-gallery.js",
+    "check:static": "node scripts/check-static.mjs",
     "typecheck": "tsc --noEmit",
     "test": "node --test tests/unit/*.test.mjs",
     "package": "npm run check && node -e \"require('node:fs').mkdirSync('releases', { recursive: true })\" && node --require ./scripts/node-file-polyfill.cjs ./node_modules/@vscode/vsce/vsce package --allow-missing-repository --out releases",

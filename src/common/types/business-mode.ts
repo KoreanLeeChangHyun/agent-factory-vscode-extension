@@ -1,6 +1,49 @@
 export const BUSINESS_MODES = ["normal", "interview", "planning", "design", "contract", "migration", "lessons", "pipeline"] as const;
 export type BusinessMode = typeof BUSINESS_MODES[number];
 
+export interface InterviewQuestionOption {
+  readonly value: string;
+  readonly label: string;
+  readonly pros: string;
+  readonly cons: string;
+}
+
+export interface InterviewQuestion {
+  readonly id: string;
+  readonly current: number;
+  readonly total: number;
+  readonly text: string;
+  readonly options: readonly InterviewQuestionOption[];
+  readonly recommendedValue?: string;
+  readonly yesNo: boolean;
+}
+
+export function parseInterviewQuestion(value: unknown): InterviewQuestion | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  const record = value as Record<string, unknown>;
+  if (typeof record.id !== "string" || !/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(record.id)
+      || !Number.isSafeInteger(record.current) || !Number.isSafeInteger(record.total)
+      || Number(record.current) < 1 || Number(record.total) < Number(record.current)
+      || typeof record.text !== "string" || !record.text.trim()
+      || !Array.isArray(record.options) || record.options.length < 2 || record.options.length > 3
+      || typeof record.yesNo !== "boolean") return undefined;
+  const options = record.options.filter((option): option is Record<string, unknown> =>
+    Boolean(option) && typeof option === "object" && !Array.isArray(option));
+  if (options.length !== record.options.length || options.some(option =>
+    typeof option.value !== "string" || !option.value || typeof option.label !== "string" || !option.label.trim()
+    || typeof option.pros !== "string" || !option.pros.trim() || typeof option.cons !== "string" || !option.cons.trim())) return undefined;
+  const values = options.map(option => option.value as string);
+  if (new Set(values).size !== values.length || (record.recommendedValue !== undefined
+      && (typeof record.recommendedValue !== "string" || !values.includes(record.recommendedValue)))) return undefined;
+  return {
+    id: record.id, current: Number(record.current), total: Number(record.total), text: record.text.trim(),
+    options: options.map(option => ({ value: option.value as string, label: (option.label as string).trim(),
+      pros: (option.pros as string).trim(), cons: (option.cons as string).trim() })),
+    ...(typeof record.recommendedValue === "string" ? { recommendedValue: record.recommendedValue } : {}),
+    yesNo: record.yesNo
+  };
+}
+
 /** Workflow guidance belongs to this message, independently of its execution route. */
 export function withBusinessMode(text: string, mode: BusinessMode = "normal"): string {
   if (mode === "normal") return text;
@@ -20,7 +63,7 @@ This workflow applies only to this message and does not change the captured exec
 Apply the Document skill's current document contract and applicable synchronization procedure. Resolve the target from the Human request and available conversation; ask for the missing target only when it cannot be established. Preserve source material and unrelated changes. This workflow applies only to this message and does not change the captured execution route, approval policy or scope of authority.\n[End workflow guidance]`;
   }
   if (mode === "interview") return `${text}\n\n[Workflow guidance for this message only: interview]
-Apply Convention's Interview contract and the Document skill's current document contract. Analyze the Human's input, current conversation and attachments before proposing an interview; reuse known answers. Before asking substantive interview questions, summarize the proposed topic, purpose, scope and main unresolved decisions, then ask whether to conduct that interview. Present this confirmation in the final response, not commentary, using exactly two clickable options in the existing designated question-table format: a heading **질문 [1/1]:** for Korean or **Question [1/1]:** for English, followed by a table whose first column is 선택지 or Option, with rows numbered 1 and 2 and decision cells exactly Yes and No. Use the Human's language for the question and explanations. Wait for the Human's answer. Yes (1) starts the proposed interview; No (2) does not start it and asks what topic or scope should change. Silence or elapsed time is not confirmation. Preserve this pending proposal in conversation so a subsequent ordinary reply or option click continues it without requiring the menu again. If the conversation provides no usable topic, ask the minimum clarification instead of inventing an interview. Once confirmed, conduct the interview adaptively from the agreed scope and do not repeat this confirmation for every question. This confirmation is specific to starting the interview, not an approval gate for unrelated work. Preserve the captured execution route and authority.\n[End workflow guidance]`;
+Apply Convention's Interview contract and the Document skill's current document contract. Analyze the Human's input, current conversation and attachments before proposing an interview; reuse known answers. Before asking substantive interview questions, summarize the proposed topic, purpose, scope and main unresolved decisions, then ask whether to conduct that interview. Use the provider's native structured question tool when it is available in the active execution mode. Otherwise emit the exact Agent Factory interview-question marker required by Convention; do not invent tool availability. Include exactly two options whose labels are Yes and No and whose stable values are 1 and 2. Use the Human's language for the question, advantages and disadvantages. Use the conservative designated Markdown question table only when neither structured channel is available. Wait for the Human's answer. Yes (1) starts the proposed interview; No (2) does not start it and asks what topic or scope should change. Silence or elapsed time is not confirmation. Preserve this pending proposal in conversation so a subsequent ordinary reply or option click continues it without requiring the menu again. If the conversation provides no usable topic, ask the minimum clarification instead of inventing an interview. Once confirmed, conduct the interview adaptively from the agreed scope and do not repeat this confirmation for every question. This confirmation is specific to starting the interview, not an approval gate for unrelated work. Preserve the captured execution route and authority.\n[End workflow guidance]`;
   const guidance = {
     design: "Develop technical design and tradeoffs, keeping planning intent and technical design together."
   }[mode];

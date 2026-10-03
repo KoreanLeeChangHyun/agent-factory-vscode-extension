@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
-import { runInNewContext } from "node:vm";
 import test from "node:test";
 import { build } from "esbuild";
+import { readChatSource, runChatInNewContext as runInNewContext } from "../support/chat-source.mjs";
 
 const compiled = await build({ entryPoints: [new URL("../../src/infrastructure/agent-factory/history-presentation.ts", import.meta.url).pathname],
   bundle: true, write: false, platform: "node", format: "esm" });
@@ -37,7 +37,7 @@ test("preparation envelopes preserve exact bytes and quoted or malformed user te
   }
 });
 
-const script = await readFile(new URL("../../static/js/chat.js", import.meta.url), "utf8");
+const script = await readChatSource();
 const handler = script.slice(script.indexOf('      case "conversation.history":'), script.indexOf('      case "sessions.open":'));
 function deliver(state, message) {
   runInNewContext(`switch (message.type) { ${handler} }`, { state, message, renderTimeline() {}, scheduleTimelineRender() {}, updateModeControls() {}, persist() {} });

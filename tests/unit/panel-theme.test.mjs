@@ -26,12 +26,17 @@ function event() {
   };
 }
 
+function memento() {
+  const values = new Map();
+  return { get: (key, fallback) => values.has(key) ? values.get(key) : fallback, async update(key, value) { values.set(key, value); }, keys: () => [...values.keys()] };
+}
+
 async function flush() {
   // Event callbacks intentionally launch refresh promises without returning them.
   await new Promise(resolve => setImmediate(resolve));
 }
 
-async function fixture(t) {
+async function fixture(t, connectRuntime = async () => ({ available: false, diagnostic: "Runtime unavailable in fixture" })) {
   const messages = [];
   const operations = [];
   const timers = new Map();
@@ -73,7 +78,7 @@ async function fixture(t) {
   };
   const module = { exports: {} };
   runInNewContext(output.outputFiles[0].text, {
-    module, exports: module.exports, Buffer, console,
+    module, exports: module.exports, Buffer, console, AbortController, setInterval, clearInterval,
     process: { env: { CODEX_HOME: "/isolated/theme-test-home" } },
     require: name => name === "vscode" ? vscode : require(name),
     setTimeout(fn, delay) { const id = nextTimer++; timers.set(id, { fn, delay }); return id; },
@@ -81,9 +86,9 @@ async function fixture(t) {
     __readTheme() { reads++; return readTheme(); }
   });
   const manager = new module.exports.ChatPanelManager(
-    { extensionUri: { fsPath: "/extension" }, globalStorageUri: { fsPath: "/isolated/theme-test-storage" }, globalState: { get: (_key, fallback) => fallback, async update() {} } },
+    { extensionUri: { fsPath: "/extension" }, globalStorageUri: { fsPath: "/isolated/theme-test-storage" }, globalState: memento(), workspaceState: memento() },
     { localResourceRoots: [], render: async () => "<html></html>" }, () => [],
-    async () => { operations.push("connectRuntime"); return { available: false, diagnostic: "Runtime unavailable in fixture" }; }
+    async () => { operations.push("connectRuntime"); return connectRuntime(); }
   );
   await manager.openDraft();
   t.after(() => manager.dispose());
@@ -94,6 +99,7 @@ async function fixture(t) {
     select(value) { selection = value; },
     deferRead(fn) { readTheme = fn; },
     ready: () => receive.fire({ type: "client.ready" }),
+    receive: message => receive.fire(message),
     async viewState(active) { panel.active = active; panel.visible = active; await view.fire({ webviewPanel: panel }); await flush(); },
     async watch(kind, file = "config.toml") { await ({ change, create, remove })[kind].fire({ fsPath: "/isolated/theme-test-home/" + file }); },
     async debounce() {
@@ -112,6 +118,37 @@ test("client.ready sends theme before attempting unavailable runtime and resends
   assert.equal(host.messages.find(message => message.type === "host.initialize").runtimeAvailable, false);
   await host.ready();
   assert.equal(host.themes().length, 2);
+});
+
+test("client.ready still initializes the chat when runtime probes fail and reports each failure", async t => {
+  const client = {
+    async capabilities() { throw new Error("Capability probe failed"); },
+    async listSessions() { throw new Error("Session list failed"); }
+  };
+  const host = await fixture(t, async () => ({ available: true, client }));
+  host.manager.panels.values().next().value.state.agentId = "main-restored";
+  await host.ready();
+  const initialize = host.messages.find(message => message.type === "host.initialize");
+  assert.ok(initialize, "the webview receives host.initialize");
+  assert.equal(initialize.runtimeAvailable, true);
+  assert.equal(initialize.capabilities, undefined);
+  assert.equal(initialize.resetConversation, false);
+  const notices = host.messages.filter(message => message.type === "host.notice" && message.level === "error").map(message => message.text);
+  assert.ok(notices.some(text => /Capability probe failed$/.test(text)));
+  assert.ok(notices.some(text => /Session list failed$/.test(text)));
+});
+
+test("a saved agent preset is not reported as failed when the follow-up capability refresh fails", async t => {
+  const client = {
+    async capabilities() { throw new Error("Capability probe failed"); },
+    async listSessions() { return []; }
+  };
+  const host = await fixture(t, async () => ({ available: true, client }));
+  await host.ready();
+  await host.receive({ type: "agent.preset.field", scope: "chat", name: "Default", role: "main", field: "reasoningEffort", value: "high" });
+  const result = host.messages.filter(message => message.type === "agent.preset.field.result").at(-1);
+  assert.ok(result, "the preset field save is answered");
+  assert.equal(result.error, undefined);
 });
 
 test("config and custom-theme watcher events refresh selection, debounce bursts and deduplicate unchanged values", async t => {

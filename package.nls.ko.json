@@ -40,11 +40,16 @@
   "agentFactory.mainChat.pluginUpdateMode.enum.1": "설정 › 일반에서 \"지금 업데이트\"를 눌렀을 때만 플러그인을 설치·업데이트합니다.",
   "agentFactory.agents.main.model.description": "이 범위에서 사용할 메인 에이전트 모델입니다. 새 프로젝트는 글로벌 설정을, 새 채팅은 프로젝트 설정을 복사합니다.",
   "agentFactory.agents.main.reasoningEffort.description": "이 범위에서 사용할 메인 에이전트 추론 수준입니다. 복사된 설정은 이후 독립적으로 유지됩니다.",
+  "agentFactory.agents.main.fast.description": "이 범위의 메인에서 Codex Fast 실행 티어를 사용합니다. 추론 수준은 바꾸지 않습니다.",
+  "agentFactory.agents.fastByModel.description": "이 범위에서 지원 모델별 빠른 모드를 독립 저장합니다.",
   "agentFactory.agents.work.model.description": "이 범위에서 사용할 작업 에이전트 모델입니다. 새 프로젝트는 글로벌 설정을, 새 채팅은 프로젝트 설정을 복사합니다.",
   "agentFactory.agents.work.reasoningEffort.description": "이 범위에서 사용할 작업 에이전트 추론 수준입니다. 복사된 설정은 이후 독립적으로 유지됩니다.",
+  "agentFactory.agents.work.fast.description": "이 범위의 전문가 Work에서 Codex Fast 실행 티어를 사용합니다. 추론 수준은 바꾸지 않습니다.",
   "agentFactory.agents.workLight.model.description": "작업자 모델입니다. 조율자가 범위가 정해진 작은 변경에 쓰는 가벼운 에이전트입니다. 비워 두면 전문가 모델을 사용합니다.",
   "agentFactory.agents.workLight.reasoningEffort.description": "작업자 추론 수준입니다.",
+  "agentFactory.agents.workLight.fast.description": "이 범위의 작업자에서 Codex Fast 실행 티어를 사용합니다. 추론 수준은 바꾸지 않습니다.",
   "agentFactory.agents.verification.model.description": "이 범위에서 사용할 검증 에이전트 모델입니다. 새 프로젝트는 글로벌 설정을, 새 채팅은 프로젝트 설정을 복사합니다.",
   "agentFactory.agents.verification.reasoningEffort.description": "이 범위에서 사용할 검증 에이전트 추론 수준입니다. 복사된 설정은 이후 독립적으로 유지됩니다.",
+  "agentFactory.agents.verification.fast.description": "이 범위의 검증자에서 Codex Fast 실행 티어를 사용합니다. 추론 수준은 바꾸지 않습니다.",
   "agentFactory.workUnits.warnDefaultBranch.description": "main·master 브랜치에서 직접 작업할 때 저장소별 알림을 표시합니다."
 }

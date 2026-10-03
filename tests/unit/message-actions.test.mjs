@@ -2,8 +2,9 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { runUiInNewContext as runInNewContext } from '../support/ui-localization.mjs';
 import test from 'node:test';
+import { readChatSource } from "../support/chat-source.mjs";
 
-const script = await readFile(new URL('../../static/js/chat.js', import.meta.url), 'utf8');
+const script = await readChatSource();
 const submitSource = script.slice(script.indexOf('  function submit('), script.indexOf('  function cancelRun('))
   // submit() resolves delegated model settings through these helpers.
   + script.slice(script.indexOf('  function agentSettingRole('), script.indexOf('  function createAgentSettingControl('));
@@ -89,6 +90,11 @@ test('stop request gives synchronous feedback, stays running, and coalesces repe
   context.state.running = false;
   runInNewContext(cancel + ';cancelRun();', context);
   assert.equal(events.length, 2);
+});
+
+test('the visible stop button does not pass its click event as a cancellation retry', () => {
+  assert.match(script, /runStopButton\.addEventListener\("click", \(\) => cancelRun\(\)\)/);
+  assert.doesNotMatch(script, /runStopButton\.addEventListener\("click", cancelRun\)/);
 });
 
 test('host termination clears stop feedback and errors allow a retry', () => {

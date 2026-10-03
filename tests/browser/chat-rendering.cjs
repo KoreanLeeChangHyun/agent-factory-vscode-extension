@@ -11,7 +11,7 @@ const { checkAutoScroll } = require('./auto-scroll.cjs');
 const { checkFactoryBot } = require('./factory-bot.cjs');
 const { checkImageComposer } = require('./image-composer.cjs');
 const { checkFactoryRendering } = require('./factory-rendering.cjs');
-const { checkAgentModels, checkReasoningSlider } = require('./agent-models.cjs');
+const { checkFastSetting, checkAgentModels, checkReasoningSlider } = require('./agent-models.cjs');
 const { checkAstraStars } = require('./astra-stars.cjs');
 const { checkOneShotComposer } = require('./one-shot-composer.cjs');
 const { checkMessageSubmission, checkMessageLayout } = require('./message-submission.cjs');
@@ -52,7 +52,7 @@ async function main() {
       let html = fs.readFileSync(path.join(root, url.pathname === '/gallery' ? 'templates/loading-animation-gallery.html' : 'templates/chat.html'), 'utf8');
       for (const [key, value] of Object.entries({
         hostLanguage: ["ko", "en", "fr"].includes(url.searchParams.get("lang")) ? url.searchParams.get("lang") : "en", cspSource: "'self'", nonce: 'browser-regression', styleUri: url.pathname === '/gallery' ? '/static/css/loading-animation-gallery.css' : '/static/css/chat.css',
-        localizationScriptUri: '/static/js/localization.js', scriptUri: url.pathname === '/gallery' ? '/static/js/loading-animation-gallery.js' : '/static/js/chat.js', markdownScriptUri: '/static/vendor/markdown-it.min.js',
+        localizationScriptUri: '/static/js/localization.js', chatModuleBaseUri: '/static/js', scriptUri: url.pathname === '/gallery' ? '/static/js/loading-animation-gallery.js' : '/static/js/chat.js', markdownScriptUri: '/static/vendor/markdown-it.min.js',
         syntaxScriptUri: '/static/vendor/syntax-highlighter.js', ansiScriptUri: '/static/js/ansi-renderer.js', executionReferencesScriptUri: '/static/js/execution-references.js', iconUri: '/static/images/agent-factory.svg'
       })) html = html.replaceAll('{{' + key + '}}', value);
       response.setHeader('Content-Type', 'text/html');
@@ -392,9 +392,16 @@ async function main() {
       console.log('Question copy checks passed');
       return;
     }
-    if (process.argv.includes('--task-flow-only')) {
-      await checkTaskFlow(page);
-      console.log('Task flow rendering checks passed');
+    if (process.argv.includes('--revision-limit-only')) {
+      await require('./revision-limit.cjs').checkRevisionLimit(page);
+      assert.deepEqual(errors, []);
+      console.log('Revision-limit decision view and task card order checks passed');
+      return;
+    }
+    if (process.argv.includes('--task-flow-only') || process.argv.includes('--task-panel-only')) {
+      const panelOnly = process.argv.includes('--task-panel-only');
+      await checkTaskFlow(page, { panelOnly });
+      console.log(panelOnly ? 'Task panel rendering checks passed' : 'Task flow rendering checks passed');
       return;
     }
     if (process.argv.includes('--document-submissions-only')) {
@@ -529,13 +536,15 @@ async function main() {
       await page.locator('#prompt').press('Alt+Shift+I');
       assert.equal(await count(), before + 2, 'Submission shortcuts send through the chosen menu action');
       assert.match(JSON.stringify(await page.evaluate(() => window.sentMessages.filter(m => m.type === 'chat.send').at(-1))), /interview/);
-      await page.keyboard.press('Alt+Shift+H');
-      assert.equal(await page.locator('#conversation-history').evaluate(el => el.open), true, 'History shortcut opens conversation history');
+      await page.locator('#submission-button').click();
       assert.match(await page.locator('#submission-menu [data-workflow="interview"]').getAttribute('title'), /Alt/);
+      await page.locator('#submission-button').click();
+      await page.keyboard.press('Alt+Shift+H');
+      assert.equal(await page.locator('#question-menu').isVisible(), true, 'History shortcut opens the integrated list panel');
+      assert.equal(await page.locator('#question-tab-history').getAttribute('aria-selected'), 'true', 'History shortcut selects the conversation history tab');
       await page.keyboard.press('Alt+KeyQ');
-      assert.equal(await page.locator('#conversation-history').evaluate(el => el.open), false, 'Rebound close shortcut collapses the open list first');
-      await page.keyboard.press('Alt+KeyQ');
-      assert.equal(await page.locator('#submission-menu').isVisible(), false, 'Rebound close shortcut closes menus');
+      assert.equal(await page.locator('#question-menu').isVisible(), false, 'Rebound close shortcut closes the integrated list panel');
+      assert.equal(await page.locator('#question-button').evaluate(el => el === document.activeElement), true, 'Closing the integrated panel restores its trigger focus');
       await page.waitForFunction(() => window.saved.shortcuts?.send === 'Mod+Enter' && window.saved.shortcuts?.botFeed === 'Alt+Shift+F');
       const persisted = await page.evaluate(() => window.saved);
       await page.evaluate(saved => sessionStorage.setItem('submission-restoration-fixture', JSON.stringify(saved)), persisted);
@@ -612,6 +621,12 @@ async function main() {
       await page.waitForFunction(() => window.sentMessages.some(m => m.type === 'chat.send' && m.execution.model === 'gemini-test'));
       assert.deepEqual(errors, []);
       console.log('Same-provider model changes, cross-provider lock, reset and dispatch passed.');
+      return;
+    }
+    if (process.argv.includes('--fast-settings-only')) {
+      await checkFastSetting(page);
+      assert.deepEqual(errors, []);
+      console.log('Fast agent settings browser checks passed.');
       return;
     }
     if (process.argv.includes('--agent-models-only')) {

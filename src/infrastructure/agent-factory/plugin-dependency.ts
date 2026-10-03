@@ -68,11 +68,14 @@ export async function ensureAgentFactoryPlugin(
   }
 }
 
-/** Read-only: the installed Agent Factory Codex plugin's version, without installing or updating anything. */
-export async function installedCodexPluginVersion(runner: ProcessRunner = runProcess): Promise<string | undefined> {
+/** Read-only: prefer an active installation matching the extension over other marketplace copies. */
+export async function installedCodexPluginVersion(runner: ProcessRunner = runProcess, requiredVersion?: string): Promise<string | undefined> {
   try {
     const records = await listPlugins(runner, "installed");
-    return records.find(record => record.name === "agent-factory" && record.installed && record.enabled)?.version;
+    const active = records.filter(record => record.name === "agent-factory" && record.installed && record.enabled);
+    const matching = requiredVersion
+      ? active.find(record => semanticBase(record.version) === semanticBase(requiredVersion)) : undefined;
+    return (matching ?? active[0])?.version;
   } catch {
     return undefined;
   }

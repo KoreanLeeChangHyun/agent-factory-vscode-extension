@@ -45,6 +45,21 @@ async function checkInterviewChoices(page) {
     assert.equal(await page.evaluate(() => window.sentMessages.filter(m => m.type === 'chat.send').at(-1).text), answer);
     assert.equal(await page.locator('#prompt').inputValue(), '작성 중인 초안');
   }
+  const pendingConfirmation = await page.evaluate(() => window.sentMessages.filter(m => m.type === 'chat.send').at(-1));
+  await emit({ ...pendingConfirmation, type: 'chat.started' });
+  await emit({ type: 'session.bound', agentId: 'interview', conversationId: 'structured', reset: true });
+  await emit({ type: 'interview.question', runId: 'structured-run', question: {
+    id: 'location-1-of-1', current: 1, total: 1, text: '어디에서 일하시겠습니까?',
+    options: [
+      { value: 'home', label: '집', pros: '조용함', cons: '고립' },
+      { value: 'office', label: '사무실', pros: '협업', cons: '소음' }
+    ], recommendedValue: 'office', yesNo: false
+  } });
+  assert.equal(await page.locator('table.interview-options').count(), 1);
+  assert.equal(await page.locator('.interview-choice').count(), 2);
+  assert.equal(await page.locator('.message-content').filter({ hasText: '권고: 사무실' }).count(), 1);
+  await page.locator('.interview-choice').nth(1).click();
+  assert.equal(await page.evaluate(() => window.sentMessages.filter(m => m.type === 'chat.send').at(-1).text), 'office');
 }
 
 module.exports = { checkInterviewChoices };

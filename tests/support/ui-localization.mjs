@@ -1,5 +1,6 @@
 import { runInNewContext } from 'node:vm';
 import { createRequire } from 'node:module';
+import { withChatFeatures } from './chat-source.mjs';
 const i18n = createRequire(import.meta.url)('../../static/js/localization.js');
 
 /** Supply real English resources to existing isolated webview-function harnesses. */
@@ -21,5 +22,5 @@ export function runUiInNewContext(source, context = {}, options) {
       context[key] = () => labels;
     }
   }
-  return runInNewContext(source, context, options);
+  return runInNewContext(source, withChatFeatures(context), options);
 }

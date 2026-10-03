@@ -185,6 +185,27 @@ test("current CLI schema activates a compatible installed plugin without request
   assert.ok(process.calls[0].options.maxBuffer > 0);
 });
 
+test("version status prefers the compatible active copy over local or newer marketplace copies", async () => {
+  const local = record({ pluginId: "agent-factory@personal", marketplaceName: "personal", version: "local", installed: true, enabled: true });
+  const matching = record({ version: "1.0.2+codex.build", installed: true, enabled: true });
+  const newer = record({ version: "1.0.3", installed: true, enabled: true });
+  for (const records of [[local, matching, newer], [newer, matching, local], [matching, local]]) {
+    const process = queuedRunner([json(currentList(records)), json(currentList(records))]);
+    // Update and display must agree even when CLI list ordering changes.
+    await dependency.ensureAgentFactoryPlugin("1.0.2+extension.build", process.runner);
+    assert.equal(await dependency.installedCodexPluginVersion(process.runner, "1.0.2+extension.build"), matching.version);
+    assert.ok(process.calls.every(call => JSON.stringify(call.args) === JSON.stringify(["plugin", "list", "--json"])));
+  }
+  for (const records of [[local], [local, { ...matching, enabled: false }], [local, { ...matching, installed: false }]]) {
+    const process = queuedRunner([json(currentList(records))]);
+    assert.equal(await dependency.installedCodexPluginVersion(process.runner, "1.0.2"), "local");
+  }
+  const missing = queuedRunner([json(currentList([]))]);
+  assert.equal(await dependency.installedCodexPluginVersion(missing.runner, "1.0.2"), undefined);
+  const unspecified = queuedRunner([json(currentList([local, matching]))]);
+  assert.equal(await dependency.installedCodexPluginVersion(unspecified.runner), "local");
+});
+
 test("matching older installed versions work even when a newer release is available", async () => {
   const process = queuedRunner([json(currentList(
     [record({ version: "1.0.8+codex.old", installed: true, enabled: true })],

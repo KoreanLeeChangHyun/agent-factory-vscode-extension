@@ -3,6 +3,7 @@ import { readFile } from 'node:fs/promises';
 import { runUiInNewContext as runInNewContext } from '../support/ui-localization.mjs';
 import test from 'node:test';
 import { build } from 'esbuild';
+import { readChatSource } from "../support/chat-source.mjs";
 
 const output = await build({ entryPoints: [new URL('../../src/modules/chat/session-controller.ts', import.meta.url).pathname], bundle: true, format: 'esm', platform: 'node', write: false });
 const { ChatSessionController } = await import(`data:text/javascript;base64,${Buffer.from(output.outputFiles[0].text).toString('base64')}`);
@@ -219,7 +220,7 @@ test('conversation reset serializes sends and cannot overtake an accepting send'
 });
 
 test('webview acceptance replay promotes exactly once and preserves queued image previews', async () => {
-  const script = await readFile(new URL('../../static/js/chat.js', import.meta.url), 'utf8');
+  const script = await readChatSource();
   const handler = script.slice(script.indexOf('      case "chat.started":'), script.indexOf('      case "queue.updated":'));
   const submissionHelper = script.slice(script.indexOf('  function submissionFromExecution('), script.indexOf('  function renderSubmission('));
   const context = {

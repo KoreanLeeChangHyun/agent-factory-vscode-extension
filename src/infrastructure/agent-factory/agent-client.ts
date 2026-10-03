@@ -4,7 +4,7 @@ import { localize } from "../../common/localization";
 import { submissionContext } from "./submission-context";
 import { historyPresentation } from "./history-presentation";
 import type { AgentPermissions } from "../../common/types/agent-permissions";
-import type { AgentModels } from "../../common/types/agent-models";
+import { parseWorkProfile, type AgentModels, type WorkProfile } from "../../common/types/agent-models";
 import { constants as fsConstants, type Dirent } from "node:fs";
 import { spawn } from "node:child_process";
 import { antigravityExecutable, claudeExecutable, codexExecutable, defaultPythonCommand, runtimeEnvironment } from "./process-environment";
@@ -14,6 +14,7 @@ import { lstat, mkdtemp, open as openFile, readFile, readdir, realpath, rm, writ
 import { homedir, tmpdir } from "node:os";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { AsyncCache } from "../../common/async-cache";
+import { parseInterviewQuestion } from "../../common/types/business-mode";
 
 const MAX_PROCESS_OUTPUT_BYTES = Infinity;
 const MAX_RESULT_BYTES = Infinity;
@@ -55,9 +56,16 @@ export interface ExecutionCapabilities {
   readonly reasoning: boolean;
   readonly fast: boolean;
   readonly goal: boolean;
+  readonly sessionProvider?: "codex" | "claude" | "antigravity";
   readonly images?: boolean;
   readonly automaticRequestHash?: boolean;
   readonly worktrees?: boolean;
+  /** The runtime accepts and records `loop.py start --work-profile`. */
+  readonly workProfile?: boolean;
+  /** A stopped loop reports `failureClass`; Main is then told what to do for each class. */
+  readonly failureClass?: boolean;
+  /** A loop stopped on its revision limit carries a structured `pause`; the task panel then offers the Human's decision. */
+  readonly revisionLimitPause?: boolean;
   readonly taskModes?: readonly TaskMode[];
   readonly diagnostic?: string;
 }
@@ -123,6 +131,7 @@ export interface RunUpdates {
 }
 
 export type RunUpdate =
+  | { readonly kind: "interviewQuestion"; readonly question: import("../../common/types/business-mode").InterviewQuestion }
   | { readonly kind: "commentary"; readonly text: string }
   /** Live preview of text still being generated; the complete commentary or final result supersedes it. */
   | { readonly kind: "delta"; readonly stream: "commentary" | "final"; readonly id: string; readonly text: string }
@@ -167,10 +176,11 @@ export interface ConversationHistory {
   readonly conversationId?: string;
   readonly nextBefore?: string;
   readonly messages: readonly {
-    readonly type: "user" | "assistant";
+    readonly type: "user" | "assistant" | "interview";
     readonly id: string;
     readonly runId: string;
     readonly text: string;
+    readonly question?: import("../../common/types/business-mode").InterviewQuestion;
     readonly phase?: "final";
     readonly submission?: import("../../protocol/messages").MessageSubmission;
   }[];
@@ -184,9 +194,19 @@ export interface ChildAgentSession {
   readonly runId?: string;
   readonly role: "work" | "verification";
   readonly status: string;
+  readonly model?: string;
+  readonly reasoningEffort?: string;
+  /** Recorded by the runtime at dispatch; absent on runs that predate the record. */
+  readonly workProfile?: WorkProfile;
   readonly updatedAt?: string;
+  /** When the runtime accepted this run; orders task cards, unlike `updatedAt` it never changes. */
+  readonly dispatchedAt?: string;
   readonly verifiedWorkRunId?: string;
 }
+
+export type RevisionLimitDecision = "continue" | "stop";
+/** Revisions one "계속" click authorizes after a loop stopped on its revision limit. */
+export const REVISION_LIMIT_EXTENSION = 3;
 
 export interface WorktreeRepository { readonly path: string; readonly branches: readonly string[]; readonly defaultBranch: string | null; }
 
@@ -233,6 +253,7 @@ export interface AgentRuntimeClient {
   listSessions(): Promise<readonly MainAgentSession[]>;
   listChildSessions(mainAgentId: string, runId?: string): Promise<readonly ChildAgentSession[]>;
   closeWorkflow?(mainAgentId: string, workAgentId: string, loopId: string): Promise<Record<string, unknown>>;
+  decideRevisionLimit?(mainAgentId: string, workAgentId: string, loopId: string, decision: RevisionLimitDecision): Promise<Record<string, unknown>>;
   advanceWorkflows?(mainAgentId: string, agents: readonly ChildAgentSession[], drive?: boolean): Promise<readonly Record<string, unknown>[]>;
 }
 
@@ -298,7 +319,7 @@ export class AgentFactoryClient implements AgentRuntimeClient {
   private readonly eventSnapshots = new Map<string, { readonly signature: string; readonly lines: readonly string[]; readonly bytes: number; readonly offset: number; readonly identity: string }>();
 
   public async capabilities(agentId?: string, model?: string): ReturnType<AgentRuntimeClient["capabilities"]> {
-    return this.capabilityCache.get(JSON.stringify([this.execPath, agentId ?? "", model ?? ""]), () => this.readCapabilities(agentId, model));
+    return this.capabilityCache.get(JSON.stringify([this.execPath, agentId ?? "", model ?? "", codexExecutable()]), () => this.readCapabilities(agentId, model));
   }
 
   private async readCapabilities(agentId?: string, model?: string): ReturnType<AgentRuntimeClient["capabilities"]> {
@@ -310,6 +331,9 @@ export class AgentFactoryClient implements AgentRuntimeClient {
       const record = readRecord(value, "execution capabilities");
       for (const key of ["model", "reasoning", "fast", "goal"]) {
         if (typeof record[key] !== "boolean") throw new Error(localize("ui.invalid.codex.capability.response.format"));
+      }
+      if (record.sessionProvider !== undefined && !["codex", "claude", "antigravity"].includes(String(record.sessionProvider))) {
+        throw new Error(localize("ui.invalid.codex.capability.response.format"));
       }
       return {
         ...record,
@@ -560,7 +584,7 @@ When a command needs sudo and the Human has requested it, use python3 ${JSON.str
     let entries;
     try { entries = await this.managedDirectoryEntries(path); }
     catch (error) { if (isMissingFile(error)) return undefined; throw error; }
-    const active = new Set(["accepted", "queued", "starting", "running", "cancelling"]);
+    const active = new Set(["accepted", "queued", "starting", "running", "verifying", "cancelling"]);
     for (const entry of entries.filter(entry => entry.isDirectory() && MANAGED_ID.test(entry.name))
       .sort((a, b) => b.name.localeCompare(a.name))) {
       const statePath = await this.managedPath(agentId, "runs", entry.name, "state.json");
@@ -672,6 +696,18 @@ When a command needs sudo and the Human has requested it, use python3 ${JSON.str
       messages.push({ type: "user", id: `history-user-${entry.name}`, runId: entry.name,
         ...historyPresentation(request, taskMode, options?.goalMode === true) });
       if (["completed", "failed", "cancelled", "needs-human-decision"].includes(String(state.status))) {
+        const eventsPath = await this.managedPath(agentId, "runs", entry.name, "events.jsonl");
+        try {
+          const rawEvents = (await readManagedBytes(eventsPath, MAX_EVENTS_BYTES)).toString("utf8");
+          bytes += Buffer.byteLength(rawEvents);
+          for (const [index, line] of rawEvents.split("\n").entries()) {
+            if (!line.trim()) continue;
+            const event = readRecordOrUndefined(JSON.parse(line));
+            const question = event?.type === "interview.question" ? parseInterviewQuestion(event.question) : undefined;
+            if (question) messages.push({ type: "interview", id: `history-interview-${entry.name}-${index}`,
+              runId: entry.name, text: question.text, question });
+          }
+        } catch (error) { if (!isMissingFile(error)) throw error; }
         const resultPath = await this.managedPath(agentId, "runs", entry.name, "result.md");
         let response = "";
         try { response = await this.readManagedResult(resultPath, agentId, entry.name); }
@@ -945,7 +981,21 @@ When a command needs sudo and the Human has requested it, use python3 ${JSON.str
     return this.agentListCache.get(this.projectRoot, () => this.command(["list", "--project-root", this.projectRoot]));
   }
 
-  public async closeWorkflow(mainAgentId: string, workAgentId: string, loopId: string): Promise<Record<string, unknown>> {
+  public closeWorkflow(mainAgentId: string, workAgentId: string, loopId: string): Promise<Record<string, unknown>> {
+    return this.workflowDecision(mainAgentId, workAgentId, loopId, "close", [], "Human selected Close failed workflow", "Workflow close failed");
+  }
+
+  /** The Human's click on a loop stopped at its revision limit: three more revisions, or the end of the loop. */
+  public decideRevisionLimit(mainAgentId: string, workAgentId: string, loopId: string, decision: RevisionLimitDecision): Promise<Record<string, unknown>> {
+    return decision === "continue"
+      ? this.workflowDecision(mainAgentId, workAgentId, loopId, "extend-revisions", ["--additional", String(REVISION_LIMIT_EXTENSION)],
+        `Human selected Continue at the revision limit (${REVISION_LIMIT_EXTENSION} more revisions)`, "Workflow continuation failed")
+      : this.workflowDecision(mainAgentId, workAgentId, loopId, "close", [], "Human selected Stop at the revision limit", "Workflow close failed");
+  }
+
+  /** Run a Human-only loop command bound to the Main run that started the workflow, with the click as decision evidence. */
+  private async workflowDecision(mainAgentId: string, workAgentId: string, loopId: string, command: "close" | "extend-revisions",
+    extra: readonly string[], evidence: string, failure: string): Promise<Record<string, unknown>> {
     const location = await this.location();
     const path = await this.managedPath(workAgentId, "loops", loopId, "state.json");
     const state = readRecord(JSON.parse((await readManagedBytes(path, MAX_RESULT_BYTES)).toString("utf8")), "workflow");
@@ -955,17 +1005,35 @@ When a command needs sudo and the Human has requested it, use python3 ${JSON.str
       throw new Error("Workflow does not belong to this Main conversation");
     }
     const parent = readRecord(JSON.parse((await readManagedBytes(parentPath, MAX_RESULT_BYTES)).toString("utf8")), "workflow parent");
-    const output = await runBoundedProcess(this.pythonCommand, [join(dirname(this.execPath), "loop.py"), "close",
+    const output = await runBoundedProcess(this.pythonCommand, [join(dirname(this.execPath), "loop.py"), command,
       "--project-root", this.projectRoot, "--runtime-home", location.home, "--project-id", location.projectId,
       "--work-agent", workAgentId, "--loop-id", loopId, "--actor", "human",
       "--authorization-reference", `chat:${mainAgentId}:workflow:${loopId}`,
-      "--decision-evidence", "Human selected Close failed workflow"], COMMAND_TIMEOUT_MS, MAX_PROCESS_OUTPUT_BYTES,
+      "--decision-evidence", evidence, ...extra], COMMAND_TIMEOUT_MS, MAX_PROCESS_OUTPUT_BYTES,
       { ...pluginRuntimeEnvironment(this.developmentRoot), AGENT_FACTORY_PARENT_STATE: parentPath,
         AGENT_FACTORY_EXECUTION_POLICY: JSON.stringify(parent.executionPolicy) });
     const snapshot = JSON.parse(output.stdout);
-    if (output.exitCode !== 0 || snapshot.kind === "error") throw new Error(snapshot.error?.message || "Workflow close failed");
+    if (output.exitCode !== 0 || snapshot.kind === "error") throw new Error(snapshot.error?.message || failure);
     this.workflowSnapshots.delete(path);
+    return this.presentWorkflow(snapshot, state, mainAgentId, parentRun);
+  }
+
+  /** Add what the task panel needs beside the runtime snapshot; the pause only where the runtime advertises it. */
+  private async presentWorkflow(snapshot: Record<string, unknown>, state: Record<string, unknown>, mainAgentId: string, parentRun: string): Promise<Record<string, unknown>> {
+    // The parent state path was checked against this Main and exact run by the caller.
+    snapshot.parentAgentId = mainAgentId;
+    snapshot.parentRunId = parentRun;
+    // Loop creation is the dispatch time of its cards; older runtimes omit it from the snapshot.
+    const dispatchedAt = typeof snapshot.createdAt === "string" ? snapshot.createdAt : state.createdAt;
+    if (typeof dispatchedAt === "string" && dispatchedAt) snapshot.dispatchedAt = dispatchedAt;
+    if (snapshot.pause !== undefined && snapshot.pause !== null && !(await this.revisionLimitPauseAdvertised(mainAgentId))) delete snapshot.pause;
     return snapshot;
+  }
+
+  private async revisionLimitPauseAdvertised(mainAgentId: string): Promise<boolean> {
+    // The cached probe of this conversation; a failed probe keeps the text message only.
+    try { return (await this.capabilities(mainAgentId)).submit.revisionLimitPause === true; }
+    catch { return false; }
   }
 
   public async advanceWorkflows(mainAgentId: string, agents: readonly ChildAgentSession[], drive = true): Promise<readonly Record<string, unknown>[]> {
@@ -1023,9 +1091,7 @@ When a command needs sudo and the Human has requested it, use python3 ${JSON.str
             AGENT_FACTORY_EXECUTION_POLICY: JSON.stringify(policy) });
         const snapshot = JSON.parse(output.stdout);
         if (output.exitCode !== 0 || snapshot.kind === "error") throw new Error(snapshot.error?.message || "Workflow reconciliation failed");
-        // The parent state path was checked against this Main and exact run above.
-        snapshot.parentAgentId = mainAgentId;
-        snapshot.parentRunId = parentRun;
+        await this.presentWorkflow(snapshot, state, mainAgentId, parentRun);
         this.workflowSnapshots.set(path, { signature, observedAt: Date.now(), state, snapshot });
         while (this.workflowSnapshots.size > 256) this.workflowSnapshots.delete(this.workflowSnapshots.keys().next().value!);
         snapshots.push(snapshot);
@@ -1088,9 +1154,13 @@ When a command needs sudo and the Human has requested it, use python3 ${JSON.str
         role: agent.role,
         ...(latest.taskBinding ? { taskBinding: latest.taskBinding } : {}),
         status: latest.status,
+        ...(latest.model ? { model: latest.model } : {}),
+        ...(latest.reasoningEffort ? { reasoningEffort: latest.reasoningEffort } : {}),
+        ...(latest.workProfile ? { workProfile: latest.workProfile } : {}),
         ...(latest.runId ? { runId: latest.runId } : {}),
         ...(latest.verifiedWorkRunId ? { verifiedWorkRunId: latest.verifiedWorkRunId } : {}),
-        ...(typeof agent.updatedAt === "string" ? { updatedAt: agent.updatedAt } : {})
+        ...(typeof agent.updatedAt === "string" ? { updatedAt: agent.updatedAt } : {}),
+        ...(latest.dispatchedAt ? { dispatchedAt: latest.dispatchedAt } : {})
       });
     }
     return agents.sort((left, right) => (right.updatedAt ?? "").localeCompare(left.updatedAt ?? ""));
@@ -1273,7 +1343,7 @@ When a command needs sudo and the Human has requested it, use python3 ${JSON.str
     this.runStateSnapshots.delete(path);
   }
 
-  private async latestRunInfo(agentId: string, runId?: string): Promise<{ readonly status: string; readonly runId?: string; readonly verifiedWorkRunId?: string; readonly parentAgentId?: string; readonly parentRunId?: string; readonly taskBinding?: Record<string, unknown> }> {
+  private async latestRunInfo(agentId: string, runId?: string): Promise<{ readonly status: string; readonly runId?: string; readonly verifiedWorkRunId?: string; readonly parentAgentId?: string; readonly parentRunId?: string; readonly taskBinding?: Record<string, unknown>; readonly model?: string; readonly reasoningEffort?: string; readonly workProfile?: WorkProfile; readonly dispatchedAt?: string }> {
     const runsDirectory = await this.managedPath(agentId, "runs");
     try {
       const runs = runId ? [{ name: runId }] : (await this.managedDirectoryEntries(runsDirectory))
@@ -1286,10 +1356,15 @@ When a command needs sudo and the Human has requested it, use python3 ${JSON.str
           // returning a value. Avoid a second metadata read for every child.
           const state = await this.cachedRunState(statePath);
           if (typeof state?.status === "string" && state.status) {
+            const executionOptions = readRecordOrUndefined(state.executionOptions);
             return {
               ...(readRecordOrUndefined(state.taskBinding) ? { taskBinding: readRecordOrUndefined(state.taskBinding) } : {}),
               status: state.status,
               runId: run.name,
+              ...(typeof executionOptions?.model === "string" && executionOptions.model ? { model: executionOptions.model } : {}),
+              ...(typeof executionOptions?.reasoningEffort === "string" && executionOptions.reasoningEffort ? { reasoningEffort: executionOptions.reasoningEffort } : {}),
+              ...(parseWorkProfile(state.workProfile) ? { workProfile: parseWorkProfile(state.workProfile) } : {}),
+              ...(typeof state.acceptedAt === "string" && state.acceptedAt ? { dispatchedAt: state.acceptedAt } : {}),
               ...(typeof state.parentAgentId === "string" && MANAGED_ID.test(state.parentAgentId) ? { parentAgentId: state.parentAgentId } : {}),
               ...(typeof state.parentRunId === "string" && MANAGED_ID.test(state.parentRunId) ? { parentRunId: state.parentRunId } : {}),
               ...(typeof state.verifiedWorkRunId === "string" && MANAGED_ID.test(state.verifiedWorkRunId)
@@ -1338,9 +1413,8 @@ When a command needs sudo and the Human has requested it, use python3 ${JSON.str
     timeoutMs: number,
     maxOutputBytes: number
   ): Promise<ProcessOutput> {
-    // New sessions and capability probes must use the same exact CLI as setup.
-    // Sends retain the executable captured by the existing runtime session.
-    if (codexExecutable() !== "codex" && ["submit", "capabilities", "worktree"].includes(arguments_[0] ?? "") && !arguments_.includes("--codex")) {
+    // Every turn uses the host's current CLI selection, including resumed conversations.
+    if (codexExecutable() !== "codex" && ["submit", "send", "capabilities", "worktree"].includes(arguments_[0] ?? "") && !arguments_.includes("--codex")) {
       arguments_ = [...arguments_, "--codex", codexExecutable()];
     }
     if (claudeExecutable() !== "claude" && ["submit", "capabilities", "worktree"].includes(arguments_[0] ?? "") && !arguments_.includes("--claude")) {
@@ -1525,6 +1599,10 @@ async function progressUpdates(line: string, projectRoot: string, ownResultPath:
   }
   const event = readRecordOrUndefined(value);
   if (!event) return [];
+  if (event.type === "interview.question") {
+    const question = parseInterviewQuestion(event.question);
+    return question ? [{ kind: "interviewQuestion", question }] : [];
+  }
   if (event.type === "goal.updated") return [{ kind: "goal", goal: readNativeGoal(event.goal) }];
   if (event.type === "goal.error") return [{ kind: "goal", goal: null, error: typeof event.message === "string" ? event.message : localize("ui.goal.status.needs.attention") }];
   if (event.type === "goal.continuing") return [statusUpdate(localize("ui.the.goal.is.active.codex.will.continue.with.the.next.turn"))];

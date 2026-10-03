@@ -114,8 +114,8 @@ export interface ProviderVersions {
 }
 
 const VERSION_PROBE_TIMEOUT_MS = 5_000;
-const PLUGIN_VERSION_READERS: Readonly<Record<ProviderId, () => Promise<string | undefined>>> = {
-  codex: () => installedCodexPluginVersion(),
+const PLUGIN_VERSION_READERS: Readonly<Record<ProviderId, (requiredVersion?: string) => Promise<string | undefined>>> = {
+  codex: requiredVersion => installedCodexPluginVersion(undefined, requiredVersion),
   claude: () => installedClaudePluginVersion(),
   antigravity: () => installedAntigravityPluginVersion()
 };
@@ -143,7 +143,7 @@ export function providerVersions(): Partial<Readonly<Record<ProviderId, Provider
 export async function refreshProviderVersions(requiredVersion?: string): Promise<Partial<Readonly<Record<ProviderId, ProviderVersions>>>> {
   const detected = providerStatuses().filter((status): status is ProviderStatus & { path: string } => status.detected && typeof status.path === "string");
   const entries = await Promise.all(detected.map(async status => {
-    const [cli, plugin] = await Promise.all([probeCliVersion(status.path), PLUGIN_VERSION_READERS[status.id]().catch(() => undefined)]);
+    const [cli, plugin] = await Promise.all([probeCliVersion(status.path), PLUGIN_VERSION_READERS[status.id](requiredVersion).catch(() => undefined)]);
     return [status.id, {
       ...(cli ? { cli } : {}),
       ...(plugin ? { plugin } : {}),

@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 import { importTypeScript } from "../support/import-typescript.mjs";
+import { readChatSource } from "../support/chat-source.mjs";
 
 
 test("webview image messages validate content without a size ceiling", async function () {
@@ -18,6 +19,9 @@ test("webview image messages validate content without a size ceiling", async fun
   const restore = { type: "attachments.restore", attachments: [{ id: "image-one", name: "one.png", target: "history" }] };
   assert.deepEqual(parseClientMessage(restore), restore);
   assert.equal(parseClientMessage({ ...restore, attachments: [{ ...restore.attachments[0], target: "arbitrary" }] }), undefined);
+  const droppedUris = { type: "attachments.addUris", uris: ["file:///Users/test/Pictures/example%20image.png"] };
+  assert.deepEqual(parseClientMessage(droppedUris), droppedUris);
+  assert.equal(parseClientMessage({ ...droppedUris, uris: ["file:///valid.png", "bad\nuri"] }), undefined);
 });
 
 test("runtime image construction rejects blob URLs and emits local paths", async function () {
@@ -27,7 +31,7 @@ test("runtime image construction rejects blob URLs and emits local paths", async
 });
 
 test("preview rendering opens only host-owned attachment identifiers and drops blob persistence", async function () {
-  const script = await readFile(new URL("../../static/js/chat.js", import.meta.url), "utf8");
+  const script = await readChatSource();
   const panel = await readFile(new URL("../../src/infrastructure/vscode/chat-panel-manager.ts", import.meta.url), "utf8");
   assert.match(script, /type: "attachment\.open", id: attachment\.id/);
   assert.match(script, /!item\.previewUri\?\.startsWith\("blob:"\)/);
@@ -43,7 +47,7 @@ test("preview rendering opens only host-owned attachment identifiers and drops b
 
 test("sent image history retains host files while releasing only the composer budget", async function () {
   const panel = await readFile(new URL("../../src/infrastructure/vscode/chat-panel-manager.ts", import.meta.url), "utf8");
-  const webview = await readFile(new URL("../../static/js/chat.js", import.meta.url), "utf8");
+  const webview = await readChatSource();
   assert.match(panel, /finally\(\(\) => \{[\s\S]*managed\.imageAttachments\.delete\(item\.id\)/);
   assert.doesNotMatch(panel, /finally\(\(\) => Promise\.all\(attachments[\s\S]*removeImageAttachment/);
   assert.match(webview, /attachments: submittedAttachments/);

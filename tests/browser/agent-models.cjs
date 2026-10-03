@@ -1,17 +1,118 @@
 const assert = require('node:assert/strict');
+async function chooseModel(row, value) {
+  const control = row.locator('button[data-field="model"]');
+  await control.click();
+  await row.locator(`.model-picker-option[data-value="${value}"]`).click();
+}
+async function checkFastSetting(page) {
+  await page.goto(new URL('/?lang=ko', page.url()).href);
+  const emit = async value => { await page.evaluate(value => window.postMessage(value, '*'), value); await page.evaluate(() => new Promise(requestAnimationFrame)); };
+  const capability = { model: true, reasoning: true, fast: true, taskModes: ['direct'] };
+  const initialize = { type: 'host.initialize', panelId: 'fast-setting', role: 'main', title: 'Main', model: 'main-model', reasoning: 'medium', fastMode: true, runtimeAvailable: true, capabilities: { submit: capability, send: capability } };
+  await emit(initialize);
+  await emit({ type: 'models.list', models: ['main-model', 'work-model', 'verify-model'] });
+  await emit({ type: 'agent.defaults', settings: { global: {}, project: {
+    main: { model: 'gpt-6-astra', reasoningEffort: 'medium', fast: false },
+    work: { model: 'gpt-6-astra', reasoningEffort: 'medium', fast: true },
+    workLight: { model: 'gpt-6-astra', reasoningEffort: 'low', fast: false },
+    verification: { model: 'gpt-6-astra', reasoningEffort: 'high', fast: true },
+    fastByModel: { 'gpt-6-astra': false }
+  }, projectAvailable: true } });
+  assert.equal(await page.locator('#fast-mode-button').isVisible(), false, 'Fast has no duplicate composer control');
+  await page.locator('#model-button').click();
+  await page.locator('#agent-default-scope').selectOption('chat');
+  const fast = page.locator('#model-menu button[data-role="main"][data-field="fast"]');
+  assert.equal(await page.locator('#model-menu > #agent-fast-setting').count(), 0);
+  assert.equal(await page.locator('#model-menu .agent-settings-columns > span').last().textContent(), '빠른 모드');
+  assert.equal(await fast.getAttribute('aria-pressed'), 'true');
+  assert.equal(await fast.getAttribute('aria-label'), '조율자 빠른 모드 켜짐');
+  assert.equal(await fast.locator('span').textContent(), '켜짐');
+  const scopeBefore = await page.locator('#agent-default-scope').inputValue();
+  const defaultsBefore = await page.evaluate(() => window.sentMessages.filter(message => message.type === 'agent.defaults.save' || message.type === 'agent.preset.field').length);
+  await fast.click();
+  assert.equal(await fast.getAttribute('aria-pressed'), 'false');
+  assert.equal(await fast.getAttribute('aria-label'), '조율자 빠른 모드 꺼짐');
+  assert.equal(await fast.locator('span').textContent(), '꺼짐');
+  assert.equal(await page.locator('#agent-default-scope').inputValue(), scopeBefore, 'Fast is independent of the selected defaults scope');
+  assert.equal(await page.evaluate(() => window.sentMessages.filter(message => message.type === 'agent.defaults.save' || message.type === 'agent.preset.field').length), defaultsBefore);
+  assert.equal(await page.evaluate(() => window.sentMessages.filter(message => message.type === 'composer.settings').at(-1).fastMode), false);
+  await page.keyboard.press('Escape');
+  await page.locator('#model-button').click();
+  const reopenedFast = page.locator('#model-menu button[data-role="main"][data-field="fast"]');
+  assert.equal(await reopenedFast.getAttribute('aria-pressed'), 'false', 'Closing and reopening settings preserves Fast');
+  const fs = require('node:fs');
+  const path = require('node:path');
+  const artifactDir = path.resolve(__dirname, '../../../docs/artifact/agent-fast-mode');
+  fs.mkdirSync(artifactDir, { recursive: true });
+  for (const size of [{ width: 465, height: 556 }, { width: 721, height: 402 }]) {
+    await page.setViewportSize(size);
+    await reopenedFast.scrollIntoViewIfNeeded();
+    const layout = await page.locator('#model-menu').evaluate(element => {
+      const rect = element.getBoundingClientRect();
+      return { left: rect.left, right: rect.right, top: rect.top, bottom: rect.bottom, width: rect.width, horizontalOverflow: element.scrollWidth > element.clientWidth + 1 };
+    });
+    assert.ok(layout.left >= 0 && layout.right <= size.width && layout.top >= 0 && layout.bottom <= size.height, JSON.stringify({ size, layout }));
+    assert.ok(Math.abs(layout.width - (size.width <= 560 ? size.width - 24 : 560)) < 1, JSON.stringify({ size, layout }));
+    assert.equal(layout.horizontalOverflow, false, JSON.stringify({ size, layout }));
+    assert.equal(await reopenedFast.isVisible(), true);
+    const stateLabel = await reopenedFast.locator('span').evaluate(element => ({
+      whiteSpace: getComputedStyle(element).whiteSpace,
+      wraps: element.scrollWidth > element.clientWidth + 1 || element.scrollHeight > element.clientHeight + 1
+    }));
+    assert.deepEqual(stateLabel, { whiteSpace: 'nowrap', wraps: false }, JSON.stringify({ size, stateLabel }));
+    const rowLayout = await page.locator('#model-menu .agent-model-row[data-agent-role="main"]').evaluate(row => {
+      const box = selector => { const rect = row.querySelector(selector).getBoundingClientRect(); return { left: rect.left, right: rect.right, top: rect.top, bottom: rect.bottom, centerY: rect.top + rect.height / 2 }; };
+      return { model: box('button[data-field="model"]'), reasoning: box('input[data-field="reasoningEffort"]'), fast: box('button[data-field="fast"]') };
+    });
+    if (size.width <= 560) {
+      assert.ok(rowLayout.model.bottom <= rowLayout.reasoning.top && Math.abs(rowLayout.reasoning.centerY - rowLayout.fast.centerY) < 2, JSON.stringify({ size, rowLayout }));
+    } else {
+      assert.ok(Math.abs(rowLayout.model.centerY - rowLayout.reasoning.centerY) < 2 && Math.abs(rowLayout.reasoning.centerY - rowLayout.fast.centerY) < 2, JSON.stringify({ size, rowLayout }));
+    }
+    for (const control of await page.locator('#model-menu .agent-model-row :is(button[data-field="model"], input, button[data-field="fast"])').all()) {
+      await control.scrollIntoViewIfNeeded();
+      assert.equal(await control.isVisible(), true, JSON.stringify({ size, control: await control.getAttribute('data-field') }));
+    }
+    await page.locator('#model-menu').evaluate(element => { element.scrollTop = 0; });
+    await page.locator('#model-menu').screenshot({ path: path.join(artifactDir, `fast-ko-${size.width}x${size.height}.png`) });
+  }
+  await page.setViewportSize({ width: 795, height: 900 });
+  await emit(initialize);
+  assert.equal(await page.locator('#model-menu button[data-role="main"][data-field="fast"]').getAttribute('aria-pressed'), 'true', 'Host restoration reapplies the session Fast state');
+  await page.keyboard.press('Escape');
+  await page.locator('#prompt').fill('Fast capture');
+  await page.locator('#prompt').press('Enter');
+  assert.equal(await page.evaluate(() => window.sentMessages.filter(message => message.type === 'chat.send').at(-1).execution.fast), true);
+}
+
 async function checkAgentModels(page) {
   const emit = async value => { await page.evaluate(value => window.postMessage(value, '*'), value); await page.evaluate(() => new Promise(requestAnimationFrame)); };
-  const capability = { model: true, reasoning: true, taskModes: ['direct', 'work', 'work-verification'] };
-  await emit({ type: 'host.initialize', panelId: 'roles', role: 'main', title: 'Main', model: 'main-model', reasoning: 'medium', agentModels: { work: { model: 'work-model', reasoningEffort: 'medium' }, verification: { model: 'verify-model', reasoningEffort: 'high' } }, agentPermissions: { main: 'bypass', work: 'bypass', verification: 'danger-full-access' }, runtimeAvailable: true, capabilities: { submit: capability, send: capability } });
+  const capability = { model: true, reasoning: true, fast: true, taskModes: ['direct', 'work', 'work-verification'] };
+  await emit({ type: 'host.initialize', panelId: 'roles', role: 'main', title: 'Main', model: 'main-model', reasoning: 'medium', fastMode: false, agentModels: { work: { model: 'work-model', reasoningEffort: 'medium', fast: false }, verification: { model: 'verify-model', reasoningEffort: 'high', fast: true } }, agentPermissions: { main: 'bypass', work: 'bypass', verification: 'danger-full-access' }, runtimeAvailable: true, capabilities: { submit: capability, send: capability } });
   await emit({ type: 'models.list', models: ['main-model', 'work-model', 'verify-model'] });
   await emit({ type: 'agent.defaults', settings: { global: {}, project: {}, projectAvailable: true } });
   assert.equal(await page.locator('#reasoning-button').isVisible(), false);
   await page.locator('#model-button').click();
   assert.equal(await page.locator('#agent-default-scope').inputValue(), 'project');
+  assert.equal(await page.locator('#agent-fast-setting').isVisible(), false);
   await page.locator('#agent-default-scope').selectOption('chat');
+  const mainFast = page.locator('#model-menu button[data-role="main"][data-field="fast"]');
+  assert.equal(await mainFast.getAttribute('aria-pressed'), 'false');
+  await mainFast.click();
+  assert.equal(await mainFast.getAttribute('aria-pressed'), 'true');
+  assert.equal(await mainFast.locator('span').textContent(), 'On');
+  assert.equal(await page.evaluate(() => window.sentMessages.filter(m => m.type === 'composer.settings').at(-1).fastMode), true);
+  await page.keyboard.press('Escape');
+  assert.equal(await page.locator('#fast-mode-button').isVisible(), false, 'Fast no longer has a duplicate composer control');
+  await page.locator('#model-button').click();
+  assert.equal(await page.locator('#model-menu button[data-role="main"][data-field="fast"]').getAttribute('aria-pressed'), 'true', 'Closing settings preserves the session Fast state');
   assert.deepEqual(await page.locator('#model-menu > .agent-model-row').evaluateAll(rows => rows.map(row => row.dataset.agentRole)), ['main', 'work', 'workLight', 'verification']);
   assert.equal(await page.evaluate(() => window.saved.agentModels.work.model), 'work-model');
   assert.equal(await page.evaluate(() => window.saved.agentModels.work.reasoningEffort), 'medium');
+  assert.equal(await page.locator('#model-menu button[data-field="fast"]').count(), 4);
+  await page.locator('#model-menu button[data-role="work"][data-field="fast"]').click();
+  assert.equal(await page.evaluate(() => window.saved.agentModels.work.fast), true);
+  assert.equal(await page.locator('#model-menu button[data-role="verification"][data-field="fast"]').getAttribute('aria-pressed'), 'true');
   for (const height of [900, 600]) {
     await page.setViewportSize({ width: 795, height });
     const layout = await page.locator('#model-menu').evaluate(element => ({
@@ -33,7 +134,7 @@ async function checkAgentModels(page) {
     assert.equal(focus.border, idleBorder);
   }
   for (const [role, model, effort] of [['main', 'main-model', 'low'], ['work', 'work-model', 'high'], ['verification', 'verify-model', 'medium']]) {
-    await page.locator(`#model-menu select[data-role="${role}"][data-field="model"]`).selectOption(model);
+    await chooseModel(page.locator(`#model-menu .agent-model-row[data-agent-role="${role}"]`), model);
     await page.locator(`#model-menu input[data-role="${role}"][data-field="reasoningEffort"]`).fill(String(["none", "low", "medium", "high", "xhigh", "max"].indexOf(effort)));
   }
   const saved = await page.evaluate(() => window.saved);
@@ -46,20 +147,21 @@ async function checkAgentModels(page) {
   const sent = await page.evaluate(() => window.sentMessages.filter(m => m.type === 'chat.send').at(-1));
   assert.equal(sent.execution.model, 'main-model');
   assert.equal(sent.execution.reasoningEffort, 'low');
+  assert.equal(sent.execution.fast, true);
   assert.deepEqual(sent.execution.agentModels, saved.agentModels);
   await page.locator('#model-button').click();
-  assert.equal(await page.locator('#model-menu select[data-field="model"] option[value=""]').count(), 0);
+  assert.equal(await page.locator('#model-menu .model-picker-option[data-value=""]').count(), 0);
   assert.equal(await page.locator('#model-menu .agent-setting-reset').count(), 0);
   assert.equal(await page.locator('#model-menu .agent-setting-source').count(), 0);
   await emit({ type: 'agent.defaults', settings: { global: {}, project: { work: { model: 'different', reasoningEffort: 'none' } }, projectAvailable: true } });
   assert.equal(await page.evaluate(() => window.saved.agentModels.work.model), 'work-model');
   await emit({ type: 'models.list', models: ['gpt-5.6-sol', 'gpt-6-astra', 'gpt-5.6-terra', 'gpt-5.6-luna', 'gpt-5.5'] });
-  await page.locator('#model-menu select[data-role="main"][data-field="model"]').selectOption('gpt-5.6-sol');
+  await chooseModel(page.locator('#model-menu .agent-model-row[data-agent-role="main"]'), 'gpt-5.6-sol');
   await page.locator('#model-menu input[data-role="main"][data-field="reasoningEffort"]').fill('2');
 
   const fs = require('node:fs');
   const path = require('node:path');
-  const artifactDir = path.resolve(__dirname, '../../out/agent-settings');
+  const artifactDir = path.resolve(__dirname, '../../../docs/artifact/agent-fast-mode');
   fs.mkdirSync(artifactDir, { recursive: true });
   for (const width of [795, 320]) {
     await page.setViewportSize({ width, height: 740 });
@@ -72,15 +174,16 @@ async function checkAgentModels(page) {
     await page.locator('#model-menu').screenshot({ path: path.join(artifactDir, 'settings-' + width + '.png') });
     const reasoning = page.locator('#model-menu input[data-role="main"][data-field="reasoningEffort"]');
     assert.equal(await reasoning.getAttribute('aria-valuetext'), 'medium');
-    const modelBox = await page.locator('#model-menu select[data-role="main"]').boundingBox();
+    const modelBox = await page.locator('#model-menu button[data-role="main"][data-field="model"]').boundingBox();
     const rangeBox = await reasoning.boundingBox();
-    assert.ok(Math.abs(modelBox.width - rangeBox.width) < 1);
+    assert.ok(modelBox.width >= rangeBox.width, JSON.stringify({ width, modelBox, rangeBox }));
     const rows = await page.locator('#model-menu .agent-model-row').evaluateAll(rows => rows.map(row => {
       const rect = node => { const r = node.getBoundingClientRect(); return { x: r.x, y: r.y + r.height / 2, width: r.width, height: r.height }; };
-      return [rect(row.querySelector('select[data-field="model"]')), rect(row.querySelector('input[type="range"]'))];
+      return [rect(row.querySelector('button[data-field="model"]')), rect(row.querySelector('input[type="range"]'))];
     }));
     for (const [model, reasoning] of rows) {
-      assert.ok(Math.abs(model.y - reasoning.y) < 1, 'Role controls must share a horizontal centerline');
+      if (width > 480) assert.ok(Math.abs(model.y - reasoning.y) < 1, 'Desktop role controls must share a horizontal centerline');
+      else assert.ok(model.width > reasoning.width && model.y < reasoning.y, 'Narrow role controls must keep the model readable above reasoning and Fast');
     }
     await reasoning.fill('3');
     assert.equal(await page.evaluate(() => window.saved.reasoning), 'high');
@@ -107,17 +210,28 @@ async function checkAgentModels(page) {
   assert.equal(await page.locator('[data-permission-role]').count(), 0);
   assert.equal(await page.locator('#model-menu [data-setting="permissions"]').count(), 0);
   // Project and global defaults are edited from the same panel through its scope selector.
-  await emit({ type: 'agent.defaults', settings: { global: {}, project: {}, projectAvailable: true } });
+  await emit({ type: 'agent.defaults', settings: { global: {}, project: {
+    main: { model: 'gpt-6-astra', reasoningEffort: 'medium', fast: false },
+    work: { model: 'gpt-6-astra', reasoningEffort: 'medium', fast: true },
+    workLight: { model: 'gpt-6-astra', reasoningEffort: 'low', fast: false },
+    verification: { model: 'gpt-6-astra', reasoningEffort: 'high', fast: true },
+    fastByModel: { 'gpt-6-astra': false }
+  }, projectAvailable: true } });
   assert.equal(await page.locator('#agent-default-scope').inputValue(), 'chat');
   assert.equal(await page.locator('#model-menu #agent-default-fields').count(), 0);
   await page.locator('#agent-default-scope').selectOption('project');
   assert.equal(await page.locator('#agent-default-scope').evaluate(el => el === document.activeElement), true);
-  assert.equal(await page.locator('#model-menu #agent-default-fields select').count(), 4);
-  await page.locator('#agent-default-fields select').first().selectOption('gpt-6-astra');
+  assert.equal(await page.locator('#model-menu #agent-default-fields button[data-field=model]').count(), 4);
+  await chooseModel(page.locator('#agent-default-fields .agent-model-row').first(), 'gpt-6-astra');
   assert.deepEqual(await page.evaluate(() => window.sentMessages.filter(m => m.type === 'agent.defaults.save').at(-1)), { type: 'agent.defaults.save', scope: 'project', role: 'main', field: 'model', value: 'gpt-6-astra' });
   assert.equal(await page.locator('#agent-default-fields input[type=range]').count(), 4);
   await page.locator('#agent-default-fields input[data-role=work]').fill('4');
   assert.deepEqual(await page.evaluate(() => window.sentMessages.filter(m => m.type === 'agent.defaults.save').at(-1)), { type: 'agent.defaults.save', scope: 'project', role: 'work', field: 'reasoningEffort', value: 'xhigh' });
+  const projectFast = page.locator('#agent-default-fields button[data-role=work][data-field=fast]');
+  assert.equal(await projectFast.getAttribute('aria-pressed'), 'false', 'The model preference is shared instead of preserving conflicting role values');
+  await projectFast.click();
+  assert.deepEqual(await page.evaluate(() => window.sentMessages.filter(m => m.type === 'agent.defaults.fast').at(-1)), { type: 'agent.defaults.fast', scope: 'project', model: 'gpt-6-astra', value: true });
+  assert.equal(await page.locator('#agent-default-fields button[data-role=verification][data-field=fast]').getAttribute('aria-pressed'), 'true', 'The same model has one Fast value across roles');
   await page.locator('#agent-default-scope').selectOption('global');
   await page.locator('#agent-default-fields input[data-role=verification]').fill('5');
   assert.deepEqual(await page.evaluate(() => window.sentMessages.filter(m => m.type === 'agent.defaults.save').at(-1)), { type: 'agent.defaults.save', scope: 'global', role: 'verification', field: 'reasoningEffort', value: 'max' });
@@ -132,19 +246,23 @@ async function checkAgentModels(page) {
     assert.ok(scope.x + scope.width <= picker.x && picker.x + picker.width <= close.x, JSON.stringify([width, scope, picker, close]));
     assert.equal(await page.locator('#model-menu').getByText('우선순위', { exact: false }).count(), 0);
     for (const row of await page.locator('#agent-default-fields .agent-model-row').all()) {
-      const model = await row.locator('select').boundingBox();
+      const model = await row.locator('button[data-field=model]').boundingBox();
       const effort = await row.locator('input[type=range]').boundingBox();
-      assert.ok(Math.abs(model.y + model.height / 2 - effort.y - effort.height / 2) < 1);
+      if (width <= 480) {
+        assert.ok(model.y + model.height <= effort.y, JSON.stringify([width, model, effort]));
+      } else {
+        assert.ok(Math.abs(model.y + model.height / 2 - effort.y - effort.height / 2) < 1, JSON.stringify([width, model, effort]));
+      }
     }
     assert.equal(await page.locator('#model-menu').evaluate(el => el.scrollWidth > el.clientWidth + 1), false);
-    const control = page.locator('#agent-default-fields select').first();
+    const control = page.locator('#agent-default-fields button[data-field=model]').first();
     assert.equal(await control.evaluate(el => getComputedStyle(el).height), '34px');
     assert.notEqual(await control.evaluate(el => getComputedStyle(el).backgroundColor), 'rgb(255, 255, 255)');
     await page.locator('#model-menu').evaluate(el => { el.scrollTop = 0; });
     await page.locator('#model-menu').screenshot({ path: path.join(artifactDir, 'defaults-' + width + '.png') });
   }
   await page.locator('#agent-default-scope').selectOption('chat');
-  assert.equal(await page.locator('#model-menu select[data-role="main"][data-field="model"]').count(), 1);
+  assert.equal(await page.locator('#model-menu button[data-role="main"][data-field="model"]').count(), 1);
   await page.keyboard.press('Escape');
   await page.locator('#status-settings-button').click();
   await page.locator('#settings-tab-general').click();
@@ -172,69 +290,100 @@ async function checkAgentModels(page) {
 }
 
 async function checkModelVendorTabs(page, emit) {
-  // Vendor tabs filter the catalog; route suffixes replace redundant group headings.
   const freshCapability = { model: true, reasoning: true, taskModes: ['direct'] };
-  await emit({ type: 'host.initialize', panelId: 'roles', role: 'main', title: 'Main', model: 'gpt-5.6-sol', reasoning: 'medium', agentSettingsScope: 'chat', agentSettingsSet: 'Default', resetConversation: true, runtimeAvailable: true, capabilities: { submit: freshCapability, send: freshCapability } });
+  await emit({ type: 'host.initialize', panelId: 'roles', role: 'main', title: 'Main', model: 'gpt-5.6-sol', reasoning: 'medium', modelFastModes: {'gpt-5.6-sol': true, 'gpt-6-astra': false}, agentSettingsScope: 'chat', agentSettingsSet: 'Default', resetConversation: true, runtimeAvailable: true, capabilities: { submit: freshCapability, send: freshCapability } });
   await page.locator('#model-button').click();
   await page.locator('#agent-default-scope').selectOption('chat');
-  await emit({ type: 'models.list', models: ['gpt-5.6-sol', 'claude-opus-5-5', 'antigravity/claude-sonnet-4-6', 'gemini-3.8-flash', 'antigravity/gpt-oss-120b-medium'] });
+  await emit({ type: 'models.list', models: ['gpt-5.6-sol', 'gpt-6-astra', 'claude-opus-5-5', 'antigravity/claude-sonnet-4-6', 'gemini-3.8-flash', 'antigravity/gpt-oss-120b-medium'] });
   const row = page.locator('#model-menu .agent-model-row[data-agent-role="main"]');
-  const model = row.locator('select[data-field="model"]');
+  const model = row.locator('button[data-field="model"]');
+  await model.click();
+  const popupBox = await row.locator('.model-picker-popup').boundingBox();
+  const modelBox = await model.boundingBox();
+  const menuBox = await page.locator('#model-menu').boundingBox();
+  assert.ok(popupBox.y + popupBox.height <= modelBox.y - 3, JSON.stringify({popupBox, modelBox}));
+  assert.ok(popupBox.y < menuBox.y, 'The upward fixed picker escapes the settings panel overflow layer');
+  assert.ok(popupBox.y >= 0 && popupBox.x >= 0, JSON.stringify(popupBox));
   const tabs = row.locator('.model-vendor-tab');
-  // Check native popup contents, not CSS visibility: other vendors must be absent.
-  const visible = () => model.evaluate(el => [...el.options].map(o => o.value));
+  const visible = () => row.locator('.model-picker-option').evaluateAll(options => options.map(option => option.dataset.value));
   assert.deepEqual(await tabs.allTextContents(), ['OpenAI', 'Anthropic', 'Google']);
   assert.equal(await tabs.nth(0).getAttribute('aria-selected'), 'true');
-  assert.deepEqual(await visible(), ['gpt-5.6-sol', 'antigravity/gpt-oss-120b-medium']);
+  assert.deepEqual(await visible(), ['gpt-5.6-sol', 'gpt-6-astra', 'antigravity/gpt-oss-120b-medium']);
+  assert.equal(await row.locator('button[data-field="fast"]').count(), 1, 'Codex rows expose Fast');
+  assert.equal(await model.getAttribute('aria-expanded'), 'true');
+  assert.match(await row.locator('.model-picker-popup').textContent(), /OpenAI/);
   await tabs.nth(1).click();
   assert.equal(await tabs.nth(1).getAttribute('aria-selected'), 'true');
   assert.deepEqual(await visible(), ['claude-opus-5-5', 'antigravity/claude-sonnet-4-6']);
-  assert.equal(await model.locator('optgroup').count(), 0);
-  assert.equal(await model.locator('option[value="antigravity/claude-sonnet-4-6"]').textContent(), 'claude-sonnet-4-6 · Antigravity');
-  await model.selectOption('antigravity/claude-sonnet-4-6');
-  // A tab click opens the native picker; close it as a click outside would.
-  await model.evaluate(el => el.blur());
-  await page.mouse.click(1, 1);
-  await page.locator('#model-button').click();
+  assert.equal(await row.locator('.model-picker-option[data-value="antigravity/claude-sonnet-4-6"]').textContent(), 'claude-sonnet-4-6 · Antigravity');
+  await row.locator('.model-picker-option[data-value="antigravity/claude-sonnet-4-6"]').click();
+  assert.equal(await row.locator('button[data-field="fast"]').count(), 0, 'Non-Codex rows omit Fast');
+  assert.equal(await row.locator('input[data-field="reasoningEffort"]').inputValue(), '2', 'Changing provider preserves reasoning');
+  await model.click();
   assert.equal(await tabs.nth(1).getAttribute('aria-selected'), 'true', 'The selected model reopens on its vendor tab');
-  await tabs.nth(2).click();
+  await tabs.nth(1).press('ArrowRight');
   assert.deepEqual(await visible(), ['gemini-3.8-flash']);
-  // The tabs share the 16px line above the select, so rows keep their height.
-  const [tabBox, selectBox] = [await row.locator('.model-vendor-tabs').boundingBox(), await model.boundingBox()];
-  assert.ok(tabBox.y + tabBox.height <= selectBox.y + 1 && tabBox.height <= 17, JSON.stringify([tabBox, selectBox]));
-  await page.mouse.click(1, 1);
-  if (await page.locator('#model-menu').isVisible()) await page.keyboard.press('Escape');
+  assert.equal(await tabs.nth(2).evaluate(element => element === document.activeElement), true, 'Arrow keys move between provider tabs');
+  await page.keyboard.press('Escape');
+  assert.equal(await model.getAttribute('aria-expanded'), 'false');
+  await page.keyboard.press('Escape');
   await page.locator('#prompt').fill('Route check');
   await page.locator('#prompt').press('Enter');
   assert.equal(await page.evaluate(() => window.sentMessages.filter(m => m.type === 'chat.send').at(-1).execution.model), 'antigravity/claude-sonnet-4-6');
-  // A started conversation keeps its provider: other routes stay visible but cannot be chosen.
   const capability = { model: true, reasoning: true, taskModes: ['direct'] };
   await emit({ type: 'session.bound', agentId: 'main-roles' });
   await emit({ type: 'capabilities.updated', capabilities: { submit: capability, send: { ...capability, sessionProvider: 'antigravity' } } });
   if (!await page.locator('#model-menu').isVisible()) await page.locator('#model-button').click();
-  await row.locator('.model-vendor-tab').nth(1).click();
+  await model.click();
   const disabled = {};
   for (const index of [0, 1, 2]) {
-    await tabs.nth(index).evaluate(el => el.click());
-    Object.assign(disabled, await model.evaluate(el => Object.fromEntries([...el.options].map(o => [o.value, o.disabled]))));
+    if (!await tabs.nth(index).isDisabled()) await tabs.nth(index).click();
+    Object.assign(disabled, await row.locator('.model-picker-option').evaluateAll(options => Object.fromEntries(options.map(option => [option.dataset.value, option.disabled]))));
   }
-  await tabs.nth(1).evaluate(el => el.click());
-  assert.deepEqual(disabled, { 'gpt-5.6-sol': true, 'antigravity/gpt-oss-120b-medium': false, 'claude-opus-5-5': true,
+  assert.deepEqual(disabled, { 'gpt-5.6-sol': true, 'gpt-6-astra': true, 'antigravity/gpt-oss-120b-medium': false, 'claude-opus-5-5': true,
     'antigravity/claude-sonnet-4-6': false, 'gemini-3.8-flash': false });
-  // Close the picker the tab click opened so the screenshots show the resting layout.
-  await page.mouse.click(1, 1);
+  await page.keyboard.press('Escape');
+  await emit({ type: 'host.initialize', panelId: 'role-fast-support', role: 'main', title: 'Main', model: 'claude-opus-5-5', reasoning: 'medium',
+    agentModels: {work: {model: 'gpt-5.6-sol', reasoningEffort: 'medium', fast: true}, workLight: {model: 'claude-opus-5-5', reasoningEffort: 'low'}, verification: {model: 'gpt-6-astra', reasoningEffort: 'high', fast: false}},
+    modelFastModes: {'gpt-5.6-sol': true, 'gpt-6-astra': false}, resetConversation: true, runtimeAvailable: true,
+    capabilities: { submit: {...freshCapability, fast: false}, send: {...freshCapability, fast: false} } });
   if (!await page.locator('#model-menu').isVisible()) await page.locator('#model-button').click();
+  assert.equal(await page.locator('.agent-model-row[data-agent-role=main] button[data-field=fast]').count(), 0, 'Claude Main omits Fast');
+  assert.equal(await page.locator('.agent-model-row[data-agent-role=work] button[data-field=fast]').count(), 1, 'Codex Work keeps its own Fast control');
+  assert.equal(await page.locator('.agent-model-row[data-agent-role=workLight] button[data-field=fast]').count(), 0, 'Claude light Work omits Fast');
+  assert.equal(await page.locator('.agent-model-row[data-agent-role=verification] button[data-field=fast]').count(), 1, 'Codex Verification keeps its own Fast control');
+  await page.keyboard.press('Escape');
+  await emit({ type: 'host.initialize', panelId: 'fast-models', role: 'main', title: 'Main', model: 'gpt-5.6-sol', reasoning: 'medium',
+    agentModels: {work: {model: 'gpt-5.6-sol', reasoningEffort: 'medium', fast: false}, workLight: {model: 'gpt-5.6-sol', reasoningEffort: 'low', fast: false}, verification: {model: 'gpt-5.6-sol', reasoningEffort: 'high', fast: false}},
+    modelFastModes: {'gpt-5.6-sol': true, 'gpt-6-astra': false}, resetConversation: true, runtimeAvailable: true, capabilities: { submit: {...freshCapability, fast: true}, send: {...freshCapability, fast: true} } });
+  if (!await page.locator('#model-menu').isVisible()) await page.locator('#model-button').click();
+  const fast = row.locator('button[data-field=fast]');
+  assert.equal(await fast.getAttribute('aria-pressed'), 'true');
+  await chooseModel(row, 'gpt-6-astra');
+  assert.equal(await fast.getAttribute('aria-pressed'), 'false', 'Switching models restores that model\'s Fast value');
+  await chooseModel(row, 'gpt-5.6-sol');
+  assert.equal(await fast.getAttribute('aria-pressed'), 'true', 'Returning to a model restores its independent Fast value');
+  await page.keyboard.press('Escape');
+  await page.locator('#prompt').fill('Model Fast request');
+  await page.locator('#prompt').press('Enter');
+  const request = await page.evaluate(() => window.sentMessages.filter(message => message.type === 'chat.send').at(-1));
+  assert.equal(request.execution.fast, true);
+  for (const role of ['work', 'workLight', 'verification']) assert.equal(request.execution.agentModels[role].fast, true, role + ' receives the selected model Fast value');
+  await page.locator('#model-button').click();
   const fs = require('node:fs');
   const path = require('node:path');
-  const artifactDir = path.resolve(__dirname, '../../out/agent-settings');
+  const artifactDir = path.resolve(__dirname, '../../../docs/artifact/agent-fast-mode');
   fs.mkdirSync(artifactDir, { recursive: true });
   for (const width of [795, 320]) {
     await page.setViewportSize({ width, height: 740 });
     assert.equal(await page.locator('#model-menu').evaluate(el => el.scrollWidth > el.clientWidth + 1), false);
-    // Every vendor name stays readable at both widths.
+    const scrollBeforePicker = await page.locator('#model-menu').evaluate(el => el.scrollHeight);
+    await model.click();
+    assert.equal(await page.locator('#model-menu').evaluate(el => el.scrollHeight), scrollBeforePicker, 'Opening the fixed picker must not enlarge the settings scroll area');
     const fit = await row.locator('.model-vendor-tab').evaluateAll(tabs => tabs.map(tab => [tab.textContent, tab.scrollWidth, tab.clientWidth, tab.parentElement.clientWidth]));
     assert.ok(fit.every(([, scroll, client]) => scroll <= client + 1), JSON.stringify([width, fit]));
-    await page.locator('#model-menu').screenshot({ path: path.join(artifactDir, 'vendor-tabs-' + width + '.png') });
+    await page.screenshot({ path: path.join(artifactDir, 'vendor-tabs-' + width + '.png') });
+    await page.keyboard.press('Escape');
   }
   await page.keyboard.press('Escape');
 }
@@ -272,4 +421,4 @@ async function checkReasoningSlider(page) {
   assert.deepEqual(await page.evaluate(() => window.sentMessages.filter(m => m.type === 'agent.defaults.save').at(-1)), { type: 'agent.defaults.save', scope: 'project', role: 'main', field: 'reasoningEffort', value: 'high' });
 }
 
-module.exports = { checkAgentModels, checkReasoningSlider };
+module.exports = { checkFastSetting, checkAgentModels, checkReasoningSlider };
