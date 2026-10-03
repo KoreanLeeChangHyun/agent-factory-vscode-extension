@@ -5,8 +5,15 @@ const directory = new URL("../../static/js/", import.meta.url);
 
 /** chat.js followed by its feature modules, for checks that inspect or slice chat source text. */
 export function readChatSourceSync() {
-  const modules = readdirSync(directory).filter(name => /^chat-[a-z-]+\.js$/.test(name)).sort();
+  const modules = readdirSync(new URL("chat/", directory)).filter(name => name.endsWith(".js")).sort().map(name => "chat/" + name);
   return ["chat.js", ...modules].map(name => readFileSync(new URL(name, directory), "utf8")).join("\n");
+}
+
+/** chat.css followed by its feature stylesheets in the order the template loads them. */
+export function readChatStylesSync() {
+  const template = readFileSync(new URL("../../templates/chat.html", import.meta.url), "utf8");
+  const names = [...template.matchAll(/href="\{\{chatStyleBaseUri\}\}\/(chat\/[a-z-]+\.css)"/g)].map(match => match[1]);
+  return ["chat.css", ...names].map(name => readFileSync(new URL("../css/" + name, directory), "utf8")).join("\n");
 }
 
 export async function readChatSource() {

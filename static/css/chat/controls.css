@@ -1,0 +1,176 @@
+.utility-picker {
+  min-width: 0;
+}
+
+.utility-button {
+  display: grid;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  place-items: center;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  color: var(--vscode-descriptionForeground);
+  background: transparent;
+  cursor: pointer;
+  transition: color 120ms ease, background-color 120ms ease, border-color 120ms ease;
+}
+
+.utility-button svg {
+  width: 16px;
+  height: 16px;
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 1.7;
+}
+
+.utility-button:hover,
+.utility-button[aria-expanded="true"] {
+  color: var(--vscode-foreground);
+  border-color: color-mix(in srgb, var(--vscode-panel-border, var(--vscode-input-border, #454545)) 72%, transparent);
+  background: color-mix(in srgb, var(--vscode-toolbar-hoverBackground) 82%, transparent);
+}
+
+.utility-button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.utility-list-menu {
+  position: absolute;
+  z-index: 14;
+  bottom: calc(100% + 5px);
+  right: 0;
+  width: min(440px, calc(100vw - 36px));
+  max-height: min(320px, 48vh);
+  padding: 5px;
+  overflow-y: auto;
+  border: 1px solid var(--vscode-menu-border, var(--vscode-widget-border));
+  border-radius: 8px;
+  color: var(--vscode-menu-foreground, var(--vscode-foreground));
+  background: var(--vscode-menu-background, var(--vscode-editorWidget-background));
+  box-shadow: 0 5px 18px var(--vscode-widget-shadow, rgba(0, 0, 0, 0.35));
+}
+
+.icon-button svg,
+.send-button svg {
+  width: 17px;
+  height: 17px;
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 2;
+}
+
+.icon-button:hover {
+  color: var(--vscode-foreground);
+  background: var(--vscode-toolbar-hoverBackground);
+}
+
+.setting-control {
+  position: relative;
+  min-width: 0;
+}
+
+.setting-button {
+  display: flex;
+  max-width: 220px;
+  min-width: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: 5px;
+  padding: 0 7px;
+}
+
+.setting-menu {
+  position: absolute;
+  z-index: 12;
+  bottom: calc(100% + 6px);
+  left: 0;
+  display: grid;
+  min-width: max(100%, 168px);
+  max-height: min(280px, 45vh);
+  padding: 4px;
+  overflow-y: auto;
+  border: 1px solid var(--vscode-menu-border, var(--vscode-widget-border));
+  border-radius: 7px;
+  color: var(--vscode-menu-foreground, var(--vscode-foreground));
+  background: var(--vscode-menu-background, var(--vscode-editorWidget-background));
+  box-shadow: 0 4px 14px var(--vscode-widget-shadow, rgba(0, 0, 0, 0.3));
+}
+
+.setting-option {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 8px;
+  border: 0;
+  border-radius: 4px;
+  color: inherit;
+  background: transparent;
+  text-align: left;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.setting-option:hover,
+.setting-option:focus-visible {
+  outline: none;
+  color: var(--vscode-menu-selectionForeground, var(--vscode-list-activeSelectionForeground));
+  background: var(--vscode-menu-selectionBackground, var(--vscode-list-activeSelectionBackground));
+}
+
+.setting-check {
+  width: 16px;
+  height: 16px;
+  flex: 0 0 auto;
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 1.8;
+}
+
+.setting-option[aria-checked="false"] .setting-check {
+  visibility: hidden;
+}
+
+.setting-button span:first-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.setting-button .submission-robot-icon {
+  width: 20px;
+  height: 20px;
+  flex: 0 0 auto;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.6;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.setting-button .chevron-icon {
+  width: 14px;
+  height: 14px;
+  flex: 0 0 auto;
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 1.5;
+}
+
+@media (max-width: 560px) {
+  .setting-button {
+    max-width: 150px;
+  }
+}
+
+.setting-option .submit-icon { margin-left: auto; }

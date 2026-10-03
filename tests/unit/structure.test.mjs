@@ -3,7 +3,7 @@ import { readdir, readFile } from "node:fs/promises";
 import test from "node:test";
 import { createRequire } from "node:module";
 import { runUiInNewContext } from "../support/ui-localization.mjs";
-import { readChatSource } from "../support/chat-source.mjs";
+import { readChatSource, readChatStylesSync } from "../support/chat-source.mjs";
 const ui = createRequire(import.meta.url)("../../static/js/localization.js");
 const nls = JSON.parse(await readFile(new URL("../../package.nls.json", import.meta.url), "utf8"));
 const nlsKo = JSON.parse(await readFile(new URL("../../package.nls.ko.json", import.meta.url), "utf8"));
@@ -12,7 +12,7 @@ const packageJson = JSON.parse(await readFile(new URL("../../package.json", impo
 const template = await readFile(new URL("../../templates/chat.html", import.meta.url), "utf8");
 const chatScript = await readChatSource();
 const templateRenderer = await readFile(new URL("../../src/infrastructure/vscode/chat-template-renderer.ts", import.meta.url), "utf8");
-const chatStyles = await readFile(new URL("../../static/css/chat.css", import.meta.url), "utf8");
+const chatStyles = readChatStylesSync();
 const agentClient = await readFile(new URL("../../src/infrastructure/agent-factory/agent-client.ts", import.meta.url), "utf8");
 const panelManager = await readFile(new URL("../../src/infrastructure/vscode/chat-panel-manager.ts", import.meta.url), "utf8");
 const syntaxHighlighter = await readFile(new URL("../../src/webview/syntax-highlighter.ts", import.meta.url), "utf8");
@@ -382,17 +382,28 @@ test("Git changes render a bounded unified diff preview with file statistics", f
 });
 
 test("every chat feature module is loaded before chat.js and installed once", async function () {
-  const modules = (await readdir(new URL("../../static/js/", import.meta.url))).filter(name => /^chat-[a-z-]+\.js$/.test(name));
+  const modules = (await readdir(new URL("../../static/js/chat/", import.meta.url))).filter(name => name.endsWith(".js"));
   assert.ok(modules.length > 0);
   const chatIndex = template.indexOf('src="{{scriptUri}}"');
   for (const name of modules) {
-    const tagIndex = template.indexOf(`src="{{chatModuleBaseUri}}/${name}"`);
+    const tagIndex = template.indexOf(`src="{{chatModuleBaseUri}}/chat/${name}"`);
     assert.ok(tagIndex > 0 && tagIndex < chatIndex, name + " must load before chat.js");
-    const feature = name.slice(5, -3).replace(/-([a-z])/g, (_match, letter) => letter.toUpperCase());
+    const feature = name.slice(0, -3).replace(/-([a-z])/g, (_match, letter) => letter.toUpperCase());
     assert.equal(chatScript.split(`globalThis.AgentFactoryChat.${feature} = function (host)`).length, 2, name + " defines its feature");
     assert.equal(chatScript.split(`= globalThis.AgentFactoryChat.${feature}({`).length, 2, name + " is installed once");
   }
   assert.match(templateRenderer, /"\{\{chatModuleBaseUri\}\}": webview\.asWebviewUri\(vscode\.Uri\.joinPath\(this\.extensionUri, "static", "js"\)\)/);
+});
+
+test("every chat feature stylesheet is linked after chat.css", async function () {
+  const sheets = (await readdir(new URL("../../static/css/chat/", import.meta.url))).filter(name => name.endsWith(".css"));
+  assert.ok(sheets.length > 0);
+  const baseIndex = template.indexOf('href="{{styleUri}}"');
+  for (const name of sheets) {
+    assert.ok(template.indexOf(`href="{{chatStyleBaseUri}}/chat/${name}"`) > baseIndex, name + " must be linked after chat.css");
+  }
+  assert.equal(template.split('href="{{chatStyleBaseUri}}/chat/').length - 1, sheets.length);
+  assert.match(templateRenderer, /"\{\{chatStyleBaseUri\}\}": webview\.asWebviewUri\(vscode\.Uri\.joinPath\(this\.extensionUri, "static", "css"\)\)/);
 });
 
 test("assistant responses render safe local Markdown", function () {

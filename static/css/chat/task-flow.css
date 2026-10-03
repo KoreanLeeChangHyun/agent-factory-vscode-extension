@@ -1,0 +1,501 @@
+.run-status {
+  --run-status-text-color: var(--vscode-foreground);
+  display: block;
+  flex: 1 1 0;
+  min-width: 0;
+  margin: 0 0 8px;
+  color: var(--vscode-descriptionForeground);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.run-status.is-running {
+  --run-status-active-color: var(--vscode-progressBar-background, var(--vscode-focusBorder, var(--af-color-accent)));
+  --run-status-text-color: var(--run-status-active-color);
+}
+
+.run-status[hidden] {
+  display: none;
+}
+
+.run-status-toggle {
+  display: flex;
+  width: fit-content;
+  max-width: 100%;
+  min-height: 24px;
+  padding: 3px 4px;
+  align-items: center;
+  gap: 8px;
+  overflow: hidden;
+  border: 0;
+  border-radius: 0;
+  color: var(--vscode-foreground);
+  background: transparent;
+  box-shadow: none;
+  text-align: left;
+  cursor: pointer;
+  transition: color 140ms ease;
+}
+
+.run-status-toggle:not(:disabled):hover {
+  color: var(--af-color-accent);
+}
+
+.run-status-toggle:disabled {
+  cursor: default;
+}
+
+.run-status-toggle:disabled .run-status-chevron {
+  display: none;
+}
+
+.run-status-pulse {
+  width: 7px;
+  height: 7px;
+  flex: 0 0 auto;
+  border-radius: 50%;
+  background: var(--vscode-descriptionForeground);
+}
+
+.run-status.is-running .run-status-pulse {
+  background: var(--run-status-active-color);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--run-status-active-color) 18%, transparent);
+  animation: run-status-dot-glow 2.4s ease-in-out infinite;
+}
+
+@keyframes run-status-dot-glow {
+  0%, 100% { opacity: .45; }
+  50% { opacity: 1; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .run-status.is-running .run-status-pulse { animation: none; }
+}
+
+@keyframes run-status-text-scan {
+  from {
+    background-position: 98% 0;
+  }
+
+  to {
+    background-position: 2% 0;
+  }
+}
+
+.run-status-copy {
+  display: flex;
+  width: fit-content;
+  max-width: 100%;
+  min-width: 0;
+  gap: 7px;
+  color: var(--run-status-text-color);
+}
+
+.run-status-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--run-status-text-color);
+  background-image: linear-gradient(
+    90deg,
+    var(--run-status-text-color) 45%,
+    color-mix(in srgb, var(--run-status-text-color) 70%, var(--af-chat-background)) 50%,
+    var(--run-status-text-color) 55%
+  );
+  background-position: 98% 0;
+  background-size: 230% 100%;
+  background-repeat: no-repeat;
+  background-clip: text;
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  animation: run-status-text-scan 2.4s linear infinite;
+}
+
+.run-status-meta {
+  flex: 0 0 auto;
+  color: var(--run-status-text-color);
+}
+
+.run-status-agents {
+  min-width: 0;
+  margin-left: auto;
+  overflow: hidden;
+  color: var(--vscode-descriptionForeground);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.run-status-agents:empty {
+  display: none;
+}
+
+.run-status-chevron {
+  width: 14px;
+  height: 14px;
+  flex: 0 0 auto;
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 1.5;
+  transition: transform 140ms ease;
+}
+
+.run-status.is-expanded .run-status-chevron {
+  transform: rotate(180deg);
+}
+
+.run-details {
+  margin-top: 6px;
+  padding: 10px;
+  overflow: visible;
+  border: 1px solid color-mix(in srgb, var(--vscode-panel-border, var(--vscode-input-border, #454545)) 72%, transparent);
+  border-radius: 11px;
+  background: var(--vscode-editorWidget-background);
+  box-shadow: 0 -8px 24px color-mix(in srgb, #000 12%, transparent);
+}
+
+/* Closed requests fit their rows; only expanded task details need a height cap. */
+.run-details:has(:is(.task-flow-disclosure, .task-flow-single)[open]) {
+  max-height: min(42vh, 340px);
+  overflow-y: auto;
+}
+
+#run-stage-list,
+#run-stage-list .task-flow { width: 100%; min-width: 0; }
+#run-stage-list .task-flow { margin: 0; padding: 8px; }
+#run-stage-list .task-flow > strong { margin-bottom: 6px; }
+#run-stage-list .task-flow-summary { margin-bottom: 6px; }
+#run-stage-list .task-flow-current { margin-bottom: 6px; }
+#run-stage-list .task-flow-step { font-size: 12px; line-height: 1.35; }
+#run-stage-list .task-flow-single-container { padding: 0; border: 0; background: transparent; }
+
+.run-details[hidden] {
+  display: none;
+}
+
+.run-details-heading {
+  display: flex;
+  margin-bottom: 8px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.run-details-heading strong {
+  color: var(--vscode-foreground);
+  font-size: 12px;
+}
+
+.run-details-heading span {
+  color: var(--vscode-descriptionForeground);
+  font-size: 11px;
+}
+
+.run-stage-list {
+  display: grid;
+  gap: 2px;
+}
+
+.run-stage {
+  display: grid;
+  width: 100%;
+  grid-template-columns: 18px minmax(0, 1fr) auto;
+  min-height: 34px;
+  padding: 6px 7px;
+  align-items: center;
+  gap: 6px;
+  border: 0;
+  border-radius: 6px;
+  color: var(--vscode-foreground);
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+}
+
+.run-stage:hover,
+.run-stage:focus-visible {
+  background: var(--vscode-list-hoverBackground, var(--vscode-toolbar-hoverBackground));
+}
+
+.run-stage-marker {
+  color: var(--af-color-accent);
+  text-align: center;
+}
+
+.run-stage[data-status="completed"] .run-stage-marker {
+  color: var(--vscode-testing-iconPassed, var(--vscode-terminal-ansiGreen, #a6e3a1));
+}
+
+.run-stage[data-status="failed"] .run-stage-marker,
+.run-stage[data-status="cancelled"] .run-stage-marker {
+  color: var(--vscode-testing-iconFailed, var(--vscode-terminal-ansiRed, #f38ba8));
+}
+
+.run-stage[data-status="needs-human-decision"] .run-stage-marker {
+  color: var(--vscode-editorWarning-foreground);
+}
+
+.run-stage-copy {
+  display: flex;
+  min-width: 0;
+  align-items: baseline;
+  gap: 7px;
+}
+
+.run-stage-name {
+  flex: 0 0 auto;
+  font-weight: 600;
+}
+
+.run-stage-id {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--vscode-descriptionForeground);
+  font-family: var(--vscode-editor-font-family, monospace);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.run-stage-status {
+  color: var(--vscode-descriptionForeground);
+  white-space: nowrap;
+}
+
+.run-stop-button {
+  margin-top: 9px;
+  padding: 5px 8px;
+  border: 1px solid var(--vscode-button-border, transparent);
+  border-radius: 5px;
+  color: var(--vscode-button-secondaryForeground);
+  background: var(--vscode-button-secondaryBackground);
+  cursor: pointer;
+}
+
+.run-stop-button:hover {
+  background: var(--vscode-button-secondaryHoverBackground);
+}
+
+.task-mode-button,
+.execution-mode-button {
+  width: 28px;
+  min-width: 28px;
+  justify-content: center;
+  padding: 0;
+}
+
+.task-mode-icon,
+.execution-mode-icon {
+  width: 18px;
+  height: 18px;
+  flex: 0 0 auto;
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 1.8;
+}
+
+.task-mode-button[aria-expanded="true"],
+.execution-mode-button[aria-expanded="true"] {
+  color: var(--vscode-foreground);
+  background: var(--vscode-toolbar-activeBackground, var(--vscode-toolbar-hoverBackground));
+}
+
+#task-mode-menu .setting-check {
+  margin-left: auto;
+}
+
+@media (max-width: 560px) {
+  .run-status-agents {
+    display: none;
+  }
+
+  .run-stage {
+    grid-template-columns: 18px minmax(0, 1fr);
+  }
+
+  .run-stage-status {
+    grid-column: 2;
+    font-size: 11px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .run-status-label {
+    color: var(--run-status-text-color);
+    background-image: none;
+    animation: none;
+    -webkit-text-fill-color: currentColor;
+  }
+}
+
+/* Action shape distinguishes menus, immediate submission and persistent toggles. */
+.task-mode-button, .execution-mode-button { width: auto; min-width: 42px; padding: 0 5px; }
+
+/* Ordered task snapshots shared by the conversation and task-status panel. */
+.task-flow { margin: 10px 0; padding: 12px; border: 1px solid var(--vscode-widget-border, #555); border-radius: 8px; min-width: 0; }
+.task-flow > strong { display: block; margin-bottom: 12px; overflow-wrap: anywhere; }
+.task-flow-summary { display: flex; flex-wrap: wrap; gap: 6px 14px; margin-bottom: 8px; min-width: 0; font-size: 11px; }
+.task-flow-summary > * { overflow-wrap: anywhere; min-width: 0; }
+.task-flow-summary-assignments { display: inline-flex; flex-wrap: wrap; gap: 4px; }
+.task-flow-current { margin: 0 0 12px; overflow-wrap: anywhere; font-size: 12px; }
+.task-flow-list { list-style: none; margin: 0; padding: 2px 2px 8px; display: grid; grid-auto-flow: column; grid-auto-columns: minmax(150px, 1fr); gap: 22px; overflow-x: auto; }
+/* The live panel uses the available width as a compact, vertically stacked task list. */
+#run-stage-list .task-flow-list {
+  grid-auto-flow: row;
+  grid-auto-columns: auto;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 4px;
+  padding: 0;
+  overflow-x: visible;
+}
+.task-flow-step { position: relative; min-width: 0; padding: 0; border-radius: 6px; background: var(--vscode-editor-background); }
+.task-flow-step + .task-flow-step::before { content: ""; position: absolute; left: -22px; top: calc(50% - 1px); width: 22px; height: 2px; background: var(--vscode-descriptionForeground); opacity: .5; }
+.task-flow-step + .task-flow-step::after { content: ""; position: absolute; left: -9px; top: calc(50% - 4px); width: 6px; height: 6px; border-right: 2px solid var(--vscode-descriptionForeground); border-bottom: 2px solid var(--vscode-descriptionForeground); transform: rotate(-45deg); }
+.task-flow-disclosure { min-width: 0; }
+.task-flow-disclosure > summary {
+  display: grid;
+  grid-template-columns: 24px minmax(0, 1fr) auto 12px;
+  min-height: 40px;
+  padding: 8px;
+  align-items: center;
+  gap: 8px;
+  list-style: none;
+  cursor: pointer;
+}
+.task-flow-disclosure > summary::-webkit-details-marker { display: none; }
+.task-flow-disclosure > summary::after { content: "›"; grid-column: 4; justify-self: center; color: var(--vscode-descriptionForeground); }
+.task-flow-disclosure[open] > summary::after { transform: rotate(90deg); }
+.task-flow-disclosure > summary:focus-visible { outline: 2px solid var(--vscode-focusBorder, #007acc); outline-offset: -2px; border-radius: 6px; }
+.task-flow-number { display: grid; place-items: center; width: 24px; height: 24px; border: 1px solid var(--vscode-widget-border, #666); border-radius: 50%; font-size: 11px; }
+.task-flow-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.task-flow-state { grid-column: 3; color: var(--vscode-descriptionForeground); font-size: 11px; white-space: nowrap; }
+#run-stage-list .task-flow-step + .task-flow-step::before,
+#run-stage-list .task-flow-step + .task-flow-step::after { display: none; }
+.task-flow-step:is([data-status="running"], [data-status="verifying"]) { outline: 1px solid var(--vscode-focusBorder, #007acc); }
+#run-stage-list :is(.task-flow-step, .task-flow-single):is([data-status="running"], [data-status="verifying"]) {
+  --task-flow-active-color: var(--vscode-progressBar-background, var(--vscode-focusBorder, var(--af-color-accent)));
+}
+#run-stage-list :is(.task-flow-step, .task-flow-single):is([data-status="running"], [data-status="verifying"]) :is(.task-flow-name, .task-flow-single-title, .task-flow-state) {
+  color: var(--task-flow-active-color);
+}
+#run-stage-list .task-flow-step:is([data-status="running"], [data-status="verifying"]) .task-flow-number { border-color: var(--task-flow-active-color); background: color-mix(in srgb, var(--task-flow-active-color) 20%, transparent); color: var(--vscode-foreground); }
+.run-stage-list .task-flow-step:is([data-status="running"], [data-status="verifying"])::before { opacity: 1; background: linear-gradient(to right, transparent, var(--vscode-focusBorder, #007acc), transparent); background-size: 12px 100%; animation: task-flow-forward 900ms linear infinite; }
+.task-flow-step[data-status="failed"] .task-flow-state { color: var(--vscode-errorForeground); }
+.task-flow-step[data-status="completed"] .task-flow-number { border-color: var(--vscode-testing-iconPassed, #73c991); }
+@keyframes task-flow-forward { from { background-position: 0 0; } to { background-position: 12px 0; } }
+@media (prefers-reduced-motion: reduce) {
+  .task-flow-step::before { animation: none !important; }
+}
+
+.task-history { min-width: 0; border-top: 1px solid var(--vscode-menu-separatorBackground, var(--vscode-panel-border)); margin-top: 5px; padding-top: 5px; }
+.task-history > summary { list-style: none; cursor: pointer; align-items: center; gap: 10px; }
+.task-history > summary svg { width: 16px; height: 16px; flex-shrink: 0; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
+.task-history > summary .history-category-icon { width: 18px; height: 18px; flex: 0 0 18px; }
+.task-history > summary .chevron-icon { margin-left: auto; }
+.task-history[open] > summary .chevron-icon { transform: rotate(90deg); }
+.task-history > summary::-webkit-details-marker { display: none; }
+.task-history-list { min-width: 0; max-width: 100%; padding: 5px; }
+#task-history-list,
+#task-history-list .task-flow-list { scrollbar-width: none; scrollbar-gutter: auto; }
+#task-history-list::-webkit-scrollbar,
+#task-history-list .task-flow-list::-webkit-scrollbar { width: 0; height: 0; }
+#task-history-list .task-flow { margin: 0; padding: 10px 4px; border: 0; border-radius: 0; }
+#task-history-list .task-flow > strong,
+#task-history-list .task-flow-current { display: none; }
+.task-history-entries { list-style: none; margin: 0; padding: 0; }
+.task-history-entries > li { min-width: 0; }
+.task-history-entries > li + li { border-top: 1px solid var(--vscode-menu-separatorBackground, var(--vscode-panel-border)); }
+.task-history-disclosure { min-width: 0; }
+.task-history-disclosure > summary { display: grid; grid-template-columns: minmax(0, 1fr) auto 12px; gap: 8px; align-items: center; cursor: pointer; list-style: none; border-radius: 4px; padding: 10px 8px; }
+.task-history-disclosure > summary::-webkit-details-marker { display: none; }
+.task-history-disclosure > summary::after { content: "›"; justify-self: center; }
+.task-history-disclosure[open] > summary::after { transform: rotate(90deg); }
+.task-history-disclosure > summary:hover { background: var(--vscode-list-hoverBackground); }
+.task-history-disclosure > summary:focus-visible { outline: 1px solid var(--vscode-focusBorder); }
+.task-history-name { min-width: 0; overflow-wrap: anywhere; }
+.task-history-count { font-size: 11px; color: var(--vscode-descriptionForeground); }
+.task-history-list.is-flyout {
+  position: fixed;
+  z-index: 14;
+  box-sizing: border-box;
+  overflow-y: auto;
+  border: 1px solid var(--vscode-menu-border, var(--vscode-widget-border));
+  border-radius: 8px;
+  color: var(--vscode-menu-foreground, var(--vscode-foreground));
+  background: var(--vscode-menu-background, var(--vscode-editorWidget-background));
+  box-shadow: 0 5px 18px var(--vscode-widget-shadow, rgba(0, 0, 0, 0.35));
+}
+.task-history[open]:has(.is-flyout) > summary .chevron-icon { transform: rotate(180deg); }
+
+.task-flow-detail { display: grid; gap: 8px; padding: 0 8px 10px 40px; min-width: 0; }
+.task-flow-description { font-size: 11px; min-width: 0; }
+.task-flow-description strong { display: block; margin-bottom: 6px; color: var(--vscode-descriptionForeground); font-weight: 500; }
+.task-flow-description div { white-space: pre-wrap; overflow-wrap: anywhere; }
+.task-flow-detail .task-flow-open { justify-self: start; }
+.task-flow-single { min-width: 0; overflow: hidden; border: 1px solid var(--vscode-focusBorder, #007acc); border-radius: 8px; background: var(--vscode-editor-background); }
+.task-flow-single > summary { display: grid; grid-template-columns: minmax(0, 1fr) auto 12px; gap: 8px; align-items: center; min-width: 0; padding: 10px; cursor: pointer; list-style: none; }
+.task-flow-single > summary::-webkit-details-marker { display: none; }
+.task-flow-single > summary::after { content: "›"; grid-column: 3; justify-self: center; color: var(--vscode-descriptionForeground); }
+.task-flow-single[open] > summary::after { transform: rotate(90deg); }
+.task-flow-single > summary:focus-visible { outline: 2px solid var(--vscode-focusBorder, #007acc); outline-offset: -2px; }
+.task-flow-single-heading { display: flex; min-width: 0; align-items: center; gap: 8px; }
+.task-flow-single-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 500; }
+.task-flow-single .task-flow-state { grid-column: auto; flex: 0 0 auto; }
+.task-flow-assignments { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 4px; min-width: 0; }
+.task-flow-assignment { padding: 2px 6px; border: 1px solid var(--vscode-widget-border, #666); border-radius: 999px; color: var(--vscode-descriptionForeground); font-size: 10px; white-space: nowrap; }
+.task-flow-assignment[data-assigned="true"] { border-color: color-mix(in srgb, var(--vscode-testing-iconPassed, #73c991) 65%, var(--vscode-widget-border, #666)); color: var(--vscode-foreground); }
+.task-flow-single .task-flow-detail { padding: 0 10px 10px; }
+/* Revision-limit decision: neutral surface like the cards around it; no status colour or coloured border. */
+.task-flow-decision { display: grid; gap: 8px; min-width: 0; margin-top: 6px; padding: 10px; border: 1px solid var(--vscode-widget-border, #555); border-radius: 8px; background: var(--vscode-editor-background); font-size: 12px; }
+.task-flow > .task-flow-decision { margin: 0 0 8px; }
+.task-flow-decision-header { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 12px; min-width: 0; }
+.task-flow-decision-title { font-weight: 500; }
+.task-flow-decision-revisions, .task-flow-decision-count { color: var(--vscode-descriptionForeground); font-size: 11px; white-space: nowrap; }
+.task-flow-decision-findings { list-style: none; display: grid; gap: 6px; max-height: 132px; margin: 0; padding: 0; overflow-y: auto; }
+.task-flow-decision-findings li { display: grid; gap: 2px; min-width: 0; }
+.task-flow-decision-finding-id { justify-self: start; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; }
+.task-flow-decision-finding-path { color: var(--vscode-descriptionForeground); font-size: 11px; overflow-wrap: anywhere; }
+.task-flow-decision-finding-problem { overflow-wrap: anywhere; }
+.task-flow-decision-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+
+.task-flow-decision-action:focus-visible { outline: 2px solid var(--vscode-focusBorder, #007acc); outline-offset: 1px; }
+.task-flow-decision-action:disabled { opacity: .55; cursor: default; }
+@media (max-width: 420px) {
+  .task-flow-single > summary { grid-template-columns: minmax(0, 1fr) 12px; }
+  .task-flow-single > summary::after { grid-column: 2; grid-row: 1; }
+  .task-flow-assignments { grid-column: 1 / -1; justify-content: flex-start; }
+}
+
+/* Status colours describe workflow state; motion is reserved for an exact running child session. */
+.run-stage-list :is(.task-flow-step, .task-flow-single)[data-worker-active="true"]:is([data-status="running"], [data-status="verifying"]) {
+  background-image: linear-gradient(100deg, transparent 35%, color-mix(in srgb, var(--task-flow-active-color) 22%, transparent) 50%, transparent 65%);
+  background-size: 200% 100%;
+  background-repeat: no-repeat;
+  animation: task-flow-active-sweep 2.4s linear infinite;
+}
+@keyframes task-flow-active-sweep {
+  from { background-position: 150% 0; }
+  to { background-position: -150% 0; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .run-stage-list :is(.task-flow-step, .task-flow-single) { animation: none !important; background-image: none !important; }
+}
+
+.task-flow-open { grid-column: 1 / -1; justify-self: start; max-width: 100%; white-space: normal; }
+
+/* Retained hidden webviews keep their state without running decorative motion. */
+html[data-af-hidden="true"] *,
+html[data-af-hidden="true"] *::before,
+html[data-af-hidden="true"] *::after {
+  animation-play-state: paused !important;
+}
+
+#contract-list-list:not(.is-flyout) { max-height: min(400px, 60vh); }
+#contract-list-list { overflow-y: auto; overflow-x: hidden; box-sizing: border-box; }
+#contract-list-list .contract-list-entry { display: flex; flex-direction: column; align-items: stretch; gap: 4px; white-space: normal; padding: 10px; min-width: 0; border-radius: 4px; }
+.contract-list-entry + .contract-list-entry { border-top: 1px solid var(--vscode-panel-border, #454545); }
+.contract-list-title { font-weight: 600; overflow-wrap: anywhere; }
+.contract-list-metadata { font-size: 11px; color: var(--vscode-descriptionForeground); overflow-wrap: anywhere; }

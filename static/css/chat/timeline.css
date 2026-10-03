@@ -1,0 +1,813 @@
+.timeline {
+  --af-cli-foreground: var(--vscode-terminal-foreground, var(--vscode-editor-foreground, #cdd6f4));
+  --af-cli-background: var(--af-chat-background);
+  --af-cli-muted: color-mix(in srgb, var(--af-cli-foreground) 62%, var(--af-cli-background));
+  --af-cli-user-background: color-mix(in srgb, var(--af-cli-background) 88%, white);
+  --af-cli-code: var(--vscode-terminal-ansiCyan, #94e2d5);
+  --af-cli-link: var(--vscode-terminal-ansiCyan, #94e2d5);
+  --af-cli-success: var(--vscode-terminal-ansiGreen, #a6e3a1);
+  --af-cli-failure: var(--vscode-terminal-ansiRed, #f38ba8);
+  --af-cli-addition: var(--vscode-terminal-ansiGreen, #a6e3a1);
+  --af-cli-deletion: var(--vscode-terminal-ansiRed, #f38ba8);
+  --af-cli-addition-background: color-mix(in srgb, var(--vscode-terminal-ansiGreen, #32b56c) 11%, var(--af-cli-background));
+  --af-cli-deletion-background: color-mix(in srgb, var(--vscode-terminal-ansiRed, #ff3824) 12%, var(--af-cli-background));
+  --af-cli-hunk: var(--vscode-terminal-ansiCyan, #94e2d5);
+  --af-cli-heading: var(--vscode-terminal-ansiBrightBlue, #89b4fa);
+  --af-cli-strong: var(--vscode-terminal-ansiYellow, #f9e2af);
+  --af-cli-emphasis: var(--vscode-terminal-ansiMagenta, #cba6f7);
+  color: var(--af-cli-foreground);
+  background: var(--af-cli-background);
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 14px 12px 18px;
+  font-family: var(--vscode-editor-font-family, monospace);
+  font-size: var(--vscode-editor-font-size, 13px);
+  scrollbar-color: var(--vscode-scrollbarSlider-background, color-mix(in srgb, var(--af-cli-foreground) 35%, transparent)) var(--af-chat-background);
+  scrollbar-gutter: stable;
+  scrollbar-width: thin;
+}
+
+.empty-state {
+  display: flex;
+  min-height: 100%;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 0 0 7vh;
+  text-align: center;
+}
+
+.empty-state[hidden] {
+  display: none;
+}
+
+.hero-mark {
+  position: relative;
+  display: grid;
+  width: 104px;
+  height: 104px;
+  margin-bottom: 16px;
+  place-items: center;
+}
+
+.hero-glow {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  background: radial-gradient(circle, color-mix(in srgb, var(--vscode-button-background, #0e7fe8) 16%, transparent) 0%, transparent 70%);
+}
+
+.hero-orbit {
+  position: absolute;
+  inset: 0;
+  border: 1px dashed color-mix(in srgb, var(--vscode-button-background, #0e7fe8) 30%, transparent);
+  border-radius: 50%;
+  animation: compaction-spin 14s linear infinite;
+}
+
+.hero-spark {
+  position: absolute;
+  top: -3px;
+  left: calc(50% - 3px);
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--vscode-button-background, #0e7fe8);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .hero-orbit { animation: none !important; }
+}
+
+.empty-state h1 {
+  margin: 0;
+  font-size: clamp(22px, 3vw, 30px);
+  font-weight: 590;
+  letter-spacing: -0.025em;
+}
+
+.empty-state p {
+  margin: 10px 0 15px;
+  color: var(--vscode-descriptionForeground);
+}
+
+.hero-flow {
+  display: flex;
+  align-items: center;
+  margin: 4px 0 0;
+  padding: 0;
+  list-style: none;
+  color: var(--vscode-descriptionForeground);
+  font-size: 12px;
+  opacity: .8;
+}
+
+.hero-flow li { white-space: nowrap; }
+.hero-flow li + li::before {
+  content: "→";
+  margin: 0 8px;
+  opacity: .6;
+}
+
+.message {
+  position: relative;
+  /* Transcript items must scroll, not shrink below their rendered content. */
+  flex-shrink: 0;
+  width: 100%;
+  margin: 0 0 1em;
+  line-height: 1.5;
+}
+
+.message-user {
+  padding: 6px 40px 6px 0;
+  min-height: 38px;
+  background: var(--af-cli-user-background);
+}
+
+.transcript-marker {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 2ch;
+  height: 1.5em;
+  color: var(--af-cli-muted);
+}
+
+.message-user .transcript-marker { top: 0.25em; }
+
+.message-user .message-content,
+.message-assistant .message-content {
+  min-width: 0;
+  padding-left: 2ch;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.message-heading {
+  display: flex;
+  min-height: 1.5em;
+  align-items: center;
+}
+
+.message-kind { color: var(--af-cli-foreground); font: inherit; }
+
+.message-phase {
+  width: 2ch;
+  height: 1.5em;
+  flex: 0 0 2ch;
+  color: var(--af-cli-muted);
+}
+
+.message-phase-completed { color: var(--af-cli-success); }
+
+.message-phase-failed { color: var(--af-cli-failure); }
+
+.message-assistant .markdown-body {
+  white-space: normal;
+}
+
+.message-notice .message-content {
+  display: flex;
+  gap: 9px;
+  align-items: flex-start;
+  padding: 0;
+  color: var(--af-cli-muted);
+}
+
+.message-activity {
+  margin-bottom: 0.5em;
+  color: var(--af-cli-muted);
+  font-size: inherit;
+  line-height: 1.5;
+}
+
+.message-activity .message-content {
+  min-width: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.message-activity > .message-content:not(.terminal-command-content):not(.git-diff-content) {
+  padding-left: 2ch;
+}
+
+.message-activity-command .message-content {
+  color: var(--af-cli-foreground);
+  font-family: var(--vscode-editor-font-family, monospace);
+}
+
+.terminal-command-row {
+  display: flex;
+  min-width: 0;
+  align-items: flex-start;
+  gap: 0;
+}
+
+.terminal-command-block {
+  min-width: 0;
+}
+
+.terminal-command-prompt { color: var(--af-cli-muted); }
+/* The state label is text-coloured only; the command itself stays syntax highlighted. */
+.message[data-phase="failed"] .terminal-command-prompt { color: var(--af-cli-failure); }
+.message[data-phase="started"] .terminal-command-prompt { color: var(--af-cli-link); }
+
+.terminal-command-context { color: inherit; font: inherit; }
+
+.bash-command-text {
+  min-width: 0;
+  flex: 1;
+  max-height: calc(1.5em * 3);
+  overflow: hidden;
+  white-space: pre-wrap;
+  /* Wrapped and continued lines hang under the command, not under the state label. */
+  padding-left: 2ch;
+  text-indent: -2ch;
+  /* Long commands break between arguments, not inside flags or paths. */
+  overflow-wrap: break-word;
+  word-break: normal;
+}
+
+.bash-command-text.is-expanded {
+  max-height: none;
+  overflow: visible;
+}
+
+.bash-command-toggle {
+  display: grid;
+  width: 20px;
+  height: 20px;
+  margin: 3px 0 0 2ch;
+  padding: 0;
+  place-items: center;
+  border: 0;
+  color: var(--af-cli-link);
+  background: transparent;
+  font: inherit;
+  cursor: pointer;
+}
+
+.bash-command-toggle[hidden] {
+  display: none;
+}
+
+.bash-command-toggle svg {
+  width: 14px;
+  height: 14px;
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 1.5;
+  transition: transform 140ms ease;
+}
+
+.bash-command-toggle.is-expanded {
+  margin-top: 3px;
+}
+
+.bash-command-toggle.is-expanded svg {
+  transform: rotate(180deg);
+}
+
+.bash-command-toggle:hover {
+  color: var(--af-cli-link);
+  text-decoration: underline;
+}
+
+.git-diff-overview {
+  display: flex;
+  align-items: flex-start;
+  color: var(--af-cli-foreground);
+}
+
+.git-diff-stats,
+.git-diff-file-stats {
+  color: var(--af-cli-foreground);
+}
+
+.git-diff-files {
+  display: grid;
+  margin: 0 0 0.5em 2ch;
+  gap: 0;
+  font-family: var(--vscode-editor-font-family, monospace);
+}
+
+.git-diff-file {
+  display: flex;
+  min-width: 0;
+  gap: 1ch;
+}
+
+.git-diff-file > span:first-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.git-diff-preview {
+  margin-left: 2ch;
+}
+
+.git-diff-preview summary {
+  color: var(--af-cli-link);
+  cursor: pointer;
+  user-select: none;
+}
+
+.git-diff-preview pre {
+  max-height: min(420px, 52vh);
+  margin: 0.5em 0 0;
+  padding: 0;
+  overflow: auto;
+  background: transparent;
+}
+
+.git-diff-preview code {
+  display: block;
+  min-width: max-content;
+  font-family: var(--vscode-editor-font-family, monospace);
+  white-space: pre;
+}
+
+.git-diff-line {
+  display: block;
+  padding: 0;
+}
+
+.git-diff-addition {
+  color: var(--af-cli-addition);
+  background: var(--af-cli-addition-background);
+}
+
+.git-diff-deletion {
+  color: var(--af-cli-deletion);
+  background: var(--af-cli-deletion-background);
+}
+
+.git-diff-hunk {
+  color: var(--af-cli-hunk);
+}
+
+.message-activity-tool {
+  --activity-heading-color: var(--af-cli-foreground);
+}
+
+/* Status dot, label and tool identifier share one row; long identifiers truncate. */
+.message.message-activity-tool:not(.message-compaction) {
+  display: flex;
+  min-width: 0;
+  align-items: baseline;
+  gap: 1ch;
+}
+
+.message.message-activity-tool:not(.message-compaction) > .message-heading {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+
+.message.message-activity-tool:not(.message-compaction) > .message-content {
+  flex: 1 1 auto;
+  padding-left: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.message-activity .message-kind {
+  color: var(--activity-heading-color, var(--af-cli-foreground));
+}
+
+.message.message-activity.message-compaction > .message-content {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding-left: 0;
+  font-size: 12px;
+  line-height: 20px;
+}
+
+.compaction-indicator {
+  box-sizing: border-box;
+  flex: 0 0 12px;
+  width: 12px;
+  height: 12px;
+  line-height: 12px;
+  text-align: center;
+}
+
+.message-compaction[data-phase="started"] .compaction-indicator {
+  border: 1.5px solid var(--vscode-descriptionForeground);
+  border-right-color: transparent;
+  border-radius: 50%;
+  animation: compaction-spin 900ms linear infinite;
+}
+
+@keyframes compaction-spin { to { transform: rotate(360deg); } }
+
+@media (prefers-reduced-motion: reduce) {
+  .message-compaction .compaction-indicator,
+  #conversation-clear-button[aria-busy="true"] svg { animation: none !important; }
+}
+
+.message-notice[data-level="warning"] {
+  --notice-color: var(--vscode-editorWarning-foreground, #cca700);
+}
+
+.message-notice[data-level="cancelled"] {
+  --notice-color: var(--vscode-editorWarning-foreground, #cca700);
+}
+
+.message-notice[data-level="error"] {
+  --notice-color: var(--vscode-editorError-foreground, #f14c4c);
+}
+
+.notice-mark {
+  color: var(--notice-color);
+  font-weight: 700;
+}
+
+.message-notice:is([data-level="warning"], [data-level="cancelled"], [data-level="error"]) .message-content {
+  color: color-mix(in srgb, var(--notice-color) 75%, var(--af-cli-foreground));
+}
+
+.message-user:focus-visible,
+.message-user.message-jump-target {
+  outline: 1px solid var(--af-color-accent);
+  outline-offset: 3px;
+}
+
+@media (max-width: 560px) {
+  .timeline {
+    padding-inline: 12px;
+  }
+}
+
+.terminal-command-output {
+  position: relative;
+  margin: 0 0 0 2ch;
+  padding-left: 2ch;
+  color: var(--af-cli-muted);
+  font: inherit;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.message[data-phase="failed"] .terminal-command-output {
+  color: color-mix(in srgb, var(--af-cli-failure) 70%, var(--af-cli-foreground));
+}
+
+.terminal-output-preview {
+  max-height: 4.5em;
+  overflow: hidden;
+}
+
+.terminal-output-block:has(.terminal-output-details[open]) .terminal-output-preview,
+.terminal-output-collapsed .terminal-output-preview { display: none; }
+.terminal-output-details[hidden] { display: none; }
+
+.terminal-output-details { margin-left: 2ch; }
+.terminal-output-details summary { cursor: pointer; color: var(--af-cli-muted); font-size: 0.92em; }
+.terminal-output-details summary:hover { color: var(--af-cli-foreground); }
+.terminal-output-details[open] > summary { margin-bottom: 2px; }
+.terminal-output-block.is-empty .terminal-command-output { font-style: italic; opacity: 0.7; }
+.terminal-output-details .terminal-command-output { margin-left: 0; }
+
+.git-diff-inline {
+  margin: 0 0 0.5em 2ch;
+  overflow-x: auto;
+  font: inherit;
+  white-space: pre;
+}
+
+.git-diff-inline .git-diff-source { color: var(--af-cli-foreground); }
+.git-diff-line-number {
+  display: inline-block;
+  min-width: 3ch;
+  margin-right: 1ch;
+  color: var(--af-cli-muted);
+  text-align: right;
+  user-select: none;
+}
+.git-diff-more { color: var(--af-cli-muted); }
+
+.terminal-command-output > svg {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 2ch;
+  height: 1.5em;
+}
+
+.git-diff-inline-file {
+  display: block;
+  color: var(--af-cli-foreground);
+  margin-top: 0.5em;
+}
+
+.message-final {
+  padding-top: 1em;
+  border-top: 1px solid var(--vscode-panel-border);
+}
+
+.message-final .transcript-marker { top: 1em; }
+
+.vscode-light .timeline,
+.vscode-high-contrast-light .timeline {
+  --af-cli-user-background: color-mix(in srgb, var(--af-cli-background) 94%, black);
+  --af-cli-code: var(--vscode-terminal-ansiCyan, #087e8b);
+  --af-cli-link: var(--vscode-terminal-ansiCyan, #087e8b);
+  --af-cli-success: var(--vscode-terminal-ansiGreen, #18712c);
+  --af-cli-failure: var(--vscode-terminal-ansiRed, #b42318);
+  --af-cli-addition: var(--vscode-terminal-ansiGreen, #18712c);
+  --af-cli-deletion: var(--vscode-terminal-ansiRed, #b42318);
+  --af-cli-hunk: var(--vscode-terminal-ansiCyan, #087e8b);
+  --af-cli-heading: var(--vscode-terminal-ansiBlue, #1f5fbf);
+  --af-cli-strong: var(--vscode-terminal-ansiYellow, #8a5a00);
+  --af-cli-emphasis: var(--vscode-terminal-ansiMagenta, #8839a8);
+}
+
+.vscode-high-contrast .timeline,
+.vscode-high-contrast-light .timeline {
+  --af-cli-muted: var(--af-cli-foreground);
+  --af-cli-user-background: var(--vscode-input-background, var(--af-cli-background));
+}
+
+.git-diff-count-addition,
+.git-diff-addition .git-diff-sign { color: var(--af-cli-addition); }
+.git-diff-count-deletion,
+.git-diff-deletion .git-diff-sign { color: var(--af-cli-deletion); }
+
+.vscode-high-contrast .timeline [style*="color"],
+.vscode-high-contrast-light .timeline [style*="color"] { color: var(--af-cli-foreground) !important; }
+
+.decision-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.decision-actions button {
+  padding: 5px 10px;
+  border: 1px solid var(--vscode-button-border, transparent);
+  border-radius: 3px;
+  background: var(--vscode-button-background);
+  color: var(--vscode-button-foreground);
+  font: inherit;
+  cursor: pointer;
+}
+
+.decision-actions button:hover { background: var(--vscode-button-hoverBackground); }
+.decision-actions .decision-reply {
+  background: var(--vscode-button-secondaryBackground);
+  color: var(--vscode-button-secondaryForeground);
+}
+.decision-actions .decision-reply:hover { background: var(--vscode-button-secondaryHoverBackground); }
+.decision-actions button:focus-visible { outline: 1px solid var(--af-color-accent); outline-offset: 2px; }
+.decision-actions button:disabled { opacity: 0.5; cursor: default; }
+
+.execution-reference { display: flex; min-width: 0; align-items: center; gap: 6px; padding-right: 6px; }
+.execution-reference-main {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  align-items: baseline;
+  gap: 10px;
+  padding: 3px 10px;
+}
+.execution-reference-main .agent-role {
+  flex: 0 0 9em;
+  padding: 0;
+  color: var(--vscode-descriptionForeground);
+  background: transparent;
+  font-size: 11px;
+}
+.execution-reference-id { font-family: var(--vscode-editor-font-family, monospace); font-size: 12px; }
+.execution-reference-copy { height: 20px; padding: 0 6px; color: var(--vscode-descriptionForeground); font-size: 11px; }
+.execution-reference-copy:hover { color: var(--vscode-foreground); }
+.execution-reference-main:not(button) { cursor: text; }
+.execution-reference-main:not(button):hover { color: inherit; background: transparent; }
+.execution-reference-id { overflow-wrap: anywhere; user-select: text; }
+.execution-reference-copy { flex: none; }
+
+.managed-agent-card {
+  --af-card-accent: var(--vscode-panel-border);
+  border: 1px solid var(--vscode-panel-border);
+  border-radius: 6px;
+  padding: 9px 12px 10px;
+  background: var(--vscode-editorWidget-background);
+  min-width: 0;
+}
+/* Card borders and backgrounds stay grey; only the status tag and its text carry the state colour. */
+.managed-agent-card[data-status="running"],
+.managed-agent-card[data-status="active"],
+.managed-agent-card[data-status="starting"],
+.managed-agent-card[data-status="accepted"],
+.managed-agent-card[data-status="queued"] { --af-card-accent: var(--vscode-progressBar-background, #0e7fe8); }
+.managed-agent-card[data-status="completed"] { --af-card-accent: var(--af-cli-success, var(--vscode-testing-iconPassed, #3fb950)); }
+.managed-agent-card[data-status="failed"],
+.managed-agent-card[data-status="runtime-error"] { --af-card-accent: var(--af-cli-failure, var(--vscode-errorForeground)); }
+.managed-agent-card[data-status="needs-human-decision"] { --af-card-accent: var(--vscode-editorWarning-foreground, #cca700); }
+.managed-agent-card[data-status="cancelled"],
+.managed-agent-card[data-status="cancelling"] { --af-card-accent: var(--af-cli-muted, var(--vscode-descriptionForeground)); }
+
+.managed-agent-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-width: 0; }
+.managed-agent-heading > strong { min-width: 0; overflow-wrap: anywhere; color: var(--af-cli-heading, var(--vscode-foreground)); }
+.managed-agent-status {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 5px;
+  padding: 1px 8px;
+  border: 1px solid color-mix(in srgb, var(--af-card-accent) 45%, transparent);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--af-card-accent) 14%, transparent);
+  color: color-mix(in srgb, var(--af-card-accent) 70%, var(--vscode-foreground));
+  font-size: 11px;
+  line-height: 16px;
+  white-space: nowrap;
+}
+.managed-agent-status::before {
+  width: 6px;
+  height: 6px;
+  flex: none;
+  border-radius: 50%;
+  background: var(--af-card-accent);
+  content: "";
+}
+.managed-agent-card:is([data-status="running"], [data-status="active"], [data-status="starting"]) .managed-agent-status::before {
+  animation: managed-agent-pulse 1.4s ease-in-out infinite;
+}
+@keyframes managed-agent-pulse { 50% { opacity: 0.3; } }
+@media (prefers-reduced-motion: reduce) {
+  .managed-agent-card .managed-agent-status::before { animation: none !important; }
+}
+
+.managed-agent-progress { margin-top: 2px; color: var(--vscode-descriptionForeground); font-size: 12px; }
+.managed-agent-identity {
+  margin: 5px 0 0;
+  overflow-wrap: anywhere;
+  color: var(--vscode-descriptionForeground);
+  font-family: var(--vscode-editor-font-family, monospace);
+  font-size: 11px;
+  user-select: text;
+}
+.managed-agent-open {
+  display: inline-flex;
+  width: auto;
+  height: 24px;
+  margin-top: 8px;
+  padding: 0 10px;
+  border: 1px solid var(--vscode-button-border, color-mix(in srgb, var(--vscode-foreground) 25%, transparent));
+  border-radius: 4px;
+  background: var(--vscode-button-secondaryBackground, transparent);
+  color: var(--vscode-button-secondaryForeground, var(--vscode-foreground));
+  font-size: 12px;
+  cursor: pointer;
+}
+.managed-agent-open:hover { background: var(--vscode-button-secondaryHoverBackground, var(--vscode-toolbar-hoverBackground)); }
+.managed-agent-open:focus-visible { outline: 1px solid var(--vscode-focusBorder); outline-offset: 1px; }
+.managed-agent-details { margin-top: 8px; }
+.managed-agent-details > summary,
+.managed-agent-card .skill-read-details > summary { cursor: pointer; color: var(--vscode-descriptionForeground); font-size: 12px; }
+.managed-agent-details > summary:hover,
+.skill-read-details > summary:hover { color: var(--vscode-foreground); }
+.managed-agent-details > div { margin-top: 8px; }
+.managed-agent-card .skill-read-details { margin-top: 4px; }
+.command-error-summary {
+  margin-top: 6px;
+  padding: 5px 8px;
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--vscode-errorForeground) 10%, transparent);
+  color: var(--vscode-errorForeground);
+  font-family: var(--vscode-editor-font-family, monospace);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+.skill-read-document { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; list-style-position: inside; }
+.skill-read-document strong { color: var(--af-cli-strong, var(--vscode-foreground)); }
+.skill-read-document span { color: var(--af-cli-muted); }
+.skill-read-details > summary { cursor: pointer; color: var(--af-cli-muted); }
+
+#execution-mode-menu .setting-option span {
+  white-space: normal;
+  max-width: 280px;
+}
+
+/* Submission intent is separate from live execution status. */
+.message-submission { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 6px; color: var(--vscode-descriptionForeground); font-size: 12px; }
+.message-user .message-submission { display: inline-flex; vertical-align: baseline; margin: 0 8px 0 0; }
+.message-submission span { padding: 1px 6px; border-radius: 4px; background: var(--vscode-editorWidget-background); }
+
+.message-guidance { margin: 0; white-space: normal; color: var(--vscode-descriptionForeground); }
+.message-guidance[open] { margin-top: 8px; }
+.message-guidance summary { position: absolute; top: 0; right: 4px; display: grid; place-items: center; width: 20px; height: 1.5em; border-radius: 3px; cursor: pointer; }
+.message-guidance summary:hover { color: var(--vscode-foreground); background: var(--vscode-toolbar-hoverBackground, #ffffff10); }
+.message-guidance summary:focus-visible { outline: 1px solid var(--af-color-accent); outline-offset: 2px; }
+.message-guidance pre { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 12px; }
+
+.message-guidance summary { list-style: none; }
+.message-guidance summary::-webkit-details-marker { display: none; }
+.message-guidance[open] summary .submission-chevron { transform: rotate(90deg); }
+
+.timeline-region { position: relative; display: grid; min-height: 0; min-width: 0; }
+.jump-to-bottom {
+  position: absolute;
+  /* Align with the bot: composer inset + border + bot inset. */
+  right: 21px;
+  bottom: 32px;
+  z-index: 1;
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  padding: 8px;
+  border: 1px solid var(--vscode-panel-border, #454545);
+  border-radius: 50%;
+  color: var(--vscode-foreground);
+  background: var(--vscode-editorWidget-background, var(--af-chat-background));
+  box-shadow: 0 2px 8px #0004;
+  cursor: pointer;
+}
+.jump-to-bottom[hidden] { display: none; }
+.jump-to-bottom:hover { background: var(--vscode-list-hoverBackground, var(--af-chat-background)); }
+.jump-to-bottom:focus-visible { outline: 2px solid var(--af-color-accent); outline-offset: 2px; }
+.jump-to-bottom svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
+@media (max-width: 560px) {
+  .jump-to-bottom { right: 17px; }
+}
+
+/* Compact, aligned actions for the user message. */
+.message-user:has(.message-guidance) { padding-right: 72px; }
+.message-user .has-message-guidance { position: static; padding-right: 0; }
+.message-user .message-copy,
+.message-user .message-guidance summary {
+  position: absolute;
+  top: 5px;
+  right: 6px;
+  display: grid;
+  place-items: center;
+  place-content: center;
+  gap: 0;
+  width: 26px;
+  height: 26px;
+  min-width: 0;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  color: var(--vscode-descriptionForeground);
+  background: color-mix(in srgb, currentColor 7%, transparent);
+  cursor: pointer;
+  transition: background-color 120ms ease, color 120ms ease;
+}
+.message-user .message-guidance summary { right: 36px; }
+.message-user .message-copy svg,
+.message-user .message-guidance summary svg {
+  display: block;
+  width: 15px;
+  height: 15px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.6;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.message-user .message-copy:hover,
+.message-user .message-guidance summary:hover,
+.message-user .message-guidance[open] summary {
+  color: var(--vscode-foreground);
+  background: var(--vscode-toolbar-hoverBackground, #ffffff18);
+}
+.message-user .message-copy:focus-visible,
+.message-user .message-guidance summary:focus-visible {
+  outline: 2px solid var(--vscode-focusBorder, #007acc);
+  outline-offset: 1px;
+}
+
+.interview-choice {
+  display: inline-grid;
+  place-items: center;
+  min-width: 28px;
+  min-height: 28px;
+  padding: 2px 6px;
+  border: 1px solid var(--vscode-button-border, transparent);
+  border-radius: 6px;
+  color: var(--vscode-button-foreground);
+  background: var(--vscode-button-background);
+  cursor: pointer;
+}
+.interview-choice:hover:not(:disabled) { background: var(--vscode-button-hoverBackground); }
+.interview-choice:focus-visible { outline: 2px solid var(--vscode-focusBorder); outline-offset: 2px; }
+.interview-choice:disabled { opacity: 0.5; cursor: default; }
+
+.notes-toggle { top: 12px; bottom: auto; z-index: 3; }
+
+/* Keep the latest transcript item above the compact progress overlay. The bot remains floating. */
+.chat-shell:has(.composer-status-row > .run-status:not([hidden]):not(.is-expanded)):not(:has(.composer-status-row > :not(.run-status):not([hidden]))) .timeline {
+  padding-bottom: 46px;
+}
