@@ -2,7 +2,7 @@
   "name": "agent-factory-main-chat",
   "displayName": "Agent Factory Main Chat",
   "description": "%extension.description%",
-  "version": "1.0.24",
+  "version": "1.0.25",
   "publisher": "agent-factory",
   "icon": "static/images/agent-factory.png",
   "license": "MIT",
@@ -474,8 +474,8 @@
           "id": "agentFactory.agents",
           "name": "%agentFactory.agents.name%"
         }
-          ]
-        }
+      ]
+    }
   },
   "scripts": {
     "build": "node scripts/build.mjs",
