@@ -1,12 +1,8 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { build } from 'esbuild';
-async function moduleAt(path) {
-  const result = await build({ entryPoints: [path], bundle: true, format: 'esm', platform: 'node', write: false });
-  return import(`data:text/javascript;base64,${Buffer.from(result.outputFiles[0].text).toString('base64')}`);
-}
-const { parseClientMessage } = await moduleAt('src/protocol/validator.ts');
-const { restoreChatState } = await moduleAt('src/modules/chat/chat-state.ts');
+import { importTypeScript } from '../support/import-typescript.mjs';
+const { parseClientMessage } = await importTypeScript('src/protocol/validator.ts');
+const { restoreChatState } = await importTypeScript('src/modules/chat/chat-state.ts');
 const settings = { work: { model: 'worker-model', reasoningEffort: 'high', fast: true }, verification: { model: 'review-model', reasoningEffort: 'medium', fast: false } };
 test('role settings survive protocol and restoration independently of Main', () => {
   const modelFastModes = {'main-model': false, 'worker-model': true};

@@ -415,6 +415,7 @@ async function checkTaskFlow(page, { panelOnly = false } = {}) {
     const actions = await page.locator('#workflow-history').boundingBox();
     assert.ok(toggle.x + toggle.width <= actions.x + 1, 'Workflow and history do not overlap');
     assert.ok(Math.abs(toggle.y - actions.y) < 2, 'Actions remain on the workflow line');
+    if (process.env.AF_HISTORY_ARTIFACT_DIR) await page.screenshot({path: require('node:path').join(process.env.AF_HISTORY_ARTIFACT_DIR, 'history-' + width + '.png')});
   }
   await page.setViewportSize({width: 900, height: 800});
   await page.locator('#task-history > summary').focus();

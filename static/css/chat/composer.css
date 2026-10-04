@@ -388,10 +388,6 @@
   max-width: 100%;
 }
 
-/* Reserve bot clearance on the controls, not on the full-width task overview. */
-.composer-status-row > .input-feedback { padding-right: 44px; }
-.composer-status-row > .pending-queue-toggle { margin-right: 44px; }
-
 .pending-queue-toggle {
   display: flex;
   flex: 0 0 auto;

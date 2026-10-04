@@ -473,6 +473,14 @@
 .aligned-settings .agent-fast-toggle { border: 0; color: var(--vscode-button-secondaryForeground, var(--vscode-foreground)); background: transparent; }
 .aligned-settings .agent-fast-toggle:hover:not(:disabled) { background: var(--vscode-toolbar-hoverBackground, #ffffff10); }
 .aligned-settings .agent-fast-toggle .toggle-icon { width: 28px; height: 18px; fill: #000; stroke: none; }
+.agent-fast-toggle .toggle-icon rect { transition: fill .15s ease, stroke .15s ease; }
+.agent-fast-toggle .toggle-thumb { transition: transform .15s ease, fill .15s ease; }
+.agent-fast-toggle[aria-pressed="true"] { color: var(--vscode-foreground); }
+.agent-fast-toggle[aria-pressed="true"] .toggle-icon rect { fill: var(--vscode-button-background, var(--af-color-accent)); stroke: var(--vscode-contrastActiveBorder, transparent); stroke-width: 1px; }
+.agent-fast-toggle[aria-pressed="true"] .toggle-thumb { fill: var(--vscode-button-foreground, #fff); }
+@media (prefers-reduced-motion: reduce) {
+  .agent-fast-toggle .toggle-icon rect, .agent-fast-toggle .toggle-thumb { transition: none; }
+}
 @container (max-width: 410px) {
   .aligned-settings .agent-settings-columns { display: none; }
   .aligned-settings .agent-model-row { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px 8px; }

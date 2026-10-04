@@ -1,15 +1,11 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { build } from 'esbuild';
+import { importTypeScript, createTypeScriptImporter } from '../support/import-typescript.mjs';
 import { readFileSync } from 'node:fs';
 import { readChatSourceSync, runChatInNewContext as runInNewContext } from "../support/chat-source.mjs";
-async function load(path) {
-  const result = await build({entryPoints:[path],bundle:true,format:'esm',platform:'node',write:false});
-  return import(`data:text/javascript;base64,${Buffer.from(result.outputFiles[0].text).toString('base64')}`);
-}
-const { createDraftChatState, restoreChatState } = await load('src/modules/chat/chat-state.ts');
-const { mergeAgentSettings } = await load('src/core/config/agent-settings.ts');
-const { parseClientMessage } = await load('src/protocol/validator.ts');
+const { createDraftChatState, restoreChatState } = await importTypeScript('src/modules/chat/chat-state.ts');
+const { mergeAgentSettings } = await importTypeScript('src/core/config/agent-settings.ts');
+const { parseClientMessage } = await importTypeScript('src/protocol/validator.ts');
 const source = readChatSourceSync();
 const section = (start,end) => source.slice(source.indexOf(start),source.indexOf(end,source.indexOf(start)));
 test('draft and restart preserve independent copied settings, including empty Fast maps',()=>{
@@ -100,8 +96,8 @@ test('store reads each scope separately and writes only the selected scope', asy
   const entries = { 'main.model': {globalValue:'global',workspaceValue:'workspace',workspaceFolderValue:'project'}, 'main.reasoningEffort':{globalValue:'high'}, 'work.model':{globalValue:'worker'} };
   const writes=[];
   globalThis.__agentConfigFixture = { workspace:{workspaceFolders:[{uri:{fsPath:'/project'}}],getConfiguration:()=>({inspect:key=>entries[key],update:async(...args)=>writes.push(args)})},ConfigurationTarget:{Global:1,WorkspaceFolder:3} };
-  const result=await build({entryPoints:['src/infrastructure/vscode/agent-settings-store.ts'],bundle:true,format:'esm',platform:'node',write:false,plugins:[{name:'mock-vscode',setup(b){b.onResolve({filter:/^vscode$/},()=>({path:'vscode',namespace:'mock'}));b.onLoad({filter:/.*/,namespace:'mock'},()=>({contents:'module.exports = globalThis.__agentConfigFixture;',loader:'js'}));}}]});
-  const store=await import(`data:text/javascript;base64,${Buffer.from(result.outputFiles[0].text).toString('base64')}`);
+  const loadStore=createTypeScriptImporter({plugins:[{name:'mock-vscode',setup(b){b.onResolve({filter:/^vscode$/},()=>({path:'vscode',namespace:'mock'}));b.onLoad({filter:/.*/,namespace:'mock'},()=>({contents:'module.exports = globalThis.__agentConfigFixture;',loader:'js'}));}}]});
+  const store=await loadStore('src/infrastructure/vscode/agent-settings-store.ts');
   assert.equal(store.readAgentDefaults().project.main.model,'project');
   assert.equal(store.readAgentDefaults().global.main.reasoningEffort,'high');
   await store.saveAgentDefault('global','work','model','new-worker');

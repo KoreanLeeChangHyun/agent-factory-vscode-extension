@@ -3,10 +3,9 @@ import test from 'node:test';
 import { mkdtemp, writeFile, chmod, mkdir, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { build } from 'esbuild';
+import { importTypeScript } from '../support/import-typescript.mjs';
 
-const bundled = await build({ entryPoints: ['src/infrastructure/agent-factory/model-catalog.ts'], bundle: true, format: 'esm', platform: 'node', write: false });
-const { readProviderModels, readClaudeModels, antigravityModels } = await import(`data:text/javascript;base64,${Buffer.from(bundled.outputFiles[0].text).toString('base64')}`);
+const { readProviderModels, readClaudeModels, antigravityModels } = await importTypeScript('src/infrastructure/agent-factory/model-catalog.ts');
 
 test('Claude discovery augments Codex and missing optional CLI preserves its catalog', async () => {
   const root = await mkdtemp(join(tmpdir(), 'af-claude-catalog-'));

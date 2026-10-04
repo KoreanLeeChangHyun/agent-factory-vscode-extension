@@ -1,16 +1,11 @@
 import assert from "node:assert/strict";
-import { build } from "esbuild";
+import { importTypeScript } from "../support/import-typescript.mjs";
 import { chmod, mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
 import test from "node:test";
 
-const output = await build({
-  entryPoints: [fileURLToPath(new URL("../../src/infrastructure/agent-factory/process-environment.ts", import.meta.url))],
-  bundle: true, format: "esm", platform: "node", target: "node18", write: false
-});
-const environmentModule = await import(`data:text/javascript;base64,${Buffer.from(output.outputFiles[0].text).toString("base64")}`);
+const environmentModule = await importTypeScript('src/infrastructure/agent-factory/process-environment.ts');
 const { defaultPythonCommand, codexExecutable, configureCodexCli, resolveCodexCli, runtimeEnvironment, resolveClaudeCli, claudeExecutable, configureClaudeCli } = environmentModule;
 
 async function executable(path) {

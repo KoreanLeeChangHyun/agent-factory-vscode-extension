@@ -2,11 +2,11 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { runInNewContext } from 'node:vm';
-import { build, transform } from 'esbuild';
+import { transform } from 'esbuild';
+import { importTypeScript } from '../support/import-typescript.mjs';
 
 test('local file upload validates size, encoding and path-free names', async () => {
-  const output = await build({ entryPoints: ['src/protocol/validator.ts'], bundle: true, format: 'esm', platform: 'node', write: false });
-  const { parseClientMessage } = await import(`data:text/javascript;base64,${Buffer.from(output.outputFiles[0].text).toString('base64')}`);
+  const { parseClientMessage } = await importTypeScript('src/protocol/validator.ts');
   const message = { type: 'attachments.createFile', id: 'file-one', name: 'notes.txt', size: 3, data: 'YWJj' };
   assert.deepEqual(parseClientMessage(message), message);
   assert.ok(parseClientMessage({ ...message, size: 0, data: '' }));

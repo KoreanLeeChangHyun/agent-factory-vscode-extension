@@ -4,9 +4,8 @@ import { EventEmitter } from 'node:events';
 import { mkdtemp, writeFile, rename, rm, mkdir } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { build } from 'esbuild';
-const output = await build({entryPoints:[new URL('../../src/infrastructure/agent-factory/observed-run-cache.ts',import.meta.url).pathname],bundle:true,write:false,platform:'node',format:'esm'});
-const { ObservedRunCache } = await import('data:text/javascript;base64,'+Buffer.from(output.outputFiles[0].text).toString('base64'));
+import { importTypeScript } from '../support/import-typescript.mjs';
+const { ObservedRunCache } = await importTypeScript('src/infrastructure/agent-factory/observed-run-cache.ts');
 async function fixture(t) {
  const path=await mkdtemp(join(tmpdir(),'af-observed-'));const cache=new ObservedRunCache();
  t.after(async()=>{cache.dispose();await rm(path,{recursive:true,force:true});});return {path,cache};

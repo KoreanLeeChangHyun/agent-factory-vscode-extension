@@ -58,6 +58,14 @@ async function checkInterviewChoices(page) {
   assert.equal(await page.locator('table.interview-options').count(), 1);
   assert.equal(await page.locator('.interview-choice').count(), 2);
   assert.equal(await page.locator('.message-content').filter({ hasText: '권고: 사무실' }).count(), 1);
+  const structuredCells = await page.locator('table.interview-options').evaluate(table => {
+    const box = cell => { const style = getComputedStyle(cell); return { border: style.borderTopWidth, padding: parseFloat(style.paddingLeft), width: cell.getBoundingClientRect().width }; };
+    return { head: box(table.querySelector('th:nth-child(2)')), cell: box(table.querySelector('tbody td:nth-child(2)')), choice: box(table.querySelector('tbody td:first-child')) };
+  });
+  assert.notEqual(structuredCells.head.border, '0px');
+  assert.notEqual(structuredCells.cell.border, '0px');
+  assert.ok(structuredCells.cell.padding > 0, JSON.stringify(structuredCells));
+  assert.ok(structuredCells.choice.width < structuredCells.cell.width + 80, JSON.stringify(structuredCells));
   await page.locator('.interview-choice').nth(1).click();
   assert.equal(await page.evaluate(() => window.sentMessages.filter(m => m.type === 'chat.send').at(-1).text), 'office');
 }

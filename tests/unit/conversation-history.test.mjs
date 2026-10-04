@@ -95,7 +95,7 @@ test("restored guidance uses the existing closed details renderer", () => {
   const element = tag => ({ tag, open: false, children: [], classList: { add() {} },
     setAttribute() {}, append(...children) { this.children.push(...children); }, prepend(child) { this.children.unshift(child); } });
   const content = element("div");
-  const renderer = script.slice(script.indexOf("  function renderSubmission(content, submission)"), script.indexOf("  function renderTimeline()"));
+  const renderer = script.slice(script.indexOf("  function renderSubmission("), script.indexOf("  function renderTimeline()"));
   runInNewContext(`${renderer}\nrenderSubmission(content, submission);`, {
     content, submission: historyPresentation("테스트" + background + model + permissions + preparation, "work", false).submission,
     t: value => value, createModeIcon: () => element("svg"),
@@ -157,4 +157,29 @@ test("cached preparation repair requires exact request equivalence", () => {
   state.timeline = [changed];
   deliver(state, { type: 'conversation.history', agentId: 'main-one', history: { messages: [restored] } });
   assert.equal(state.timeline[0], changed);
+});
+
+
+test("orchestrator requests restore captured guidance, including isolation and suffix combinations", async () => {
+  const source = await readFile(new URL("../../src/modules/chat/session-controller.ts", import.meta.url), "utf8");
+  const producer = source.slice(source.indexOf("export function orchestratorModeGuidance("), source.indexOf("export const orchestratorGuidance"))
+    .replace("export function", "function").replace("workProfileRecorded: boolean, failureClassReported = false): string", "workProfileRecorded, failureClassReported = false)");
+  for (const workProfileRecorded of [false, true]) for (const failureClassReported of [false, true]) {
+    const context = { workProfileRecorded, failureClassReported };
+    runInNewContext(producer + "\nguidance = orchestratorModeGuidance(workProfileRecorded, failureClassReported);", context);
+    for (const isolation of ["", "\n\n[Work isolation: task Work Units]\nRecorded isolation instructions.\n[End Work isolation]", "\n\n[Work isolation]\nUnavailable isolation instructions.\n[End Work isolation]"]) {
+      for (const suffix of ["", model + permissions + isolation + runtimeStatus + preparation]) {
+        const text = "원문\n\n첨부 참조:\n- [image] image.png: file:///fixture/image.png (image/png, 9371 bytes)";
+        const guidance = context.guidance + suffix;
+        const restored = historyPresentation(text + guidance, "orchestrate", false);
+        assert.equal(restored.text, text);
+        assert.equal(restored.submission.guidance, guidance);
+        assert.equal(restored.submission.taskMode, "orchestrate");
+        assert.equal(restored.text + restored.submission.guidance, text + guidance);
+        assert.equal(historyPresentation(text + guidance + "\nExplain this quote.", "direct", false).text, text + guidance + "\nExplain this quote.");
+      }
+    }
+  }
+  const incomplete = "원문\n\n[Orchestrator mode]\nIncomplete";
+  assert.equal(historyPresentation(incomplete, "orchestrate", false).text, incomplete);
 });

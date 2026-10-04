@@ -60,7 +60,7 @@ async function checkMessageSubmission(page) {
   await message.waitFor();
   assert.equal(await message.locator('.message-submission').innerText(), 'Contract');
   assert.equal(await message.locator('pre').textContent(), submission.guidance);
-  assert.equal(await message.locator('details').getAttribute('open'), null);
+  assert.equal(await message.locator('details').evaluate(el => el.open), true, 'The saved expansion survives reload');
   assert.equal(await page.locator('[data-id="legacy-submission"] .message-submission').count(), 0);
 }
 module.exports = { checkMessageSubmission };

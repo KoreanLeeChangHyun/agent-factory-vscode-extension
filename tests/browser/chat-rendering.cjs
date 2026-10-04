@@ -287,6 +287,49 @@ async function main() {
         await message.locator('summary').click();
         assert.equal(await message.locator('pre').textContent(), notification + guidance);
       }
+      const orchestrator = '\n\n[Orchestrator mode]\nRecorded orchestrator instructions.\n[End orchestrator mode]';
+      const attachedText = '원문\n\n첨부 참조:\n- [image] image.png: file:///fixture/image.png (image/png, 9371 bytes)';
+      const captured = orchestrator + guidance;
+      const orchestrated = { type: 'user', id: 'history-user-orchestrator', runId: 'orchestrator', ...historyPresentation(attachedText + captured, 'orchestrate', false) };
+      const cached = [[], [{ ...orchestrated, text: attachedText + captured, submission: undefined }],
+        [{ ...orchestrated, text: attachedText + orchestrator, submission: { ...orchestrated.submission, guidance } }], [orchestrated]];
+      const saveAndReload = async () => {
+        await page.evaluate(() => sessionStorage.setItem('submission-restoration-fixture', JSON.stringify(window.saved)));
+        await page.reload();
+      };
+      for (const timeline of cached) {
+        await page.evaluate(timeline => sessionStorage.setItem('submission-restoration-fixture', JSON.stringify({ agentId: 'main-history', timeline })), timeline);
+        await page.reload();
+        await page.evaluate(item => window.postMessage({ type: 'conversation.history', agentId: 'main-history', history: { messages: [item] } }, '*'), orchestrated);
+        const row = page.locator('[data-id="history-user-orchestrator"]');
+        const details = row.locator('.message-guidance');
+        await details.waitFor({ state: 'attached' });
+        assert.equal(await details.evaluate(el => el.open), false);
+        assert.ok((await row.innerText()).includes(attachedText));
+        assert.ok(!(await row.innerText()).includes('[Orchestrator mode]'));
+        assert.equal(await details.locator('pre').textContent(), captured);
+        await details.locator('summary').focus();
+        await page.keyboard.press('Enter');
+        await page.waitForFunction(() => window.saved.guidanceExpanded?.includes('history-user-orchestrator'));
+        await saveAndReload();
+        assert.equal(await details.evaluate(el => el.open), true, 'Explicit expansion survives Webview restoration');
+        await page.evaluate(item => window.postMessage({ type: 'conversation.history', agentId: 'main-history', history: { messages: [item] } }, '*'), orchestrated);
+        assert.equal(await details.evaluate(el => el.open), true, 'Host history does not reset the selection');
+        await details.locator('summary').click();
+        await page.waitForFunction(() => !window.saved.guidanceExpanded?.includes('history-user-orchestrator'));
+        await saveAndReload();
+        assert.equal(await details.evaluate(el => el.open), false, 'Explicit collapse survives Webview restoration');
+      }
+      await page.evaluate(item => window.postMessage({ type: 'chat.started', id: 'live-orchestrator', text: item.text, submission: item.submission, attachments: [] }, '*'), orchestrated);
+      const live = page.locator('[data-id="live-orchestrator"] .message-guidance');
+      await live.waitFor({ state: 'attached' });
+      assert.equal(await live.evaluate(el => el.open), false);
+      await live.locator('summary').click();
+      await page.waitForFunction(() => window.saved.guidanceExpanded?.includes('live-orchestrator'));
+      await saveAndReload();
+      assert.equal(await live.evaluate(el => el.open), true);
+      await page.evaluate(() => window.postMessage({ type: 'host.initialize', panelId: 'other-panel', agentId: 'other-agent', role: 'main', resetConversation: true }, '*'));
+      await page.waitForFunction(() => window.saved.agentId === 'other-agent' && window.saved.guidanceExpanded.length === 0);
       assert.deepEqual(errors, []);
       console.log('Fresh and cached history hide captured workflow/status instructions until expanded.');
       return;

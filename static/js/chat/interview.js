@@ -18,6 +18,8 @@ globalThis.AgentFactoryChat.interview = function (host) {
   function renderStructuredInterview(content, event) {
     const question = event.question;
     if (!question || !Array.isArray(question.options)) return;
+    // Shares the Markdown answer scope so the table receives the same cell styles.
+    content.classList.add("markdown-body");
     const korean = /[가-힣]/.test(question.text + question.options.map(option => option.label + option.pros + option.cons).join(""));
     const heading = document.createElement("p");
     const strong = document.createElement("strong");

@@ -179,6 +179,7 @@
     return t(state.companionAvailable ? "bot.name.lumi" : "bot.name.factory");
   }
   const state = {
+    guidanceExpanded: Array.isArray(saved?.guidanceExpanded) ? saved.guidanceExpanded.filter(id => typeof id === "string") : [],
     panelId: typeof saved?.panelId === "string" ? saved.panelId : undefined,
     agentId: typeof saved?.agentId === "string" ? saved.agentId : undefined,
     capturedRun: normalizeCapturedRun(saved?.capturedRun, saved?.agentId),
@@ -1164,6 +1165,7 @@
             state.historyNextBefore = undefined;
             timelineEndId = undefined;
             messageViewStates.clear();
+            state.guidanceExpanded = [];
             state.timeline = [];
             state.taskFlows = [];
             state.dismissedTasks = [];
@@ -1968,7 +1970,7 @@
     return { taskMode: execution.taskMode, businessMode: execution.businessMode, goal: execution.goal === true };
   }
 
-  function renderSubmission(content, submission) {
+  function renderSubmission(content, submission, messageId) {
     if (!submission || typeof submission !== "object") return;
     const actions = { work: t("ui.work"), plan: t("ui.plan"), verification: t("ui.verification"), "plan-work": t("ui.plan.work.f294a9"), "work-verification": t("ui.work.verification.6a0009"), "plan-work-verification": t("ui.plan.work.verification.d02a66") };
     const workflows = { contract: t("ui.contract"), interview: t("ui.interview"), planning: t("ui.planning"), design: t("ui.design"), migration: t("ui.migration"), lessons: t("ui.lessons"), pipeline: t("ui.pipeline") };
@@ -1990,6 +1992,15 @@
       content.classList.add("has-message-guidance");
       const details = document.createElement("details");
       details.className = "message-guidance";
+      if (messageId) {
+        details.open = state.guidanceExpanded.includes(messageId);
+        details.addEventListener("toggle", function () {
+          if (!details.isConnected || details.open === state.guidanceExpanded.includes(messageId)) return;
+          state.guidanceExpanded = state.guidanceExpanded.filter(id => id !== messageId);
+          if (details.open) state.guidanceExpanded.push(messageId);
+          persist();
+        });
+      }
       const summary = document.createElement("summary");
       summary.setAttribute("aria-label", t("ui.view.delivered.guidance"));
       summary.title = t("ui.view.delivered.guidance");
@@ -2191,7 +2202,7 @@
       } else {
         content.textContent = event.text;
       }
-      if (event.type === "user") renderSubmission(content, event.submission);
+      if (event.type === "user") renderSubmission(content, event.submission, event.id);
       if (event.type === "user" && Array.isArray(event.attachments)) chatAttachments.renderHistoryAttachments(content, event.attachments);
       message.append(content);
       const display = displayStates.get(event.id);
@@ -2652,6 +2663,7 @@
     state.historyNextBefore = undefined;
     timelineEndId = undefined;
     messageViewStates.clear();
+    state.guidanceExpanded = [];
     state.timeline = [];
     state.taskFlows = [];
     state.dismissedTasks = [];
@@ -2868,6 +2880,7 @@
       shortcuts: { ...chatShortcuts.shortcuts },
       shortcutDefaultsVersion: chatShortcuts.shortcutDefaultsVersion,
       startedMessageIds: state.startedMessageIds,
+      guidanceExpanded: state.guidanceExpanded,
       pendingRequests: state.pendingRequests,
       notesScope: chatNotes.selectedNotesScope,
       noteDraft: chatNotes.noteDraft && (chatNotes.noteDirty || chatNotes.noteSending) ? { ...chatNotes.noteDraft } : null,

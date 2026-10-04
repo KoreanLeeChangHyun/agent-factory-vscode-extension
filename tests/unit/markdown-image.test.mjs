@@ -1,11 +1,10 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { build } from 'esbuild';
+import { importTypeScript } from '../support/import-typescript.mjs';
 import { mkdtemp, mkdir, writeFile, symlink, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-const output = await build({ entryPoints: ['src/infrastructure/vscode/markdown-image.ts'], bundle: true, platform: 'node', format: 'esm', write: false });
-const { readMarkdownImage } = await import('data:text/javascript;base64,' + Buffer.from(output.outputFiles[0].text).toString('base64'));
+const { readMarkdownImage } = await importTypeScript('src/infrastructure/vscode/markdown-image.ts');
 test('local Markdown images resolve while outside files and invalid content are rejected', async () => {
   const dir = await mkdtemp(join(tmpdir(), 'af-markdown-'));
   try {

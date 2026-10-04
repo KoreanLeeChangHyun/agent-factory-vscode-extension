@@ -5,18 +5,13 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import test from "node:test";
-import { build } from "esbuild";
+import { importTypeScript } from "../support/import-typescript.mjs";
 
 const exec = promisify(execFile);
-async function module(path) {
-  const compiled = await build({ entryPoints: [new URL(`../../src/${path}.ts`, import.meta.url).pathname],
-    bundle: true, write: false, platform: "node", format: "esm" });
-  return import(`data:text/javascript;base64,${Buffer.from(compiled.outputFiles[0].text).toString("base64")}`);
-}
-const { parseGitStatus, collectGitStatus, submissionContext } = await module("infrastructure/agent-factory/submission-context");
-const { historyPresentation } = await module("infrastructure/agent-factory/history-presentation");
-const { AgentFactoryClient } = await module("infrastructure/agent-factory/agent-client");
-const { ChatSessionController } = await module("modules/chat/session-controller");
+const { parseGitStatus, collectGitStatus, submissionContext } = await importTypeScript("src/infrastructure/agent-factory/submission-context.ts");
+const { historyPresentation } = await importTypeScript("src/infrastructure/agent-factory/history-presentation.ts");
+const { AgentFactoryClient } = await importTypeScript("src/infrastructure/agent-factory/agent-client.ts");
+const { ChatSessionController } = await importTypeScript("src/modules/chat/session-controller.ts");
 async function directory(t) {
   const root = await mkdtemp(join(tmpdir(), "af-preparation-"));
   t.after(() => rm(root, { recursive: true, force: true }));

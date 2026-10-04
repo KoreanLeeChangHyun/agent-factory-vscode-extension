@@ -140,6 +140,7 @@ globalThis.AgentFactoryChat.history = function (host) {
   function positionTaskHistory() {
     const status = document.getElementById("run-status");
     const actions = document.getElementById("workflow-history");
+    document.getElementById("workflow-history-toggle").setAttribute("aria-label", t("contracts.title") + " / " + t("flow.history"));
     const progress = document.getElementById("agent-progress");
     const available = status.clientWidth - (progress.hidden ? 0 : progress.getBoundingClientRect().width + 8);
     actions.classList.toggle("is-compact", available < 430);

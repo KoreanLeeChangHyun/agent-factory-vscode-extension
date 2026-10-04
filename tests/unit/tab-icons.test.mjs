@@ -5,26 +5,18 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { runInNewContext } from "node:vm";
 import test from "node:test";
-import { build } from "esbuild";
+import { createTypeScriptBuilder } from "../support/import-typescript.mjs";
 
 const require = createRequire(import.meta.url);
 const extensionRoot = new URL("../..", import.meta.url).pathname.replace(/\/$/, "");
 const vscodeUri = { file: value => ({ fsPath: value }), joinPath: (base, ...parts) => ({ fsPath: [base.fsPath, ...parts].join("/") }) };
 
 // Share immutable bundle text only; each load keeps a fresh VM and mock state.
-const bundles = new Map();
+const prepare = createTypeScriptBuilder({ format: "cjs", external: ["vscode"] });
 async function load(entry, vscode) {
-  if (!bundles.has(entry)) {
-    const pending = build({
-      entryPoints: [join(extensionRoot, "src/infrastructure/vscode", entry)],
-      bundle: true, write: false, platform: "node", format: "cjs", target: "node18", external: ["vscode"]
-    });
-    bundles.set(entry, pending);
-    pending.catch(() => { if (bundles.get(entry) === pending) bundles.delete(entry); });
-  }
-  const output = await bundles.get(entry);
+  const source = await prepare(`src/infrastructure/vscode/${entry}`);
   const module = { exports: {} };
-  runInNewContext(output.outputFiles[0].text, {
+  runInNewContext(source, {
     module, exports: module.exports, Buffer, console, process, URL, setTimeout, clearTimeout, global: { Date },
     require: name => name === "vscode" ? vscode : require(name)
   });

@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { createTypeScriptImporter } from '../support/import-typescript.mjs';
+import { runInNewContext } from 'node:vm';
+import { createTypeScriptBuilder, createTypeScriptImporter } from '../support/import-typescript.mjs';
 
 const source = 'src/common/types/agent-permissions.ts';
 
@@ -39,4 +40,29 @@ test('failed TypeScript preparation can retry within the same worker', async () 
   await assert.rejects(load(source), /fixture build failure/);
   assert.equal((await load(source)).marker, 'recovered');
   assert.equal(attempts, 2);
+});
+
+test('CommonJS preparation shares immutable code while VM mocks and state stay isolated', async () => {
+  let builds = 0;
+  const prepare = createTypeScriptBuilder({
+    format: 'cjs', plugins: [{ name: 'cjs-fixture', setup(api) {
+      api.onStart(() => { builds++; });
+      api.onLoad({ filter: /agent-permissions\.ts$/ }, () => ({
+        contents: 'export const state = { marker: globalThis.marker, count: 0 };'
+      }));
+    } }]
+  });
+  const [left, right] = await Promise.all([prepare(source), prepare(source)]);
+  assert.equal(left, right);
+  assert.equal(builds, 1);
+  const evaluate = marker => {
+    const module = { exports: {} };
+    runInNewContext(left, { module, exports: module.exports, marker });
+    return module.exports.state;
+  };
+  const first = evaluate('left'), second = evaluate('right');
+  first.count++;
+  assert.equal(first.marker, 'left');
+  assert.equal(second.marker, 'right');
+  assert.equal(second.count, 0);
 });

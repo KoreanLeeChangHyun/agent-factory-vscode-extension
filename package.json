@@ -484,7 +484,8 @@
     "check": "npm run typecheck && npm run check:static && npm run test && npm run build",
     "check:static": "node scripts/check-static.mjs",
     "typecheck": "tsc --noEmit",
-    "test": "node --test tests/unit/*.test.mjs",
+    "test": "node scripts/test.mjs",
+    "test:serial": "node scripts/test.mjs --serial",
     "package": "npm run check && node -e \"require('node:fs').mkdirSync('releases', { recursive: true })\" && node --require ./scripts/node-file-polyfill.cjs ./node_modules/@vscode/vsce/vsce package --allow-missing-repository --out releases",
     "vscode:prepublish": "node scripts/build.mjs --release"
   },

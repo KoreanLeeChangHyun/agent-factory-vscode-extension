@@ -3,9 +3,8 @@ import test from 'node:test';
 import { mkdtemp, mkdir, writeFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { build } from 'esbuild';
-const output = await build({ entryPoints: [new URL('../../src/infrastructure/agent-factory/agent-client.ts', import.meta.url).pathname], bundle: true, write: false, platform: 'node', format: 'esm' });
-const { AgentFactoryClient } = await import('data:text/javascript;base64,' + Buffer.from(output.outputFiles[0].text).toString('base64'));
+import { importTypeScript } from '../support/import-typescript.mjs';
+const { AgentFactoryClient } = await importTypeScript('src/infrastructure/agent-factory/agent-client.ts');
 async function fixture(t) {
   const root = await mkdtemp(join(tmpdir(), 'af-directory-cache-'));
   const client = new AgentFactoryClient('/unused', root);

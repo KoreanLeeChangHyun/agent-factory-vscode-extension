@@ -1,22 +1,13 @@
 import assert from "node:assert/strict";
-import { build } from "esbuild";
+import { importTypeScript } from "../support/import-typescript.mjs";
 import { chmod, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { fileURLToPath } from "node:url";
 import test from "node:test";
 
-async function load(relativePath) {
-  const output = await build({
-    entryPoints: [fileURLToPath(new URL(`../../${relativePath}`, import.meta.url))],
-    bundle: true, format: "esm", platform: "node", target: "node18", write: false
-  });
-  return import(`data:text/javascript;base64,${Buffer.from(output.outputFiles[0].text).toString("base64")}`);
-}
-
-const detection = await load("src/infrastructure/agent-factory/provider-detection.ts");
-const { providerCliInstallMethod } = await load("src/infrastructure/agent-factory/provider-cli-installer.ts");
-const { readProviderVersionCatalog, sortedVersions } = await load("src/infrastructure/agent-factory/provider-version-catalog.ts");
+const detection = await importTypeScript("src/infrastructure/agent-factory/provider-detection.ts");
+const { providerCliInstallMethod } = await importTypeScript("src/infrastructure/agent-factory/provider-cli-installer.ts");
+const { readProviderVersionCatalog, sortedVersions } = await importTypeScript("src/infrastructure/agent-factory/provider-version-catalog.ts");
 
 test("version choices come from release catalogs and respect detected providers", async () => {
   assert.deepEqual(sortedVersions(["1.0.9", "1.0.21", "1.0.9", "1.0.22-alpha.1"]), ["1.0.21", "1.0.9"]);
@@ -97,7 +88,7 @@ test("each provider is detected independently with its path, source and manual o
 });
 
 test("provider path messages accept a bounded path or an empty reset only for known providers", async () => {
-  const { parseClientMessage } = await load("src/protocol/validator.ts");
+  const { parseClientMessage } = await importTypeScript("src/protocol/validator.ts");
   assert.deepEqual(parseClientMessage({ type: "providers.configure", provider: "antigravity", path: "/opt/agy" }),
     { type: "providers.configure", provider: "antigravity", path: "/opt/agy" });
   assert.deepEqual(parseClientMessage({ type: "providers.configure", provider: "claude", path: "" }),
