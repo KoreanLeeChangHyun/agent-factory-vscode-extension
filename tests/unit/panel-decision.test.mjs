@@ -134,12 +134,12 @@ test("host sends approval only to current controller and rejects missing or stal
     state: { role: "verification", verifiedWorkRunId: "work-run", model: "unsupported-model", fastMode: true },
     panel: { webview: { async postMessage(message) { posted.push(message); return true; } } },
     controller: {
-      approveDecision(runId, execution) { calls.push({ runId, execution }); return runId === "current-run"; }
+      approveDecision(runId, execution, language) { calls.push({ runId, execution, language }); return runId === "current-run"; }
     }
   };
-  await manager.handleMessage(managed, { type: "decision.approve", runId: "current-run" });
+  await manager.handleMessage(managed, { type: "decision.approve", runId: "current-run", language: "en" });
   assert.equal(calls.length, 1);
-  assert.deepEqual(JSON.parse(JSON.stringify(calls[0])), { runId: "current-run", execution: { verifiedWorkRunId: "work-run" } });
+  assert.deepEqual(JSON.parse(JSON.stringify(calls[0])), { runId: "current-run", execution: { verifiedWorkRunId: "work-run" }, language: "en" });
   assert.equal(posted.length, 0);
   await manager.handleMessage(managed, { type: "decision.approve", runId: "old-run" });
   assert.equal(posted.at(-2).type, "decision.pending");
@@ -622,9 +622,9 @@ test("Host rejects a provider-changing composer payload for a bound conversation
 
 test("Host rejects a provider-changing saved set before applying it", async () => {
   const posted = [], writes = [];
-  const stored = new Map([["agentFactory.agentPresets.global.v2", [{ name: "Other provider", settings: { main: { model: "gpt-6-astra", reasoningEffort: "high" } } }]]]);
+  const stored = new Map([["agentFactory.agentPresets.chat.v2", {"preset-provider-bound": [{ name: "Other provider", settings: { main: { model: "gpt-6-astra", reasoningEffort: "high" } } }]}]]);
   const memory = { get(key, fallback) { return stored.has(key) ? stored.get(key) : fallback; }, async update(...args) { writes.push(args); stored.set(args[0], args[1]); } };
-  const manager = new module.exports.ChatPanelManager({ globalState: memory }, {}, () => [], async () => ({
+  const manager = new module.exports.ChatPanelManager({ globalState: memory, workspaceState: memory }, {}, () => [], async () => ({
     available: true,
     client: { async capabilities() { return { submit: { model: true, reasoning: true }, send: { model: true, reasoning: true, sessionProvider: "claude" } }; } }
   }));
@@ -632,7 +632,7 @@ test("Host rejects a provider-changing saved set before applying it", async () =
     state: { panelId: "preset-provider-bound", role: "main", agentId: "main-bound", model: "claude-opus-5-5", reasoning: "medium" },
     panel: { webview: { async postMessage(message) { posted.push(message); return true; } } }
   };
-  await manager.handleMessage(managed, { type: "agent.preset", action: "apply", scope: "global", name: "Other provider" });
+  await manager.handleMessage(managed, { type: "agent.preset", action: "apply", scope: "chat", name: "Other provider" });
   assert.equal(managed.state.model, "claude-opus-5-5");
   assert.equal(writes.length, 0, "An incompatible set is rejected before any preset/configuration write");
   assert.equal(posted.at(-1).type, "agent.preset.result");
@@ -1126,4 +1126,149 @@ test('invalid chat requests log the operation without private payloads', async (
   assert.equal(diagnostics.at(-1)[1].type, 'chat.send');
   assert.equal(diagnostics.at(-1)[1].reason, 'protocol-validation-failed');
   assert.doesNotMatch(JSON.stringify(diagnostics.at(-1)), /private text|private password/);
+});
+
+
+test("task role opens and focuses only its existing child chat without starting a session", async () => {
+  const posted = [], created = [], attached = [], reveals = [], originalCreate = vscode.window.createWebviewPanel;
+  const child = { agentId: "exact-worker", runId: "exact-run", role: "work", status: "running", model: "captured-worker", workProfile: "workLight" };
+  const manager = new module.exports.ChatPanelManager({}, {}, () => [], async () => ({
+    available: true, client: { async listChildSessions(id) { assert.equal(id, "main-owner"); return [child]; } }
+  }));
+  manager.newChatPreferences = () => ({ model: "different-main-setting" });
+  manager.webviewOptions = () => ({});
+  manager.attach = async (panel, state) => { attached.push(state); manager.panels.set(state.panelId, { panel, state }); };
+  vscode.window.createWebviewPanel = (...args) => { created.push(args); return { webview: { async postMessage(message) { posted.push(message); } }, reveal(...args) { reveals.push(args); } }; };
+  const main = { state: { role: "main", agentId: "main-owner" }, panel: { webview: { async postMessage(message) { posted.push(message); } } } };
+  try {
+    await manager.openChildAgent(main, "exact-worker");
+    assert.equal(created.length, 1);
+    assert.equal(attached[0].agentId, "exact-worker");
+    assert.equal(attached[0].role, "work");
+    assert.equal(attached[0].capturedRun.model, "captured-worker");
+    assert.equal(attached[0].model, "different-main-setting");
+    await manager.openChildAgent(main, "exact-worker");
+    assert.equal(created.length, 1);
+    assert.deepEqual(reveals, [[undefined, false]], "Existing tab receives focus");
+    for (const id of ["main-owner", "other-worker"]) await manager.openChildAgent(main, id);
+    assert.equal(created.length, 1);
+    assert.equal(posted.filter(message => message.type === "host.notice").length, 2);
+    assert.equal(posted.find(message => message.type === "agent.run.selected").capturedRun.runId, "exact-run");
+  } finally { vscode.window.createWebviewPanel = originalCreate; }
+});
+
+
+test('role clicks retarget the same tab to an exact old run without changing send options', async () => {
+  const posted = [], created = [], attached = [], reveals = [], originalCreate = vscode.window.createWebviewPanel;
+  const runs = [
+    { agentId: 'worker-one', runId: 'run-old', role: 'work', model: 'old-worker-model', workProfile: 'workLight' },
+    { agentId: 'worker-one', runId: 'run-new', role: 'work', model: 'new-expert-model', workProfile: 'work' },
+    { agentId: 'verifier-one', runId: 'run-v', role: 'verification' }
+  ];
+  const client = { async childRun(main, agent, run) {
+    assert.equal(main, 'main-owner'); return runs.find(value => value.agentId === agent && value.runId === run);
+  }, async submit() { assert.fail('Opening must not submit'); }, async send() { assert.fail('Opening must not send'); } };
+  const manager = new module.exports.ChatPanelManager({}, {}, () => [], async () => ({ available: true, client }));
+  manager.newChatPreferences = () => ({ model: 'next-send-setting' }); manager.webviewOptions = () => ({});
+  manager.attach = async (panel, state) => { attached.push(state); manager.panels.set(state.panelId, { panel, state }); };
+  vscode.window.createWebviewPanel = () => { created.push(1); return { webview: { async postMessage(value) { posted.push(value); } }, reveal() { reveals.push(1); } }; };
+  const main = { state: { agentId: 'main-owner', role: 'main' }, panel: { webview: { async postMessage(value) { posted.push(value); } } } };
+  try {
+    await manager.handleMessage(main, { type: 'agent.open', agentId: 'worker-one', runId: 'run-new' });
+    await manager.handleMessage(main, { type: 'agent.open', agentId: 'worker-one', runId: 'run-old' });
+    assert.equal(created.length, 1); assert.equal(reveals.length, 1);
+    const state = [...manager.panels.values()][0].state;
+    assert.equal(state.capturedRun.runId, 'run-old'); assert.equal(state.capturedRun.model, 'old-worker-model');
+    assert.equal(state.capturedRun.workProfile, 'workLight'); assert.equal(state.model, 'next-send-setting');
+    await manager.handleMessage(main, { type: 'agent.open', agentId: 'verifier-one', runId: 'run-v' });
+    assert.equal(attached[1].capturedRun.model, undefined);
+    await manager.handleMessage(main, { type: 'agent.open', agentId: 'worker-one', runId: 'nonexistent' });
+    assert.equal(created.length, 2); assert.equal(posted.at(-1).type, 'host.notice');
+  } finally { vscode.window.createWebviewPanel = originalCreate; }
+});
+
+
+test('restoring an existing child tab rereads its historical run and rejects stale cache values', async () => {
+  const posted = [], revealed = [], disposed = [];
+  const capturedRun = { parentAgentId: 'main-owner', agentId: 'worker-one', runId: 'run-old', model: 'stale-cache' };
+  let missing = false;
+  const manager = new module.exports.ChatPanelManager({}, {}, () => [], async () => ({ available: true, client: {
+    async childRun(parent, agentId, runId) {
+      assert.deepEqual([parent, agentId, runId], ['main-owner', 'worker-one', 'run-old']);
+      return missing ? undefined : { agentId, runId, role: 'work', model: 'captured-old', workProfile: 'workLight' };
+    }
+  } }));
+  manager.newChatPreferences = () => ({ model: 'changed-main' });
+  const existing = { state: { panelId: 'existing', agentId: 'worker-one', role: 'work', model: 'next-send' },
+    panel: { reveal() { revealed.push(1); }, webview: { async postMessage(value) { posted.push(value); } } } };
+  manager.panels.set('existing', existing);
+  const duplicate = { viewColumn: 1, dispose() { disposed.push(1); } };
+  await manager.revive(duplicate, { panelId: 'restored', agentId: 'worker-one', role: 'work', capturedRun });
+  assert.equal(existing.state.capturedRun.model, 'captured-old'); assert.equal(existing.state.model, 'next-send');
+  assert.equal(posted.at(-1).capturedRun.runId, 'run-old');
+  missing = true;
+  await manager.revive(duplicate, { panelId: 'restored', agentId: 'worker-one', role: 'work', capturedRun });
+  assert.equal(existing.state.capturedRun, undefined); assert.equal(posted.at(-1).capturedRun, undefined);
+  assert.equal(manager.panels.size, 1); assert.equal(revealed.length, 2); assert.equal(disposed.length, 2);
+});
+
+
+test("new chats copy the current project once and restore without global or project propagation", async () => {
+  const originalConfiguration = vscode.workspace.getConfiguration;
+  const originalFolders = vscode.workspace.workspaceFolders;
+  const originalCreate = vscode.window.createWebviewPanel;
+  const entries = {};
+  for (const role of ['main', 'work', 'workLight', 'verification']) {
+    entries[`${role}.model`] = {globalValue: `global-${role}`, workspaceFolderValue: `project-${role}`};
+    entries[`${role}.reasoningEffort`] = {globalValue: 'high', workspaceFolderValue: 'medium'};
+  }
+  entries.fastByRoleModel = {globalValue: {main: {'global-main': true}}, workspaceFolderValue: {work: {'project-work': true}}};
+  const context = {globalState: {get: (key, fallback) => key === 'agentFactory.mainChat.composerPreferences' ? {fastMode:true, agentFastModes:{main:{'old-main':true}}} : fallback}};
+  const manager = new module.exports.ChatPanelManager(context, {}, () => [], async () => ({available:false}));
+  const attached = [];
+  manager.webviewOptions = () => ({});
+  manager.attach = async (_panel, state) => { attached.push(JSON.parse(JSON.stringify(state))); };
+  vscode.workspace.workspaceFolders = [{uri: {fsPath:'/project'}}];
+  vscode.workspace.getConfiguration = () => ({inspect: key => entries[key]});
+  vscode.window.createWebviewPanel = () => ({});
+  try {
+    await manager.openDraft();
+    const first = attached[0];
+    assert.equal(first.model,'project-main'); assert.equal(first.fastMode,false);
+    assert.deepEqual(first.agentFastModes,{work:{'project-work':true}});
+    entries['main.model'].globalValue = 'changed-global';
+    assert.equal(manager.newChatPreferences().model,'project-main');
+    entries['main.model'].workspaceFolderValue = 'changed-project';
+    entries['work.model'].workspaceFolderValue = 'changed-worker';
+    entries.fastByRoleModel.workspaceFolderValue.work['project-work'] = false;
+    await manager.openDraft();
+    assert.equal(attached[1].model,'changed-project'); assert.equal(attached[1].agentModels.work.model,'changed-worker');
+    assert.equal(first.agentModels.work.model,'project-work'); assert.equal(first.agentFastModes.work['project-work'],true);
+    await manager.revive({},first);
+    assert.equal(attached[2].model,'project-main'); assert.equal(attached[2].agentModels.work.model,'project-work');
+    assert.equal(attached[2].agentFastModes.work['project-work'],true);
+    const applied = manager.applyAgentSettings({...first,fastMode:true}, {main:{model:'project-main',reasoningEffort:'medium'}}, 'chat','Default');
+    assert.equal(applied.fastMode,false); assert.deepEqual(JSON.parse(JSON.stringify(applied.agentFastModes)),{});
+  } finally {
+    vscode.workspace.getConfiguration = originalConfiguration; vscode.workspace.workspaceFolders = originalFolders;
+    vscode.window.createWebviewPanel = originalCreate;
+  }
+});
+
+test("the Work isolation toggle is stored per project, defaults off and reaches every open panel", async () => {
+  const storage = new Map(), posted = [];
+  const context = { workspaceState: { get(key) { return storage.get(key); }, async update(key, value) { storage.set(key, value); } } };
+  const manager = new module.exports.ChatPanelManager(context, {}, () => [], async () => ({ available: false }));
+  const panels = ["one", "two"].map(panelId => ({
+    state: { panelId, role: "main" },
+    panel: { webview: { async postMessage(message) { posted.push([panelId, message]); return true; } } }
+  }));
+  for (const managed of panels) manager.panels.set(managed.state.panelId, managed);
+  assert.equal(manager.workIsolation(), false);
+  await manager.handleMessage(panels[0], { type: "workIsolation.set", value: true });
+  assert.equal(storage.get("agentFactory.mainChat.workIsolation"), true);
+  assert.equal(manager.workIsolation(), true);
+  assert.equal(JSON.stringify(posted), JSON.stringify([["two", { type: "workIsolation.updated", value: true }]]));
+  await manager.handleMessage(panels[1], { type: "workIsolation.set", value: false });
+  assert.equal(manager.workIsolation(), false);
 });

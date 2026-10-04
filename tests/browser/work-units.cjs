@@ -2,12 +2,18 @@ const assert = require('node:assert/strict');
 async function checkWorkUnits(page) {
   const emit = async value => { await page.evaluate(v => window.postMessage(v, '*'), value); await page.evaluate(() => new Promise(requestAnimationFrame)); };
   const capability = { model: true, taskModes: ['direct'], worktrees: true };
-  await emit({ type: 'host.initialize', panelId: 'units', role: 'main', runtimeAvailable: true, capabilities: { submit: capability, send: capability } });
+  await emit({ type: 'host.initialize', panelId: 'units', role: 'main', runtimeAvailable: true, statusItems: ['agents', 'project', 'branch'], capabilities: { submit: capability, send: capability } });
+  await emit({ type: 'agents.list', agents: [] });
   await emit({ type: 'worktree.updated', supported: true });
   await page.locator('#status-settings-button').click();
   await page.locator('#ui-language').selectOption('ko');
   await page.locator('#status-settings-close').click();
-  await page.locator('#worktree-button').click();
+  // The worktree control lives in the called-agents menu, opened from the status bar.
+  const worktreeButton = async () => {
+    if (!await page.locator('#agents-menu').isVisible()) await page.locator('#status-bar [data-item-id=agents]').click();
+    return page.locator('#worktree-button');
+  };
+  await (await worktreeButton()).click();
   assert.ok(await page.evaluate(() => window.sentMessages.some(m => m.type === 'worktree.repositories')));
   await emit({ type: 'worktree.repositories', repositories: [{ path: '/projects/one', branches: ['main'], defaultBranch: 'main' }, { path: '/projects/two', branches: ['main'], defaultBranch: 'main' }] });
   assert.equal(await page.locator('#worktree-repositories button').count(), 2);
@@ -83,7 +89,7 @@ async function checkWorkUnits(page) {
   await emit({ type: 'worktree.created', created: true });
   assert.equal(await page.locator('#unit-create-dialog').isVisible(), false);
   await page.waitForFunction(() => document.activeElement === document.getElementById('worktree-button'));
-  await page.locator('#worktree-button').click();
+  await (await worktreeButton()).click();
   await page.locator('#worktree-repositories button').first().click();
   await page.keyboard.press('Escape');
   assert.equal(await page.locator('#unit-create-dialog').isVisible(), false);
@@ -91,7 +97,7 @@ async function checkWorkUnits(page) {
   assert.equal(await page.locator('#prompt').inputValue(), 'Reviewed context');
   await emit({ type: 'worktree.updated', supported: true, value: { worktree: { workUnit: true, phase: 'merged', cleaned: true }, workingDirectory: '/projects/two' } });
   assert.equal(await page.locator('#prompt').evaluate(el => el.readOnly), true);
-  await page.locator('#worktree-button').click();
+  await (await worktreeButton()).click();
   assert.equal(await page.locator('#worktree-merge').isVisible(), false);
 }
 module.exports = { checkWorkUnits };

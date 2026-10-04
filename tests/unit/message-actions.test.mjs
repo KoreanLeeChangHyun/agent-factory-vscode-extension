@@ -92,9 +92,9 @@ test('stop request gives synchronous feedback, stays running, and coalesces repe
   assert.equal(events.length, 2);
 });
 
-test('the visible stop button does not pass its click event as a cancellation retry', () => {
-  assert.match(script, /runStopButton\.addEventListener\("click", \(\) => cancelRun\(\)\)/);
-  assert.doesNotMatch(script, /runStopButton\.addEventListener\("click", cancelRun\)/);
+test('the composer stop control does not pass its click event as a cancellation retry', () => {
+  assert.match(script, /if \(state\.running && !hasComposerContent\(\)\) \{\s*cancelRun\(\);/);
+  assert.doesNotMatch(script, /addEventListener\("click", cancelRun\)/);
 });
 
 test('host termination clears stop feedback and errors allow a retry', () => {

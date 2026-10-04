@@ -6,6 +6,8 @@ async function checkImageComposer(page) {
     await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
   };
   const capabilities = { submit: { model: true, reasoning: true, fast: true, goal: true }, send: { model: true, reasoning: true, fast: true, goal: true } };
+  await emit({ type: 'host.initialize', panelId: 'attachments', role: 'main', runtimeAvailable: true, running: false, statusItems: ['agents'] });
+  await emit({ type: 'agents.list', agents: [] });
   await emit({ type: 'capabilities.updated', capabilities });
   await page.evaluate(() => {
     const data = new DataTransfer();
@@ -65,18 +67,47 @@ async function checkImageComposer(page) {
   assert.equal(await page.evaluate(() => window.composerNodes.every((node, index) => node.isConnected && node.querySelector('svg') === window.composerIcons[index])), true);
   await page.evaluate(() => window.composerObserver.disconnect());
 
+  assert.equal(await page.locator('.composer-actions #attach-button').count(), 0);
+  assert.equal(await page.locator('#agents-menu #attach-button').count(), 1);
+  for (const [width, height] of [[465, 556], [721, 402]]) {
+    await page.setViewportSize({ width, height });
+    await page.locator('#status-bar [data-item-id=agents]').click();
+    const button = page.locator('#attach-button');
+    assert.ok(await button.getAttribute('aria-label'));
+    const box = await button.boundingBox();
+    assert.ok(box.x >= 0 && box.y >= 0 && box.x + box.width <= width && box.y + box.height <= height);
+    await page.keyboard.press('Escape');
+  }
+  await page.locator('#status-bar [data-item-id=agents]').click();
+  const chooserPromise = page.waitForEvent('filechooser');
+  await page.locator('#attach-button').press('Enter');
+  const chooser = await chooserPromise;
+  assert.equal(chooser.isMultiple(), true);
+  await chooser.setFiles({ name: 'picker.txt', mimeType: 'text/plain', buffer: Buffer.from('picked file') });
+  await page.waitForFunction(() => window.sentMessages.some(message => message.type === 'attachments.createFile' && message.name === 'picker.txt'));
+  const picked = await page.evaluate(() => window.sentMessages.find(message => message.type === 'attachments.createFile' && message.name === 'picker.txt'));
+  assert.equal(Buffer.from(picked.data, 'base64').toString(), 'picked file');
+  await emit({ type: 'attachments.add', attachments: [{ id: picked.id, name: picked.name, kind: 'file', uri: 'file:///test/picker.txt' }] });
+  assert.equal(await page.locator('#agents-menu').isVisible(), false);
+  assert.equal(await page.locator('#prompt').inputValue(), 'before typing after');
+  await page.setViewportSize({ width: 795, height: 900 });
+
   const second = await paste('second.png');
   await page.locator('#model-button').click();
   const focused = await page.evaluateHandle(() => document.activeElement);
   await emit({ type: 'attachments.add', attachments: [attachment(second)] });
   assert.equal(await focused.evaluate(element => document.activeElement === element), true);
   await page.keyboard.press('Escape');
+  await page.locator('#status-bar [data-item-id=agents]').click();
   await page.locator('#attach-button').click();
+  assert.equal(await page.locator('#agents-menu').isVisible(), false);
   assert.equal(await page.locator('#prompt').evaluate(element => document.activeElement === element), true);
   await emit({ type: 'attachments.add', attachments: [{ id: 'picked', name: 'picked.txt', kind: 'file', uri: 'file:///test/picked.txt' }] });
   assert.equal(await page.locator('#prompt').evaluate(element => document.activeElement === element), true);
 
+  await page.locator('#status-bar [data-item-id=agents]').click();
   await page.locator('#attach-button').click();
+  assert.equal(await page.locator('#agents-menu').isVisible(), false);
   await page.locator('#model-button').click();
   const pickerMovedFocus = await page.evaluateHandle(() => document.activeElement);
   await emit({ type: 'attachments.add', attachments: [{ id: 'picked-later', name: 'later.txt', kind: 'file', uri: 'file:///test/later.txt' }] });
@@ -98,12 +129,75 @@ async function checkImageComposer(page) {
   });
   assert.equal(await page.locator('#prompt').evaluate(element => document.activeElement === element), true);
   assert.deepEqual(await page.evaluate(() => window.sentMessages.filter(message => message.type === 'attachments.addUris').at(-1)?.uris), ['file:///Users/test/Pictures/dropped%20image.png']);
+  // Explorer's public URI list contains only the first item; the internal list
+  // carries the complete selection, even when browser Files is empty in SSH.
+  const explorerUris = [
+    'vscode-remote://ssh-remote+lchserver.iptime.org/home/test/docs',
+    'vscode-remote://ssh-remote+lchserver.iptime.org/home/test/docs/hello%20world.txt'
+  ];
+  for (const transfer of [
+    { 'application/vnd.code.uri-list': '# Explorer\r\n' + explorerUris.join('\r\n'), 'text/uri-list': explorerUris[0] },
+    { 'ResourceURLs': JSON.stringify(['file:///test/one.txt', 'file:///test/two.txt']) },
+    { 'application/vnd.code.uri-list': [...explorerUris, explorerUris[0]].join('\n') },
+    { 'ResourceURLs': '{invalid', 'text/uri-list': 'file:///test/fallback.txt' }
+  ]) {
+    const expected = transfer['application/vnd.code.uri-list'] ? explorerUris
+      : transfer['text/uri-list'] ? ['file:///test/fallback.txt'] : ['file:///test/one.txt', 'file:///test/two.txt'];
+    await page.evaluate(transfer => {
+      const data = new DataTransfer();
+      for (const [type, value] of Object.entries(transfer)) data.setData(type, value);
+      const target = document.getElementById('prompt');
+      target.dispatchEvent(new DragEvent('dragenter', { dataTransfer: data, bubbles: true, cancelable: true }));
+      const over = new DragEvent('dragover', { dataTransfer: data, bubbles: true, cancelable: true });
+      target.dispatchEvent(over);
+      // Synthetic DataTransfer keeps dropEffect='none' even after assignment.
+      // preventDefault is the observable acceptance signal in this fixture.
+      window.explorerDragAccepted = over.defaultPrevented;
+    }, transfer);
+    assert.equal(await page.locator('#drop-overlay').isVisible(), true);
+    assert.equal(await page.evaluate(() => window.explorerDragAccepted), true);
+    await page.evaluate(transfer => {
+      const data = new DataTransfer();
+      for (const [type, value] of Object.entries(transfer)) data.setData(type, value);
+      document.getElementById('prompt').dispatchEvent(new DragEvent('drop', { dataTransfer: data, bubbles: true, cancelable: true }));
+    }, transfer);
+    assert.equal(await page.locator('#drop-overlay').isVisible(), false);
+    assert.deepEqual(await page.evaluate(() => window.sentMessages.filter(message => message.type === 'attachments.addUris').at(-1).uris), expected);
+    assert.equal(await page.locator('#prompt').inputValue(), 'before typing after');
+  }
+  const explorerAttachments = explorerUris.map((uri, index) => ({ id: 'explorer-' + index,
+    name: index ? 'hello world.txt' : 'docs', kind: index ? 'file' : 'folder', uri }));
+  await emit({ type: 'attachments.add', attachments: explorerAttachments });
+  for (const attachment of explorerAttachments) {
+    assert.equal(await page.locator('.attachment-chip-name', { hasText: attachment.name }).count(), 1);
+  }
+  // Text drags remain text; a native file drop still uploads its bytes.
+  assert.equal(await page.evaluate(() => {
+    const data = new DataTransfer(); data.setData('text/plain', 'ordinary text');
+    const event = new DragEvent('dragover', { dataTransfer: data, bubbles: true, cancelable: true });
+    document.getElementById('prompt').dispatchEvent(event);
+    return event.defaultPrevented;
+  }), false);
+  await page.evaluate(() => {
+    const data = new DataTransfer(); data.items.add(new File(['ordinary file'], 'native.txt', { type: 'text/plain' }));
+    document.getElementById('prompt').dispatchEvent(new DragEvent('drop', { dataTransfer: data, bubbles: true, cancelable: true }));
+  });
+  await page.waitForFunction(() => window.sentMessages.some(message => message.type === 'attachments.createFile' && message.name === 'native.txt'));
+  const native = await page.evaluate(() => window.sentMessages.filter(message => message.type === 'attachments.createFile').at(-1));
+  assert.equal(Buffer.from(native.data, 'base64').toString(), 'ordinary file');
+  await emit({ type: 'attachments.add', attachments: [{ id: native.id, name: native.name, kind: 'file', uri: 'file:///test/native.txt' }] });
   const rejected = await paste('rejected.png');
   await emit({ type: 'attachment.rejected', id: rejected.id });
   await emit({ type: 'host.notice', level: 'error', text: 'Unable to save the image attachment: test rejection' });
   assert.equal(await page.locator('#prompt').evaluate(element => document.activeElement === element), true);
   assert.equal(await page.locator('.attachment-chip-name', { hasText: 'rejected.png' }).count(), 0);
   assert.ok(await page.getByText('Unable to save the image attachment: test rejection', { exact: true }).count());
+  await emit({ type: 'runtime.updated', runtimeAvailable: true, capabilities });
+  await page.locator('#send-button').click();
+  const sent = await page.evaluate(() => window.sentMessages.filter(message => message.type === 'chat.send').at(-1));
+  assert.equal(sent.text, 'before typing after');
+  assert.ok(sent.attachments.some(item => item.id === picked.id && item.name === 'picker.txt'));
+  for (const attachment of explorerAttachments) assert.deepEqual(sent.attachments.find(item => item.id === attachment.id), attachment);
   // Leave the existing rendering suite with its original empty draft.
   while (await page.locator('.attachment-remove').count()) await page.locator('.attachment-remove').first().click();
   await page.locator('#prompt').fill('');

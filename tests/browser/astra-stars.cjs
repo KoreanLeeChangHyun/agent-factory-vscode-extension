@@ -11,7 +11,10 @@ async function checkAstraStars(page) {
   await emit({ type: 'host.initialize', panelId: 'star-preview', role: 'main', runtimeAvailable: true, capabilities: { submit: capability, send: capability } });
   await emit({ type: 'models.list', models: ['gpt-6-astra', 'gpt-5.6-sol'] });
   await page.locator('#model-button').click();
-  await page.locator('select[data-role="main"][data-field="model"]').selectOption('gpt-6-astra');
+  // The model control is now a picker button with an option list, not a native select.
+  const mainRow = page.locator('#model-menu .agent-model-row[data-agent-role="main"]');
+  await mainRow.locator('button[data-field="model"]').click();
+  await mainRow.locator('.model-picker-option[data-value="gpt-6-astra"]').click();
   await page.keyboard.press('Escape');
   await page.locator('#prompt').fill('');
   assert.equal(await page.locator('.astra-stars').isVisible(), true);
@@ -31,7 +34,7 @@ async function checkAstraStars(page) {
       shots.push(await page.locator('.composer').screenshot({ path: path.join(artifacts, `stars-${width}-${time}.png`), animations: 'allow' }));
     }
     assert.equal(shots[0].equals(shots[1]), false, 'Stars must visibly twinkle');
-    assert.equal(await page.locator('.composer').evaluate(node => node.scrollWidth <= node.clientWidth + 1), true);
+    assert.equal(await page.locator('.composer').evaluate(node => node.scrollWidth <= node.clientWidth + 1), true, 'Composer controls stay inside the composer at ' + width);
   }
   await page.setViewportSize({ width: 795, height: 740 });
   await page.locator('#prompt').click();
@@ -52,7 +55,8 @@ async function checkAstraStars(page) {
   assert.equal(await page.locator('.astra-stars').isVisible(), false);
   await page.emulateMedia({ forcedColors: 'none' });
   await page.locator('#model-button').click();
-  await page.locator('select[data-role="main"][data-field="model"]').selectOption('gpt-5.6-sol');
+  await mainRow.locator('button[data-field="model"]').click();
+  await mainRow.locator('.model-picker-option[data-value="gpt-5.6-sol"]').click();
   await page.keyboard.press('Escape');
   assert.equal(await page.locator('.astra-stars').isVisible(), false);
 }

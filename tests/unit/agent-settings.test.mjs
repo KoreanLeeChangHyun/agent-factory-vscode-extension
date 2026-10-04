@@ -7,18 +7,25 @@ async function load(path) {
   const result = await build({entryPoints:[path],bundle:true,format:'esm',platform:'node',write:false});
   return import(`data:text/javascript;base64,${Buffer.from(result.outputFiles[0].text).toString('base64')}`);
 }
+const { createDraftChatState, restoreChatState } = await load('src/modules/chat/chat-state.ts');
 const { mergeAgentSettings } = await load('src/core/config/agent-settings.ts');
 const { parseClientMessage } = await load('src/protocol/validator.ts');
 const source = readChatSourceSync();
 const section = (start,end) => source.slice(source.indexOf(start),source.indexOf(end,source.indexOf(start)));
-test('setting snapshots are copied without mutating their source',()=>{
-  const project={main:{model:'project-main',reasoningEffort:'high',fast:true},work:{model:'project-work',reasoningEffort:'medium',fast:false}};
-  const chat=structuredClone(project);
-  chat.main.model='chat-main';
-  assert.equal(project.main.model,'project-main');
-  assert.equal(chat.main.model,'chat-main');
-  assert.deepEqual(mergeAgentSettings(chat).main,chat.main);
-  assert.deepEqual(mergeAgentSettings(chat).work,chat.work);
+test('draft and restart preserve independent copied settings, including empty Fast maps',()=>{
+  const parent={model:'project-main',reasoning:'high',agentModels:{work:{model:'project-work',reasoningEffort:'medium'}},agentFastModes:{work:{'project-work':true}}};
+  const chat=createDraftChatState(parent);
+  parent.agentModels.work.model='new-project-work'; parent.agentFastModes.work['project-work']=false;
+  assert.equal(chat.agentModels.work.model,'project-work');
+  assert.equal(chat.agentFastModes.work['project-work'],true);
+  const saved=JSON.parse(JSON.stringify({...chat,agentFastModes:{}}));
+  const restored=restoreChatState(saved,parent);
+  assert.equal(restored.model,'project-main');
+  assert.equal(restored.agentModels.work.model,'project-work');
+  assert.deepEqual(restored.agentFastModes,{});
+  const legacy=restoreChatState({panelId:'legacy',model:'chosen',agentModels:{work:{model:'chosen-work'}}},parent);
+  assert.equal(legacy.model,'chosen'); assert.equal(legacy.agentModels.work.model,'chosen-work');
+  assert.equal(legacy.agentModels.work.reasoningEffort,'medium');
 });
 test('scope writes reject unknown roles, fields, unsafe models and effort',()=>{
   const good={type:'agent.defaults.save',scope:'project',role:'work',field:'model',value:'claude-sonnet'};
@@ -102,6 +109,13 @@ test('store reads each scope separately and writes only the selected scope', asy
   await store.saveModelFastMode('project','work','gpt-6-astra',true);
   assert.deepEqual(writes,[['work.model','new-worker',1],['main.model','project-new',3],['fastByRoleModel',{work:{'gpt-6-astra':true}},3]]);
   await assert.rejects(store.saveAgentDefault('project','main','model',''),/Invalid agent setting/);
+  entries['main.fast']={globalValue:true};
+  entries.fastByModel={globalValue:{global:true}};
+  entries.fastByRoleModel={globalValue:{}};
+  assert.equal(store.readAgentDefaults().global.main.fast,undefined);
+  assert.deepEqual(store.readAgentDefaults().global.fastByRoleModel,{},'An explicit empty Fast set cannot revive legacy preferences');
+  delete entries['main.fast']; delete entries.fastByModel; delete entries.fastByRoleModel;
+
   globalThis.__agentConfigFixture.workspace.workspaceFolders=[];
   await assert.rejects(store.saveAgentDefault('project','main','model','oops'),/Open a project/);
   for (const [providers, expected] of [
@@ -132,6 +146,23 @@ test('store reads each scope separately and writes only the selected scope', asy
   globalThis.__agentConfigFixture.workspace.getConfiguration=()=>({inspect:()=>({globalValue:''}),update:async(...args)=>explicitEmpty.push(args)});
   await store.initializeAgentDefaults({get:()=>false,update:async()=>{}},{codex:true,claude:false});
   assert.equal(explicitEmpty.length,6,'Empty legacy model and reasoning values are replaced without creating role Fast settings');
+  const legacyFastValues={};
+  for(const role of ['main','work','verification']) {
+    legacyFastValues[`${role}.model`]={globalValue:`${role}-legacy`};
+    legacyFastValues[`${role}.reasoningEffort`]={globalValue:'medium'};
+  }
+  legacyFastValues['main.fast']={globalValue:true};
+  const fastMigrationState=new Map([['agentFactory.agentDefaults.initialized.v3',true]]);
+  const fastMigrationWrites=[];
+  globalThis.__agentConfigFixture.workspace.getConfiguration=()=>({inspect:key=>legacyFastValues[key],update:async(key,value,target)=>{
+    fastMigrationWrites.push([key,value,target]);legacyFastValues[key]={...legacyFastValues[key],globalValue:value};
+  }});
+  const fastState={get:key=>fastMigrationState.get(key),update:async(key,value)=>fastMigrationState.set(key,value)};
+  await store.initializeAgentDefaults(fastState,{codex:true,claude:false});
+  assert.deepEqual(fastMigrationWrites,[['fastByRoleModel',{main:{'main-legacy':true}},1]]);
+  legacyFastValues.fastByRoleModel.globalValue={};
+  await store.initializeAgentDefaults(fastState,{codex:true,claude:false});
+  assert.equal(fastMigrationWrites.length,1,'Migration runs once and cannot revive cleared legacy Fast values');
   const partial={}, completed=new Map(); let fail=true;
   const state={get:key=>completed.get(key),update:async(key,value)=>completed.set(key,value)};
   globalThis.__agentConfigFixture.workspace.getConfiguration=()=>({
@@ -153,17 +184,24 @@ test('store reads each scope separately and writes only the selected scope', asy
     copied[`${role}.reasoningEffort`]={globalValue:'medium'};
     copied[`${role}.fast`]={globalValue:role==='work'};
   }
+  copied.fastByRoleModel={workspaceFolderValue:{work:{'work-global':false}}};
   const projectWrites=[], projectState=new Map();
   globalThis.__agentConfigFixture.workspace.workspaceFolders=[{uri:{fsPath:'/project'}}];
   globalThis.__agentConfigFixture.workspace.getConfiguration=()=>({inspect:key=>copied[key],update:async(key,value,target)=>{
     projectWrites.push([key,value,target]); copied[key]={...copied[key],workspaceFolderValue:value};
   }});
   await store.initializeAgentDefaults({get:()=>true,update:async()=>{}},{codex:true,claude:false},{get:key=>projectState.get(key),update:async(key,value)=>projectState.set(key,value)});
-  assert.equal(projectWrites.length,7,'A new project receives model, reasoning and one model-scoped Fast map');
+  assert.equal(projectWrites.length,7,'A new project materializes model, reasoning and role/model Fast preferences');
+  assert.equal(store.readAgentDefaults().project.fastByRoleModel.work['work-global'],false,'Project Fast overrides survive the initial copy');
   copied['main.model'].globalValue='changed-global';
   await store.initializeAgentDefaults({get:()=>true,update:async()=>{}},{codex:true,claude:false},{get:key=>projectState.get(key),update:async(key,value)=>projectState.set(key,value)});
   assert.equal(projectWrites.length,7,'Later global changes do not update an initialized project');
   assert.equal(copied['main.model'].workspaceFolderValue,'main-global');
+  copied['main.reasoningEffort'].globalValue='max';
+  copied.fastByRoleModel.globalValue={main:{'future-model':true}};
+  assert.equal(store.readAgentDefaults().project.main.reasoningEffort,'medium');
+  assert.equal(store.readAgentDefaults().project.fastByRoleModel.main['future-model'],undefined);
+
   const createMemory=()=>{const data=new Map();return {data,get:(key,fallback)=>data.has(key)?structuredClone(data.get(key)):fallback,update:async(key,value)=>data.set(key,structuredClone(value))};};
   const globalMemory=createMemory(), workspaceMemory=createMemory(), chatId='chat-1';
   const presetValues={
@@ -187,6 +225,21 @@ test('store reads each scope separately and writes only the selected scope', asy
     store.ensureAgentPresets(globalMemory,workspaceMemory,chatId,completeChat)
   ]);
   assert.equal(store.readAgentDefaults(globalMemory,workspaceMemory,chatId).presets.filter(p=>p.isDefault).length,3);
+  const seeded=store.readAgentDefaults(globalMemory,workspaceMemory,chatId).presets;
+  const initialGlobal=seeded.find(p=>p.scope==='global'&&p.isDefault).settings;
+  const initialProject=seeded.find(p=>p.scope==='project'&&p.isDefault).settings;
+  const initialChat=seeded.find(p=>p.scope==='chat'&&p.isDefault).settings;
+  assert.equal(initialGlobal.main.model,'gpt-6-astra');
+  for(const role of ['main','work','verification']) assert.deepEqual(initialChat[role],completeChat[role],'Chat Default preserves each copied role value');
+  assert.equal(initialChat.fastByRoleModel.main['gpt-6-sol'],true,'Legacy Fast preferences are retained in the canonical role/model map');
+  const laterChat={...completeChat,main:{model:'claude-opus-5-5',reasoningEffort:'none'}};
+  await store.ensureAgentPresets(globalMemory,workspaceMemory,chatId,laterChat);
+  assert.deepEqual(store.readAgentDefaults(globalMemory,workspaceMemory,chatId).presets.find(p=>p.scope==='chat'&&p.isDefault).settings,initialChat,'Opening an existing chat never reseeds its saved Default');
+  await store.ensureAgentPresets(globalMemory,workspaceMemory,'chat-2',laterChat);
+  const otherChat=store.readAgentDefaults(globalMemory,workspaceMemory,'chat-2').presets;
+  assert.equal(otherChat.find(p=>p.scope==='chat'&&p.isDefault).settings.main.model,'claude-opus-5-5','Panel identity separates same-named chat defaults');
+  assert.deepEqual(otherChat.find(p=>p.scope==='global'&&p.isDefault).settings,initialGlobal);
+  assert.deepEqual(otherChat.find(p=>p.scope==='project'&&p.isDefault).settings,initialProject);
   await store.useAgentPreset(globalMemory,workspaceMemory,chatId,'update','chat','Default',completeChat);
   await store.ensureAgentPresets(globalMemory,workspaceMemory,chatId,completeChat);
   assert.equal(store.readAgentDefaults(globalMemory,workspaceMemory,chatId).presets.find(p=>p.scope==='chat'&&p.isDefault).settings.main.model,'gpt-6-sol');

@@ -54,6 +54,7 @@ const clientMessageTypes = new Set([
   "contracts.request",
   "conversations.request",
   "conversation.read",
+  "task.stop",
   "workflow.close",
   "workflow.decision",
   "agent.open",
@@ -70,6 +71,7 @@ const clientMessageTypes = new Set([
   "attachment.open",
   "attachment.remove",
   "composer.settings",
+  "workIsolation.set",
   "status.reorder"
 ]);
 const attachmentKinds = new Set<AttachmentKind>(["file", "folder", "image"]);
@@ -146,7 +148,10 @@ export function parseClientMessage(value: unknown): ClientMessage | undefined {
       return { type: value.type, id: value.id };
     case "decision.approve":
       if (typeof value.runId !== "string" || !/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(value.runId)) return undefined;
-      return { type: value.type, runId: value.runId };
+      if (value.language !== undefined && value.language !== "ko" && value.language !== "en") return undefined;
+      return { type: value.type, runId: value.runId, ...(value.language ? { language: value.language } : {}) };
+    case "workIsolation.set":
+      return typeof value.value === "boolean" ? { type: "workIsolation.set", value: value.value } : undefined;
     case "goal.control":
       if (typeof value.action !== "string" || !["get", "refresh", "pause", "cancel", "disable", "reopen"].includes(value.action)) return undefined;
       return { type: "goal.control", action: value.action as import("../infrastructure/agent-factory/agent-client").GoalAction };
@@ -267,6 +272,16 @@ export function parseClientMessage(value: unknown): ClientMessage | undefined {
     case "history.request":
       if (typeof value.before !== "string" || !/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(value.before)) return undefined;
       return { type: value.type, before: value.before };
+    case "task.stop": {
+      const valid = (id: unknown) => typeof id === "string" && /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(id);
+      if (!valid(value.workflowId) || !valid(value.taskId)) return undefined;
+      const loop = value.loopId !== undefined || value.workAgentId !== undefined;
+      if (loop ? !valid(value.loopId) || !valid(value.workAgentId) || value.agentId !== undefined || value.runId !== undefined
+        : !valid(value.agentId) || !valid(value.runId)) return undefined;
+      return { type: value.type, workflowId: value.workflowId as string, taskId: value.taskId as string,
+        ...(loop ? { loopId: value.loopId as string, workAgentId: value.workAgentId as string }
+          : { agentId: value.agentId as string, runId: value.runId as string }) };
+    }
     case "workflow.close":
       if (![value.workAgentId, value.loopId].every(id => typeof id === "string" && /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(id))) return undefined;
       return { type: value.type, workAgentId: value.workAgentId as string, loopId: value.loopId as string };
@@ -280,7 +295,10 @@ export function parseClientMessage(value: unknown): ClientMessage | undefined {
       if (typeof value.agentId !== "string" || !/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(value.agentId)) {
         return undefined;
       }
-      return { type: value.type, agentId: value.agentId };
+      if (value.type === "agent.open" && value.runId !== undefined &&
+        (typeof value.runId !== "string" || !/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(value.runId))) return undefined;
+      return { type: value.type, agentId: value.agentId,
+        ...(value.type === "agent.open" && typeof value.runId === "string" ? { runId: value.runId } : {}) };
     case "composer.settings":
       if (
         (value.businessMode !== undefined && !BUSINESS_MODES.includes(value.businessMode as BusinessMode)) ||
@@ -328,6 +346,7 @@ export function parseClientMessage(value: unknown): ClientMessage | undefined {
         (value.execution.taskMode !== undefined && !TASK_SELECTIONS.includes(value.execution.taskMode as TaskSelection)) ||
         (value.execution.agentModels !== undefined && !parseAgentModels(value.execution.agentModels)) ||
         (value.execution.agentPermissions !== undefined && !parseAgentPermissions(value.execution.agentPermissions)) ||
+        (value.execution.workIsolation !== undefined && typeof value.execution.workIsolation !== "boolean") ||
         (value.execution.model !== undefined && (
           typeof value.execution.model !== "string" || value.execution.model.length > 100
         )) ||
@@ -360,6 +379,7 @@ export function parseClientMessage(value: unknown): ClientMessage | undefined {
           ...(value.execution.taskMode !== undefined ? { taskMode: value.execution.taskMode as TaskSelection } : {}),
           ...(value.execution.agentModels !== undefined ? { agentModels: parseAgentModels(value.execution.agentModels) } : {}),
           ...(value.execution.agentPermissions !== undefined ? { agentPermissions: parseAgentPermissions(value.execution.agentPermissions) } : {}),
+          ...(typeof value.execution.workIsolation === "boolean" ? { workIsolation: value.execution.workIsolation } : {}),
           ...(typeof value.execution.model === "string" && value.execution.model
             ? { model: value.execution.model }
             : {}),

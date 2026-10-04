@@ -36,6 +36,8 @@ async function checkRenderingPerformance(page) {
     window.agentFactoryAnsi = { render: function (...args) { window.perfCounts.ansi++; return ansi.apply(this, args); } };
     window.perfStableMessage = document.querySelector('[data-id="perf-180"]');
   });
+  // Output folds behind the action row; open the updated one so each update re-renders its preview.
+  await page.locator('[data-id="perf-199"] .act-row').click();
   const before = await metrics();
   report.updateWallMs = await page.evaluate(async output => {
     const start = performance.now();

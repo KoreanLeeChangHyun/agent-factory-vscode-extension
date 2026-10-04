@@ -28,16 +28,16 @@ async function stoppedLoop(t, { createdAt = "2026-10-03T10:00:00Z", snapshot = {
   await writeFile(parent, JSON.stringify({ executionPolicy: policy }));
   const loopRoot = join(directory, "work-one", "loops", "loop-one");
   await mkdir(loopRoot, { recursive: true });
-  await writeFile(join(loopRoot, "state.json"), JSON.stringify({ workflow: { id: "flow" }, status: "needs-human-decision", parentStatePath: parent,
+  await writeFile(join(loopRoot, "state.json"), JSON.stringify({ workflow: { id: "flow", tasks: [{ id: "task-one" }] }, status: "needs-human-decision", parentStatePath: parent,
     ...(createdAt ? { createdAt } : {}) }));
   const calls = join(root, "loop-calls.jsonl");
-  const response = { kind: "work-verification-loop", loopId: "loop-one", status: "needs-human-decision", pause: PAUSE, ...snapshot };
+  const response = { workflow: { id: "flow", tasks: [{ id: "task-one" }] }, workAgentId: "work-one", kind: "work-verification-loop", loopId: "loop-one", status: "needs-human-decision", pause: PAUSE, ...snapshot };
   await writeFile(join(root, "loop.py"), [
     "import json, os, sys",
     `open(${JSON.stringify(calls)}, 'a').write(json.dumps({'argv': sys.argv[1:], 'parent': os.environ.get('AGENT_FACTORY_PARENT_STATE'), 'policy': json.loads(os.environ['AGENT_FACTORY_EXECUTION_POLICY'])}) + '\\n')`,
     `response = json.loads(${JSON.stringify(JSON.stringify(response))})`,
     "if sys.argv[1] == 'extend-revisions': response.update(status='active', pause=None)",
-    "if sys.argv[1] == 'close': response.update(status='cancelled', pause=None)",
+    "if sys.argv[1] in ('close', 'stop-task'): response.update(status='cancelled', pause=None)",
     "print(json.dumps(response))", ""].join("\n"));
   const client = new AgentFactoryClient(join(root, "exec.py"), root);
   client.location = async () => ({ home: runtimeHome, projectId: "project-test", agentsRoot: directory });
@@ -171,6 +171,22 @@ test("only a Main chat's click reaches the runtime decision and its result refre
   }
   assert.equal(decisions.length, 2);
 
+  const stopMessage = { type: "task.stop", workflowId: "flow", taskId: "task-one", workAgentId: "work-one", loopId: "loop-one" };
+  let release;
+  let stops = 0;
+  client = { async stopTask(owner, target) { stops++; assert.equal(owner, "main-one"); assert.equal(target.taskId, "task-one");
+    await new Promise(resolve => { release = resolve; }); return { loopId: "loop-one", status: "cancelled" }; }, async listChildSessions() { return children; } };
+  const stopping = manager.handleMessage(main.managed, stopMessage);
+  await new Promise(resolve => setImmediate(resolve));
+  await manager.handleMessage(main.managed, stopMessage);
+  assert.equal(stops, 1, "duplicate clicks share the pending stop");
+  release(); await stopping;
+  assert.equal(main.posted.at(-1).type, "task.stop.result");
+  client = { async stopTask() { throw new Error("fixture cancellation failed"); } };
+  await manager.handleMessage(main.managed, stopMessage);
+  assert.match(main.posted.at(-1).error, /fixture cancellation failed/);
+  for (const role of ["work", "verification"]) await manager.handleMessage(panel(role).managed, stopMessage);
+
   // A runtime client without the command, or a failed command, reports the error and decides nothing.
   client = { async listChildSessions() { return children; } };
   const older = panel("main");
@@ -182,4 +198,67 @@ test("only a Main chat's click reaches the runtime decision and its result refre
   const failed = panel("main");
   await manager.handleMessage(failed.managed, message("stop"));
   assert.deepEqual([failed.posted[0].level, failed.posted[0].text], ["error", "Error: Loop is not stopped on its revision limit"]);
+});
+
+
+test("task stop validates exclusive bindings and cancels only owned direct runs", async () => {
+  const { parseClientMessage } = await importTypeScript("src/protocol/validator.ts");
+  const { AgentFactoryClient } = await importTypeScript("src/infrastructure/agent-factory/agent-client.ts");
+  const target = { workflowId: "flow", taskId: "task-one", agentId: "work-one", runId: "run-one" };
+  assert.deepEqual(parseClientMessage({ type: "task.stop", ...target }), { type: "task.stop", ...target });
+  for (const override of [{ runId: undefined }, { taskId: "../bad" }, { loopId: "loop-one" }, { workAgentId: "work-one" }]) {
+    assert.equal(parseClientMessage({ type: "task.stop", ...target, ...override }), undefined);
+  }
+  const client = new AgentFactoryClient("/unused/exec.py", "/unused");
+  const children = ["one", "two"].map(id => ({ agentId: "work-" + id, runId: "run-" + id, status: "running", role: "work",
+    taskBinding: { workflowId: "flow", taskId: "task-" + id } }));
+  client.listChildSessions = async () => children;
+  client.refreshWorkflows = async () => [];
+  const calls = [];
+  client.cancel = async (...args) => calls.push(args);
+  await client.stopTask("main-owner", target);
+  assert.deepEqual(calls, [["work-one", "run-one"]]);
+  for (const override of [{ runId: "other" }, { taskId: "task-two" }, { workflowId: "other" }]) {
+    await assert.rejects(client.stopTask("main-owner", { ...target, ...override }), /does not belong/);
+  }
+  client.refreshWorkflows = async () => [{ workflow: { id: "flow" }, loopId: "loop-one" }];
+  await assert.rejects(client.stopTask("main-owner", target), /exact Loop binding/);
+  assert.equal(calls.length, 1);
+});
+
+test("task stop binds the Loop to this Main and refuses multi-task scope", async t => {
+  const fixture = await stoppedLoop(t);
+  fixture.client.listChildSessions = async () => fixture.children;
+  const target = { workflowId: "flow", taskId: "task-one", workAgentId: "work-one", loopId: "loop-one" };
+  const stopped = await fixture.client.stopTask("main-owner", target);
+  assert.equal(stopped.status, "cancelled");
+  const calls = await fixture.recorded();
+  assert.equal(calls.at(-1).argv[0], "stop-task");
+  assert.equal(calls.at(-1).argv[calls.at(-1).argv.indexOf("--task-id") + 1], "task-one");
+  assert.equal(calls.at(-1).parent, fixture.parent);
+  await assert.rejects(fixture.client.stopTask("other-main", target), /does not belong/);
+  fixture.client.refreshWorkflows = async () => [{ ...target, workflow: { id: "flow", tasks: [{ id: "task-one" }, { id: "other" }] } }];
+  await assert.rejects(fixture.client.stopTask("main-owner", target), /multi-task/);
+  assert.equal((await fixture.recorded()).filter(call => call.argv[0] === "stop-task").length, 1);
+});
+
+
+test("workflow stage identity uses only its own captured run, including historical stages", async () => {
+  const { AgentFactoryClient } = await importTypeScript("src/infrastructure/agent-factory/agent-client.ts");
+  const client = new AgentFactoryClient("/unused", "/fixture");
+  const calls = [];
+  client.latestRunInfo = async (agent, run) => {
+    calls.push([agent, run]);
+    return run === "run-old" ? { model: "captured-old", workProfile: "workLight" }
+      : run === "verify-old" ? { model: "captured-verifier" } : { status: "unknown" };
+  };
+  const snapshot = { workAgentId: "worker", verificationAgentId: "verifier", workflow: { tasks: [
+    { workRunId: "run-old", verificationRunId: "verify-old" }, {}, { workRunId: "run-missing" }
+  ] } };
+  await client.presentWorkflow(snapshot, {}, "main", "parent");
+  assert.deepEqual(calls, [["worker", "run-old"], ["worker", "run-missing"], ["verifier", "verify-old"]]);
+  assert.deepEqual(snapshot.workflow.tasks, [
+    { workRunId: "run-old", verificationRunId: "verify-old", workModel: "captured-old", verificationModel: "captured-verifier", workProfile: "workLight" },
+    {}, { workRunId: "run-missing" }
+  ]);
 });

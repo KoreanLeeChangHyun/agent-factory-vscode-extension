@@ -1,15 +1,17 @@
 const assert = require('node:assert/strict');
 
 async function checkGeneralSettings(page) {
-  // Scope follows the copy flow and opens on the project default.
-  assert.deepEqual(await page.locator('#agent-default-scope option').evaluateAll(options => options.map(option => option.value)), ['global', 'project', 'chat']);
-  assert.equal(await page.locator('#agent-default-scope').inputValue(), 'project');
+  // Chat settings edit the project snapshot or this chat; global settings live in full settings.
+  assert.deepEqual(await page.locator('#agent-default-scope option').evaluateAll(options => options.map(option => option.value)), ['project', 'chat']);
+  assert.equal(await page.locator('#agent-default-scope').inputValue(), 'chat');
   await page.evaluate(() => window.postMessage({ type: 'agent.defaults', settings: { global: {}, project: {}, projectAvailable: false } }, '*'));
   await page.evaluate(() => new Promise(requestAnimationFrame));
-  assert.equal(await page.locator('#agent-default-scope').inputValue(), 'global');
+  assert.equal(await page.locator('#agent-default-scope').inputValue(), 'chat');
   assert.equal(await page.locator('#agent-default-scope option[value="project"]').evaluate(option => option.disabled), true);
+  // The shared timeline fixture renders raw commands only after expanding its activity rows.
+  for (const id of ['short', 'long', 'ansi']) await page.locator(`[data-id="${id}"] .act-row`).click();
   await page.locator('#status-settings-button').click();
-  assert.equal(await page.locator('#status-settings [data-settings-tab="agents"]').count(), 0);
+  assert.equal(await page.locator('#status-settings [data-settings-tab="agents"]').count(), 1);
   assert.equal(await page.locator('#settings-panel-general').isVisible(), true);
   const language = page.locator('#ui-language');
   // Compare command bodies, excluding the localized Ran/Running prefix.
@@ -27,7 +29,7 @@ async function checkGeneralSettings(page) {
   assert.match(await page.locator('#agent-permissions-description').textContent(), /작업 공간/);
   assert.equal(await page.evaluate(() => window.sentMessages.filter(m => m.type === 'execution.select').at(-1).mode), 'workspace-write');
   const height = (await page.locator('#status-settings').boundingBox()).height;
-  for (const tab of ['status', 'bot', 'keyboard', 'providers', 'general']) {
+  for (const tab of ['agents', 'status', 'bot', 'keyboard', 'providers', 'general']) {
     await page.locator('#settings-tab-' + tab).click();
     assert.equal((await page.locator('#status-settings').boundingBox()).height, height);
   }
@@ -157,6 +159,25 @@ async function checkGeneralSettings(page) {
     assert.ok(pathBox && pickBox && autoBox);
     assert.ok(Math.abs(pathBox.y - pickBox.y) < 2 && Math.abs(pathBox.y - autoBox.y) < 2);
     await page.locator('#settings-tab-general').click();
+  }
+  const global = Object.fromEntries(['main','work','workLight','verification'].map(role => [role,{model:'gpt-6-astra',reasoningEffort:'medium'}]));
+  await page.evaluate(global => window.postMessage({type:'agent.defaults',settings:{global,project:{},projectAvailable:true}},'*'),global);
+  await page.locator('#settings-tab-agents').click();
+  assert.equal(await page.locator('#global-agent-settings .agent-model-row').count(),4);
+  const fs=require('node:fs'),path=require('node:path');
+  const artifactDir=path.resolve(__dirname,'../../../docs/artifact/model-settings-copy-20261004');
+  fs.mkdirSync(artifactDir,{recursive:true});
+  for(const size of [{width:465,height:556},{width:721,height:402}]) {
+    await page.setViewportSize(size);
+    assert.equal(await page.locator('#status-settings').evaluate(e=>e.scrollWidth>e.clientWidth),false);
+    const layout=await page.locator('#settings-panel-agents').evaluate(e=>({height:e.clientHeight,content:e.scrollHeight}));
+    console.log('Global settings layout',size,layout);
+    assert.ok(layout.content <= layout.height + 1, JSON.stringify({size,layout}));
+    for(const row of await page.locator('#global-agent-settings .agent-model-row').all()) {
+      const model = row.locator('button[data-field="model"]');
+      assert.equal(await model.evaluate(e => e.scrollWidth > e.clientWidth + 1),false);
+    }
+    await page.screenshot({path:path.join(artifactDir,`global-${size.width}x${size.height}.png`)});
   }
   await page.locator('#status-settings-close').click();
   await page.locator('#model-button').click();

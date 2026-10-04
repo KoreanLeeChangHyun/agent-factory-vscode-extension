@@ -2,11 +2,16 @@ import { readdirSync, readFileSync } from "node:fs";
 import { isContext, runInContext, runInNewContext } from "node:vm";
 
 const directory = new URL("../../static/js/", import.meta.url);
+// Test workers inspect immutable checkout sources. Keep only the source string;
+// every harness still owns its mutable VM context. A new run reads the files again.
+let chatSource;
 
 /** chat.js followed by its feature modules, for checks that inspect or slice chat source text. */
 export function readChatSourceSync() {
+  if (chatSource !== undefined) return chatSource;
   const modules = readdirSync(new URL("chat/", directory)).filter(name => name.endsWith(".js")).sort().map(name => "chat/" + name);
-  return ["chat.js", ...modules].map(name => readFileSync(new URL(name, directory), "utf8")).join("\n");
+  chatSource = ["chat.js", ...modules].map(name => readFileSync(new URL(name, directory), "utf8")).join("\n");
+  return chatSource;
 }
 
 /** chat.css followed by its feature stylesheets in the order the template loads them. */

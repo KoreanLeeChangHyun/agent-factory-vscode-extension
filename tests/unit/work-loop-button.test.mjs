@@ -239,7 +239,8 @@ test("host derives the objective from chat text and rejects blank goals before d
   const { code } = await transform(method.replace("private async sendChat(", "async function sendChat("), { loader: "ts" });
   const sendChat = runInNewContext(code + "\nsendChat;", { taskExecution: () => ({}) });
   const calls = [];
-  const host = { context: {}, async ensureController() {}, async post() {} };
+  let isolation = false;
+  const host = { context: {}, async ensureController() {}, async post() {}, workIsolation: () => isolation };
   const managed = {
     state: { role: "main", panelId: "panel" },
     controller: { async send(text, attachments, execution, onStarted) { calls.push(execution); onStarted(); } }
@@ -247,6 +248,8 @@ test("host derives the objective from chat text and rejects blank goals before d
   const send = (text, execution) => sendChat.call(host, managed, text, [], execution, "id", "workspace-write", false);
   await send(" Current composer goal ", { goal: true, goalObjective: "Stale hidden objective" });
   assert.equal(calls[0].goalObjective, "Current composer goal");
+  // Main carries the project's Work isolation toggle: the message's value, else the stored one.
+  assert.equal(calls[0].workIsolation, false);
   await assert.rejects(send("", { goal: true, goalObjective: "Stale hidden objective" }), /goal|목표/i);
   assert.equal(calls.length, 1);
   await send("x".repeat(4001), { goal: true, goalObjective: "Stale hidden objective" });
@@ -258,6 +261,13 @@ test("host derives the objective from chat text and rejects blank goals before d
   await send("Child message", { goal: true, goalObjective: "Stale" });
   assert.equal(calls[3].goalMode, false);
   assert.equal(calls[3].goalObjective, undefined);
+  assert.equal("workIsolation" in calls[3], false);
+  managed.state.role = "main";
+  isolation = true;
+  await send("Isolated", { goal: false });
+  assert.equal(calls[4].workIsolation, true);
+  await send("Explicitly shared", { goal: false, workIsolation: false });
+  assert.equal(calls[5].workIsolation, false);
 });
 
 test("ordinary sends follow the orchestrator switch while menu actions keep their route", () => {

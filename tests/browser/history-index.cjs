@@ -37,7 +37,8 @@ async function checkHistoryIndex(page) {
   await page.locator('#question-button').click();
   assert.equal(await questions.count(), 0, 'Clearing a conversation invalidates the question index');
   await page.keyboard.press('Escape');
-  await emit({ type: 'host.initialize', runtimeAvailable: true, botsEnabled: false, capabilities: { submit: { taskModes: ['direct'] }, send: { taskModes: ['direct'] } } });
+  // The same session re-initializes with its own agent and conversation; omitting them now starts a new session.
+  await emit({ type: 'host.initialize', agentId: 'index-main', conversationId: 'fresh', runtimeAvailable: true, botsEnabled: false, capabilities: { submit: { taskModes: ['direct'] }, send: { taskModes: ['direct'] } } });
   const question = '**Question [1/2]:** Choose a place\n\n| Option | Place |\n|---|---|\n| 1 | Home |\n| 2 | Office |';
   await emit({ type: 'chat.assistant', phase: 'final', text: question });
   await emit({ type: 'chat.assistant', phase: 'commentary', text: 'Additional explanation' });

@@ -4,14 +4,16 @@ globalThis.AgentFactoryChat.taskFlow = function (host) {
 
   const {
     indexedTimeline, state, t, vscode, runStageList, selectQuestionTab, historyEmpty, runDetails,
-    runStatus, runStatusToggle, runStatusAgents, runDetailsSummary, runStopButton,
-    childAgentStatusLabel
+    runStatus, runStatusToggle, runStatusAgents,
+    childAgentStatusLabel, persist
   } = host;
 
   const taskFlowParseCache = new WeakMap();
   let taskFlowSnapshot;
   // Loops whose revision-limit decision was clicked and is not answered by the host yet.
   const workflowDecisionsPending = new Set();
+  const taskStopsPending = new Set();
+  const taskStopErrors = new Map();
   // Revisions one "Continue" authorizes; the host passes the same number to the runtime.
   const REVISION_LIMIT_EXTENSION = 3;
   function extractTaskFlows(text) {
@@ -53,9 +55,10 @@ globalThis.AgentFactoryChat.taskFlow = function (host) {
       const binding = agent.taskBinding;
       if (!acceptedTaskAgent(agent) || !binding) continue;
       const task = { id: binding.taskId, title: binding.title, description: binding.description,
-        status: agent.status === "completed" ? "pending" : agent.status === "needs-human-decision" ? "blocked" :
+        status: agent.status === "completed" ? "completed" : agent.status === "needs-human-decision" ? "blocked" :
           ["failed", "cancelled"].includes(agent.status) ? agent.status : agent.status === "running" ? (agent.role === "verification" ? "verifying" : "running") : "pending",
-        agentId: agent.agentId, runId: agent.runId, sessionRole: agent.role };
+        agentId: agent.agentId, runId: agent.runId, sessionRole: agent.role,
+        ...(typeof agent.model === "string" && agent.model.trim() ? { model: agent.model } : {}) };
       if (recordedWorkProfile(agent.workProfile)) task.workProfile = agent.workProfile;
       if (typeof binding.completionCriteria === "string") task.description += "\n\n" + binding.completionCriteria;
       const candidate = { id: binding.workflowId, title: binding.workflowTitle, tasks: [task] };
@@ -77,16 +80,20 @@ globalThis.AgentFactoryChat.taskFlow = function (host) {
       if (!workflow || !Array.isArray(workflow.tasks)) continue;
       const verification = ["work-verification", "plan-work-verification"].includes(snapshot.taskMode);
       const tasks = workflow.tasks.flatMap((task, index) => {
-        const description = [task.description, task.completionCriteria].filter(Boolean).join("\n\n");
+        const description = [task.description, task.completionCriteria, task.workspaceSummary].filter(Boolean).join("\n\n");
         const stages = [{ id: verification ? "stage-" + index + ".work" : task.id, taskId: task.id, title: task.title, description, status: task.workStatus, sessionAgentId: task.workAgentId || snapshot.workAgentId, sessionRunId: task.workRunId, sessionRole: "work",
-          ...(recordedWorkProfile(snapshot.workProfile) ? { workProfile: snapshot.workProfile } : {}) }];
-        if (verification) stages.push({ id: "stage-" + index + ".verification", taskId: task.id, title: String(task.title).slice(0, 280) + " · " + t("ui.verification"), description, status: task.verificationStatus === "running" ? "verifying" : task.verificationStatus, sessionAgentId: task.verificationAgentId || snapshot.verificationAgentId, sessionRunId: task.verificationRunId, sessionRole: "verification" });
+          ...(typeof task.workModel === "string" ? { model: task.workModel } : {}),
+          ...(recordedWorkProfile(task.workProfile || snapshot.workProfile) ? { workProfile: task.workProfile || snapshot.workProfile } : {}) }];
+        if (verification) stages.push({ id: "stage-" + index + ".verification", taskId: task.id, title: String(task.title).slice(0, 280) + " · " + t("ui.verification"), description, status: task.verificationStatus === "running" ? "verifying" : task.verificationStatus, sessionAgentId: task.verificationAgentId || snapshot.verificationAgentId, sessionRunId: task.verificationRunId, sessionRole: "verification",
+          ...(typeof task.verificationModel === "string" ? { model: task.verificationModel } : {}) });
         return stages;
       });
       const candidate = { id: workflow.id, title: workflow.title, tasks };
       if (!extractTaskFlows("```task-flow\n" + JSON.stringify(candidate) + "\n```").flows.length) continue;
       const pause = revisionLimitPause(snapshot);
-      flows.set(workflow.id, { ...candidate, engine: true, loopId: snapshot.loopId, workAgentId: snapshot.workAgentId, closable: snapshot.status === "runtime-error",
+      flows.set(workflow.id, { ...candidate, engine: true, loopId: snapshot.loopId, workAgentId: snapshot.workAgentId, closable: snapshot.status === "runtime-error", engineStatus: snapshot.status, stopPending: snapshot.stopPending === true,
+        ...(snapshot.status === "needs-human-decision" && (workflow.tasks.length === 1 || Number.isInteger(workflow.index))
+          ? { decisionTaskId: workflow.tasks[workflow.index ?? 0]?.id } : {}),
         ...(pause ? { pause } : {}) });
       // A loop's start outlives its revisions and repair runs, so it wins over any single run's time.
       if (validDispatchTime(snapshot.dispatchedAt)) dispatchTimes.set(workflow.id, snapshot.dispatchedAt);
@@ -174,17 +181,292 @@ globalThis.AgentFactoryChat.taskFlow = function (host) {
     const agentId = task.sessionAgentId || task.agentId;
     const runId = task.sessionRunId || task.runId;
     const agent = state.childAgents.find(candidate => candidate.role === "work" && candidate.agentId === agentId &&
-      (!runId || candidate.runId === runId));
+      runId && candidate.runId === runId);
     // Only the profile Main recorded at dispatch (on the run, else the loop) counts. Both profiles can share
     // settings and settings change later, so a task without a record is shown as "no record", never guessed.
     return recordedWorkProfile(agent?.workProfile) || recordedWorkProfile(task.workProfile);
   }
-  function taskHasActiveWorker(task) {
+  // Identity comes from this exact accepted run, never from the next composer settings.
+  // `stage` places the tag and model in the worker or verifier column; `running` animates the model like Main's.
+  function appendTaskIdentity(summary, task, stage = "work", running = false) {
+    summary.classList.add("task-flow-row");
+    const agentId = task.sessionAgentId || task.agentId;
+    const runId = task.sessionRunId || task.runId;
+    const validId = value => typeof value === "string" && /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(value);
+    const agent = validId(runId) && state.childAgents.find(candidate => candidate.agentId === agentId &&
+      candidate.runId === runId && acceptedTaskAgent(candidate));
+    const profile = workProfileForTask(task);
+    const role = task.sessionRole || agent?.role;
+    // Expert and worker tags are plain labels (their session opens from the row icon); only the verifier tag opens a chat.
+    const canOpen = state.role === "main" && (stage === "verification" || role === "verification") &&
+      validId(agentId) && validId(runId) && Boolean(task.sessionRunId || agent);
+    const assignment = document.createElement(canOpen ? "button" : "span");
+    assignment.className = "task-flow-assignment task-flow-agent";
+    assignment.dataset.assigned = String(Boolean(agentId && (profile || role === "verification")));
+    const key = stage === "verification" || role === "verification" ? "ui.verification" : !agentId ? "flow.role.unassigned"
+      : profile ? "flow.role." + (profile === "workLight" ? "worker" : "expert") : "flow.role.unavailable";
+    assignment.textContent = t(key);
+    assignment.title = agentId || assignment.textContent;
+    if (agentId && role !== "verification" && !profile) assignment.dataset.unrecorded = "true";
+    // A subtle text tint distinguishes the recorded role; the label still carries the meaning.
+    if (agentId && (role === "verification" || profile)) assignment.dataset.agentRole = role === "verification" ? "verifier" : profile === "workLight" ? "worker" : "expert";
+    if (canOpen) {
+      assignment.type = "button";
+      assignment.setAttribute("aria-label", task.title + " · " + assignment.textContent + t("ui.open.session"));
+      assignment.addEventListener("click", event => {
+        event.preventDefault(); event.stopPropagation();
+        vscode.postMessage({ type: "agent.open", agentId, runId });
+      });
+    }
+    const model = document.createElement("span");
+    model.className = "task-flow-model";
+    const captured = agent?.model || (task.sessionRunId ? task.model : undefined);
+    model.textContent = typeof captured === "string" && captured.trim() ? captured : t("flow.model.unavailable");
+    model.title = model.textContent;
+    assignment.dataset.stage = model.dataset.stage = stage;
+    model.dataset.running = String(running);
+    // A stage whose run has not started yet (a Verification awaiting its Work) is shown dimmed.
+    if (!runId) {
+      assignment.dataset.waiting = model.dataset.waiting = "true";
+      model.textContent = "—";
+    }
+    summary.append(assignment, model);
+  }
+  function taskStageAgent(task) {
+    const agentId = task.sessionAgentId || task.agentId;
+    const runId = task.sessionRunId || task.runId;
+    return agentId && runId ? state.childAgents.find(agent => agent.agentId === agentId && agent.runId === runId) : undefined;
+  }
+  function taskStageRunning(task, flow) {
+    return ["running", "verifying"].includes(liveTaskStatus(task)) &&
+      (taskHasActiveWorker(task, flow) || Boolean(flow.engine && flow.engineStatus === "active" && taskStageAgent(task)));
+  }
+  // Two lines per task: title | worker | verifier | status | action, then activity | models | steps.
+  function appendTaskColumns(summary, flow, stages, selected, label, live) {
+    const work = stages.find(task => task.sessionRole !== "verification") || stages[0];
+    const verification = stages.find(task => task.sessionRole === "verification");
+    appendTaskIdentity(summary, work, "work", live && taskStageRunning(work, flow));
+    if (verification) appendTaskIdentity(summary, verification, "verification", live && taskStageRunning(verification, flow));
+    summary.append(label);
+    if (!live) return;
+    // The agent's own record only: its latest commentary line and its to-do list count.
+    const agent = taskStageAgent(selected) || taskStageAgent(work);
+    // Under the title: the agent's latest commentary line, else the first line of the recorded request.
+    const requestLine = typeof work.description === "string"
+      ? (work.description.split("\n").map(line => line.replace(/^#+\s*/, "").trim()).find(line => line && line !== work.title.trim() && !/^(Goal|Scope|Done|Report)$/i.test(line)) || "") : "";
+    const activityText = (typeof agent?.activity === "string" ? agent.activity.trim() : "") || requestLine;
+    if (activityText) {
+      const activity = document.createElement("span");
+      activity.className = "task-flow-activity";
+      activity.textContent = activityText;
+      activity.title = activityText;
+      activity.setAttribute("aria-label", t("flow.activity.label", activityText));
+      summary.append(activity);
+    }
+    // A task whose agent kept no to-do list is one step: 0/1 until it completes, then 1/1.
+    const recorded = agent?.planProgress;
+    const progress = recorded && Number.isInteger(recorded.completed) && Number.isInteger(recorded.total) && recorded.total > 0
+      ? recorded : { completed: liveTaskStatus(work) === "completed" ? 1 : 0, total: 1 };
+    {
+      const steps = document.createElement("span");
+      steps.className = "task-flow-progress";
+      steps.textContent = progress.completed + "/" + progress.total;
+      steps.title = t("flow.progress", progress.completed, progress.total);
+      steps.setAttribute("aria-label", steps.title);
+      summary.append(steps);
+    }
+  }
+  function taskHasActiveWorker(task, flow) {
+    if (flow?.engine && flow.engineStatus !== "active") return false;
     const agentId = task.sessionAgentId || task.agentId;
     const runId = task.sessionRunId || task.runId;
     if (!agentId || !runId) return false;
     return state.childAgents.some(agent => agent.agentId === agentId && agent.runId === runId &&
       agent.status === "running" && acceptedTaskAgent(agent));
+  }
+  // A loop remains the same execution across Work/Verification revisions. Direct runs do not.
+  function taskDismissKey(flow, stages) {
+    const work = stages.find(task => task.sessionRole !== "verification") || stages[0];
+    const agentId = work.sessionAgentId || work.agentId || "";
+    const runId = work.sessionRunId || work.runId || "";
+    return JSON.stringify([flow.id, work.taskId || work.id,
+      flow.loopId ? ["loop", flow.loopId, flow.workAgentId || agentId] : ["run", agentId, runId]]);
+  }
+  function visibleTaskFlows(flows) {
+    const dismissed = new Set(state.dismissedTasks || []);
+    return flows.flatMap(flow => {
+      const groups = new Map();
+      for (const task of flow.tasks) {
+        const id = task.taskId || task.id;
+        if (!groups.has(id)) groups.set(id, []);
+        groups.get(id).push(task);
+      }
+      const tasks = flow.tasks.filter(task => !dismissed.has(taskDismissKey(flow, groups.get(task.taskId || task.id))));
+      return tasks.length ? [{ ...flow, tasks, originalTaskCount: groups.size,
+        ...(flow.pause && !tasks.some(task => (task.taskId || task.id) === flow.pause.taskId) ? { pause: undefined } : {}) }] : [];
+    });
+  }
+  function createTaskDismiss(flow, stages) {
+    const key = taskDismissKey(flow, stages);
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "task-flow-dismiss";
+    button.title = t("flow.dismiss.detail");
+    button.setAttribute("aria-label", stages[0].title + " · " + t("flow.dismiss"));
+    const icon = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+    icon.setAttribute("viewBox", "0 0 16 16");
+    icon.setAttribute("aria-hidden", "true");
+    icon.setAttribute("focusable", "false");
+    const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+    path.setAttribute("d", "M3 4.5h10M6.5 4.5V3h3v1.5M4.5 4.5l.6 8.5h5.8l.6-8.5M7 7v4M9 7v4");
+    icon.append(path);
+    button.append(icon);
+    button.addEventListener("click", event => {
+      event.preventDefault(); event.stopPropagation();
+      state.dismissedTasks = [...new Set([...(state.dismissedTasks || []), key])];
+      renderWorkLoopPanel();
+      persist();
+    });
+    return button;
+  }
+  function taskStopKey(flow, task) { return flow.id + "/" + (task.taskId || task.id); }
+  // The stage a stop targets: Verification once Work completed, otherwise Work.
+  function taskStopTarget(flow, stages) {
+    const work = stages.find(task => task.sessionRole !== "verification") || stages[0];
+    const selected = liveTaskStatus(work) === "completed" ? stages.find(task => task.sessionRole === "verification") || work : work;
+    const agentId = selected.sessionAgentId || selected.agentId;
+    const runId = selected.sessionRunId || selected.runId;
+    const agent = state.childAgents.find(agent => agent.agentId === agentId && agent.runId === runId);
+    return { work, selected, agentId, runId, agent, key: taskStopKey(flow, work) };
+  }
+  // A task is active until it ends: queued or running stages, a pending Loop stop, or an unanswered stop request.
+  function taskStopActive(flow, stages) {
+    const { selected, agent, key } = taskStopTarget(flow, stages);
+    return Boolean(flow.stopPending) || taskStopsPending.has(key) || agent?.status === "cancelling" ||
+      ["pending", "running", "verifying", "blocked"].includes(liveTaskStatus(selected));
+  }
+  // One action slot per task: stop while the task is active, delete (hide from the panel) only after it ended.
+  // `rowStages` is the row's own stage; `stages` is its whole logical task, which delete hides together.
+  function appendTaskAction(container, flow, stages, live, rowStages = stages) {
+    if (!live || state.role !== "main") return;
+    const controls = document.createElement("span");
+    controls.className = "task-flow-stop-controls";
+    if (taskStopActive(flow, rowStages)) controls.append(createTaskStop(flow, rowStages));
+    else if (!taskStopActive(flow, stages) && (rowStages === stages || !stages.some(stage => taskStopActive(flow, [stage])))) {
+      controls.append(createTaskDismiss(flow, stages));
+    }
+    if (controls.childElementCount) container.append(controls);
+    // A stop failure gets its own full-width line below the row, never the narrow action slot.
+    const key = taskStopTarget(flow, rowStages).key;
+    if (taskStopErrors.has(key)) {
+      const error = document.createElement("span");
+      error.className = "task-flow-stop-error";
+      error.setAttribute("role", "alert"); error.textContent = taskStopErrors.get(key);
+      container.append(error);
+    }
+  }
+  // Second-line icon under stop/delete: opens the session of the stage now shown (Verification once Work completed).
+  function appendTaskSessionIcon(container, flow, stages, live) {
+    if (!live || state.role !== "main") return;
+    const { selected, agentId, runId, agent } = taskStopTarget(flow, stages);
+    const validId = value => typeof value === "string" && /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(value);
+    const canOpen = validId(agentId) && validId(runId) && Boolean(selected.sessionRunId || (agent && acceptedTaskAgent(agent)));
+    const control = document.createElement(canOpen ? "button" : "span");
+    control.className = "task-flow-session";
+    const icon = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+    icon.setAttribute("viewBox", "0 0 16 16");
+    icon.setAttribute("aria-hidden", "true");
+    icon.setAttribute("focusable", "false");
+    const bubble = document.createElementNS("http://www.w3.org/2000/svg", "path");
+    bubble.setAttribute("d", "M3 3.5h10a1 1 0 0 1 1 1v5.5a1 1 0 0 1-1 1H7l-3 2.5V11H3a1 1 0 0 1-1-1V4.5a1 1 0 0 1 1-1ZM5 7h.01M8 7h.01M11 7h.01");
+    icon.append(bubble);
+    control.append(icon);
+    if (canOpen) {
+      control.type = "button";
+      const label = stages[0].title + t("ui.open.session");
+      control.title = label;
+      control.setAttribute("aria-label", label);
+      control.addEventListener("click", event => {
+        event.preventDefault(); event.stopPropagation();
+        vscode.postMessage({ type: "agent.open", agentId, runId });
+      });
+    } else control.setAttribute("aria-hidden", "true");
+    container.append(control);
+  }
+  function createTaskStop(flow, stages) {
+    const { work, agentId, runId, agent, key } = taskStopTarget(flow, stages);
+    const taskId = work.taskId || work.id;
+    const logical = new Set(flow.tasks.map(task => task.taskId || task.id));
+    const unsupported = flow.engine ? (flow.originalTaskCount || logical.size) !== 1 : !agent || !["accepted", "queued", "starting", "running", "cancelling"].includes(agent.status);
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "task-flow-stop task-flow-icon-button";
+    const stopLabel = t(taskStopsPending.has(key) || agent?.status === "cancelling" ? "flow.stop.pending" : "flow.stop");
+    const icon = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+    icon.setAttribute("viewBox", "0 0 16 16");
+    icon.setAttribute("aria-hidden", "true");
+    icon.setAttribute("focusable", "false");
+    const square = document.createElementNS("http://www.w3.org/2000/svg", "rect");
+    for (const [name, value] of [["x", "4.5"], ["y", "4.5"], ["width", "7"], ["height", "7"], ["rx", "1"]]) square.setAttribute(name, value);
+    icon.append(square);
+    button.append(icon);
+    button.dataset.label = stopLabel;
+    button.disabled = unsupported || taskStopsPending.has(key) || agent?.status === "cancelling";
+    button.title = unsupported ? t(flow.engine ? "flow.stop.multi.unsupported" : "flow.stop.unbound") : work.title + " · " + stopLabel;
+    button.setAttribute("aria-label", work.title + " · " + stopLabel);
+    button.addEventListener("click", event => {
+      event.preventDefault(); event.stopPropagation();
+      if (button.disabled || taskStopsPending.has(key)) return;
+      taskStopsPending.add(key); taskStopErrors.delete(key);
+      button.disabled = true; button.dataset.label = t("flow.stop.pending"); button.setAttribute("aria-label", work.title + " · " + button.dataset.label);
+      vscode.postMessage({ type: "task.stop", workflowId: flow.id, taskId,
+        ...(flow.engine ? { workAgentId: flow.workAgentId, loopId: flow.loopId } : { agentId, runId }) });
+    });
+    return button;
+  }
+  function finishTaskStop(message) {
+    const key = message.workflowId + "/" + message.taskId;
+    taskStopsPending.delete(key);
+    if (message.error) taskStopErrors.set(key, message.error);
+    else taskStopErrors.delete(key);
+    delete runStageList.dataset.flowSignature;
+    renderWorkLoopPanel();
+  }
+  // Presentation only: preserve the task/loop status and use only this exact run's observed lifecycle.
+  function createTaskStatus(task, flow, status, live) {
+    const label = document.createElement("span");
+    label.className = "task-flow-state";
+    label.textContent = t("flow.status." + status);
+    if (!live) return label;
+    const agentId = task.sessionAgentId || task.agentId;
+    const runId = task.sessionRunId || task.runId;
+    const agent = agentId && runId && state.childAgents.find(candidate => candidate.agentId === agentId &&
+      candidate.runId === runId && acceptedTaskAgent(candidate));
+    let observed = status;
+    if (["pending", "running", "verifying"].includes(status) &&
+      ["accepted", "queued", "starting", "cancelling"].includes(agent?.status)) observed = agent.status;
+    if (["pending", "running", "verifying", "blocked"].includes(status) &&
+      (agent?.status === "needs-human-decision" || (flow.engineStatus === "needs-human-decision" &&
+        (status === "blocked" || flow.decisionTaskId === (task.taskId || task.id))))) {
+      observed = "needs-human-decision";
+    }
+    const verification = (task.sessionRole || agent?.role) === "verification";
+    label.dataset.observedStatus = observed;
+    label.textContent = t(observed === "completed" && verification ? "flow.display.verification.completed"
+      : ["accepted", "queued", "starting", "cancelling", "needs-human-decision"].includes(observed)
+        ? "flow.display." + observed : "flow.status." + observed);
+    const detail = t(observed === "completed" ? "flow.status.detail." + (verification ? "verification.completed" : "completed")
+      : "flow.status.detail." + observed);
+    label.title = detail;
+    label.setAttribute("aria-label", label.textContent + " · " + detail);
+    label.setAttribute("role", "status");
+    label.setAttribute("aria-live", "polite");
+    label.setAttribute("aria-atomic", "true");
+    return label;
+  }
+  function trackDisclosureState(disclosure, summary) {
+    summary.setAttribute("aria-expanded", String(disclosure.open));
+    disclosure.addEventListener("toggle", () => summary.setAttribute("aria-expanded", String(disclosure.open)));
   }
   function createSingleTaskFlowCard(flow, stages, live) {
     const work = stages.find(task => task.sessionRole !== "verification") || stages[0];
@@ -195,43 +477,21 @@ globalThis.AgentFactoryChat.taskFlow = function (host) {
     disclosure.className = "task-flow-single";
     disclosure.dataset.status = status;
     disclosure.dataset.taskId = work.taskId || work.id;
-    disclosure.dataset.workerActive = String(taskHasActiveWorker(selected));
+    disclosure.dataset.workerActive = String(taskHasActiveWorker(selected, flow));
     if (work.sessionRunId || work.runId) disclosure.dataset.runId = work.sessionRunId || work.runId;
     if (["running", "verifying"].includes(status)) disclosure.setAttribute("aria-current", "step");
     const summary = document.createElement("summary");
-    const heading = document.createElement("span");
-    heading.className = "task-flow-single-heading";
     const title = document.createElement("strong");
     title.className = "task-flow-single-title";
     title.textContent = work.title;
     title.title = work.title;
-    const label = document.createElement("span");
-    label.className = "task-flow-state";
-    label.textContent = t("flow.status." + status);
-    heading.append(title, label);
-    const assignments = document.createElement("span");
-    assignments.className = "task-flow-assignments";
-    const dispatched = Boolean(work.sessionAgentId || work.agentId);
-    const assignedProfile = dispatched ? workProfileForTask(work) : undefined;
-    for (const profile of ["workLight", "work"]) {
-      const assigned = assignedProfile === profile;
-      const badge = document.createElement("span");
-      badge.className = "task-flow-assignment";
-      badge.dataset.assigned = String(assigned);
-      badge.textContent = t("flow.assignment." + (profile === "workLight" ? "worker" : "expert") + "." + (assigned ? "assigned" : "unassigned"));
-      assignments.append(badge);
-    }
-    if (dispatched && !assignedProfile) {
-      // A dispatched task whose profile was never recorded: say so instead of marking either profile.
-      const badge = document.createElement("span");
-      badge.className = "task-flow-assignment";
-      badge.dataset.assigned = "false";
-      badge.dataset.unrecorded = "true";
-      badge.textContent = t("flow.assignment.unrecorded");
-      assignments.append(badge);
-    }
-    summary.append(heading, assignments);
+    const label = createTaskStatus(selected, flow, status, live);
+    summary.append(title);
+    appendTaskColumns(summary, flow, stages, selected, label, live);
+    appendTaskAction(summary, flow, stages, live);
+    appendTaskSessionIcon(summary, flow, stages, live);
     disclosure.append(summary);
+    trackDisclosureState(disclosure, summary);
     const detail = document.createElement("div");
     detail.className = "task-flow-detail";
     if (work.description) {
@@ -261,7 +521,7 @@ globalThis.AgentFactoryChat.taskFlow = function (host) {
         : t("flow.assignment.unrecorded") + t("ui.open.session");
       open.setAttribute("aria-label", work.title + " · " + open.textContent);
       open.title = agentId;
-      open.addEventListener("click", function () { vscode.postMessage({ type: "agent.open", agentId }); });
+      open.addEventListener("click", function () { vscode.postMessage({ type: "agent.open", agentId, runId }); });
       detail.append(open);
     }
     if (detail.childElementCount) disclosure.append(detail);
@@ -348,13 +608,18 @@ globalThis.AgentFactoryChat.taskFlow = function (host) {
     }
     const list = document.createElement("ol");
     list.className = "task-flow-list";
-    flow.tasks.forEach(function (task, index) {
-      const status = live ? liveTaskStatus(task) : task.status;
+    // Live rows are logical tasks whose Work and Verification share one row; snapshots keep each stage.
+    const rows = live ? [...logicalTasks.values()].map(stages => ({ task: stages.find(stage => stage.sessionRole !== "verification") || stages[0], stages }))
+      : flow.tasks.map(task => ({ task, stages: [task] }));
+    rows.forEach(function ({ task, stages }, index) {
+      const verificationStage = stages.find(stage => stage !== task && stage.sessionRole === "verification");
+      const selected = live && verificationStage && liveTaskStatus(task) === "completed" ? verificationStage : task;
+      const status = live ? liveTaskStatus(selected) : task.status;
       const item = document.createElement("li");
       item.className = "task-flow-step";
       item.dataset.status = status;
       item.dataset.taskId = task.taskId || task.id;
-      item.dataset.workerActive = String(taskHasActiveWorker(task));
+      item.dataset.workerActive = String(taskHasActiveWorker(selected, flow));
       if (task.sessionRunId || task.runId) item.dataset.runId = task.sessionRunId || task.runId;
       if (["running", "verifying"].includes(status)) item.setAttribute("aria-current", "step");
       const disclosure = document.createElement("details");
@@ -367,11 +632,15 @@ globalThis.AgentFactoryChat.taskFlow = function (host) {
       name.className = "task-flow-name";
       name.textContent = task.title;
       name.title = task.title;
-      const label = document.createElement("span");
-      label.className = "task-flow-state";
-      label.textContent = t("flow.status." + status);
-      taskSummary.append(marker, name, label);
+      const label = createTaskStatus(selected, flow, status, live);
+      if (live) {
+        taskSummary.append(name);
+        appendTaskColumns(taskSummary, flow, stages, selected, label, live);
+      } else taskSummary.append(marker, name, label);
+      appendTaskAction(taskSummary, flow, stages, live);
+      appendTaskSessionIcon(taskSummary, flow, stages, live);
       disclosure.append(taskSummary);
+      if (live) trackDisclosureState(disclosure, taskSummary);
       const detail = document.createElement("div");
       detail.className = "task-flow-detail";
       if (task.description) {
@@ -384,25 +653,25 @@ globalThis.AgentFactoryChat.taskFlow = function (host) {
         descriptionBlock.append(heading, description);
         detail.append(descriptionBlock);
       }
-      const agentId = task.sessionAgentId || task.agentId;
-      const runId = task.sessionRunId || task.runId;
-      const validId = value => typeof value === "string" && /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(value);
-      if (validId(agentId) && validId(runId)) {
+      for (const stage of stages) {
+        const agentId = stage.sessionAgentId || stage.agentId;
+        const runId = stage.sessionRunId || stage.runId;
+        const validId = value => typeof value === "string" && /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(value);
+        if (!validId(agentId) || !validId(runId)) continue;
         const agent = state.childAgents.find(agent => agent.agentId === agentId && agent.runId === runId && acceptedTaskAgent(agent));
-        if (task.sessionRunId || agent) {
-          const role = task.sessionRole || agent?.role;
-          const open = document.createElement("button");
-          open.type = "button";
-          open.className = "task-flow-open setting-button";
-          const profile = role === "verification" ? undefined : workProfileForTask(task);
-          open.textContent = role === "verification" ? t("flow.open.verification.session")
-            : profile ? t(profile === "workLight" ? "flow.open.work.session" : "flow.open.expert.session")
-            : t("flow.assignment.unrecorded") + t("ui.open.session");
-          open.setAttribute("aria-label", task.title + " · " + open.textContent);
-          open.title = agentId;
-          open.addEventListener("click", function () { vscode.postMessage({ type: "agent.open", agentId }); });
-          detail.append(open);
-        }
+        if (!stage.sessionRunId && !agent) continue;
+        const role = stage.sessionRole || agent?.role;
+        const open = document.createElement("button");
+        open.type = "button";
+        open.className = "task-flow-open setting-button";
+        const profile = role === "verification" ? undefined : workProfileForTask(stage);
+        open.textContent = role === "verification" ? t("flow.open.verification.session")
+          : profile ? t(profile === "workLight" ? "flow.open.work.session" : "flow.open.expert.session")
+          : t("flow.assignment.unrecorded") + t("ui.open.session");
+        open.setAttribute("aria-label", task.title + " · " + open.textContent);
+        open.title = agentId;
+        open.addEventListener("click", function () { vscode.postMessage({ type: "agent.open", agentId, runId }); });
+        detail.append(open);
       }
       if (detail.childElementCount) disclosure.append(detail);
       item.append(disclosure);
@@ -519,16 +788,19 @@ globalThis.AgentFactoryChat.taskFlow = function (host) {
     return flows;
   }
   function unfinishedFlow(flow) {
-    return flow.tasks.some(task => ["pending", "running", "verifying", "blocked"].includes(liveTaskStatus(task)));
+    return flow.stopPending || flow.tasks.some(task => ["pending", "running", "verifying", "blocked"].includes(liveTaskStatus(task)));
   }
   function renderWorkLoopPanel() {
     const contractList = document.getElementById("contract-list");
-    const flows = displayTaskFlows();
+    const allFlows = displayTaskFlows();
+    const flows = visibleTaskFlows(allFlows);
     const active = flows.filter(unfinishedFlow);
     const history = flows.filter(flow => !unfinishedFlow(flow));
-    const boundRuns = new Set(flows.flatMap(flow => flow.tasks.map(task => task.agentId + "/" + task.runId)));
+    const boundRuns = new Set(allFlows.flatMap(flow => flow.tasks.map(task => (task.sessionAgentId || task.agentId) + "/" + (task.sessionRunId || task.runId))));
     const legacyHistory = state.childAgents.filter(agent => acceptedTaskAgent(agent) &&
-      ["completed", "failed", "cancelled"].includes(agent.status) && !boundRuns.has(agent.agentId + "/" + agent.runId) &&
+      ["completed", "failed", "cancelled"].includes(agent.status) &&
+      !(state.dismissedTasks || []).includes(taskDismissKey({ id: agent.taskBinding?.workflowId },
+        [{ id: agent.taskBinding?.taskId, agentId: agent.agentId, runId: agent.runId }])) && !boundRuns.has(agent.agentId + "/" + agent.runId) &&
       !(state.workflows || []).some(snapshot => snapshot.workflow?.id === agent.taskBinding?.workflowId));
     const historyPanel = document.getElementById("task-history");
     const historyList = document.getElementById("task-history-list");
@@ -555,29 +827,33 @@ globalThis.AgentFactoryChat.taskFlow = function (host) {
       historyList.replaceChildren(history.length || legacyHistory.length ? list : historyEmpty("ui.task.history.empty"));
     }
     const hasActive = active.length > 0;
-    if (hasActive && runDetails.dataset.hasActive !== "true") state.runPanelExpanded = true;
+    if (hasActive && runDetails.dataset.hasActive !== "true" && !state.runPanelUserChoice) state.runPanelExpanded = true;
     runDetails.dataset.hasActive = String(hasActive);
-    if (!hasActive) {
-      state.runPanelExpanded = false;
-      runStageList.replaceChildren();
-      delete runStageList.dataset.flowSignature;
-    }
-    const expandable = state.role === "main" && hasActive;
-    const expanded = expandable && state.runPanelExpanded && !runStatus.hidden;
+    const expandable = state.role === "main";
+    runStatus.hidden = !expandable;
+    const expanded = expandable && state.runPanelExpanded;
+    document.getElementById("run-status-title").textContent = t(flows.length ? "ui.task.workflow" : "flow.empty");
     runStatusToggle.disabled = !expandable;
     runStatusToggle.setAttribute("aria-expanded", String(expanded));
     runStatus.classList.toggle("is-expanded", expanded);
-    const hasRunningStage = active.some(flow => flow.tasks.some(task =>
-      ["running", "verifying"].includes(liveTaskStatus(task))));
-    runStatus.classList.toggle("is-running", state.running || hasRunningStage);
+    // Main's working indicator leads the open panel's header and returns to the composer dock when closed.
+    const progress = document.getElementById("agent-progress");
+    const progressHome = expanded ? runStatus : document.querySelector(".agent-progress-dock");
+    if (progress && progressHome && progress.parentElement !== progressHome) progressHome.prepend(progress);
+    const hasRunningStage = flows.some(flow => flow.tasks.some(task =>
+      (taskHasActiveWorker(task, flow) || (flow.engine && flow.engineStatus === "active" &&
+        (task.sessionAgentId || task.agentId) && (task.sessionRunId || task.runId))) && ["running", "verifying"].includes(liveTaskStatus(task))));
+    runStatus.classList.toggle("is-running", hasRunningStage);
     runDetails.hidden = !expanded;
-    runStatusAgents.hidden = !expandable || state.workUnits.activeUnits === 0;
-    runStatusAgents.textContent = state.workUnits.activeUnits > 0
-      ? t("status.runningAgents", state.workUnits.workActive, state.workUnits.verificationActive) : "";
+    // Header: in-progress roles from durable run status, then the visible task total; zero roles are omitted.
+    const headerParts = runningRoleCounts().filter(([, count]) => count > 0).map(([key, count]) => t(key, count));
+    if (flows.length) headerParts.push(t("flow.task.count", flows.reduce((sum, flow) => sum + summarizeTaskFlow(flow, true).total, 0)));
+    runStatusAgents.hidden = state.role !== "main" || !headerParts.length;
+    runStatusAgents.textContent = headerParts.length ? "· " + headerParts.join(" · ") : "";
+    runStatusAgents.title = headerParts.join(" · ");
+    runStatusToggle.setAttribute("aria-label", [document.getElementById("run-status-title").textContent, ...headerParts].join(" · "));
     if (!expanded) return;
-    runDetailsSummary.textContent = active.length ? t("flow.task.count", active.reduce((sum, flow) => sum + summarizeTaskFlow(flow, true).total, 0)) : t("ui.preparing");
-    const signature = JSON.stringify([active, state.childAgents, t("flow.status.pending")]);
-    runStopButton.hidden = !state.running;
+    const signature = JSON.stringify([flows, state.childAgents, [...taskStopsPending], [...taskStopErrors], t("flow.status.pending"), t("flow.empty")]);
     if (runStageList.dataset.flowSignature === signature) return;
     const expandedTasks = new Set(Array.from(runStageList.querySelectorAll(".task-flow-disclosure[open], .task-flow-single[open]"), item => {
       const task = item.closest("[data-task-id]");
@@ -585,12 +861,22 @@ globalThis.AgentFactoryChat.taskFlow = function (host) {
       return flow?.dataset.flowId + "/" + task?.dataset.taskId;
     }));
     runStageList.dataset.flowSignature = signature;
-    runStageList.replaceChildren(...active.map(flow => createTaskFlow(flow, true)));
+    runStageList.replaceChildren(...(flows.length ? flows.map(flow => createTaskFlow(flow, true)) : [historyEmpty("flow.empty")]));
     for (const item of runStageList.querySelectorAll(".task-flow-disclosure, .task-flow-single")) {
       const task = item.closest("[data-task-id]");
       const flow = item.closest(".task-flow");
       item.open = expandedTasks.has(flow?.dataset.flowId + "/" + task?.dataset.taskId);
     }
+  }
+  function runningRoleCounts() {
+    const active = new Set(["accepted", "queued", "starting", "running", "verifying", "cancelling"]);
+    const counts = { expert: 0, worker: 0, verifier: 0, unrecorded: 0 };
+    for (const agent of state.childAgents) {
+      if (!active.has(agent.status)) continue;
+      if (agent.role === "verification") counts.verifier += 1;
+      else if (agent.role === "work") counts[agent.workProfile === "work" ? "expert" : agent.workProfile === "workLight" ? "worker" : "unrecorded"] += 1;
+    }
+    return Object.entries(counts).map(([role, count]) => ["flow.header." + role, count]);
   }
   function childTaskName(agent) {
     const title = agent.taskBinding?.title;
@@ -629,7 +915,7 @@ globalThis.AgentFactoryChat.taskFlow = function (host) {
     status.textContent = childAgentStatusLabel(agent.status);
     item.append(marker, copy, status);
     item.addEventListener("click", function () {
-      vscode.postMessage({ type: "agent.open", agentId: agent.agentId });
+      vscode.postMessage({ type: "agent.open", agentId: agent.agentId, ...(agent.runId ? { runId: agent.runId } : {}) });
     });
     return item;
   }
@@ -644,8 +930,8 @@ globalThis.AgentFactoryChat.taskFlow = function (host) {
   }
 
   return {
-    renderWorkLoopPanel, currentTaskFlows, workflowDecisionsPending, extractTaskFlows,
-    releaseWorkflowDecisions, taskFlowParseCache, createTaskFlow, displayTaskFlows, unfinishedFlow,
+    renderWorkLoopPanel, currentTaskFlows, workflowDecisionsPending, finishTaskStop, extractTaskFlows,
+    releaseWorkflowDecisions, taskFlowParseCache, createTaskFlow, displayTaskFlows, visibleTaskFlows, taskDismissKey, unfinishedFlow,
     childTaskName
   };
 };

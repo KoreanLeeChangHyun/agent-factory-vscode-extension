@@ -244,7 +244,8 @@ test("running state appears above the composer as an expandable work loop panel"
   assert.match(template, /id="run-status-toggle"[^>]*aria-controls="run-details"/);
   assert.match(template, /id="run-details"[^>]*aria-label="Work and verification details"/);
   assert.match(template, /id="run-stage-list"/);
-  assert.match(template, /id="run-stop-button"/);
+  // The composer send button is the single Main stop control; the task panel has no duplicate.
+  assert.doesNotMatch(template, /id="run-stop-button"/);
   assert.match(chatScript, /aria-busy/);
   assert.match(chatScript, /formatElapsed/);
   assert.match(chatStyles, /\.run-status/);
@@ -252,12 +253,12 @@ test("running state appears above the composer as an expandable work loop panel"
   assert.match(chatStyles, /\.run-stage/);
   assert.doesNotMatch(template, /run-status-marker/);
   assert.doesNotMatch(chatStyles, /\.run-status-marker/);
-  assert.match(chatStyles, /@keyframes run-status-text-scan\s*\{[\s\S]*?from\s*\{\s*background-position: 98% 0;[\s\S]*?to\s*\{\s*background-position: 2% 0;/);
+  assert.match(chatStyles, /@keyframes run-status-text-scan\s*\{[\s\S]*?from\s*\{\s*background-position: 100% 0;[\s\S]*?to\s*\{\s*background-position: 0% 0;/);
   assert.match(chatStyles, /\.run-status-label\s*\{[^}]*background-size: 230% 100%;[^}]*background-repeat: no-repeat;/);
   assert.match(template, /class="run-status-copy"[\s\S]*run-status-label[\s\S]*run-status-meta/);
   assert.match(chatStyles, /\.run-status\.is-running\s*\{[^}]*--run-status-active-color: var\(--vscode-progressBar-background, var\(--vscode-focusBorder, var\(--af-color-accent\)\)\)[^}]*--run-status-text-color: var\(--run-status-active-color\)/);
   assert.match(chatStyles, /\.run-status-label\s*\{[^}]*color: var\(--run-status-text-color\)[^}]*background-clip: text[^}]*animation: run-status-text-scan/);
-  assert.match(chatStyles, /var\(--run-status-text-color\) 45%,[\s\S]*color-mix\(in srgb, var\(--run-status-text-color\) 70%, var\(--af-chat-background\)\) 50%,[\s\S]*var\(--run-status-text-color\) 55%/);
+  assert.match(chatStyles, /var\(--run-status-text-color\) 45%,[\s\S]*var\(--run-status-scan-color, color-mix\(in srgb, var\(--run-status-text-color\) 70%, var\(--af-chat-background\)\)\) 50%,[\s\S]*var\(--run-status-text-color\) 55%/);
   assert.doesNotMatch(chatStyles.match(/\.run-status-label\s*\{[^}]*\}/)[0], /ansiCyan|#94e2d5/);
   assert.doesNotMatch(chatStyles.match(/\.run-status-copy\s*\{[^}]*\}/)[0], /animation|transparent|background-image/);
   assert.match(chatStyles, /\.run-status-meta\s*\{[^}]*color: var\(--run-status-text-color\)/);
@@ -271,18 +272,18 @@ test("running state appears above the composer as an expandable work loop panel"
 
 test("runtime status stays in the loader while concrete activity updates the timeline", function () {
   assert.match(chatScript, /case "run\.progress":[\s\S]*state\.runProgress = message\.text/);
-  assert.match(chatScript, /case "run\.activity":[\s\S]*upsertActivity\(message\.id, message\.category, message\.phase, message\.text, message\.diff, message\.title, message\.output\)/);
+  assert.match(chatScript, /case "run\.activity":[\s\S]*upsertActivity\(message\.id, message\.category, message\.phase, message\.text, message\.diff, message\.title, message\.output, activityDetails\(message\)\)/);
   assert.match(chatScript, /indexedTimeline\(\)\.activities\.get\(id\)/);
   assert.match(chatStyles, /\.message-activity/);
   assert.match(chatScript, /runStatusLabel\.textContent = state\.cancellationRequested \? t\("ui\.cancellation\.requested"\) : localizedText\(state\.runProgress, state\.runProgressLocalization\) \|\| t\("ui\.working"\)/);
 });
 
 test("commands, file changes, tools, and assistant responses have distinct presentation", function () {
-  assert.match(chatScript, /activityKindLabel\(event\.category\)/);
+  assert.match(chatScript, /chatActivityRows\.render\(content, event\)/);
+  assert.match(chatScript, /verb\(row\)/);
   assert.doesNotMatch(chatScript, /event\.type === "assistant" \? "Response"/);
   assert.doesNotMatch(chatScript, /return "Bash"/);
-  assert.match(chatScript, /renderTerminalCommand\(content, event\.text, event\.phase, event\.title\)/);
-  assert.match(chatScript, /if \(category === "file"\) return t\("ui\.git\.changes"\)/);
+  assert.match(chatScript, /renderTerminalCommand\(detail, event\.text, event\.phase\)/);
   assert.match(chatStyles, /\.message-activity-command \.message-content[\s\S]*font-family/);
   assert.doesNotMatch(chatStyles, /\.message-activity-command\s*\{[^}]*(?:border|background):/);
   assert.match(chatStyles, /\.git-diff-overview/);
@@ -297,7 +298,7 @@ test("commands, file changes, tools, and assistant responses have distinct prese
 });
 
 test("recognized read commands use concise activity labels instead of Bash text", function () {
-  assert.match(chatScript, /event\.title \|\| activityKindLabel\(event\.category\)/);
+  assert.match(chatScript, /skillDocuments\?\.\(event\.text\)/);
   assert.match(chatScript, /message\.title\.length <= 200/);
   assert.doesNotMatch(agentClient, /return truncate\(summary, 140\)/);
   assert.match(agentClient, /return summary\.trim\(\) \|\| undefined/);
@@ -331,7 +332,8 @@ test("read activities visibly distinguish in-progress and completed phases", fun
 
 test("activity completion uses accessible success and failure dots instead of text labels", function () {
   assert.match(chatScript, /message-phase-" \+ \(phaseValue \|\| "started"\)/);
-  assert.match(chatScript, /heading\.append\(createActivityPhase\(event\.phase\), kind\)/);
+  assert.match(chatScript, /overview\.append\(createActivityPhase\(phaseValue\)\)/);
+  assert.match(chatScript, /mark = span\("act-mark", row\.phase === "failed" \? "!" : ""\)/);
   assert.match(chatScript, /phase\.setAttribute\("aria-label", activityPhaseAccessibleLabel\(phaseValue\)\)/);
   assert.doesNotMatch(chatScript, /return "Completed"/);
   assert.match(chatStyles, /\.message-phase\s*\{[^}]*width: 2ch[^}]*height: 1\.5em/);
@@ -340,7 +342,7 @@ test("activity completion uses accessible success and failure dots instead of te
 });
 
 test("terminal commands show three lines before offering an accessible command expansion", function () {
-  assert.match(chatScript, /renderTerminalCommand\(content, event\.text, event\.phase, event\.title\)/);
+  assert.match(chatScript, /renderTerminalCommand\(detail, event\.text, event\.phase\)/);
   assert.match(chatScript, /prompt\.textContent = phaseValue === "failed" \? t\("ui\.failed\.0f4f56"\) : phaseValue === "completed" \? t\("ui\.ran"\) : t\("ui\.running"\)/);
   assert.match(chatScript, /row\.append\(createActivityPhase\(phaseValue\), text\)/);
   assert.match(chatScript, /updates\.push\(\[toggle, text\.scrollHeight <= text\.clientHeight \+ 1\]\)/);
@@ -371,7 +373,7 @@ test("terminal commands and extension-aware diffs use VS Code TextMate highlight
 });
 
 test("Git changes render a bounded unified diff preview with file statistics", function () {
-  assert.match(chatScript, /renderGitDiff\(content, event\.diff, event\.text, event\.phase\)/);
+  assert.match(chatScript, /renderGitDiff\(detail, row\.diff, row\.target, event\.phase\)/);
   assert.match(chatScript, /t\("ui\.edited"\) \+ \(files\.length === 1 \? files\[0\]\.path/);
   assert.match(chatScript, /summary\.textContent = t\("ui\.view\.git\.diff"\)/);
   assert.match(chatScript, /line\.startsWith\("@@"\)/);

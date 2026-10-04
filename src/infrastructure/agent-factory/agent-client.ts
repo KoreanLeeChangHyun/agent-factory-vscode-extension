@@ -15,6 +15,10 @@ import { homedir, tmpdir } from "node:os";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { AsyncCache } from "../../common/async-cache";
 import { parseInterviewQuestion } from "../../common/types/business-mode";
+import type { ActivityDetails as ProtocolActivityDetails, ActivityKind } from "../../protocol/messages";
+
+/** Activity details inside a RunUpdate, whose own `kind` is the update discriminant. */
+export type ActivityDetails = Omit<ProtocolActivityDetails, "kind"> & { readonly activityKind?: ActivityKind };
 
 const MAX_PROCESS_OUTPUT_BYTES = Infinity;
 const MAX_RESULT_BYTES = Infinity;
@@ -60,6 +64,10 @@ export interface ExecutionCapabilities {
   readonly images?: boolean;
   readonly automaticRequestHash?: boolean;
   readonly worktrees?: boolean;
+  /** Captured per-task Work Units, checked integration and same-session conflict revisions. */
+  readonly taskWorkspaces?: boolean;
+  /** Main runs accept `--work-isolation on|off`, the Human's Work isolation toggle that loops inherit. */
+  readonly workIsolation?: boolean;
   /** The runtime accepts and records `loop.py start --work-profile`. */
   readonly workProfile?: boolean;
   /** A stopped loop reports `failureClass`; Main is then told what to do for each class. */
@@ -83,6 +91,8 @@ export interface ExecutionOptions {
   readonly model?: string;
   readonly agentModels?: AgentModels;
   readonly agentPermissions?: AgentPermissions;
+  /** The Human's per-project Work isolation toggle; sent only to a runtime advertising `workIsolation`. */
+  readonly workIsolation?: boolean;
   readonly reasoningEffort?: "none" | "low" | "medium" | "high" | "xhigh" | "max";
   readonly fast?: boolean;
   readonly goalMode?: boolean;
@@ -98,6 +108,15 @@ export interface NativeGoal {
   readonly tokensUsed: number;
   readonly timeUsedSeconds: number;
   readonly tokenBudget?: number | null;
+}
+
+export interface TaskStopTarget {
+  readonly workflowId: string;
+  readonly taskId: string;
+  readonly agentId?: string;
+  readonly runId?: string;
+  readonly workAgentId?: string;
+  readonly loopId?: string;
 }
 
 export type GoalAction = "get" | "refresh" | "pause" | "cancel" | "disable" | "reopen";
@@ -147,7 +166,7 @@ export type RunUpdate =
       readonly fiveHourResetsAt?: number;
     }
   | { readonly kind: "accountLimits"; readonly limits: AccountLimits }
-  | {
+  | ({
       readonly kind: "activity";
       readonly id: string;
       readonly category: "command" | "file" | "tool";
@@ -156,7 +175,7 @@ export type RunUpdate =
       readonly title?: string;
       readonly diff?: string;
       readonly output?: string;
-    };
+    } & ActivityDetails);
 
 export interface MainAgentSession {
   readonly agentId: string;
@@ -202,6 +221,21 @@ export interface ChildAgentSession {
   /** When the runtime accepted this run; orders task cards, unlike `updatedAt` it never changes. */
   readonly dispatchedAt?: string;
   readonly verifiedWorkRunId?: string;
+  /** Steps the agent's own to-do list reports done; absent when it keeps no list. */
+  readonly planProgress?: PlanProgress;
+  /** The first line of the agent's latest commentary. */
+  readonly activity?: string;
+}
+
+export interface PlanProgress { readonly completed: number; readonly total: number; }
+
+/** A recorded step count, only when it is a consistent completed/total pair. */
+function parsePlanProgress(value: unknown): PlanProgress | undefined {
+  const record = readRecordOrUndefined(value);
+  const completed = record?.completed, total = record?.total;
+  return Number.isInteger(completed) && Number.isInteger(total) && (total as number) > 0 && (total as number) <= 200 &&
+    (completed as number) >= 0 && (completed as number) <= (total as number)
+    ? { completed: completed as number, total: total as number } : undefined;
 }
 
 export type RevisionLimitDecision = "continue" | "stop";
@@ -251,7 +285,9 @@ export interface AgentRuntimeClient {
   goal(agentId: string, action: GoalAction): Promise<{ readonly goal?: NativeGoal | null; readonly accepted?: RunAcceptance; readonly error?: string }>;
   resetConversation(agentId: string): Promise<{ readonly conversationId: string; readonly startedAt: string }>;
   listSessions(): Promise<readonly MainAgentSession[]>;
+  childRun?(mainAgentId: string, agentId: string, runId: string): Promise<ChildAgentSession | undefined>;
   listChildSessions(mainAgentId: string, runId?: string): Promise<readonly ChildAgentSession[]>;
+  stopTask?(mainAgentId: string, target: TaskStopTarget): Promise<Record<string, unknown> | undefined>;
   closeWorkflow?(mainAgentId: string, workAgentId: string, loopId: string): Promise<Record<string, unknown>>;
   decideRevisionLimit?(mainAgentId: string, workAgentId: string, loopId: string, decision: RevisionLimitDecision): Promise<Record<string, unknown>>;
   advanceWorkflows?(mainAgentId: string, agents: readonly ChildAgentSession[], drive?: boolean): Promise<readonly Record<string, unknown>[]>;
@@ -981,6 +1017,29 @@ When a command needs sudo and the Human has requested it, use python3 ${JSON.str
     return this.agentListCache.get(this.projectRoot, () => this.command(["list", "--project-root", this.projectRoot]));
   }
 
+  public async stopTask(mainAgentId: string, target: TaskStopTarget): Promise<Record<string, unknown> | undefined> {
+    const agents = await this.listChildSessions(mainAgentId);
+    // Read fresh engine state before allowing a direct-run cancel. An omitted Loop binding
+    // must not bypass its engine and leave it free to dispatch the next stage.
+    const loops = await this.refreshWorkflows(mainAgentId, agents, false, true);
+    const owned = loops.filter(loop => (loop.workflow as { id?: string } | undefined)?.id === target.workflowId);
+    if (target.loopId) {
+      const loop = owned.find(loop => loop.loopId === target.loopId && loop.workAgentId === target.workAgentId);
+      if (!loop) throw new Error("Task Loop does not belong to this Main conversation");
+      const tasks = (loop.workflow as { tasks?: { id?: string }[] }).tasks;
+      if (tasks?.length !== 1 || tasks[0]?.id !== target.taskId) throw new Error("Stopping one task in a multi-task Loop is unsupported");
+      return this.workflowDecision(mainAgentId, target.workAgentId!, target.loopId, "stop-task",
+        ["--workflow-id", target.workflowId, "--task-id", target.taskId], "Human selected Stop task", "Task stop failed");
+    }
+    if (owned.length) throw new Error("This task requires its exact Loop binding");
+    const agent = agents.find(agent => agent.agentId === target.agentId && agent.runId === target.runId &&
+      agent.taskBinding?.workflowId === target.workflowId && agent.taskBinding?.taskId === target.taskId);
+    if (!agent || agent.agentId === mainAgentId) throw new Error("Task run does not belong to this Main conversation");
+    if (!["accepted", "queued", "starting", "running", "cancelling"].includes(agent.status)) throw new Error("This task run cannot be cancelled in its current state");
+    await this.cancel(agent.agentId, agent.runId!);
+    return undefined;
+  }
+
   public closeWorkflow(mainAgentId: string, workAgentId: string, loopId: string): Promise<Record<string, unknown>> {
     return this.workflowDecision(mainAgentId, workAgentId, loopId, "close", [], "Human selected Close failed workflow", "Workflow close failed");
   }
@@ -994,7 +1053,7 @@ When a command needs sudo and the Human has requested it, use python3 ${JSON.str
   }
 
   /** Run a Human-only loop command bound to the Main run that started the workflow, with the click as decision evidence. */
-  private async workflowDecision(mainAgentId: string, workAgentId: string, loopId: string, command: "close" | "extend-revisions",
+  private async workflowDecision(mainAgentId: string, workAgentId: string, loopId: string, command: "close" | "extend-revisions" | "stop-task",
     extra: readonly string[], evidence: string, failure: string): Promise<Record<string, unknown>> {
     const location = await this.location();
     const path = await this.managedPath(workAgentId, "loops", loopId, "state.json");
@@ -1012,8 +1071,10 @@ When a command needs sudo and the Human has requested it, use python3 ${JSON.str
       "--decision-evidence", evidence, ...extra], COMMAND_TIMEOUT_MS, MAX_PROCESS_OUTPUT_BYTES,
       { ...pluginRuntimeEnvironment(this.developmentRoot), AGENT_FACTORY_PARENT_STATE: parentPath,
         AGENT_FACTORY_EXECUTION_POLICY: JSON.stringify(parent.executionPolicy) });
-    const snapshot = JSON.parse(output.stdout);
-    if (output.exitCode !== 0 || snapshot.kind === "error") throw new Error(snapshot.error?.message || failure);
+    let snapshot: Record<string, unknown>;
+    try { snapshot = JSON.parse(output.stdout); }
+    catch { throw new Error(`${failure}: ${output.stderr.trim() || "Runtime returned an invalid response"}`); }
+    if (output.exitCode !== 0 || snapshot.kind === "error") throw new Error((snapshot.error as { message?: string } | undefined)?.message || failure);
     this.workflowSnapshots.delete(path);
     return this.presentWorkflow(snapshot, state, mainAgentId, parentRun);
   }
@@ -1026,6 +1087,33 @@ When a command needs sudo and the Human has requested it, use python3 ${JSON.str
     // Loop creation is the dispatch time of its cards; older runtimes omit it from the snapshot.
     const dispatchedAt = typeof snapshot.createdAt === "string" ? snapshot.createdAt : state.createdAt;
     if (typeof dispatchedAt === "string" && dispatchedAt) snapshot.dispatchedAt = dispatchedAt;
+    // Enrich each stage from its own captured run, including earlier tasks no longer in the child list.
+    const workflow = readRecordOrUndefined(snapshot.workflow);
+    if (workflow && Array.isArray(workflow.tasks)) {
+      await Promise.all(workflow.tasks.map(async value => {
+        const task = readRecordOrUndefined(value);
+        if (!task) return;
+        const workspace = readRecordOrUndefined(readRecordOrUndefined(snapshot.taskWorkspaces)?.[String(task.id)]);
+        if (workspace && Array.isArray(workspace.repositories)) {
+          task.workspaceSummary = workspace.repositories.map(value => {
+            const unit = readRecordOrUndefined(value);
+            if (!unit) return "";
+            return localize("unit.task.detail", String(unit.repositoryRoot), String(unit.branch), String(unit.targetBranch),
+              localize("unit.task." + String(unit.phase)), String(unit.path), String(unit.baseCommit),
+              unit.mergeCommit ? localize("unit.task.merge", String(unit.mergeCommit)) : "",
+              unit.cleanupPending ? localize("unit.task.cleanup.pending") : "");
+          }).filter(Boolean).join("\n");
+        }
+        for (const role of ["work", "verification"] as const) {
+          const agentId = task[role + "AgentId"] || snapshot[role + "AgentId"];
+          const runId = task[role + "RunId"];
+          if (typeof agentId !== "string" || !MANAGED_ID.test(agentId) || typeof runId !== "string" || !MANAGED_ID.test(runId)) continue;
+          const captured = await this.latestRunInfo(agentId, runId);
+          if (captured.model) task[role + "Model"] = captured.model;
+          if (role === "work" && captured.workProfile) task.workProfile = captured.workProfile;
+        }
+      }));
+    }
     if (snapshot.pause !== undefined && snapshot.pause !== null && !(await this.revisionLimitPauseAdvertised(mainAgentId))) delete snapshot.pause;
     return snapshot;
   }
@@ -1041,7 +1129,7 @@ When a command needs sudo and the Human has requested it, use python3 ${JSON.str
     return this.workflowRefreshCache.get(JSON.stringify([mainAgentId, identity, drive]), () => this.refreshWorkflows(mainAgentId, agents, drive));
   }
 
-  private async refreshWorkflows(mainAgentId: string, agents: readonly ChildAgentSession[], drive: boolean): Promise<readonly Record<string, unknown>[]> {
+  private async refreshWorkflows(mainAgentId: string, agents: readonly ChildAgentSession[], drive: boolean, fullScan = false): Promise<readonly Record<string, unknown>[]> {
     const location = await this.location();
     const snapshots: Record<string, unknown>[] = [];
     for (const agentId of new Set(agents.filter(agent => agent.role === "work").map(agent => agent.agentId))) {
@@ -1059,7 +1147,7 @@ When a command needs sudo and the Human has requested it, use python3 ${JSON.str
         if ((error as NodeJS.ErrnoException).code === "ENOENT") return [];
         throw error;
       });
-      for (const entry of entries.slice(-100)) {
+      for (const entry of fullScan ? entries : entries.slice(-100)) {
         if (!entry.isDirectory() || !MANAGED_ID.test(entry.name)) continue;
         const path = await this.managedPath(agentId, "loops", entry.name, "state.json");
         const info = await lstat(path);
@@ -1098,6 +1186,21 @@ When a command needs sudo and the Human has requested it, use python3 ${JSON.str
       }
     }
     return snapshots;
+  }
+
+  /** Resolve the clicked historical run, retaining Main ownership and its captured options. */
+  public async childRun(mainAgentId: string, agentId: string, runId: string): Promise<ChildAgentSession | undefined> {
+    if (![mainAgentId, agentId, runId].every(id => MANAGED_ID.test(id))) return undefined;
+    const captured = await this.latestRunInfo(agentId, runId);
+    if (captured.status === "unknown" || captured.parentAgentId !== mainAgentId) return undefined;
+    const document = await this.listAgentsDocument();
+    const session = Array.isArray(document.agents) && document.agents.find(value => {
+      const agent = readRecordOrUndefined(value);
+      return agent?.agentId === agentId && (agent.role === "work" || agent.role === "verification");
+    });
+    const agent = readRecordOrUndefined(session);
+    if (!agent) return undefined;
+    return { ...captured, agentId, role: agent.role as "work" | "verification" };
   }
 
   public async listChildSessions(mainAgentId: string, runId?: string): Promise<readonly ChildAgentSession[]> {
@@ -1159,6 +1262,8 @@ When a command needs sudo and the Human has requested it, use python3 ${JSON.str
         ...(latest.workProfile ? { workProfile: latest.workProfile } : {}),
         ...(latest.runId ? { runId: latest.runId } : {}),
         ...(latest.verifiedWorkRunId ? { verifiedWorkRunId: latest.verifiedWorkRunId } : {}),
+        ...(latest.planProgress ? { planProgress: latest.planProgress } : {}),
+        ...(latest.activity ? { activity: latest.activity } : {}),
         ...(typeof agent.updatedAt === "string" ? { updatedAt: agent.updatedAt } : {}),
         ...(latest.dispatchedAt ? { dispatchedAt: latest.dispatchedAt } : {})
       });
@@ -1343,7 +1448,7 @@ When a command needs sudo and the Human has requested it, use python3 ${JSON.str
     this.runStateSnapshots.delete(path);
   }
 
-  private async latestRunInfo(agentId: string, runId?: string): Promise<{ readonly status: string; readonly runId?: string; readonly verifiedWorkRunId?: string; readonly parentAgentId?: string; readonly parentRunId?: string; readonly taskBinding?: Record<string, unknown>; readonly model?: string; readonly reasoningEffort?: string; readonly workProfile?: WorkProfile; readonly dispatchedAt?: string }> {
+  private async latestRunInfo(agentId: string, runId?: string): Promise<{ readonly status: string; readonly runId?: string; readonly verifiedWorkRunId?: string; readonly parentAgentId?: string; readonly parentRunId?: string; readonly taskBinding?: Record<string, unknown>; readonly model?: string; readonly reasoningEffort?: string; readonly workProfile?: WorkProfile; readonly dispatchedAt?: string; readonly planProgress?: PlanProgress; readonly activity?: string }> {
     const runsDirectory = await this.managedPath(agentId, "runs");
     try {
       const runs = runId ? [{ name: runId }] : (await this.managedDirectoryEntries(runsDirectory))
@@ -1365,6 +1470,8 @@ When a command needs sudo and the Human has requested it, use python3 ${JSON.str
               ...(typeof executionOptions?.reasoningEffort === "string" && executionOptions.reasoningEffort ? { reasoningEffort: executionOptions.reasoningEffort } : {}),
               ...(parseWorkProfile(state.workProfile) ? { workProfile: parseWorkProfile(state.workProfile) } : {}),
               ...(typeof state.acceptedAt === "string" && state.acceptedAt ? { dispatchedAt: state.acceptedAt } : {}),
+              ...(parsePlanProgress(state.planProgress) ? { planProgress: parsePlanProgress(state.planProgress) } : {}),
+              ...(typeof state.activity === "string" && state.activity.trim() ? { activity: state.activity.trim().slice(0, 160) } : {}),
               ...(typeof state.parentAgentId === "string" && MANAGED_ID.test(state.parentAgentId) ? { parentAgentId: state.parentAgentId } : {}),
               ...(typeof state.parentRunId === "string" && MANAGED_ID.test(state.parentRunId) ? { parentRunId: state.parentRunId } : {}),
               ...(typeof state.verifiedWorkRunId === "string" && MANAGED_ID.test(state.verifiedWorkRunId)
@@ -1483,6 +1590,7 @@ function executionArguments(execution: ExecutionOptions): string[] {
   const arguments_: string[] = [];
   if (execution.taskMode) arguments_.push("--task-mode", execution.taskMode);
   if (execution.agentPermissions) arguments_.push("--agent-permissions", JSON.stringify(execution.agentPermissions));
+  if (execution.workIsolation !== undefined) arguments_.push("--work-isolation", execution.workIsolation ? "on" : "off");
   if (execution.model) arguments_.push("--model", execution.model);
   if (execution.reasoningEffort) arguments_.push("--reasoning-effort", execution.reasoningEffort);
   if (execution.fast !== undefined) arguments_.push(execution.fast ? "--fast" : "--no-fast");
@@ -1645,12 +1753,20 @@ async function progressUpdates(line: string, projectRoot: string, ownResultPath:
     const detail = summarizeCommand(item.command) ?? localize("ui.no.command.details");
     const title = summarizeReadActivity(item.command);
     const output = typeof item.aggregatedOutput === "string" ? item.aggregatedOutput : item.aggregated_output;
-    const failed = completed && typeof item.exit_code === "number" && item.exit_code !== 0;
+    const exitCode = typeof item.exit_code === "number" && Number.isInteger(item.exit_code) ? item.exit_code : undefined;
+    // Claude reports a failed Bash call by status without always knowing its exit code.
+    const failed = completed && ((exitCode !== undefined && exitCode !== 0) || item.status === "failed" || item.status === "declined");
     if (title === "Read run request") {
       return [statusUpdate(localize("ui.main.agent.is.analyzing.the.request"))];
     }
+    const details: ActivityDetails = {
+      ...(title ? {} : commandActionDetails(item.commandActions, projectRoot)),
+      ...durationDetails(item.durationMs),
+      ...(completed && exitCode ? { exitCode } : {}),
+      ...(failed ? errorDetails(item.error) : {})
+    };
     return compactUpdates(
-      itemId ? activityUpdate(itemId, "command", failed ? "failed" : completed ? "completed" : "started", detail, undefined, title, typeof output === "string" ? truncate(output, 32768) : undefined) : undefined,
+      itemId ? activityUpdate(itemId, "command", failed ? "failed" : completed ? "completed" : "started", detail, undefined, title, typeof output === "string" ? truncate(output, 32768) : undefined, details) : undefined,
       statusUpdate(failed ? localize("ui.checking.command.failure") : completed ? localize("ui.analyzing.results") : localize("ui.running.command"))
     );
   }
@@ -1660,8 +1776,9 @@ async function progressUpdates(line: string, projectRoot: string, ownResultPath:
     }
     const detail = summarizeChanges(item.changes, projectRoot) ?? localize("ui.no.changed.file.details");
     const diff = completed ? await readGitDiff(item.changes, projectRoot) : undefined;
+    const failed = completed && (item.status === "failed" || item.status === "declined");
     return compactUpdates(
-      itemId ? activityUpdate(itemId, "file", completed ? "completed" : "started", detail, diff) : undefined,
+      itemId ? activityUpdate(itemId, "file", failed ? "failed" : completed ? "completed" : "started", detail, diff, undefined, undefined, failed ? errorDetails(item.error) : undefined) : undefined,
       statusUpdate(completed ? localize("ui.checking.git.changes") : localize("ui.applying.git.changes"))
     );
   }
@@ -1677,20 +1794,43 @@ async function progressUpdates(line: string, projectRoot: string, ownResultPath:
       : typeof action?.url === "string" ? action.url
       : title;
     const failed = item.status === "failed" || (completed && item.error != null);
+    const target = queries.length ? queries.join(" · ") : typeof action?.query === "string" ? action.query
+      : typeof item.query === "string" ? item.query : typeof action?.url === "string" ? action.url : undefined;
+    const details: ActivityDetails = {
+      activityKind: opensPage ? "page" : "web",
+      ...(target ? { target: truncate(target, 500) } : {}),
+      ...(action?.type === "findInPage" && typeof action.pattern === "string" ? { scope: truncate(action.pattern, 200) } : {}),
+      ...(failed ? errorDetails(item.error) : {})
+    };
     return compactUpdates(
-      itemId ? activityUpdate(itemId, "tool", failed ? "failed" : completed ? "completed" : "started", truncate(detail, 32768), undefined, title) : undefined,
+      itemId ? activityUpdate(itemId, "tool", failed ? "failed" : completed ? "completed" : "started", truncate(detail, 32768), undefined, title, undefined, details) : undefined,
       statusUpdate(failed ? localize(opensPage ? "ui.web.page.open.failed" : "ui.web.search.failed") : completed ? localize("ui.analyzing.results") : localize(opensPage ? "ui.web.page.opening" : "ui.searching.the.web"))
     );
   }
   if (item.type === "mcp_tool_call") {
     const detail = [item.server, item.tool].filter((value) => typeof value === "string").join("/") || localize("ui.no.tool.details");
-    const failed = completed && item.error !== null && item.error !== undefined;
+    const failed = completed && ((item.error !== null && item.error !== undefined) || item.status === "failed");
+    const output = completed ? toolResultText(item.result) : undefined;
+    const details: ActivityDetails = {
+      ...toolActivityDetails(item.tool, item.arguments, projectRoot),
+      ...durationDetails(item.durationMs),
+      ...(failed ? errorDetails(item.error) : {})
+    };
     return compactUpdates(
-      itemId ? activityUpdate(itemId, "tool", failed ? "failed" : completed ? "completed" : "started", detail) : undefined,
+      itemId ? activityUpdate(itemId, "tool", failed ? "failed" : completed ? "completed" : "started", detail, undefined, undefined, output ? truncate(output, 32768) : undefined, details) : undefined,
       statusUpdate(failed ? localize("ui.checking.connected.tool.failure") : completed ? localize("ui.analyzing.results") : localize("ui.running.connected.tool"))
     );
   }
-  if (item.type === "reasoning") return [statusUpdate(localize("ui.reasoning"))];
+  if (item.type === "reasoning") {
+    // Only the provider's user-facing summary is shown; raw reasoning content stays private.
+    const summary = Array.isArray(item.summary)
+      ? item.summary.filter((part): part is string => typeof part === "string" && part.trim() !== "").join("\n\n").trim() : "";
+    return compactUpdates(
+      itemId ? activityUpdate(itemId, "tool", completed ? "completed" : "started", localize("ui.reasoning"), undefined, undefined, undefined,
+        { activityKind: "think", ...(summary ? { summary: truncate(summary, 16384) } : {}) }) : undefined,
+      statusUpdate(localize("ui.reasoning"))
+    );
+  }
   if (item.type === "agent_message") return [statusUpdate(localize("ui.finalizing.response"))];
   return [];
 }
@@ -1835,7 +1975,8 @@ function activityUpdate(
   text: string,
   diff?: string,
   title?: string,
-  output?: string
+  output?: string,
+  details?: ActivityDetails
 ): RunUpdate {
   return {
     kind: "activity",
@@ -1845,8 +1986,125 @@ function activityUpdate(
     text,
     ...(title ? { title } : {}),
     ...(diff ? { diff } : {}),
-    ...(output !== undefined ? { output } : {})
+    ...(output !== undefined ? { output } : {}),
+    ...details
   };
+}
+
+// Provider tool names whose action is a read, search or listing; other tools stay generic.
+const TOOL_ACTIVITY_KINDS: Readonly<Record<string, ActivityKind>> = {
+  Read: "read", view_file: "read",
+  Grep: "search", grep_search: "search",
+  Glob: "list", LS: "list", list_dir: "list", find_by_name: "list"
+};
+// The agy names are those agy 1.2.16 stream-json reports; it omits line windows and include filters.
+const TOOL_ARGUMENT_NAMES: Readonly<Record<string, string>> = {
+  file_path: "file_path", absolutepath: "file_path", notebook_path: "file_path",
+  path: "path", directorypath: "path", searchpath: "path", searchdirectory: "path",
+  pattern: "pattern", query: "query", glob: "glob", url: "url",
+  offset: "offset", limit: "limit"
+};
+
+/** Bounded copy of the arguments naming a tool's target, keyed by normalized name. */
+export function summarizeToolArguments(value: unknown): Readonly<Record<string, string | number>> {
+  const record = readRecordOrUndefined(value);
+  const summary: Record<string, string | number> = {};
+  if (!record) return summary;
+  for (const [key, argument] of Object.entries(record)) {
+    const name = TOOL_ARGUMENT_NAMES[key.toLowerCase()];
+    if (!name || name in summary) continue;
+    if (name === "offset" || name === "limit") {
+      if (typeof argument === "number" && Number.isInteger(argument) && argument >= 0) summary[name] = argument;
+    } else if (typeof argument === "string" && argument.trim()) {
+      summary[name] = truncate(argument, 200);
+    }
+  }
+  return summary;
+}
+
+/** What a provider tool call acted on; nothing is invented when its arguments do not say. */
+export function toolActivityDetails(tool: unknown, value: unknown, projectRoot: string): ActivityDetails {
+  const name = typeof tool === "string" ? tool : "";
+  const kind = Object.hasOwn(TOOL_ACTIVITY_KINDS, name) ? TOOL_ACTIVITY_KINDS[name] : undefined;
+  const args = summarizeToolArguments(value);
+  const text = (key: string): string | undefined => typeof args[key] === "string" ? args[key] as string : undefined;
+  const count = (key: string): number | undefined => typeof args[key] === "number" ? args[key] as number : undefined;
+  const path = (key: string): string | undefined => { const raw = text(key); return raw ? projectPath(raw, projectRoot) : undefined; };
+  if (kind === "read") {
+    const target = path("file_path") ?? path("path");
+    const offset = count("offset"), limit = count("limit");
+    const start = offset ?? (limit !== undefined ? 1 : undefined);
+    const end = (limit !== undefined && limit > 0 && start !== undefined ? start + limit - 1 : undefined);
+    return { activityKind: kind, ...(target ? { target } : {}), ...(start !== undefined && start > 0 ? { lineStart: start } : {}),
+      ...(end !== undefined && start !== undefined && end >= start ? { lineEnd: end } : {}) };
+  }
+  if (kind === "search") {
+    const target = text("pattern") ?? text("query");
+    const scope = [path("path"), text("glob")].filter(Boolean).join(" · ");
+    return { activityKind: kind, ...(target ? { target } : {}), ...(scope ? { scope } : {}) };
+  }
+  if (kind === "list") {
+    const pattern = text("pattern") ?? text("glob");
+    const directory = path("path");
+    const target = pattern ?? directory;
+    return { activityKind: kind, ...(target ? { target } : {}), ...(pattern && directory ? { scope: directory } : {}) };
+  }
+  // A generic tool shows one key argument: a known target field, else its first short text argument.
+  const key = path("file_path") ?? path("path") ?? text("query") ?? text("url") ?? text("pattern") ?? text("glob") ??
+    Object.values(readRecordOrUndefined(value) ?? {}).find((argument): argument is string => typeof argument === "string" && argument.trim() !== "" && argument.length <= 200);
+  return key ? { activityKind: "tool", scope: truncate(key, 200) } : {};
+}
+
+/** Codex's parsed command actions when they name one read, search or listing. */
+export function commandActionDetails(value: unknown, projectRoot: string): ActivityDetails {
+  if (!Array.isArray(value) || value.length === 0) return {};
+  const actions = value.map(readRecordOrUndefined);
+  if (actions.some((action) => !action)) return {};
+  const records = actions as Record<string, unknown>[];
+  const type = records[0]!.type;
+  if (!records.every((action) => action.type === type)) return {};
+  const paths = (key: string) => records.map((action) => typeof action[key] === "string" && action[key] ? projectPath(action[key] as string, projectRoot) : undefined);
+  if (type === "read") {
+    const targets = paths("path");
+    return targets.every(Boolean) ? { activityKind: "read", target: truncate([...new Set(targets)].join(", "), 500) } : {};
+  }
+  if (type === "search" && records.length === 1) {
+    const query = typeof records[0]!.query === "string" && records[0]!.query ? truncate(records[0]!.query as string, 200) : undefined;
+    const scope = paths("path")[0];
+    return { activityKind: "search", ...(query ? { target: query } : {}), ...(scope ? { scope } : {}) };
+  }
+  if (type === "listFiles" && records.length === 1) {
+    const target = paths("path")[0];
+    return { activityKind: "list", ...(target ? { target } : {}) };
+  }
+  return {};
+}
+
+function projectPath(path: string, projectRoot: string): string {
+  if (!isAbsolute(path)) return truncate(path, 500);
+  const inside = relative(projectRoot, path);
+  return truncate(inside && !inside.startsWith("..") && !isAbsolute(inside) ? inside.split(sep).join("/") : path, 500);
+}
+
+function durationDetails(value: unknown): ActivityDetails {
+  return typeof value === "number" && Number.isFinite(value) && value >= 0 ? { durationMs: Math.round(value) } : {};
+}
+
+function errorDetails(value: unknown): ActivityDetails {
+  const message = typeof value === "string" ? value : typeof readRecordOrUndefined(value)?.message === "string" ? readRecordOrUndefined(value)!.message as string : "";
+  return message.trim() ? { error: truncate(message.trim(), 2000) } : {};
+}
+
+/** Plain text of a tool result: a string, or the text parts of an MCP content list. */
+function toolResultText(value: unknown): string | undefined {
+  if (typeof value === "string") return value || undefined;
+  const content = readRecordOrUndefined(value)?.content;
+  if (!Array.isArray(content)) return undefined;
+  const text = content.flatMap((part) => {
+    const record = readRecordOrUndefined(part);
+    return record?.type === "text" && typeof record.text === "string" ? [record.text] : [];
+  }).join("\n");
+  return text || undefined;
 }
 
 function compactUpdates(...updates: readonly (RunUpdate | undefined)[]): readonly RunUpdate[] {

@@ -173,7 +173,7 @@
 .sudo-panel button { padding: 6px 12px; border: 1px solid var(--vscode-button-border, transparent); border-radius: 4px; color: var(--vscode-button-foreground); background: var(--vscode-button-background); cursor: pointer; }
 .sudo-panel button:disabled { opacity: .5; }
 
-.worktree-menu { position: fixed; box-sizing: border-box; width: min(320px, calc(100vw - 16px)); min-width: 0; right: auto; padding: 8px; border-radius: 10px; overflow-x: hidden; }
+.worktree-menu { position: fixed; z-index: 19; box-sizing: border-box; width: min(320px, calc(100vw - 16px)); min-width: 0; right: auto; padding: 8px; border-radius: 10px; overflow-x: hidden; }
 .worktree-summary { margin: 6px 10px; font-size: 11px; color: var(--vscode-descriptionForeground); overflow-wrap: anywhere; }
 #worktree-button.is-connected { color: var(--vscode-button-foreground); background: var(--vscode-button-background); }
 #worktree-button svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.5; }
@@ -260,3 +260,6 @@
 #deploy-dialog button { padding: 7px 16px; border-radius: 6px; cursor: pointer; border: 1px solid var(--vscode-button-border, #454545); background: var(--vscode-button-secondaryBackground, #333); color: var(--vscode-button-secondaryForeground, #fff); }
 #deploy-dialog #deploy-submit { background: var(--vscode-button-background, #007acc); color: var(--vscode-button-foreground, #fff); }
 #deploy-dialog :disabled { opacity: .55; cursor: default; }
+
+.agents-tools { display: flex; align-items: center; gap: 4px; padding: 4px; margin-bottom: 4px; border-bottom: 1px solid var(--vscode-panel-border); }
+#agents-menu [hidden] { display: none; }

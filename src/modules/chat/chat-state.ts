@@ -6,7 +6,20 @@ import type { BusinessMode } from "../../common/types/business-mode";
 import { type TaskSelection } from "./task-selection";
 import { randomUUID } from "node:crypto";
 
+export interface CapturedAgentRun {
+  readonly parentAgentId: string;
+  readonly agentId: string;
+  readonly runId: string;
+  readonly model?: string;
+  readonly reasoningEffort?: string;
+  readonly workProfile?: "work" | "workLight";
+}
+
 export interface ChatPanelState {
+  /** Display snapshot of the selected task run; never a next-send setting. */
+  readonly capturedRun?: CapturedAgentRun;
+  /** Complete, independent model settings snapshot. */
+  readonly agentSettingsVersion?: 1;
   readonly panelId: string;
   readonly title: string;
   readonly agentId?: string;
@@ -44,7 +57,8 @@ export function createDraftChatState(preferences: ComposerPreferences = {}): Cha
   return {
     panelId: randomUUID(),
     title: "Main Agent",
-    ...preferences,
+    agentSettingsVersion: 1,
+    ...JSON.parse(JSON.stringify(preferences)),
     businessMode: "normal",
     goalMode: false,
     taskMode: "direct",
@@ -60,9 +74,19 @@ export function restoreChatState(
     return createDraftChatState(preferences);
   }
 
+  // A migrated snapshot never reads its parent again, including intentionally empty maps.
+  if (value.agentSettingsVersion === 1) preferences = {agentPermissions: preferences.agentPermissions};
+  const storedModels = parseAgentModels(value.agentModels);
+  const agentModels = value.agentSettingsVersion === 1 ? storedModels : {
+    ...preferences.agentModels,
+    ...Object.fromEntries(Object.entries(storedModels ?? {}).map(([role, fields]) =>
+      [role, {...preferences.agentModels?.[role as keyof AgentModels], ...fields}]))
+  };
   return {
+    ...(value.agentSettingsVersion === 1 ? {agentSettingsVersion: 1 as const} : {}),
     panelId: readNonEmptyString(value.panelId) ?? randomUUID(),
     title: readNonEmptyString(value.title) ?? "Main Agent",
+    ...(readCapturedRun(value.capturedRun, value.agentId) ? { capturedRun: readCapturedRun(value.capturedRun, value.agentId) } : {}),
     ...(readRole(value.role) ? { role: readRole(value.role) } : {}),
     ...(readManagedId(value.verifiedWorkRunId) ? { verifiedWorkRunId: readManagedId(value.verifiedWorkRunId) } : {}),
     ...(readNonEmptyString(value.model)
@@ -77,7 +101,7 @@ export function restoreChatState(
     ...(readNonEmptyString(value.agentSettingsSet)
       ? { agentSettingsSet: readNonEmptyString(value.agentSettingsSet) }
       : preferences.agentSettingsSet ? { agentSettingsSet: preferences.agentSettingsSet } : {}),
-    ...((parseAgentModels(value.agentModels) ?? preferences.agentModels) ? { agentModels: parseAgentModels(value.agentModels) ?? preferences.agentModels } : {}),
+    ...(agentModels && Object.keys(agentModels).length ? {agentModels} : {}),
     ...((parseModelFastModes(value.modelFastModes) ?? preferences.modelFastModes) ? { modelFastModes: parseModelFastModes(value.modelFastModes) ?? preferences.modelFastModes } : {}),
     ...((parseAgentFastModes(value.agentFastModes) ?? preferences.agentFastModes) ? { agentFastModes: parseAgentFastModes(value.agentFastModes) ?? preferences.agentFastModes } : {}),
     ...((parseAgentPermissions(value.agentPermissions) ?? preferences.agentPermissions) ? { agentPermissions: parseAgentPermissions(value.agentPermissions) ?? preferences.agentPermissions } : {}),
@@ -151,4 +175,12 @@ function readPercent(value: unknown): number | undefined {
   return typeof value === "number" && Number.isFinite(value) && value >= 0 && value <= 100
     ? value
     : undefined;
+}
+
+export function readCapturedRun(value: unknown, agentId: unknown): CapturedAgentRun | undefined {
+  if (!isRecord(value) || value.agentId !== agentId || !readManagedId(value.agentId) || !readManagedId(value.parentAgentId) || !readManagedId(value.runId)) return undefined;
+  return { parentAgentId: value.parentAgentId as string, agentId: value.agentId as string, runId: value.runId as string,
+    ...(readNonEmptyString(value.model) ? { model: readNonEmptyString(value.model) } : {}),
+    ...(readNonEmptyString(value.reasoningEffort) ? { reasoningEffort: readNonEmptyString(value.reasoningEffort) } : {}),
+    ...(value.workProfile === "work" || value.workProfile === "workLight" ? { workProfile: value.workProfile } : {}) };
 }

@@ -348,7 +348,7 @@ test("composer shows only supported controls across draft and bound sessions", a
     modelMenu: { querySelector() { return null; } }, submissionButton: button(),
     promptSurface: { classList: { toggle() {} } },
     state: { role: 'main', businessMode: 'normal', taskMode: 'work', capabilities: { submit: { model: true }, send: {} }, model: 'gpt-6-astra', reasoning: 'medium', fastMode: true, goalMode: true },
-    modelButton: button(), reasoningButton: button(), fastModeSetting: button(), fastModeButton: button(), fastModeValue: {}, orchestrateModeButton: button(), goalModeButton: button(), workLoopButton: button(),
+    modelButton: button(), reasoningButton: button(), fastModeSetting: button(), fastModeButton: button(), fastModeValue: {}, orchestrateModeButton: button(), workIsolationButton: button(), goalModeButton: button(), workLoopButton: button(),
     orchestrateAvailable: () => true, enterAction: () => context.state.orchestrateMode === false ? "direct" : "orchestrate",
     taskModeNames: { work: "Work" }, businessModeNames: { normal: "Normal" }, businessModeButton: button(),
     executionModeButton: button(), executionModeLabel: {}, modelLabel: {}, reasoningLabel: {}, openSettingId: undefined,
@@ -363,6 +363,19 @@ test("composer shows only supported controls across draft and bound sessions", a
   assert.equal(context.fastModeSetting.hidden, true);
   assert.equal(context.orchestrateModeButton.hidden, false);
   assert.equal(context.orchestrateModeButton.title.length > 0, true);
+  // Work isolation sits beside the mode toggle; it is off until the runtime supports it and the Human turns it on.
+  assert.equal(context.workIsolationButton.hidden, false);
+  assert.equal(context.workIsolationButton.disabled, true);
+  assert.equal(context.workIsolationButton.attributes['aria-pressed'], 'false');
+  context.state.workIsolation = true;
+  context.state.capabilities = { submit: { model: true, workIsolation: true }, send: { workIsolation: true } };
+  runInNewContext('updateModeControls();', context);
+  assert.equal(context.workIsolationButton.disabled, false);
+  assert.equal(context.workIsolationButton.attributes['aria-pressed'], 'true');
+  context.state.workIsolation = false;
+  runInNewContext('updateModeControls();', context);
+  assert.equal(context.workIsolationButton.attributes['aria-pressed'], 'false');
+  statusRenders -= 2;
   context.state.agentId = 'bound-session';
   runInNewContext('updateModeControls();', context);
   assert.equal(context.modelButton.parentElement.hidden, false);
@@ -373,6 +386,7 @@ test("composer shows only supported controls across draft and bound sessions", a
   runInNewContext('updateModeControls();', context);
   assert.equal(context.submissionButton.hidden, true);
   assert.equal(context.orchestrateModeButton.hidden, true);
+  assert.equal(context.workIsolationButton.hidden, true);
   assert.equal(clearButton.hidden, true);
 });
 
@@ -502,6 +516,8 @@ test("composer settings messages are strictly validated", async function () {
     type: "agent.open",
     agentId: "main-one-work"
   });
+  assert.deepEqual(parseClientMessage({ type: "agent.open", agentId: "main-one-work", runId: "run-old" }), { type: "agent.open", agentId: "main-one-work", runId: "run-old" });
+  for (const runId of ["../old", "", 12]) assert.equal(parseClientMessage({ type: "agent.open", agentId: "main-one-work", runId }), undefined);
   assert.equal(parseClientMessage({ type: "agent.open", agentId: "../work" }), undefined);
 });
 
@@ -778,6 +794,34 @@ test("runtime client invokes official commands and reads the bounded managed res
     { kind: "activity", id: "compact-1", category: "tool", phase: "completed", text: "Context compaction completed", title: "Context compaction" },
     { kind: "status", text: "Context compaction completed" }
   ]);
+
+  await writeFile(eventsPath, [
+    { type: "item.completed", item: { id: "read-1", type: "command_execution", command: "/bin/zsh -lc 'nl -ba src/a.ts | sed -n 1,20p'", exit_code: 0, durationMs: 42,
+      commandActions: [{ type: "read", command: "nl -ba src/a.ts", name: "a.ts", path: join(projectRoot, "src/a.ts") }] } },
+    { type: "item.completed", item: { id: "search-1", type: "command_execution", command: "rg -n TODO src", exit_code: 1,
+      commandActions: [{ type: "search", command: "rg -n TODO src", query: "TODO", path: "src" }] } },
+    { type: "item.completed", item: { id: "bash-1", type: "command_execution", command: "npm test", status: "failed", error: "Exit code 2\nnpm ERR!" } },
+    { type: "item.started", item: { id: "tool-1", type: "mcp_tool_call", server: "claude", tool: "Read", arguments: { file_path: join(projectRoot, "src/b.py"), offset: 120, limit: 40 } } },
+    { type: "item.completed", item: { id: "tool-2", type: "mcp_tool_call", server: "playwright", tool: "browser_navigate", arguments: { url: "https://example.com" },
+      durationMs: 700, status: "failed", error: { message: "net::ERR_FAILED" }, result: { content: [{ type: "text", text: "navigation failed" }] } } },
+    { type: "item.started", item: { id: "think-1", type: "reasoning", summary: [] } },
+    { type: "item.completed", item: { id: "think-1", type: "reasoning", summary: ["**Plan**", "Check rows"], content: ["private"] } },
+    { type: "item.completed", item: { id: "patch-1", type: "file_change", status: "failed", changes: [{ path: join(projectRoot, "src/c.ts") }] } }
+  ].map(JSON.stringify).join("\n") + "\n");
+  const detailUpdates = (await client.updates("main-test", "run-fake", 0)).updates.filter(update => update.kind === "activity");
+  const pick = ({ id, phase, activityKind, target, scope, lineStart, lineEnd, durationMs, exitCode, error, summary, output }) =>
+    JSON.parse(JSON.stringify({ id, phase, activityKind, target, scope, lineStart, lineEnd, durationMs, exitCode, error, summary, output }));
+  assert.deepEqual(detailUpdates.map(pick), [
+    { id: "read-1", phase: "completed", activityKind: "read", target: "src/a.ts", durationMs: 42 },
+    { id: "search-1", phase: "failed", activityKind: "search", target: "TODO", scope: "src", exitCode: 1 },
+    { id: "bash-1", phase: "failed", error: "Exit code 2\nnpm ERR!" },
+    { id: "tool-1", phase: "started", activityKind: "read", target: "src/b.py", lineStart: 120, lineEnd: 159 },
+    { id: "tool-2", phase: "failed", activityKind: "tool", scope: "https://example.com", durationMs: 700, error: "net::ERR_FAILED", output: "navigation failed" },
+    { id: "think-1", phase: "started", activityKind: "think" },
+    { id: "think-1", phase: "completed", activityKind: "think", summary: "**Plan**\n\nCheck rows" },
+    { id: "patch-1", phase: "failed" }
+  ]);
+  assert.ok(detailUpdates.every(update => !JSON.stringify(update).includes("private")), "raw reasoning content stays private");
 
   assert.deepEqual(await client.result("main-test", "run-fake"), {
     status: "completed",
@@ -1371,6 +1415,8 @@ test("approval protocol accepts only explicit bounded run identifiers", async ()
   for (const runId of [undefined, "", "../run", "r".repeat(129), 123]) {
     assert.equal(parseClientMessage({ type: "decision.approve", runId }), undefined);
   }
+  assert.deepEqual(parseClientMessage({ type: "decision.approve", runId: "run-123", language: "en" }), { type: "decision.approve", runId: "run-123", language: "en" });
+  assert.equal(parseClientMessage({ type: "decision.approve", runId: "run-123", language: "fr" }), undefined);
 });
 
 test("execution selection protocol accepts only listed modes", async () => {
@@ -2333,4 +2379,31 @@ test('state snapshots bound both record count and source bytes across replacemen
   assert.equal(await client.cachedRunState(path), undefined);
   assert.equal(client.runStateSnapshots.has(path), false);
   verifyBudget();
+});
+
+
+test('task chat resolves exact historical models, profiles and missing values without starting runs', async t => {
+  const { AgentFactoryClient } = await importTypeScript('src/infrastructure/agent-factory/agent-client.ts');
+  const { restoreChatState } = await importTypeScript('src/modules/chat/chat-state.ts');
+  const root = await mkdtemp(join(tmpdir(), 'af-chat-model-'));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const directory = agentsRoot(root);
+  const client = new AgentFactoryClient('/unused', root);
+  client.location = async () => ({ agentsRoot: directory });
+  client.listAgentsDocument = async () => ({ agents: [{ agentId: 'work-one', role: 'work', model: 'current-profile' }, { agentId: 'verify-one', role: 'verification' }] });
+  for (const [agentId, runId, model, workProfile] of [['work-one', 'run-old', 'captured-old', 'workLight'], ['work-one', 'run-new', 'captured-new', 'work'], ['verify-one', 'run-v', undefined, undefined]]) {
+    const path = join(directory, agentId, 'runs', runId, 'state.json');
+    await mkdir(dirname(path), { recursive: true });
+    await writeFile(path, JSON.stringify({ status: 'completed', parentAgentId: 'main-owner', workProfile, executionOptions: { model } }));
+    const captured = await client.childRun('main-owner', agentId, runId);
+    assert.equal(captured.runId, runId); assert.equal(captured.model, model); assert.equal(captured.workProfile, workProfile);
+    const snapshot = { parentAgentId: 'main-owner', agentId, runId, ...(model ? { model } : {}), ...(workProfile ? { workProfile } : {}) };
+    const restored = restoreChatState({ agentId, role: captured.role, capturedRun: snapshot }, { model: 'main-setting' });
+    assert.deepEqual(restored.capturedRun, snapshot);
+    assert.equal(restored.model, 'main-setting', 'Next-send preferences remain independent');
+    assert.equal(restoreChatState({ agentId: 'another-agent', capturedRun: snapshot }).capturedRun, undefined);
+  }
+  assert.equal(await client.childRun('other-main', 'work-one', 'run-old'), undefined);
+  assert.equal(await client.childRun('main-owner', 'work-one', 'missing-run'), undefined);
+  assert.equal(await client.childRun('main-owner', 'work-one', '../run'), undefined);
 });

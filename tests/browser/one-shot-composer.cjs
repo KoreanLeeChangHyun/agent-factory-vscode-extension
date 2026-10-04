@@ -22,7 +22,8 @@ async function checkOneShotComposer(page) {
   assert.match(await page.locator('#input-feedback').innerText(), /target and desired result/);
   assert.equal(await page.locator('#prompt').inputValue(), '   ');
   await page.locator('#model-button').click();
-  assert.equal(await page.locator('#model-menu select[data-role]').count(), 3);
+  // One model picker per role: Main, expert, worker and verifier.
+  assert.deepEqual(await page.locator('#model-menu button[data-field="model"]').evaluateAll(els => els.map(el => el.dataset.role)), ['main', 'work', 'workLight', 'verification']);
   await page.keyboard.press('Escape');
   for (const [action, workflow, goal] of [
     ['direct', 'interview', false],
@@ -53,7 +54,13 @@ async function checkOneShotComposer(page) {
   assert.equal((await last()).execution.taskMode, 'direct');
   assert.equal((await last()).execution.goal, true);
   assert.equal((await last()).execution.goalObjective, 'Goal draft');
-  for (const draft of ['   ', 'x'.repeat(4001)]) {
+  // A long objective is sent; the runtime replaces a condition over 4,000 characters with a bounded one.
+  await page.locator('#prompt').fill('x'.repeat(4001));
+  const beforeLong = await count();
+  await sendGoal();
+  assert.equal(await count(), beforeLong + 1);
+  assert.equal((await last()).execution.goalObjective.length, 4001);
+  for (const draft of ['   ']) {
     await page.locator('#prompt').fill(draft);
     const beforeInvalid = await count();
     await sendGoal();

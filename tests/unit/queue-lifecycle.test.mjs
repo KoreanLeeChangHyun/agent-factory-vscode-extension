@@ -80,7 +80,7 @@ test('decision-required pauses batching until an explicit answer is accepted', a
   assert.equal(sent.length, 1);
   assert.match(sent[0], /^proposal\n/);
   assert.deepEqual(promoted, []);
-  assert.equal(controller.approveDecision('proposal', {}), true);
+  assert.equal(controller.approveDecision('proposal', {}, 'ko'), true);
   await Promise.all([second, third]);
   assert.equal(sent.length, 3);
   assert.match(sent[1], /제안한 범위/);

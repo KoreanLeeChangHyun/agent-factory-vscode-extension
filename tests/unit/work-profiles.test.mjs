@@ -115,6 +115,21 @@ test("the dispatch asks the runtime before telling Main to pass --work-profile",
   const both = await dispatch(() => ({ submit: { workProfile: true, failureClass: true }, send: {} }), orchestrate);
   assert.match(both.text, /--work-profile work or --work-profile workLight matching the profile you chose/);
   assert.match(both.text, /failureClass is contract or absent/);
+  assert.doesNotMatch(both.text, /--workspace-file/);
+  // Work isolation off (the default) keeps the shared checkout even on a runtime that supports Work Units.
+  const isolating = () => ({ submit: { taskWorkspaces: true, workIsolation: true }, send: {} });
+  assert.doesNotMatch((await dispatch(isolating, orchestrate)).text, /--workspace-file|Work isolation/);
+  assert.doesNotMatch((await dispatch(isolating, { ...orchestrate, workIsolation: false })).text, /--workspace-file|Work isolation/);
+  const isolated = await dispatch(isolating, { ...orchestrate, workIsolation: true });
+  assert.match(isolated.text, /Work isolation ON[\s\S]*every brief or task pass loop\.py start --workspace-file/);
+  assert.match(isolated.text, /research, questions and other read-only Work: \{"mode":"read-only"\}/);
+  assert.match(isolated.text, /Shared mode is unavailable while isolation is on/);
+  assert.match(isolated.text, /nested repositories[\s\S]*one task per repository/);
+  assert.match(isolated.text, /current branch/);
+  assert.match(isolated.text, /Conflicts never wait for the Human[\s\S]*integration_preserved/);
+  assert.match(isolated.text, /Do not retrofit any accepted loop or run/);
+  assert.match((await dispatch(() => ({ submit: { taskWorkspaces: true }, send: {} }), { ...orchestrate, workIsolation: true })).text, /does not support it[\s\S]*report this limitation/);
+  assert.doesNotMatch((await dispatch(isolating, { taskMode: "direct", workIsolation: true })).text, /--workspace-file|Work isolation/);
   for (const capabilities of [() => ({ submit: { failureClass: "yes" }, send: {} }), () => { throw new Error("capabilities unavailable"); }, undefined]) {
     assert.doesNotMatch((await dispatch(capabilities, orchestrate)).text, /failureClass/);
   }
@@ -177,6 +192,13 @@ test("the client reports the advertised capability and each run's recorded profi
   // Older runs and malformed values stay unrecorded so the panel never invents an assignment.
   assert.equal("workProfile" in await child({ padding: 333 }), false);
   assert.equal("workProfile" in await child({ workProfile: "light", padding: 4444 }), false);
+  // Step counts and the activity line come only from the run's own record and must be consistent.
+  const progressed = await child({ planProgress: { completed: 2, total: 7 }, activity: "  Editing the panel  ", padding: 55555 });
+  assert.deepEqual(progressed.planProgress, { completed: 2, total: 7 });
+  assert.equal(progressed.activity, "Editing the panel");
+  for (const [planProgress, padding] of [[{ completed: 8, total: 7 }, 6], [{ completed: 1, total: 0 }, 77], [{ completed: "2", total: 7 }, 888]]) {
+    assert.equal("planProgress" in await child({ planProgress, padding }), false);
+  }
 });
 
 test("the task panel shows the recorded profile and never infers one for unrecorded runs", async () => {
@@ -227,4 +249,39 @@ test("the task panel shows the recorded profile and never infers one for unrecor
   const bound = panel(identical, [agent({ workProfile: "workLight", taskBinding: { workflowId: "flow-two", workflowTitle: "Flow", taskId: "task-two", title: "Task", description: "Do it" } })]);
   assert.equal(bound.flows()[0].tasks[0].workProfile, "workLight");
   assert.equal(bound.profile(bound.flows()[0].tasks[0]), "workLight");
+});
+
+test("the Work isolation flag reaches only a runtime that advertises it", async () => {
+  const { ChatSessionController } = await importTypeScript("src/modules/chat/session-controller.ts");
+  const events = { onBound() {}, onRunningChanged() {}, onAssistantText() {}, onProgress() {}, onActivity() {}, onUsage() {}, onError() {} };
+  const dispatch = async (capabilities, execution) => {
+    const sent = [];
+    const controller = new ChatSessionController({
+      async activeRun() {},
+      async send(agentId, text, options) { sent.push(options); return { agentId, runId: "run-one" }; },
+      async updates() { return { cursor: 0, updates: [] }; },
+      async status() { return { status: "completed" }; },
+      async result() { return { status: "completed", text: "done" }; },
+      async capabilities() { return capabilities; }
+    }, events, "main-existing", { pollIntervalMs: 0 });
+    await controller.send("request", [], execution);
+    return sent[0];
+  };
+  const orchestrate = { taskMode: "orchestrate", model: "main-model" };
+  assert.equal((await dispatch({ submit: { workIsolation: true }, send: {} }, { ...orchestrate, workIsolation: true })).workIsolation, true);
+  assert.equal((await dispatch({ submit: { workIsolation: true }, send: {} }, { ...orchestrate, workIsolation: false })).workIsolation, false);
+  assert.equal("workIsolation" in (await dispatch({ submit: {}, send: {} }, { ...orchestrate, workIsolation: true })), false);
+  assert.equal("workIsolation" in (await dispatch({ submit: { workIsolation: true }, send: {} }, orchestrate)), false);
+});
+
+test("the Work isolation toggle maps to the runtime flag and validates on the protocol", async () => {
+  const { parseClientMessage } = await importTypeScript("src/protocol/validator.ts");
+  assert.deepEqual(parseClientMessage({ type: "workIsolation.set", value: true }), { type: "workIsolation.set", value: true });
+  assert.equal(parseClientMessage({ type: "workIsolation.set", value: "on" }), undefined);
+  const send = { type: "chat.send", id: "message-one", text: "hello", attachments: [], execution: { fast: false, goal: false } };
+  assert.equal(parseClientMessage({ ...send, execution: { ...send.execution, workIsolation: true } }).execution.workIsolation, true);
+  assert.equal("workIsolation" in parseClientMessage(send).execution, false);
+  assert.equal(parseClientMessage({ ...send, execution: { ...send.execution, workIsolation: "yes" } }), undefined);
+  const source = await readFile(new URL("../../src/infrastructure/agent-factory/agent-client.ts", import.meta.url), "utf8");
+  assert.match(source, /--work-isolation", execution\.workIsolation \? "on" : "off"/);
 });

@@ -5,6 +5,24 @@ import type { AttachmentReference } from "../common/types/attachment";
 import type { InterviewQuestion } from "../common/types/business-mode";
 
 /** Captured submission intent and app-added guidance, never the full provider prompt. */
+/** What one timeline action did and touched; every field is optional and omitted when unobserved. */
+export type ActivityKind = "read" | "search" | "list" | "run" | "test" | "git" | "edit" | "web" | "page" | "tool" | "think" | "skill";
+export interface ActivityDetails {
+  readonly kind?: ActivityKind;
+  /** Path, pattern, query, URL or tool identity the action acted on. */
+  readonly target?: string;
+  /** Where a search/list ran, or a tool's key argument. */
+  readonly scope?: string;
+  readonly lineStart?: number;
+  readonly lineEnd?: number;
+  readonly durationMs?: number;
+  /** Only nonzero exit codes are reported. */
+  readonly exitCode?: number;
+  readonly error?: string;
+  /** Reasoning summary shown when a thinking row is opened. */
+  readonly summary?: string;
+}
+
 export interface MessageSubmission {
   readonly backgroundContinuation?: boolean;
   readonly taskMode: import("../modules/chat/task-selection").TaskSelection;
@@ -52,6 +70,8 @@ export type ClientMessage =
         readonly model?: string;
         readonly agentModels?: AgentModels;
   readonly agentPermissions?: AgentPermissions;
+        /** The project's Work isolation toggle when the message was sent. */
+        readonly workIsolation?: boolean;
         readonly reasoningEffort?: "none" | "low" | "medium" | "high" | "xhigh" | "max";
         readonly fast: boolean;
         readonly goal: boolean;
@@ -59,8 +79,9 @@ export type ClientMessage =
       };
     }
   | { readonly type: "sudo.reply"; readonly id: string; readonly key?: string; readonly iv?: string; readonly data?: string; readonly cancelled?: boolean }
-  | { readonly type: "decision.approve"; readonly runId: string }
+  | { readonly type: "decision.approve"; readonly runId: string; readonly language?: "ko" | "en" }
   | { readonly type: "goal.control"; readonly action: import("../infrastructure/agent-factory/agent-client").GoalAction }
+  | { readonly type: "workIsolation.set"; readonly value: boolean }
   | { readonly type: "queue.resume" }
   | { readonly type: "run.cancel" }
   | { readonly type: "conversation.clear" }
@@ -74,13 +95,14 @@ export type ClientMessage =
   | { readonly type: "providers.pick"; readonly provider: import("../infrastructure/agent-factory/provider-detection").ProviderId }
   | { readonly type: "providers.updateMode.select"; readonly mode: import("../infrastructure/agent-factory/provider-detection").PluginUpdateMode }
   | { readonly type: "session.select"; readonly agentId: string }
+  | ({ readonly type: "task.stop" } & import("../infrastructure/agent-factory/agent-client").TaskStopTarget)
   | { readonly type: "workflow.close"; readonly workAgentId: string; readonly loopId: string }
   | { readonly type: "workflow.decision"; readonly workAgentId: string; readonly loopId: string; readonly decision: "continue" | "stop" }
   | { readonly type: "conversations.request" }
   | { readonly type: "conversation.read"; readonly conversationId: string | null; readonly before?: string; readonly requestId: string }
   | { readonly type: "history.request"; readonly before: string }
   | { readonly type: "agents.request" }
-  | { readonly type: "agent.open"; readonly agentId: string }
+  | { readonly type: "agent.open"; readonly agentId: string; readonly runId?: string }
   | { readonly type: "attachments.pick" }
   | { readonly type: "attachments.addUris"; readonly uris: readonly string[] }
   | { readonly type: "attachments.createText"; readonly text: string }
@@ -148,10 +170,12 @@ export type HostMessage =
   | { readonly type: "bot.prompt.saved"; readonly requestId: string; readonly prompt?: string; readonly failed?: boolean }
   | { readonly type: "chat.rejected"; readonly id: string }
   | { readonly type: "chat.started"; readonly submission?: MessageSubmission; readonly id: string; readonly text: string; readonly attachments: readonly AttachmentReference[] }
+  | { readonly type: "agent.run.selected"; readonly capturedRun?: import("../modules/chat/chat-state").CapturedAgentRun }
   | { readonly type: "execution.updated"; readonly mode?: import("../infrastructure/agent-factory/agent-client").ExecutionMode | "read-only" }
   | { readonly type: "syntax.theme"; readonly selection: import("../infrastructure/agent-factory/cli-theme").CliTheme }
   | { readonly type: "branch.updated"; readonly branch?: string }
   | { readonly type: "goal.updated"; readonly goal: import("../infrastructure/agent-factory/agent-client").NativeGoal | null; readonly error?: string }
+  | { readonly type: "workIsolation.updated"; readonly value: boolean }
   | { readonly type: "capabilities.updated"; readonly capabilities: { readonly submit: import("../infrastructure/agent-factory/agent-client").ExecutionCapabilities; readonly send: import("../infrastructure/agent-factory/agent-client").ExecutionCapabilities } }
   | { readonly type: "models.list"; readonly models: readonly string[] }
   | {
@@ -166,6 +190,9 @@ export type HostMessage =
   | { readonly type: "runtime.updated"; readonly runtimeAvailable: boolean; readonly capabilities?: { readonly submit: import("../infrastructure/agent-factory/agent-client").ExecutionCapabilities; readonly send: import("../infrastructure/agent-factory/agent-client").ExecutionCapabilities } }
   | {
       readonly type: "host.initialize";
+      readonly agentSettingsVersion?: 1;
+      readonly agentId?: string;
+      readonly capturedRun?: import("../modules/chat/chat-state").CapturedAgentRun;
       readonly panelId: string;
       readonly title: string;
       readonly role: "main" | "work" | "verification";
@@ -173,6 +200,8 @@ export type HostMessage =
       readonly projectName: string;
       readonly runtimeAvailable: boolean;
       readonly capabilities?: { readonly submit: import("../infrastructure/agent-factory/agent-client").ExecutionCapabilities; readonly send: import("../infrastructure/agent-factory/agent-client").ExecutionCapabilities };
+      /** Per-project Work isolation toggle; off unless the Human turned it on. */
+      readonly workIsolation?: boolean;
       readonly running: boolean;
       readonly botsEnabled?: boolean;
       readonly botsAvailable?: boolean;
@@ -213,6 +242,12 @@ export type HostMessage =
     }
   | { readonly type: "attachment.rejected"; readonly id: string }
   | {
+      readonly type: "task.stop.result";
+      readonly workflowId: string;
+      readonly taskId: string;
+      readonly error?: string;
+    }
+  | {
       readonly type: "host.notice";
       readonly level: "info" | "warning" | "error" | "cancelled";
       readonly text: string;
@@ -252,9 +287,11 @@ export type HostMessage =
         readonly workProfile?: import("../common/types/agent-models").WorkProfile;
         readonly updatedAt?: string;
         readonly dispatchedAt?: string;
+        readonly planProgress?: { readonly completed: number; readonly total: number };
+        readonly activity?: string;
       }[];
     }
-  | { readonly type: "decision.pending"; readonly runId: string | null; readonly canApprove?: boolean }
+  | { readonly type: "decision.pending"; readonly runId: string | null; readonly canApprove?: boolean; readonly approval?: import("../modules/chat/decision-approval").DecisionApproval }
   | { readonly type: "chat.human-decision"; readonly submission?: MessageSubmission; readonly text: string }
   | { readonly type: "chat.assistant"; readonly localization?: { readonly text?: import("../common/localization").LocalizedMessage }; readonly text: string; readonly phase?: "commentary" | "final"; readonly runId?: string }
   | { readonly type: "chat.delta"; readonly runId: string; readonly stream: "commentary" | "final"; readonly id: string; readonly text: string }
@@ -269,7 +306,7 @@ export type HostMessage =
       readonly fiveHourResetsAt?: number;
       readonly weeklyResetsAt?: number;
     }
-  | {
+  | ({
       readonly type: "run.activity";
       readonly id: string;
       readonly category: "command" | "file" | "tool";
@@ -278,7 +315,7 @@ export type HostMessage =
       readonly title?: string;
       readonly diff?: string;
       readonly output?: string;
-    }
+    } & ActivityDetails)
   | {
       readonly type: "run.state";
       readonly running: boolean;

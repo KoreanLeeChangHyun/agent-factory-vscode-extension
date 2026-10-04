@@ -3,14 +3,15 @@ import { mkdtemp, mkdir, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createRequire } from "node:module";
+import { runInThisContext } from "node:vm";
 import test from "node:test";
 import { build } from "esbuild";
 
-const bundleRoot = await mkdtemp(join(tmpdir(), "af-cli-theme-bundle-"));
-test.after(() => rm(bundleRoot, { recursive: true, force: true }));
-const outfile = join(bundleRoot, "theme.cjs");
-await build({ entryPoints: [new URL("../../src/infrastructure/agent-factory/cli-theme.ts", import.meta.url).pathname], outfile, bundle: true, platform: "node", format: "cjs", target: "node18" });
-const { readCliTheme } = createRequire(import.meta.url)(outfile);
+const bundle = await build({ entryPoints: [new URL("../../src/infrastructure/agent-factory/cli-theme.ts", import.meta.url).pathname], write: false, bundle: true, platform: "node", format: "cjs", target: "node18" });
+const module = { exports: {} };
+// Match CommonJS's realm so strict assertions keep their original semantics.
+runInThisContext(`(function(module, exports, require) {\n${bundle.outputFiles[0].text}\n})`)(module, module.exports, createRequire(import.meta.url));
+const { readCliTheme } = module.exports;
 
 async function fixture(t, config) {
   const home = await mkdtemp(join(tmpdir(), "af-cli-theme-"));

@@ -24,7 +24,7 @@ async function checkRevisionLimit(page) {
   const flow = page.locator('#run-stage-list [data-flow-id="brief-limit"]');
   const view = flow.locator('.task-flow-decision');
   await view.waitFor();
-  assert.equal(await flow.locator('.task-flow-single .task-flow-state').textContent(), '막힘');
+  assert.equal(await flow.locator('.task-flow-single .task-flow-state').textContent(), '결정 대기');
   assert.equal(await view.locator('.task-flow-decision-title').textContent(), '수정 상한 도달');
   assert.equal(await view.locator('.task-flow-decision-revisions').textContent(), '수정 3/3회 사용');
   assert.equal(await view.locator('.task-flow-decision-count').textContent(), '남은 지적 2건');
@@ -86,7 +86,7 @@ async function checkRevisionLimit(page) {
   assert.equal(await flow.locator('.task-flow-single .task-flow-state').textContent(), '진행 중');
   // Without the structured pause (a runtime that does not advertise it) the stop stays a plain blocked card.
   await post([], [{ ...limited, pause: undefined }]);
-  await page.waitForFunction(() => document.querySelector('[data-flow-id="brief-limit"] .task-flow-state')?.textContent === '막힘');
+  await page.waitForFunction(() => document.querySelector('[data-flow-id="brief-limit"] .task-flow-state')?.textContent === '결정 대기');
   assert.equal(await view.count(), 0);
   assert.equal(await flow.locator('.task-flow-decision-action').count(), 0);
 
@@ -112,7 +112,13 @@ async function checkRevisionLimit(page) {
   assert.equal(await listedView.locator('.task-flow-decision-findings li').count(), 1);
   await post([], [{ ...limited, status: 'cancelled', pause: null, workflow: { ...limited.workflow, tasks: [{ ...limited.workflow.tasks[0], verificationStatus: 'cancelled' }] } },
     { ...listed, status: 'cancelled', pause: null, workflow: { ...listed.workflow, tasks: listed.workflow.tasks.map(task => ({ ...task, verificationStatus: task.verificationStatus === 'blocked' ? 'cancelled' : task.verificationStatus })) } }]);
-  await page.waitForFunction(() => !document.querySelector('#run-stage-list .task-flow'));
+  await page.waitForFunction(() => document.querySelector('#run-stage-list [data-flow-id="brief-limit"] .task-flow-state')?.textContent === '취소');
+  assert.equal(await flow.locator('.task-flow-decision').count(), 0, 'Cancelled workflow no longer asks for a decision');
+  assert.equal(await page.locator('#run-stage-list [data-flow-id="listed-flow"]').count(), 1, 'Cancelled rows remain in the list');
+  // Dispatch ordering is a separate fixture, isolated from retained cancellation history.
+  await page.evaluate(() => sessionStorage.setItem('submission-restoration-fixture', JSON.stringify({ botVisible: false })));
+  await page.reload();
+  await page.evaluate(() => window.postMessage({ type: 'host.initialize', panelId: 'order-fixture', role: 'main', runtimeAvailable: true }, '*'));
 
   // Brief cards keep the order in which they were dispatched while their runs report in any order.
   const brief = (name, dispatchedAt, updatedAt, status = 'running') => ({ agentId: 'order-' + name, runId: 'order-run-' + name, role: 'work', status, dispatchedAt, updatedAt,

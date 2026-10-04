@@ -3,6 +3,8 @@ const assert = require('node:assert/strict');
 // Uses the real chat template/CSS and the existing fixture's VS Code state bridge.
 // Exported separately so Main can also run this focused check in its browser fixture.
 async function checkStatusCustomizationLayout(page) {
+  // The free-floating companion can rest over the status bar after a resize; this layout check is about the status settings only.
+  await page.evaluate(() => window.dispatchEvent(new MessageEvent('message', { data: { type: 'bots.updated', enabled: false } })));
   const originalViewport = page.viewportSize();
   const originalItems = await page.evaluate(() => window.saved.statusItems ??
     Array.from(document.querySelectorAll('#status-bar [data-item-id]'), element => element.dataset.itemId));
@@ -124,15 +126,16 @@ async function checkStatusAvailability(page) {
   await page.locator('#status-settings-button').click();
   await page.locator('#settings-tab-status').click();
   const bar = page.locator('#status-bar');
+  // Unavailable metrics leave the status bar; the settings list keeps them, marked unavailable.
   for (const id of items.slice(1)) {
     assert.equal(await bar.locator(`[data-item-id="${id}"]`).count(), 0);
-    assert.equal(await page.locator(`#status-settings [data-item-id="${id}"]`).count(), 0);
+    assert.equal(await page.locator(`#status-settings [data-item-id="${id}"]`).getAttribute('data-available'), 'false');
   }
   assert.equal(await page.getByText('Some metrics are unavailable', { exact: true }).count(), 0);
   await emit({ type: 'goal.updated', goal: { status: 'active', tokensUsed: 0, timeUsedSeconds: 0, tokenBudget: 500 } });
   for (const id of ['goalTokens', 'goalBudget', 'goalTime']) {
     assert.equal(await bar.locator(`[data-item-id="${id}"]`).count(), 1, 'Zero is a provided value');
-    assert.equal(await page.locator(`#status-settings [data-item-id="${id}"]`).count(), 1);
+    assert.equal(await page.locator(`#status-settings [data-item-id="${id}"]`).getAttribute('data-available'), 'true');
   }
   await emit({ type: 'goal.updated', goal: null });
   assert.equal(await bar.locator('[data-item-id="goalBudget"]').count(), 0);

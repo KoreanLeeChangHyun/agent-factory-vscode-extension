@@ -141,38 +141,40 @@ results in VS Code.
 
 ### 4.1. Scope and inheritance
 
-- Open the chat's **Agent settings** panel to configure Main, Work and Verification
-  models and reasoning levels, and select the scope to edit: **Global**, **Project**,
-  or **This chat**. The panel opens on **Project**; without an open workspace folder,
-  it uses **Global**.
-- Each value resolves independently: **chat → project → global → provider default**.
-- **Use parent setting** removes an override. The panel shows each value's
-  source and effective setting.
-- Existing chats retain their saved explicit choices. New chats inherit scoped
-  defaults; changing one chat does not change defaults for future chats.
+- Open the chat's **Agent settings** panel to edit **Project** or **This chat**.
+  Main, Work, light Work and Verification each have model, reasoning and supported
+  Fast controls. The panel opens on **This chat**.
+- Manage **Global agent settings** in the full settings window opened by the
+  settings button. Provider-specific model options remain available.
+- A project copies the current global settings once when first initialized.
+  A new chat copies the current project settings once when created. Each copy is
+  saved independently: global edits leave existing projects unchanged, and project
+  edits leave existing chats unchanged.
+- Existing explicit choices are preserved during the initial migration. Missing
+  values are filled once, and saved chats retain their settings after a restart.
 
 ### 4.2. Storage and submitted messages
 
 | Scope | Storage |
 | --- | --- |
-| Chat | Existing chat state |
+| Chat | Persisted chat state |
 | Project | Active runtime workspace folder's `.vscode/settings.json` |
 | Global | VS Code User settings |
 
-- Project and global defaults use six VS Code settings:
-  `agentFactory.agents.<role>.model` and
-  `agentFactory.agents.<role>.reasoningEffort`, where `<role>` is `main`, `work`
-  or `verification`.
+- Model and reasoning settings use `agentFactory.agents.<role>.model` and
+  `agentFactory.agents.<role>.reasoningEffort`, where `<role>` is `main`, `work`,
+  `workLight` or `verification`. Fast preferences are stored per role and model.
 - The extension uses the first workspace folder as its runtime project.
-- Each submitted message captures the resolved model and reasoning values,
-  including queued messages. Later default changes affect future submissions only.
-- Provider and session compatibility checks still apply.
+- Each submitted message, including queued messages, captures that chat's saved
+  model, reasoning and Fast settings. Provider and session compatibility checks
+  still apply to changes in the current chat.
 
 ### 4.3. Presets
 
-- Save the current models and reasoning levels as a named set, then apply, update,
-  or delete it across the global and project scopes. One set can be the default.
-- On first use, unset global models are initialized from the detected runtimes.
+- Save, apply, rename or delete named sets independently in each scope. Applying
+  a project or global set changes only that scope. Each scope retains its Default
+  set; custom sets are copied into newly initialized child scopes.
+- On first use, unset global models are initialized from detected runtimes.
   Explicit settings are preserved.
 
 ### 4.4. Model selection and sessions

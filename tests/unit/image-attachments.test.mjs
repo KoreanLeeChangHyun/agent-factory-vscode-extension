@@ -1,6 +1,9 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
+import { build } from "esbuild";
+import { createRequire } from "node:module";
+import { runInNewContext } from "node:vm";
 import { importTypeScript } from "../support/import-typescript.mjs";
 import { readChatSource } from "../support/chat-source.mjs";
 
@@ -21,7 +24,58 @@ test("webview image messages validate content without a size ceiling", async fun
   assert.equal(parseClientMessage({ ...restore, attachments: [{ ...restore.attachments[0], target: "arbitrary" }] }), undefined);
   const droppedUris = { type: "attachments.addUris", uris: ["file:///Users/test/Pictures/example%20image.png"] };
   assert.deepEqual(parseClientMessage(droppedUris), droppedUris);
+  const remoteUris = { type: "attachments.addUris", uris: [
+    "vscode-remote://ssh-remote+example/home/test/docs",
+    "vscode-remote://ssh-remote+example/home/test/docs/hello%20world.txt"
+  ] };
+  assert.deepEqual(parseClientMessage(remoteUris), remoteUris);
   assert.equal(parseClientMessage({ ...droppedUris, uris: ["file:///valid.png", "bad\nuri"] }), undefined);
+});
+
+test("local and SSH file/folder references retain the existing runtime prompt contract", async function () {
+  const { withAttachmentReferences } = await importTypeScript("src/modules/chat/session-controller.ts");
+  for (const root of ["file:///home/test", "file:///C:/Users/test", "vscode-remote://ssh-remote+example/home/test"]) {
+    const attachments = [
+      { id: "folder", name: "docs", kind: "folder", uri: root + "/docs" },
+      { id: "file", name: "hello world.txt", kind: "file", uri: root + "/docs/hello%20world.txt" }
+    ];
+    assert.equal(withAttachmentReferences("Inspect", attachments),
+      `Inspect\n\n첨부 참조:\n- [folder] docs: ${attachments[0].uri}\n- [file] hello world.txt: ${attachments[1].uri}`);
+  }
+});
+
+test("Host prepares local and SSH Explorer selections using workspace filesystem metadata", async function () {
+  const require = createRequire(import.meta.url);
+  const output = await build({ entryPoints: [new URL("../../src/infrastructure/vscode/chat-panel-manager.ts", import.meta.url).pathname],
+    bundle: true, write: false, platform: "node", format: "cjs", target: "node18", external: ["vscode"] });
+  const inspected = [];
+  const vscode = {
+    Uri: { parse(value) {
+      const url = new URL(value);
+      return { scheme: url.protocol.slice(0, -1), path: decodeURIComponent(url.pathname),
+        fsPath: decodeURIComponent(url.pathname), toString: () => value };
+    } },
+    FileType: { Directory: 2 },
+    workspace: { fs: { async stat(uri) { inspected.push(uri.toString()); return { type: uri.path.endsWith("/docs") ? 2 : 1 }; } } }
+  };
+  const module = { exports: {} };
+  runInNewContext(output.outputFiles[0].text, { module, exports: module.exports, Buffer, URL, console, process,
+    setTimeout, clearTimeout, global: { Date }, require: name => name === "vscode" ? vscode : require(name) });
+  const manager = Object.create(module.exports.ChatPanelManager.prototype);
+  const messages = [];
+  manager.post = async (_panel, message) => messages.push(message);
+  const managed = { panel: {}, state: { panelId: "explorer-test" }, imageAttachments: new Map() };
+  for (const root of ["file:///home/test", "file:///C:/Users/test", "vscode-remote://ssh-remote+example/home/test"]) {
+    const uris = [root + "/docs", root + "/docs/hello%20world.txt"];
+    await manager.addUriAttachments(managed, uris);
+    const added = messages.at(-1);
+    assert.equal(added.type, "attachments.add");
+    assert.deepEqual(Array.from(added.attachments, item => ({ kind: item.kind, name: item.name, uri: item.uri })), [
+      { kind: "folder", name: "docs", uri: uris[0] },
+      { kind: "file", name: "hello world.txt", uri: uris[1] }
+    ]);
+    assert.deepEqual(inspected.slice(-2), uris);
+  }
 });
 
 test("runtime image construction rejects blob URLs and emits local paths", async function () {

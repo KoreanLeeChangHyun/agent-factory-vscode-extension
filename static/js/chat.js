@@ -37,6 +37,13 @@
       typeof envelope.resultPath === "string" && typeof envelope.resultText === "string"
       ? envelope.resultText : value;
   }
+  // Host-derived approval target; only verbatim response text is shown.
+  function decisionApproval(value) {
+    if (!value || typeof value !== "object") return undefined;
+    const request = typeof value.request === "string" && value.request.trim() ? value.request.trim() : undefined;
+    const irreversible = Array.isArray(value.irreversible) ? value.irreversible.filter(item => typeof item === "string" && item.trim()) : [];
+    return request || irreversible.length ? { request, irreversible } : undefined;
+  }
   function reasoningDisplayLabel(value) { return value ? uiLocale() === "en" ? value : t("ui." + value) : t("ui.default"); }
 
   const chatSyntax = globalThis.AgentFactoryChat.syntax({
@@ -51,6 +58,9 @@
   const jumpToBottom = document.getElementById("jump-to-bottom");
   const chatTerminal = globalThis.AgentFactoryChat.terminal({
     t, createActivityPhase, timeline, chatSyntax
+  });
+  const chatActivityRows = globalThis.AgentFactoryChat.activityRows({
+    t, timeline, chatTerminal, chatSyntax, chatMarkdown, isRunning: () => state.running
   });
   const emptyState = document.getElementById("empty-state");
   const prompt = document.getElementById("prompt");
@@ -76,6 +86,7 @@
   const fastModeButton = document.getElementById("fast-mode-button");
   const fastModeValue = document.getElementById("fast-mode-value");
   const orchestrateModeButton = document.getElementById("orchestrate-mode-button");
+  const workIsolationButton = document.getElementById("work-isolation-button");
   const businessModeNames = () => ({ normal: t("ui.normal"), contract: t("ui.contract"), interview: t("ui.interview"), planning: t("ui.planning"), design: t("ui.design"), migration: t("ui.migration"), lessons: t("ui.lessons"), pipeline: t("ui.pipeline") });
   const taskModeNames = () => ({ orchestrate: t("ui.orchestrate.mode"), plan: t("ui.plan"), verification: t("ui.verification"), direct: t("ui.direct"), work: t("ui.work"), "plan-work": t("ui.plan.work"), "work-verification": t("ui.work.verification"), "plan-work-verification": t("ui.plan.work.verification") });
   let nativeGoal = null;
@@ -93,9 +104,7 @@
   const runElapsed = document.getElementById("run-elapsed");
   const runStatusAgents = document.getElementById("run-status-agents");
   const runDetails = document.getElementById("run-details");
-  const runDetailsSummary = document.getElementById("run-details-summary");
   const runStageList = document.getElementById("run-stage-list");
-  const runStopButton = document.getElementById("run-stop-button");
   const attachmentList = document.getElementById("attachment-list");
   const chatWorkUnits = globalThis.AgentFactoryChat.workUnits({
     openSetting, closeSettingMenu, vscode, handleSettingMenuKeydown, t, promptSurface, prompt,
@@ -172,6 +181,7 @@
   const state = {
     panelId: typeof saved?.panelId === "string" ? saved.panelId : undefined,
     agentId: typeof saved?.agentId === "string" ? saved.agentId : undefined,
+    capturedRun: normalizeCapturedRun(saved?.capturedRun, saved?.agentId),
     conversationId: typeof saved?.conversationId === "string" ? saved.conversationId : undefined,
     title: typeof saved?.title === "string" ? saved.title : "Main Agent",
     role: ["main", "work", "verification"].includes(saved?.role) ? saved.role : "main",
@@ -180,11 +190,14 @@
     autoScroll: saved?.autoScroll !== false,
     // Ordinary Enter sends orchestrator mode unless the Human switches this chat to worker mode (direct).
     orchestrateMode: saved?.orchestrateMode !== false,
+    // Per project; the host restores it on initialize and stores every change.
+    workIsolation: false,
     uiLanguage: ["auto", "ko", "en"].includes(saved?.uiLanguage) ? saved.uiLanguage : "auto",
     botsEnabled: false,
     botsAvailable: true,
     companionAvailable: true,
     botVisible: saved?.botVisible !== false,
+    botPosition: Number.isFinite(saved?.botPosition?.x) && Number.isFinite(saved?.botPosition?.y) ? { x: saved.botPosition.x, y: saved.botPosition.y } : undefined,
     botAnimations: saved?.botAnimations !== false,
     botCare: restoreBotCare(saved?.botCare),
     attachments: Array.isArray(saved?.attachments) ? saved.attachments.filter(function (item) {
@@ -197,6 +210,7 @@
     projectName: typeof saved?.projectName === "string" ? saved.projectName : "",
     pendingDecisionRunId: undefined,
     pendingDecisionCanApprove: false,
+    pendingDecisionApproval: undefined,
     decisionSubmitting: false,
     executionMode: saved?.agentId ? undefined : "danger-full-access",
     runtimeAvailable: false,
@@ -207,6 +221,7 @@
     agentFastModes: normalizeAgentFastModes(saved?.agentFastModes, saved?.modelFastModes),
     model: normalizeModel(saved?.model),
     reasoning: normalizeSettingValue(saved?.reasoning, settingOptions.reasoning),
+    agentSettingsVersion: saved?.agentSettingsVersion === 1 ? 1 : undefined,
     agentSettingsScope: ["global", "project", "chat"].includes(saved?.agentSettingsScope) ? saved.agentSettingsScope : undefined,
     agentSettingsSet: typeof saved?.agentSettingsSet === "string" && saved.agentSettingsSet.trim() ? saved.agentSettingsSet.trim() : "Default",
     fastMode: saved?.fastMode === true,
@@ -221,11 +236,14 @@
     fiveHourUsedPercent: safePercentOrUndefined(saved?.fiveHourUsedPercent),
     weeklyResetsAt: safeResetsAtOrUndefined(saved?.weeklyResetsAt),
     fiveHourResetsAt: safeResetsAtOrUndefined(saved?.fiveHourResetsAt),
+    runExecutionStatus: typeof saved?.runExecutionStatus === "string" ? saved.runExecutionStatus : undefined,
     runProgress: typeof saved?.runProgress === "string" ? saved.runProgress : "",
     runProgressLocalization: saved?.runProgressLocalization,
     runStartedAt: Number.isFinite(saved?.runStartedAt) ? saved.runStartedAt : undefined,
     taskFlows: Array.isArray(saved?.taskFlows) ? saved.taskFlows.slice(-100) : [],
+    dismissedTasks: Array.isArray(saved?.dismissedTasks) ? saved.dismissedTasks.filter(key => typeof key === "string") : [],
     runPanelExpanded: saved?.runPanelExpanded === true,
+    runPanelUserChoice: saved?.runPanelUserChoice === true,
     sessions: [],
     sessionsLoading: false,
     historyNextBefore: saved?.historyNextBefore,
@@ -288,12 +306,13 @@
   });
   const chatAgents = globalThis.AgentFactoryChat.agents({
     agentsMenu, state, renderStatusBar: chatStatusBar.renderStatusBar, vscode, agentsList, t,
+    closeWorktreeMenu() { if (openSettingId === "worktree") closeSettingMenu(false); },
     get chatTaskFlow() { return chatTaskFlow; }
   });
   const chatTaskFlow = globalThis.AgentFactoryChat.taskFlow({
     indexedTimeline, state, t, vscode, runStageList, selectQuestionTab: chatNavigation.selectQuestionTab, historyEmpty, runDetails,
-    runStatus, runStatusToggle, runStatusAgents, runDetailsSummary, runStopButton,
-    childAgentStatusLabel: chatAgents.childAgentStatusLabel
+    runStatus, runStatusToggle, runStatusAgents,
+    persist, childAgentStatusLabel: chatAgents.childAgentStatusLabel
   });
   const messageRenderKeys = new WeakMap();
   const eventVersions = new WeakMap();
@@ -321,7 +340,7 @@
     hasComposerContent, renderSubmission, prompt, renderAll, resizePrompt, persist
   });
   const chatActivities = globalThis.AgentFactoryChat.activities({
-    state, t, vscode, activityPhaseAccessibleLabel, chatTerminal, taskModeNames, chatAgents
+    state, t, uiLocale, vscode, activityPhaseAccessibleLabel, chatTerminal, taskModeNames, chatAgents
   });
   const chatInterview = globalThis.AgentFactoryChat.interview({
     indexedTimeline, state, submit, renderAll, persist
@@ -351,13 +370,13 @@
 
   runStatusToggle.addEventListener("click", function () {
     state.runPanelExpanded = !state.runPanelExpanded;
+    state.runPanelUserChoice = true;
     chatTaskFlow.renderWorkLoopPanel();
     if (state.runPanelExpanded && state.role === "main") {
       vscode.postMessage({ type: "agents.request" });
     }
     persist();
   });
-  runStopButton.addEventListener("click", () => cancelRun());
 
   let syntaxThemeClass = document.body.className;
   new MutationObserver(function () {
@@ -550,10 +569,8 @@
     persist();
     if (action === "play") chatBot.startBotConversation(t("bot.play.prompt"), false);
   });
-  factoryBot.addEventListener("click", function () {
-    const pet = chatBot.companionPetStart && chatBot.companionPetDistance >= 20;
-    chatBot.companionPetStart = undefined;
-    if (pet) { chatBot.interactCompanion("pet"); return; }
+  factoryBot.addEventListener("click", function (event) {
+    if (chatBot.consumeDragClick(event)) return;
     const opening = chatBot.botMenu.hidden;
     chatBot.wakeFactoryBot();
     clearTimeout(chatBot.botReactionTimer);
@@ -618,6 +635,7 @@
     }
   });
   attachButton.addEventListener("click", function () {
+    chatAgents.closeAgentsMenu();
     // Let the native picker return to the existing draft and selection.
     prompt.focus({ preventScroll: true });
     document.getElementById("attachment-file-input").click();
@@ -636,6 +654,11 @@
     state.orchestrateMode = !state.orchestrateMode;
     updateModeControls();
     persist();
+  });
+  workIsolationButton.addEventListener("click", function () {
+    state.workIsolation = !state.workIsolation;
+    updateModeControls();
+    vscode.postMessage({ type: "workIsolation.set", value: state.workIsolation });
   });
   prompt.addEventListener("input", function () { inputFeedback.hidden = true; });
   questionButton.addEventListener("click", function () {
@@ -772,7 +795,7 @@
     if (!questionMenu.hidden && !event.target.closest(".question-picker")) {
       chatNavigation.closeQuestionMenu(false);
     }
-    if (!agentsMenu.hidden && !event.target.closest(".agents-menu") && !event.target.closest(".work-unit-activity")) {
+    if (!agentsMenu.hidden && !event.target.closest(".agents-menu") && !event.target.closest(".work-unit-activity") && !event.target.closest("#unit-create-dialog, #deploy-dialog")) {
       chatAgents.closeAgentsMenu();
     }
   });
@@ -865,8 +888,6 @@
         chatAgentSettings.agentPresetBusy = false;
         if (message.error) {
           chatAgentSettings.pendingPresetName = "";
-          const scopeControl = document.getElementById("agent-default-scope");
-          if (scopeControl && state.agentSettingsScope) scopeControl.value = state.agentSettingsScope;
         }
         const status = document.getElementById("agent-preset-status"); status.hidden = !message.error; status.textContent = message.error || "";
         if (!message.error && chatAgentSettings.pendingPresetAction === "save") {
@@ -874,14 +895,14 @@
           document.getElementById("agent-preset-name").value = "";
         }
         if (!message.error && chatAgentSettings.pendingPresetAction === "rename") {
-          state.agentSettingsSet = message.name;
+          if (message.scope === "chat") state.agentSettingsSet = message.name;
           document.getElementById("agent-preset-rename").open = false;
           document.getElementById("agent-preset-rename-name").value = "";
           persist();
           saveComposerSettings();
         }
         chatAgentSettings.pendingPresetAction = "";
-        if (!message.error && message.settings && message.scope && message.name) chatAgentSettings.applyAgentSettingsToChat(message.settings, message.scope, message.name);
+        if (!message.error && message.settings && message.scope === "chat" && message.name) chatAgentSettings.applyAgentSettingsToChat(message.settings, message.scope, message.name);
         chatAgentSettings.renderAgentDefaults();
         chatAgentSettings.renderAgentPresets();
         break;
@@ -892,24 +913,36 @@
         break;
       case "agent.defaults":
         state.agentDefaults = message.settings;
-        if (state.agentSettingsScope === "project" && !message.settings.projectAvailable) state.agentSettingsScope = "global";
-        if (!state.agentSettingsScope) state.agentSettingsScope = message.settings.projectAvailable ? "project" : "global";
+        if (!state.agentSettingsScope) state.agentSettingsScope = "chat";
         chatAgentSettings.renderAgentDefaults();
         // Existing chat values are an independent snapshot and do not follow later default changes.
         updateModeControls();
         break;
+      case "agent.run.selected":
+        if (state.role === "main") break;
+        state.capturedRun = normalizeCapturedRun(message.capturedRun, state.agentId);
+        updateModeControls(); chatStatusBar.renderStatusBar(); persist();
+        break;
       case "host.initialize":
+        const incomingAgentId = typeof message.agentId === "string" ? message.agentId : undefined;
+        const sessionBoundaryChanged = Boolean(
+          (state.panelId && message.panelId !== state.panelId) ||
+          (state.agentId && incomingAgentId !== state.agentId));
         const incomingConversationId = typeof message.conversationId === "string" ? message.conversationId : undefined;
-        const conversationBoundaryChanged = Boolean(incomingConversationId && incomingConversationId !== state.conversationId);
+        const conversationBoundaryChanged = sessionBoundaryChanged || Boolean(incomingConversationId && incomingConversationId !== state.conversationId);
+        state.agentSettingsVersion = message.agentSettingsVersion === 1 ? 1 : state.agentSettingsVersion;
         state.panelId = message.panelId;
+        state.agentId = incomingAgentId;
         state.title = message.title;
         state.role = ["main", "work", "verification"].includes(message.role) ? message.role : "main";
         state.verifiedWorkRunId = typeof message.verifiedWorkRunId === "string" ? message.verifiedWorkRunId : undefined;
+        state.capturedRun = state.role === "main" ? undefined : normalizeCapturedRun(message.capturedRun, state.agentId);
         document.body.dataset.agentRole = state.role;
         state.projectName = message.projectName;
+        state.workIsolation = message.workIsolation === true;
         state.runtimeAvailable = message.runtimeAvailable === true;
         if (message.resetConversation === true || conversationBoundaryChanged) resetConversationState();
-        state.conversationId = incomingConversationId ?? state.conversationId;
+        state.conversationId = incomingConversationId ?? (sessionBoundaryChanged ? undefined : state.conversationId);
         state.capabilities = message.capabilities;
         if (currentCapabilities().diagnostic) appendNotice("warning", currentCapabilities().diagnostic);
         state.running = message.running === true;
@@ -942,7 +975,6 @@
           state.runStartedAt = Date.now();
         } else if (!state.running) {
           state.runStartedAt = undefined;
-          if (chatTaskFlow.currentTaskFlows().length === 0) state.runPanelExpanded = false;
         }
         state.botsAvailable = message.botsAvailable !== false;
         state.companionAvailable = message.companionAvailable !== false;
@@ -1005,6 +1037,10 @@
         updateModeControls();
         // The conversation's provider decides which model routes remain selectable.
         if (openSettingId === "model") renderSettingMenu("model", modelMenu);
+        break;
+      case "workIsolation.updated":
+        state.workIsolation = message.value === true;
+        updateModeControls();
         break;
       case "providers.status":
         chatProviders.receiveProviders(message);
@@ -1130,6 +1166,7 @@
             messageViewStates.clear();
             state.timeline = [];
             state.taskFlows = [];
+            state.dismissedTasks = [];
             followLatest = true;
             renderTimeline();
           }
@@ -1147,6 +1184,11 @@
           resetConversationState();
           state.pendingRequests = pendingRequests;
           state.conversationId = message.conversationId;
+          // A reset conversation has no provider binding yet; release it before the capability refresh arrives.
+          if (state.capabilities?.send?.sessionProvider) {
+            const { sessionProvider, ...send } = state.capabilities.send;
+            state.capabilities = { ...state.capabilities, send };
+          }
           renderAll();
           persist();
         }
@@ -1229,6 +1271,9 @@
         }) : [];
         chatNavigation.renderSessionList();
         break;
+      case "task.stop.result":
+        chatTaskFlow.finishTaskStop(message);
+        break;
       case "agents.list":
         state.workUnitsKnown = Array.isArray(message.agents);
         state.agentsLoading = false;
@@ -1254,8 +1299,10 @@
         break;
       case "decision.pending":
         state.pendingDecisionCanApprove = Boolean(message.runId) && message.canApprove === true;
+        state.pendingDecisionApproval = message.runId ? decisionApproval(message.approval) : undefined;
         state.pendingDecisionRunId = typeof message.runId === "string" ? message.runId : undefined;
         state.decisionSubmitting = false;
+        renderRunStatus();
         chatPendingQueue.renderPendingQueue();
         scheduleTimelineRender();
         chatStatusBar.renderStatusBar();
@@ -1396,12 +1443,15 @@
         chatBot.renderFactoryBot();
         break;
       case "run.observed":
+        state.runExecutionStatus = message.status;
+        renderRunStatus();
         chatBot.botOutcome = message.status;
         chatBot.renderFactoryBot();
         break;
       case "run.state":
         if (message.running === true && !state.running) {
           chatBot.botOutcome = undefined;
+          state.runExecutionStatus = undefined;
           clearTimeout(chatBot.botWaveTimer);
           chatBot.botWaveTimer = undefined;
         }
@@ -1497,7 +1547,7 @@
           ["command", "file", "tool"].includes(message.category) &&
           ["started", "completed", "failed"].includes(message.phase)
         ) {
-          upsertActivity(message.id, message.category, message.phase, message.text, message.diff, message.title, message.output);
+          upsertActivity(message.id, message.category, message.phase, message.text, message.diff, message.title, message.output, activityDetails(message));
           persist(false);
         }
         break;
@@ -1562,6 +1612,7 @@
         ...(state.role === "main" ? { taskMode: action, businessMode: workflow } : {}),
         agentModels: state.role === "main" ? chatAgentSettings.effectiveDelegatedModels() : undefined,
         agentPermissions: state.role === "main" ? Object.fromEntries(["main", "work", "verification"].map(role => [role, state.executionMode || "cli-default"])) : undefined,
+        ...(state.role === "main" ? { workIsolation: workIsolationActive() } : {}),
         // Preserve an explicit selection so the host can reject an unavailable
         // provider instead of silently falling back to another model.
         model: chatAgentSettings.effectiveAgentValue("main", "model") || undefined,
@@ -1590,6 +1641,10 @@
     persist();
     vscode.postMessage({ type: "chat.send", ...message });
     return true;
+  }
+
+  function workIsolationActive() {
+    return state.workIsolation && currentCapabilities().workIsolation === true;
   }
 
   function orchestrateAvailable() {
@@ -1768,7 +1823,21 @@
     if (state.timeline.length !== before) scheduleTimelineRender();
   }
 
-  function upsertActivity(id, category, phase, text, diff, title, output) {
+  // Optional row fields from the host; anything malformed is dropped, never guessed.
+  function activityDetails(message) {
+    const details = {};
+    if (["read", "search", "list", "run", "test", "git", "edit", "web", "page", "tool", "think", "skill"].includes(message.kind)) details.kind = message.kind;
+    for (const [key, limit] of [["target", 500], ["scope", 500], ["error", 2000], ["summary", 16384]]) {
+      if (typeof message[key] === "string" && message[key] && message[key].length <= limit) details[key] = message[key];
+    }
+    for (const key of ["lineStart", "lineEnd", "durationMs"]) {
+      if (Number.isSafeInteger(message[key]) && message[key] >= 0) details[key] = message[key];
+    }
+    if (Number.isSafeInteger(message.exitCode) && message.exitCode !== 0) details.exitCode = message.exitCode;
+    return details;
+  }
+
+  function upsertActivity(id, category, phase, text, diff, title, output, details = {}) {
     let existing = indexedTimeline().activities.get(id);
     if (!existing) {
       const previous = state.timeline[state.timeline.length - 1];
@@ -1777,6 +1846,7 @@
         existing = previous;
       }
     }
+    const now = Date.now();
     if (existing) {
       existing.category = category;
       existing.phase = phase;
@@ -1784,8 +1854,15 @@
       existing.diff = diff;
       existing.title = title;
       existing.output = output;
+      for (const key of ["kind", "target", "scope", "error", "summary", "lineStart", "lineEnd", "durationMs", "exitCode"]) {
+        if (Object.hasOwn(details, key)) existing[key] = details[key];
+        else if (phase !== "started") delete existing[key];
+      }
+      // Receipt times give providers without durations an approximate elapsed time.
+      if (phase !== "started" && existing.completedAt === undefined) existing.completedAt = now;
     } else {
-      state.timeline.push({ type: "activity", id, category, phase, text, diff, title, output });
+      state.timeline.push({ type: "activity", id, category, phase, text, diff, title, output, ...details,
+        ...(phase === "started" ? { startedAt: now } : { completedAt: now }) });
     }
     scheduleTimelineRender();
   }
@@ -1996,9 +2073,10 @@
         event.type === "assistant" ? assistantContext : null,
         event.type === "assistant" || event.type === "interview" ? chatInterview.canAnswerInterview(event) : null,
         event.type === "assistant" && event.runId === state.pendingDecisionRunId && event.runId
-          ? JSON.stringify([state.pendingDecisionRunId, state.pendingDecisionCanApprove, state.decisionSubmitting, state.running, state.runtimeAvailable]) : null,
+          ? JSON.stringify([state.pendingDecisionRunId, state.pendingDecisionCanApprove, state.pendingDecisionApproval, state.decisionSubmitting, state.running, state.runtimeAvailable]) : null,
         managedGroup ? state.role + ":" + (commandContexts.get(managedGroup.managed.agentId) || "") : null,
-        managedGroup ? JSON.stringify([managedGroup.managed, managedGroup.events.map(eventVersion)]) : null];
+        managedGroup ? JSON.stringify([managedGroup.managed, managedGroup.events.map(eventVersion)]) : null,
+        event.type === "activity" && event.phase === "started" ? state.running : null];
       const previousKey = existing && messageRenderKeys.get(existing);
       if (previousKey && renderKey.every((value, index) => value === previousKey[index])) {
         if (previousMessage.nextElementSibling !== existing) previousMessage.after(existing);
@@ -2007,10 +2085,11 @@
       }
       if (existing) {
         const element = existing;
-        const controls = Array.from(element.querySelectorAll(".bash-command-toggle, summary, .execution-reference button, .managed-agent-open"));
+        const controls = Array.from(element.querySelectorAll(".act-row, .bash-command-toggle, summary, .execution-reference button, .managed-agent-open"));
         const focusIndex = controls.indexOf(document.activeElement);
         if (focusIndex >= 0) focusedControl = { id: element.dataset.id, index: focusIndex };
         displayStates.set(element.dataset.id, {
+          rows: chatActivityRows.expandedKeys(element),
           expanded: element.querySelector(".bash-command-toggle")?.getAttribute("aria-expanded") === "true",
           details: Array.from(element.querySelectorAll("details")).map(function (details, index) { return { key: details.dataset.disclosureKey || details.className + ":" + index, open: details.open, hidden: details.hidden, loaded: chatTerminal.lazyCommandOutputs.has(details) && Boolean(details.querySelector("pre")) }; }),
           scroll: Array.from(element.querySelectorAll("pre")).map(function (pre) { return { top: pre.scrollTop, left: pre.scrollLeft }; })
@@ -2021,6 +2100,13 @@
       message.dataset.id = event.id;
       const compaction = event.type === "activity" && event.category === "tool" &&
         ["Context compaction", "컨텍스트 압축", t("ui.context.compaction")].includes(event.title);
+      // Factory script runs keep their cards; every other action is one tracking row.
+      const factoryScripts = event.type === "activity" && event.category === "command" && !managedGroup
+        ? (globalThis.agentFactoryExecutionReferences?.runtimeScripts(event.output) || []).length
+          ? globalThis.agentFactoryExecutionReferences.runtimeScripts(event.output)
+          : globalThis.agentFactoryExecutionReferences?.scriptInvocations(event.text) || []
+        : [];
+      const activityRow = event.type === "activity" && !compaction && !managedGroup && !factoryScripts.length;
       if (event.type === "assistant" || event.type === "interview") {
         message.classList.add(event.phase === "commentary" ? "message-commentary" : "message-final");
       }
@@ -2040,7 +2126,7 @@
         }
       }
       if (event.type === "activity") {
-        message.classList.add("message-activity-" + (event.category || "tool"));
+        message.classList.add(activityRow ? "message-activity-row" : "message-activity-" + (event.category || "tool"));
         message.dataset.category = event.category || "tool";
         message.dataset.phase = event.phase || "started";
       }
@@ -2050,15 +2136,6 @@
         marker.setAttribute("aria-hidden", "true");
         if (event.type === "user") marker.append(createModeIcon("m9 5 7 7-7 7", "submission-chevron"));
         message.append(marker);
-      }
-      if (event.type === "activity" && !compaction && event.category !== "command" && !(event.category === "file" && event.diff)) {
-        const heading = document.createElement("div");
-        heading.className = "message-heading";
-        const kind = document.createElement("span");
-        kind.className = "message-kind";
-        kind.textContent = event.title || activityKindLabel(event.category);
-        heading.append(createActivityPhase(event.phase), kind);
-        message.append(heading);
       }
       const content = document.createElement("div");
       content.className = "message-content";
@@ -2102,34 +2179,25 @@
         if (event.runId && event.runId === state.pendingDecisionRunId && event.phase !== "commentary") {
           chatActivities.renderDecisionActions(content, event.runId);
         }
-      } else if (event.type === "activity" && event.category === "command") {
-        const skillDocuments = globalThis.agentFactoryExecutionReferences?.skillDocuments(event.text) || [];
-        const runtimeScripts = globalThis.agentFactoryExecutionReferences?.runtimeScripts(event.output) || [];
-        const factoryScripts = runtimeScripts.length ? runtimeScripts : globalThis.agentFactoryExecutionReferences?.scriptInvocations(event.text) || [];
-        if (managedGroup) {
-          message.classList.add("message-activity-agent");
-          chatActivities.renderManagedAgent(content, managedGroup.managed, managedGroup.events);
-        } else if (factoryScripts.length) {
-          message.classList.add("message-activity-agent");
-          chatActivities.renderFactoryScripts(content, factoryScripts, skillDocuments, event);
-        } else if (skillDocuments.length) {
-          chatActivities.renderSkillDocuments(content, skillDocuments, event);
-        } else {
-          chatActivities.renderCommandError(content, globalThis.agentFactoryExecutionReferences.commandOutcome(event));
-          chatTerminal.renderTerminalCommand(content, event.text, event.phase, event.title);
-          chatTerminal.renderCommandOutput(content, event.output, Boolean(event.title));
-        }
-      } else if (event.type === "activity" && event.category === "file" && event.diff) {
-        chatSyntax.renderGitDiff(content, event.diff, event.text, event.phase);
+      } else if (activityRow) {
+        message.dataset.kind = event.kind || "";
+        chatActivityRows.render(content, event);
+      } else if (event.type === "activity" && managedGroup) {
+        message.classList.add("message-activity-agent");
+        chatActivities.renderManagedAgent(content, managedGroup.managed, managedGroup.events);
+      } else if (event.type === "activity" && factoryScripts.length) {
+        message.classList.add("message-activity-agent");
+        chatActivities.renderFactoryScripts(content, factoryScripts, globalThis.agentFactoryExecutionReferences?.skillDocuments(event.text) || [], event);
       } else {
         content.textContent = event.text;
-        if (event.type === "activity" && message.dataset.category === "tool" && event.text) content.title = event.text;
       }
       if (event.type === "user") renderSubmission(content, event.submission);
       if (event.type === "user" && Array.isArray(event.attachments)) chatAttachments.renderHistoryAttachments(content, event.attachments);
       message.append(content);
       const display = displayStates.get(event.id);
       if (display) {
+        // Reopen rows first so the raw output inside them can restore its own disclosure state.
+        chatActivityRows.restoreExpanded(message, display.rows);
         const toggle = message.querySelector(".bash-command-toggle");
         const command = message.querySelector(".bash-command-text");
         if (toggle && command && display.expanded) chatTerminal.setCommandExpanded(command, toggle, true);
@@ -2160,7 +2228,7 @@
         });
       }
       if (focusedControl?.id === event.id) {
-        const control = message.querySelectorAll(".bash-command-toggle, summary, .execution-reference button, .managed-agent-open")[focusedControl.index];
+        const control = message.querySelectorAll(".act-row, .bash-command-toggle, summary, .execution-reference button, .managed-agent-open")[focusedControl.index];
         if (control) {
           if (control.classList.contains("bash-command-toggle")) control.hidden = false;
           control.focus({ preventScroll: true });
@@ -2170,6 +2238,7 @@
     for (const [id, element] of existingMessages) {
       if (!retainedIds.has(id)) {
         messageViewStates.set(id, {
+          rows: chatActivityRows.expandedKeys(element),
           expanded: element.querySelector(".bash-command-toggle")?.getAttribute("aria-expanded") === "true",
           details: Array.from(element.querySelectorAll("details")).map((details, index) => ({ key: details.dataset.disclosureKey || details.className + ":" + index, open: details.open, hidden: details.hidden, loaded: chatTerminal.lazyCommandOutputs.has(details) && Boolean(details.querySelector("pre")) })),
           scroll: Array.from(element.querySelectorAll("pre")).map(pre => ({ top: pre.scrollTop, left: pre.scrollLeft }))
@@ -2204,11 +2273,6 @@
       ? "m6 5 6 6 6-6m-12 8 6 6 6-6" : "M8 5v14M16 5v14");
   }
 
-  function activityKindLabel(category) {
-    if (category === "file") return t("ui.git.changes");
-    return t("ui.tool.execution");
-  }
-
   function createTranscriptDot() {
     const dot = document.createElementNS("http://www.w3.org/2000/svg", "svg");
     dot.setAttribute("viewBox", "0 0 16 24");
@@ -2237,9 +2301,12 @@
   }
 
   function renderRunStatus() {
+    document.getElementById("agent-progress").hidden = !state.running;
     runElapsed.hidden = !state.running;
-    const hasUnfinishedTasks = chatTaskFlow.displayTaskFlows().some(chatTaskFlow.unfinishedFlow);
-    runStatus.hidden = !state.running && !hasUnfinishedTasks;
+    runStatus.hidden = state.role !== "main";
+    const progressing = state.running && state.runExecutionStatus === "running" && !state.pendingDecisionRunId && !state.cancellationRequested;
+    document.querySelector(".composer").classList.toggle("is-progressing", progressing);
+    document.getElementById("agent-progress").classList.toggle("is-progressing", progressing);
     if (!state.running) {
       stopElapsedTimer();
       runStatusLabel.textContent = t("ui.task.workflow");
@@ -2301,6 +2368,7 @@
 
   statusSettingsButton.addEventListener("click", function () {
     if (!statusSettings.hidden) { chatStatusBar.closeStatusSettings(); return; }
+    closeSettingMenu();
     chatAgentSettings.renderGeneralSettings();
     statusSettings.hidden = false;
     statusSettingsButton.setAttribute("aria-expanded", "true");
@@ -2513,14 +2581,21 @@
     orchestrateModeButton.setAttribute("aria-pressed", String(orchestrating));
     orchestrateModeButton.setAttribute("aria-label", orchestrateLabel);
     orchestrateModeButton.title = orchestrateLabel;
+    workIsolationButton.hidden = state.role !== "main";
+    workIsolationButton.disabled = currentCapabilities().workIsolation !== true;
+    const isolationLabel = workIsolationButton.disabled ? t("ui.work.isolation.unavailable") : state.workIsolation ? t("ui.work.isolation.on") : t("ui.work.isolation.off");
+    workIsolationButton.setAttribute("aria-pressed", String(state.workIsolation === true && !workIsolationButton.disabled));
+    workIsolationButton.setAttribute("aria-label", isolationLabel);
+    workIsolationButton.title = isolationLabel;
     fastModeButton.setAttribute("aria-pressed", String(state.fastMode));
     fastModeButton.setAttribute("aria-label", state.fastMode ? t("ui.fast.mode.on") : t("ui.fast.mode.off"));
     fastModeButton.title = state.fastMode ? t("ui.fast.mode.on") : t("ui.fast.mode.off");
     fastModeValue.textContent = state.fastMode ? t("ui.on") : t("ui.off");
     promptSurface.classList.toggle("is-astra", /(?:^|[-/])astra(?:$|-)/i.test(chatAgentSettings.effectiveAgentValue("main", "model")));
-    const modelText = (chatAgentSettings.effectiveAgentValue("main", "model") ? chatAgentSettings.modelOptionLabel(chatAgentSettings.effectiveAgentValue("main", "model")) : t("ui.default")) + " · " + reasoningDisplayLabel(chatAgentSettings.effectiveAgentValue("main", "reasoningEffort"));
+    const selectedRun = state.role !== "main" ? state.capturedRun || {} : undefined;
+    const modelText = selectedRun ? (selectedRun.model || t("flow.model.unavailable")) : (chatAgentSettings.effectiveAgentValue("main", "model") ? chatAgentSettings.modelOptionLabel(chatAgentSettings.effectiveAgentValue("main", "model")) : t("ui.default")) + " · " + reasoningDisplayLabel(chatAgentSettings.effectiveAgentValue("main", "reasoningEffort"));
     if (modelLabel.textContent !== modelText) modelLabel.textContent = modelText;
-    modelButton.title = t("ui.models.and.reasoning");
+    modelButton.title = selectedRun ? t("ui.captured.run.model") + " · " + (selectedRun.runId || "—") + " · " + (selectedRun.model || t("flow.model.unavailable")) : t("ui.models.and.reasoning");
     modelButton.setAttribute("aria-label", modelButton.title);
     if (openSettingId === "submission") renderSubmissionMenu(submissionMenu);
     updateComposerControls();
@@ -2579,6 +2654,7 @@
     messageViewStates.clear();
     state.timeline = [];
     state.taskFlows = [];
+    state.dismissedTasks = [];
     state.pendingRequests = [];
     state.startedMessageIds = [];
     state.pendingDecisionRunId = undefined;
@@ -2640,7 +2716,10 @@
   }
 
   function renderSettingMenu(setting, menu) {
-    if (setting === "model") chatAgentSettings.renderModelSettings(menu);
+    if (setting === "model") {
+      chatStatusBar.closeStatusSettings();
+      chatAgentSettings.renderModelSettings(menu);
+    }
     else if (setting === "worktree") { chatWorkUnits.renderWorktree(); vscode.postMessage({ type: "worktree.repositories" }); }
     else renderSubmissionMenu(menu);
   }
@@ -2804,6 +2883,7 @@
       orchestrateMode: state.orchestrateMode,
       uiLanguage: state.uiLanguage,
       botVisible: state.botVisible,
+      botPosition: state.botPosition,
       botAnimations: state.botAnimations,
       botCare: state.botCare,
       attachments: state.attachments.filter(function (attachment) {
@@ -2814,6 +2894,7 @@
         return persisted;
       }),
       taskFlows: chatTaskFlow.currentTaskFlows().slice(-100),
+      dismissedTasks: state.dismissedTasks,
       timeline: state.timeline.filter(function (event) { return !event.streaming; }).slice(-200).map(function (event) {
         if (!Array.isArray(event.attachments)) return event;
         return {
@@ -2832,7 +2913,9 @@
       agentModels: state.agentModels,
       agentFastModes: state.agentFastModes,
       model: state.model,
+      capturedRun: state.capturedRun,
       reasoning: state.reasoning,
+      agentSettingsVersion: state.agentSettingsVersion,
       agentSettingsScope: state.agentSettingsScope,
       agentSettingsSet: state.agentSettingsSet,
       fastMode: state.fastMode,
@@ -2842,10 +2925,12 @@
       fiveHourUsedPercent: state.fiveHourUsedPercent,
       weeklyResetsAt: state.weeklyResetsAt,
       fiveHourResetsAt: state.fiveHourResetsAt,
+      runExecutionStatus: state.runExecutionStatus,
       runProgress: state.runProgress,
       runProgressLocalization: state.runProgressLocalization,
       runStartedAt: state.runStartedAt,
       runPanelExpanded: state.runPanelExpanded,
+      runPanelUserChoice: state.runPanelUserChoice,
       workUnits: state.workUnits,
       childAgents: state.childAgents,
       workflows: state.workflows
@@ -2888,6 +2973,15 @@
     if (state.contextUsedTokens === undefined || !(state.contextWindowTokens > 0)) return t("ui.ctx.left");
     const remaining = Math.max(0, state.contextWindowTokens - state.contextUsedTokens);
     return t("ui.ctx.left.350cbf") + formatPercent(remaining / state.contextWindowTokens * 100);
+  }
+
+  function normalizeCapturedRun(value, agentId) {
+    const validId = id => typeof id === "string" && /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(id);
+    if (!value || value.agentId !== agentId || !validId(value.agentId) || !validId(value.parentAgentId) || !validId(value.runId)) return undefined;
+    return { parentAgentId: value.parentAgentId, agentId: value.agentId, runId: value.runId,
+      ...(typeof value.model === "string" && value.model.trim() ? { model: value.model } : {}),
+      ...(typeof value.reasoningEffort === "string" && value.reasoningEffort.trim() ? { reasoningEffort: value.reasoningEffort } : {}),
+      ...(["work", "workLight"].includes(value.workProfile) ? { workProfile: value.workProfile } : {}) };
   }
 
   function contextUsedStatusLabel() {

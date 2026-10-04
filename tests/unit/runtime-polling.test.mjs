@@ -91,3 +91,25 @@ test('cancelled run settles an unfinished context compaction instead of leaving 
   assert.equal(settled[0].phase, 'failed');
   assert.equal(settled[0].text, 'Context compaction interrupted');
 });
+
+test('activity details reach the webview with the protocol kind, not the update discriminant', async t => {
+  accelerate(t);
+  const activities = [];
+  const f = fixture(async () => ({ status: 'completed' }));
+  f.events.onActivity = activity => activities.push(activity);
+  let delivered = false;
+  f.runtime.updates = async (a, r, cursor) => {
+    if (delivered) return { cursor, updates: [] };
+    delivered = true;
+    return { cursor: cursor + 1, updates: [
+      { kind: 'activity', id: 'read-1', category: 'tool', phase: 'completed', text: 'claude/Read', activityKind: 'read', target: 'src/a.py', lineStart: 3, lineEnd: 9 },
+      { kind: 'activity', id: 'cmd-1', category: 'command', phase: 'completed', text: 'ls' }
+    ] };
+  };
+  const controller = new ChatSessionController(f.runtime, f.events);
+  await controller.send('work', [], {});
+  assert.deepEqual(activities.slice(0, 2), [
+    { id: 'run-test:read-1', category: 'tool', phase: 'completed', text: 'claude/Read', kind: 'read', target: 'src/a.py', lineStart: 3, lineEnd: 9 },
+    { id: 'run-test:cmd-1', category: 'command', phase: 'completed', text: 'ls' }
+  ]);
+});

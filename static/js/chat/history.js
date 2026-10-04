@@ -3,12 +3,12 @@ globalThis.AgentFactoryChat.history = function (host) {
   "use strict";
 
   const {
-    handleSettingMenuKeydown, vscode, submissionMenu, questionButton, t, closeQuestionMenu,
+    vscode, questionButton, t, closeQuestionMenu,
     renderAssistantMarkdown, assistantDisplayText, historyEmpty
   } = host;
 
   const contractList = document.getElementById("contract-list");
-  contractList.querySelector("summary").addEventListener("keydown", handleSettingMenuKeydown);
+  contractList.querySelector("summary").addEventListener("keydown", handleHistoryKeydown);
   contractList.addEventListener("toggle", function () {
     if (this.open) {
       document.getElementById("task-history").open = false;
@@ -17,10 +17,42 @@ globalThis.AgentFactoryChat.history = function (host) {
     }
     positionTaskHistory();
   });
-  document.querySelector("#task-history > summary").addEventListener("keydown", handleSettingMenuKeydown);
+  document.querySelector("#task-history > summary").addEventListener("keydown", handleHistoryKeydown);
   document.getElementById("task-history").addEventListener("toggle", positionTaskHistory);
   window.addEventListener("resize", positionTaskHistory);
-  new ResizeObserver(positionTaskHistory).observe(submissionMenu);
+  const layoutObserver = new ResizeObserver(positionTaskHistory);
+  layoutObserver.observe(document.getElementById("run-status"));
+  layoutObserver.observe(document.getElementById("agent-progress"));
+
+  const actions = document.getElementById("workflow-history");
+  const overflow = document.getElementById("workflow-history-toggle");
+  overflow.addEventListener("click", () => {
+    const open = actions.classList.toggle("is-open");
+    overflow.setAttribute("aria-expanded", String(open));
+  });
+  document.addEventListener("click", event => {
+    if (!actions.contains(event.target)) closeHistoryMenu();
+  });
+  actions.addEventListener("keydown", event => {
+    if (event.key === "Escape") {
+      event.preventDefault();
+      event.stopPropagation();
+      contractList.open = false;
+      document.getElementById("task-history").open = false;
+      closeHistoryMenu();
+      (actions.classList.contains("is-compact") ? overflow : event.target.closest("details")?.querySelector("summary"))?.focus();
+    }
+  });
+  function handleHistoryKeydown(event) {
+    const options = Array.from(document.querySelectorAll("#workflow-history-items > details > summary"));
+    const index = options.indexOf(event.currentTarget);
+    const target = event.key === "Home" ? options[0] : event.key === "End" ? options.at(-1) : event.key === "ArrowDown" ? options[(index + 1) % options.length] : event.key === "ArrowUp" ? options[(index + options.length - 1) % options.length] : null;
+    if (target) { event.preventDefault(); target.focus(); }
+  }
+  function closeHistoryMenu() {
+    actions.classList.remove("is-open");
+    overflow.setAttribute("aria-expanded", "false");
+  }
 
   const conversationList = document.getElementById("conversation-history-list");
   const conversationReader = document.getElementById("conversation-reader");
@@ -106,6 +138,12 @@ globalThis.AgentFactoryChat.history = function (host) {
   }
 
   function positionTaskHistory() {
+    const status = document.getElementById("run-status");
+    const actions = document.getElementById("workflow-history");
+    const progress = document.getElementById("agent-progress");
+    const available = status.clientWidth - (progress.hidden ? 0 : progress.getBoundingClientRect().width + 8);
+    actions.classList.toggle("is-compact", available < 430);
+    status.style.setProperty("--workflow-header-width", Math.max(36, available) + "px");
     for (const id of ["contract-list", "task-history"]) positionHistory(id);
   }
 
@@ -113,27 +151,21 @@ globalThis.AgentFactoryChat.history = function (host) {
     const history = document.getElementById(id);
     const summary = history.querySelector("summary");
     summary.setAttribute("aria-expanded", String(history.open));
-    if (!history.open || submissionMenu.hidden) return;
+    if (!history.open) return;
     const list = document.getElementById(id + "-list");
-    const bounds = submissionMenu.getBoundingClientRect();
-    const leftSpace = bounds.left - 20;
-    const rightSpace = window.innerWidth - bounds.right - 20;
-    const inline = Math.max(leftSpace, rightSpace) < 240;
-    list.classList.toggle("is-flyout", !inline);
-    if (inline) {
-      list.style.removeProperty("left");
-      list.style.removeProperty("top");
-      list.style.removeProperty("height");
-      list.style.removeProperty("max-height");
-      list.style.removeProperty("width");
-      return;
-    }
-    const onLeft = leftSpace >= rightSpace;
-    const width = Math.min(440, onLeft ? leftSpace : rightSpace);
-    list.style.left = (onLeft ? bounds.left - width - 8 : bounds.right + 8) + "px";
-    list.style.top = bounds.top + "px";
-    list.style.height = bounds.height + "px";
+    const bounds = summary.getBoundingClientRect();
+    const width = Math.min(440, window.innerWidth - 16);
+    const below = window.innerHeight - bounds.bottom - 12;
+    const above = bounds.top - 12;
+    const down = below >= Math.min(180, above);
+    const height = Math.max(0, Math.min(400, down ? below : above));
+    list.classList.add("is-flyout");
+    list.style.left = Math.max(8, Math.min(bounds.right - width, window.innerWidth - width - 8)) + "px";
     list.style.width = width + "px";
+    list.style.removeProperty("height");
+    list.style.maxHeight = height + "px";
+    list.style.top = down ? bounds.bottom + 4 + "px" : "auto";
+    list.style.bottom = down ? "auto" : window.innerHeight - bounds.top + 4 + "px";
   }
 
   return {

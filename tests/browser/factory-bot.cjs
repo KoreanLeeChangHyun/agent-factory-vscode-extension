@@ -1,6 +1,9 @@
 const assert = require('node:assert/strict');
 
 async function checkFactoryBot(page) {
+  // These checks cover the SVG Factory Bot; the companion artwork replaces it only for the lumi character.
+  await page.evaluate(() => window.postMessage({ type: 'bots.updated', enabled: true, botCharacter: 'factory', localCompanionAvailable: true }, '*'));
+  await page.waitForFunction(() => !document.querySelector('#factory-bot').classList.contains('sd-companion'));
   const propMotion = await page.evaluate(() => {
     return [['coffee', '.bot-cup'], ['read', '.bot-book-page'], ['feed', '.bot-spoon']].map(([gesture, selector]) => {
       const probe = document.querySelector('#factory-bot').cloneNode(true);
@@ -216,7 +219,7 @@ async function checkFactoryBot(page) {
   assert.equal(sleepMotion.duration, '4s');
   const bot = page.locator('#factory-bot');
   const state = () => bot.getAttribute('data-state');
-  await emit({ type: 'host.initialize', runtimeAvailable: true, capabilities: { submit: {}, send: {} } });
+  await emit({ type: 'host.initialize', companionAvailable: false, runtimeAvailable: true, capabilities: { submit: {}, send: {} } });
   assert.equal(await state(), 'idle');
   const menu = page.locator('#bot-menu');
   const localizedActions = await menu.evaluate(element => {
@@ -227,9 +230,10 @@ async function checkFactoryBot(page) {
         labels: ['feed', 'play', 'sleep'].map(action => copy.querySelector(`[data-bot-action="${action}"] span`).textContent) };
     });
   });
+  // Pet, praise and call companion actions, feed, play and sleep, then talk: seven icon buttons.
   assert.deepEqual(localizedActions, [
-    { icons: 4, labels: ['밥 주기', '놀아주기', '잠자기'] },
-    { icons: 4, labels: ['Feed the bot', 'Play together', 'Sleep'] }
+    { icons: 7, labels: ['밥 주기', '놀아주기', '잠자기'] },
+    { icons: 7, labels: ['Feed the bot', 'Play together', 'Sleep'] }
   ]);
   const sentBefore = await page.evaluate(() => window.sentMessages.length);
   for (const action of ['feed', 'play']) {
@@ -243,6 +247,10 @@ async function checkFactoryBot(page) {
     else assert.equal(gesture, action);
     assert.equal(await menu.isVisible(), false);
   }
+  // Play starts a bot conversation, and the bot stays awake while it talks: answer and close it first.
+  const talk = await page.evaluate(() => window.sentMessages.filter(message => typeof message.requestId === 'string' && message.requestId.startsWith('bot-')).at(-1));
+  await emit({ type: 'bot.reply', requestId: talk.requestId, text: 'Fun!' });
+  await page.locator('#bot-speech-close').click();
   await bot.click();
   await menu.locator('[data-bot-action="sleep"]').click();
   assert.equal(await state(), 'sleeping');
@@ -253,13 +261,16 @@ async function checkFactoryBot(page) {
   assert.equal(await bot.evaluate(el => el === document.activeElement), true);
   await bot.press('Enter');
   assert.equal(await menu.isVisible(), true);
+  // Keyboard opening focuses the first action, now the companion "pet", whose gesture is "shy".
+  assert.equal(await menu.locator('button').first().getAttribute('data-companion-action'), 'pet');
   await page.keyboard.press('Enter');
-  assert.equal(await bot.getAttribute('data-gesture'), 'feed');
+  assert.equal(await bot.getAttribute('data-gesture'), 'shy');
   assert.equal(await menu.isVisible(), false);
   await bot.click();
   await page.locator('#prompt').click();
   assert.equal(await menu.isVisible(), false);
-  assert.equal(await page.evaluate(() => window.sentMessages.length), sentBefore, 'Bot actions send no work requests');
+  // Play's bot conversation is the only message; nothing reaches the work or chat runtime.
+  assert.deepEqual(await page.evaluate(sentBefore => window.sentMessages.slice(sentBefore).map(message => message.type), sentBefore), ['bot.talk'], 'Bot actions send no work requests');
   for (const [width, height] of [[360, 400], [360, 700], [795, 700]]) {
     await page.setViewportSize({ width, height });
     await bot.click();
@@ -314,10 +325,13 @@ async function checkFactoryBot(page) {
       const box = await bot.boundingBox();
       const composer = await page.locator('.composer').boundingBox();
       assert.ok(box.x >= 0 && box.x + box.width <= width);
-      assert.ok(box.y + box.height <= composer.y + 5, 'Bot stays above the composer even with expanded details');
-      if (expanded) {
-        const details = await page.locator('#run-details').boundingBox();
-        assert.ok(box.y < details.y + details.height, 'Bot overlaps details without adding a spacer');
+      // The bot keeps its stored perch (clamped to the window) instead of moving with the composer or details.
+      const origin = await page.evaluate(() => window.saved.botPosition);
+      assert.ok(Math.abs(box.x - Math.max(0, Math.min(width - box.width, origin.x))) < 1 && Math.abs(box.y - Math.max(0, Math.min(700 - box.height, origin.y))) < 1,
+        'Bot stays at its stored perch with or without expanded details');
+      void composer;
+      const details = expanded ? await page.locator('#run-details').boundingBox() : undefined;
+      if (details && box.y < details.y + details.height && box.y + box.height > details.y && box.x < details.x + details.width && box.x + box.width > details.x) {
         const inFront = await bot.evaluate((el, details) => {
           const box = el.getBoundingClientRect();
           const x = box.x + box.width / 2;
@@ -333,25 +347,17 @@ async function checkFactoryBot(page) {
   assert.equal(await bot.evaluate(el => el.tagName), 'BUTTON');
   await bot.click();
   assert.equal(await state(), 'working', 'Clicking must preserve the active task state');
-  assert.equal(await bot.getAttribute('data-reacting'), 'true');
-  assert.equal(await bot.locator('svg').evaluate(el => getComputedStyle(el).animationName), 'bot-click');
-  await page.clock.fastForward(400);
-  await bot.click();
-  await page.clock.fastForward(400);
-  assert.equal(await bot.getAttribute('data-reacting'), 'true', 'Repeated clicks renew the response');
-  await page.clock.fastForward(300);
-  assert.equal(await bot.getAttribute('data-reacting'), null);
+  // A click opens the bot menu; there is no separate click reaction any more.
+  assert.equal(await page.locator('#bot-menu').isVisible(), true, 'Clicking opens the menu without changing the task state');
+  await page.keyboard.press('Escape');
+  assert.equal(await page.locator('#bot-menu').isVisible(), false);
   for (const key of ['Enter', 'Space']) {
     await bot.focus();
     await bot.press(key);
-    assert.equal(await bot.getAttribute('data-reacting'), 'true', 'Keyboard activation responds');
-    await page.clock.fastForward(700);
+    assert.equal(await page.locator('#bot-menu').isVisible(), true, 'Keyboard activation opens the menu');
+    assert.equal(await state(), 'working');
+    await page.keyboard.press('Escape');
   }
-  await page.emulateMedia({ reducedMotion: 'reduce' });
-  await bot.click();
-  assert.equal(await bot.locator('svg').evaluate(el => getComputedStyle(el).animationName), 'none');
-  assert.notEqual(await bot.locator('svg').evaluate(el => getComputedStyle(el).filter), 'none', 'Reduced motion retains static feedback');
-  await page.clock.fastForward(700);
   await page.emulateMedia({ reducedMotion: 'no-preference' });
   await emit({ type: 'run.state', running: false });
   const movePointer = async (roll, x = 0) => page.evaluate(({ roll, x }) => {
@@ -404,7 +410,8 @@ async function checkFactoryBot(page) {
   assert.equal(await state(), 'sleeping', 'Luna expressions must not wake the sleeping bot');
   await bot.dispatchEvent('click');
   assert.equal(await state(), 'idle', 'Click wakes the sleeping bot');
-  assert.equal(await bot.getAttribute('data-reacting'), 'true');
+  // The waking click also opens the menu; close it so the idle timers continue.
+  await page.keyboard.press('Escape');
   await page.clock.fastForward(700);
   await bot.dispatchEvent('pointerenter');
   assert.equal(await state(), 'idle');
@@ -421,7 +428,7 @@ async function checkFactoryBot(page) {
   await page.clock.fastForward(120000);
   assert.equal(await state(), 'waiting');
   await emit({ type: 'decision.pending', runId: null });
-  await emit({ type: 'host.initialize', runtimeAvailable: false, capabilities: { submit: {}, send: {} } });
+  await emit({ type: 'host.initialize', companionAvailable: false, runtimeAvailable: false, capabilities: { submit: {}, send: {} } });
   assert.equal(await state(), 'offline');
   await emit({ type: 'bots.updated', enabled: false });
   assert.equal(await bot.isVisible(), false);
@@ -439,10 +446,10 @@ async function checkFactoryBot(page) {
   await page.locator('#bots-disabled').evaluate(el => { el.checked = true; el.dispatchEvent(new Event('change')); });
   assert.equal(await bot.isVisible(), false);
   assert.equal(await page.evaluate(() => window.sentMessages.some(m => m.type === 'bots.configure' && m.enabled === false)), true);
-  await emit({ type: 'host.initialize', botsEnabled: false, runtimeAvailable: true, capabilities: { submit: {}, send: {} } });
+  await emit({ type: 'host.initialize', companionAvailable: false, botsEnabled: false, runtimeAvailable: true, capabilities: { submit: {}, send: {} } });
   assert.equal(await bot.isVisible(), false, 'host preference survives initialization');
 
-  await emit({ type: 'host.initialize', botsEnabled: true, runtimeAvailable: true, capabilities: { submit: {}, send: {} } });
+  await emit({ type: 'host.initialize', companionAvailable: false, botsEnabled: true, runtimeAvailable: true, capabilities: { submit: {}, send: {} } });
   await emit({ type: 'run.state', running: false });
   const careStress = await page.evaluate(() => {
     const bot = document.querySelector('#factory-bot');
@@ -466,7 +473,12 @@ async function checkFactoryBot(page) {
         bot.click();
         peakTimers = Math.max(peakTimers, pending.size);
         menu.querySelector(`[data-bot-action="${index % 2 ? 'play' : 'feed'}"]`).click();
-        if (index % 2) played.push(bot.dataset.gesture);
+        if (index % 2) {
+          played.push(bot.dataset.gesture);
+          // Play starts a bot conversation; answer it so the next play is not blocked by the pending talk.
+          const talk = window.sentMessages.filter(message => message.type === 'bot.talk').at(-1);
+          window.dispatchEvent(new MessageEvent('message', { data: { type: 'bot.reply', requestId: talk.requestId, text: 'ok' } }));
+        }
       }
       const after = { ...window.saved.botCare };
       const closedTimers = pending.size;
@@ -501,7 +513,7 @@ async function checkFactoryBot(page) {
     sessionStorage.setItem('submission-restoration-fixture', JSON.stringify(window.saved));
   });
   await page.reload();
-  await emit({ type: 'host.initialize', botsEnabled: true, runtimeAvailable: true, capabilities: { submit: {}, send: {} } });
+  await emit({ type: 'host.initialize', companionAvailable: false, botsEnabled: true, runtimeAvailable: true, capabilities: { submit: {}, send: {} } });
   await bot.click();
   assert.equal(await page.locator('#bot-fullness').evaluate(el => el.value), 100);
   assert.equal(await page.locator('#bot-energy').evaluate(el => el.value), 100);

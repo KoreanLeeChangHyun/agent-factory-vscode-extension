@@ -1,4 +1,4 @@
-const { checkTaskFlow } = require('./task-flow.cjs');
+const { checkTaskFlow, checkTaskStop, checkTaskDismiss } = require('./task-flow.cjs');
 const { checkLocalization, checkGalleryLocalization } = require('./localization.cjs');
 const { checkGeneralSettings } = require('./general-settings.cjs');
 const assert = require('node:assert/strict');
@@ -15,6 +15,7 @@ const { checkFastSetting, checkAgentModels, checkReasoningSlider } = require('./
 const { checkAstraStars } = require('./astra-stars.cjs');
 const { checkOneShotComposer } = require('./one-shot-composer.cjs');
 const { checkMessageSubmission, checkMessageLayout } = require('./message-submission.cjs');
+const { checkActivityRows } = require('./activity-rows.cjs');
 
 const root = path.resolve(__dirname, '../..');
 const longCommand = Array.from({ length: 8 }, (_, index) => 'echo ' + index).join('\n');
@@ -42,7 +43,7 @@ fixture.push(
   { type: 'activity', id: 'ansi', category: 'command', phase: 'completed', text: 'printf colors', output: ansiOutput },
   { type: 'activity', id: 'multi-diff', category: 'file', phase: 'completed', text: 'Two files', diff: diff + '\n' + secondDiff }
 );
-const theme = ':root{--vscode-font-family:monospace;--vscode-font-size:14px;--vscode-editor-font-family:monospace;--vscode-editor-font-size:14px;--vscode-editor-foreground:#d4d4d4;--vscode-foreground:#d4d4d4;--vscode-descriptionForeground:#999;--vscode-editor-background:#1e1e1e;--vscode-editorWidget-background:#252526;--vscode-panel-border:#454545;--vscode-input-background:#313131}';
+const theme = ':root{--vscode-font-family:monospace;--vscode-font-size:14px;--vscode-editor-font-family:monospace;--vscode-editor-font-size:14px;--vscode-editor-foreground:#d4d4d4;--vscode-textLink-foreground:#3794ff;--vscode-foreground:#d4d4d4;--vscode-descriptionForeground:#999;--vscode-editor-background:#1e1e1e;--vscode-editorWidget-background:#252526;--vscode-panel-border:#454545;--vscode-input-background:#313131}';
 
 async function main() {
   let browser;
@@ -97,6 +98,22 @@ async function main() {
     await page.goto('http://127.0.0.1:' + server.address().port);
     // A startup exception (e.g. a TDZ access) stops chat.js entirely; fail here instead of timing out in a later check.
     assert.deepEqual(pageErrors, [], 'chat.js threw during startup');
+    if (process.argv.includes('--companion-position-only')) {
+      await require('./companion.cjs').checkCompanionOverlay(page);
+      assert.deepEqual(errors, []);
+      console.log('Companion viewport position own checks passed');
+      return;
+    }
+    if (process.argv.includes('--overlay-state-only')) {
+      await require('./companion.cjs').checkCompanionOverlay(page);
+      // Isolate workflow checks from position fixtures and keep their controls unobstructed.
+      await page.evaluate(() => sessionStorage.setItem('submission-restoration-fixture', JSON.stringify({ botVisible: false })));
+      await page.reload();
+      await require('./task-flow.cjs').checkTaskFlowStates(page);
+      assert.deepEqual(errors, []);
+      console.log('Companion overlay and task flow state own checks passed');
+      return;
+    }
     if (process.argv.includes('--companion-only') || process.argv.includes('--companion-care-only')) {
       await require('./companion.cjs').checkCompanion(page, { careOnly: process.argv.includes('--companion-care-only') });
       assert.deepEqual(errors, []);
@@ -133,7 +150,8 @@ async function main() {
       await require('./rich-markdown.cjs').checkSafeMarkup(page);
       await require('./rich-markdown.cjs').checkManagedEnvelope(page);
       // Mermaid measures labels in the document, where the CSP refuses its inline styles; the rendered image is unaffected.
-      assert.deepEqual(errors.filter(error => !error.startsWith('Refused to apply inline style')), []);
+      // Chromium reports the same refusal as "Refused to apply inline style" or "Applying inline style violates".
+      assert.deepEqual(errors.filter(error => !/^(Refused to apply inline style|Applying inline style violates)/.test(error)), []);
       console.log('Rich Markdown browser checks passed');
       return;
     }
@@ -306,6 +324,12 @@ async function main() {
       console.log('Status settings and responsive usage layout passed.');
       return;
     }
+    if (process.argv.includes('--decision-approval-only')) {
+      await require('./decision-approval.cjs').checkDecisionApproval(page);
+      assert.deepEqual(errors, []);
+      console.log('Decision approval target and irreversible-operation guard passed.');
+      return;
+    }
     if (process.argv.includes('--cancellation-notice-only')) {
       await require('./cancellation-notice.cjs').checkCancellationNotice(page);
       assert.deepEqual(errors, []);
@@ -398,9 +422,34 @@ async function main() {
       console.log('Revision-limit decision view and task card order checks passed');
       return;
     }
+    if (process.argv.includes('--task-status-only')) {
+      await require('./task-flow.cjs').checkTaskStatusBadges(page);
+      assert.deepEqual(errors, []);
+      console.log('Task status badge own checks passed');
+      return;
+    }
+    if (process.argv.includes('--task-row-only')) {
+      await require('./task-flow.cjs').checkTaskRows(page);
+      assert.deepEqual(errors, []);
+      console.log('Task row identity, full width and independent controls checks passed');
+      return;
+    }
+    if (process.argv.includes('--task-dismiss-only')) {
+      await checkTaskDismiss(page);
+      assert.deepEqual(errors, []);
+      console.log('Task dismissal browser checks passed');
+      return;
+    }
+    if (process.argv.includes('--task-stop-only')) {
+      await checkTaskStop(page);
+      assert.deepEqual(errors, []);
+      console.log('Per-task stop controls, exact bindings, failures and state checks passed');
+      return;
+    }
     if (process.argv.includes('--task-flow-only') || process.argv.includes('--task-panel-only')) {
       const panelOnly = process.argv.includes('--task-panel-only');
       await checkTaskFlow(page, { panelOnly });
+      assert.deepEqual(errors, []);
       console.log(panelOnly ? 'Task panel rendering checks passed' : 'Task flow rendering checks passed');
       return;
     }
@@ -436,6 +485,11 @@ async function main() {
       await checkGalleryLocalization(page);
       assert.deepEqual(errors, []);
       console.log('Localization, restoration and source preservation checks passed.');
+      return;
+    }
+    if (process.argv.includes('--agent-settings-consistency-only')) {
+      await require('./agent-presets.cjs').checkAgentSettingsConsistency(page);
+      assert.deepEqual(errors, []);
       return;
     }
     if (process.argv.includes('--agent-presets-only')) {
@@ -590,30 +644,39 @@ async function main() {
     if (process.argv.includes('--model-lock-only')) {
       const emit = async message => { await page.evaluate(value => window.postMessage(value, '*'), message); await page.evaluate(() => new Promise(requestAnimationFrame)); };
       const caps = { model: true, reasoning: true };
-      await emit({ type: 'host.initialize', panelId: 'lock', role: 'main', resetConversation: true, conversationId: 'conversation-lock', runtimeAvailable: true, model: 'gpt-one', capabilities: { submit: caps, send: { ...caps, sessionProvider: 'codex' } } });
+      await emit({ type: 'host.initialize', panelId: 'lock', agentId: 'main-lock', role: 'main', resetConversation: true, conversationId: 'conversation-lock', runtimeAvailable: true, model: 'gpt-one', capabilities: { submit: caps, send: { ...caps, sessionProvider: 'codex' } } });
       await emit({ type: 'models.list', models: ['gpt-one', 'gpt-two', 'claude-one', 'antigravity/claude-test', 'gemini-test', 'antigravity/gpt-test'] });
       await page.locator('#model-button').click();
-      const model = page.locator('#model-menu select[data-role="main"][data-field="model"]');
-      const tabs = page.locator('#model-menu .agent-model-row[data-agent-role="main"] .model-vendor-tab');
+      // The model control is a picker button; its popup holds vendor tabs and option buttons for the active tab.
+      const mainRow = page.locator('#model-menu .agent-model-row[data-agent-role="main"]');
+      const model = mainRow.locator('button[data-field="model"]');
+      const tabs = mainRow.locator('.model-vendor-tab');
+      const openPicker = async () => { if (await model.getAttribute('aria-expanded') !== 'true') await model.click(); };
+      const option = value => mainRow.locator(`.model-picker-option[data-value="${value}"]`);
+      const showTab = async index => { await openPicker(); await tabs.nth(index).click(); };
       assert.equal(await model.isDisabled(), false);
       await emit({ type: 'chat.started', id: 'accepted-lock', text: 'hello', attachments: [] });
       assert.equal(await model.isDisabled(), false);
-      await model.selectOption('gpt-two');
+      await showTab(0);
+      await option('gpt-two').click();
       assert.equal(await page.evaluate(() => window.saved.model), 'gpt-two');
+      await openPicker();
       assert.equal(await tabs.nth(0).isDisabled(), false);
       assert.equal(await tabs.nth(1).isDisabled(), true);
-      assert.equal(await model.locator('option[value="antigravity/gpt-test"]').evaluate(el => el.disabled), true);
-      assert.equal(await page.locator('#model-menu select[data-role="work"][data-field="model"]').isDisabled(), false);
+      assert.equal(await option('antigravity/gpt-test').isDisabled(), true);
+      assert.equal(await page.locator('#model-menu .agent-model-row[data-agent-role="work"] button[data-field="model"]').isDisabled(), false);
       await emit({ type: 'conversation.cleared', conversationId: 'conversation-new-lock' });
+      await openPicker();
       assert.equal(await tabs.nth(1).isDisabled(), false, 'Reset unlocks providers even before capability refresh');
-      await tabs.nth(1).evaluate(el => el.click());
-      await model.selectOption('antigravity/claude-test');
+      await showTab(1);
+      await option('antigravity/claude-test').click();
       await emit({ type: 'capabilities.updated', capabilities: { submit: caps, send: { ...caps, sessionProvider: 'antigravity' } } });
       await emit({ type: 'chat.started', id: 'accepted-agy', text: 'next', attachments: [] });
-      assert.equal(await model.locator('option[value="claude-one"]').evaluate(el => el.disabled), true);
+      await showTab(1);
+      assert.equal(await option('claude-one').isDisabled(), true);
       assert.equal(await tabs.nth(2).isDisabled(), false);
-      await tabs.nth(2).evaluate(el => el.click());
-      await model.selectOption('gemini-test');
+      await showTab(2);
+      await option('gemini-test').click();
       assert.equal(await page.evaluate(() => window.saved.model), 'gemini-test', 'Different vendors on one provider remain selectable');
       await page.keyboard.press('Escape');
       await page.locator('#prompt').fill('same provider send');
@@ -682,15 +745,31 @@ async function main() {
       console.log('Compact context status, animation, completion and reduced motion checks passed.');
       return;
     }
+    if (process.argv.includes('--activity-rows-only')) {
+      await page.waitForSelector('[data-id="multi-diff"] .act-row');
+      await checkActivityRows(page);
+      assert.deepEqual(errors, []);
+      console.log('Activity tracking rows, targets, failure, progress, thinking, tooltip and keyboard checks passed.');
+      return;
+    }
     if (process.argv.includes('--image-composer-only')) {
       await checkImageComposer(page);
       assert.deepEqual(errors, []);
       console.log('Image composer focus, caret, icons, and attachment lifecycle checks passed.');
       return;
     }
+    // Raw commands, output and diffs fold behind tracking rows; these checks inspect them opened.
+    const openRows = () => page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => {
+      document.querySelectorAll('#timeline .act-row[aria-expanded="false"]').forEach(row => row.click());
+      requestAnimationFrame(resolve);
+    })));
+    await page.waitForSelector('[data-id="multi-diff"] .act-row');
+    await checkActivityRows(page);
+    await openRows();
     await page.waitForFunction(() => document.querySelector('code.language-python span') && document.querySelector('.git-diff-source span'));
     const emit = async message => {
       await page.evaluate(value => window.postMessage(value, '*'), message);
+      await openRows();
       await page.waitForFunction(() => document.querySelector('.bash-command-text .syntax-code span'));
       await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
     };
@@ -779,8 +858,9 @@ async function main() {
     assert.equal(await ansi.evaluate(element => Array.from(element.childNodes).filter(node => node.nodeType === Node.TEXT_NODE).map(node => node.textContent).join('')), ' plain    <raw>');
 
     const multi = page.locator('[data-id="multi-diff"]');
-    await multi.locator('summary').click();
-    assert.equal(await multi.locator('details code').textContent(), (diff + secondDiff).replaceAll('\n', ''));
+    assert.deepEqual(await multi.locator('.act-row .act-target').allTextContents(), ['example.py', 'app.ts'], 'Each changed file has its own row');
+    for (const summary of await multi.locator('summary').all()) await summary.click();
+    assert.equal((await multi.locator('details code').allTextContents()).join(''), (diff + secondDiff).replaceAll('\n', ''));
     assert.deepEqual(await multi.locator('.git-diff-line-number').allTextContents(), ['1', '2', '1', '2', '20', '30', '1', '1']);
     assert.ok(await multi.locator('.git-diff-source span').count() > 8);
 
@@ -862,16 +942,16 @@ async function main() {
     await page.setViewportSize({ width: 1200, height: 900 });
     await page.waitForFunction(() => document.querySelector('[data-id="resizing-output"] details').hidden);
     await emit({ type: 'run.activity', id: 'skill-reference-card', category: 'command', phase: 'completed', text: 'cat /home/test/.codex/plugins/cache/agent-factory/agent-factory/1.0.0/skills/convention/references/communication.md', output: '# Human communication' });
-    const skillCard = page.locator('[data-id="skill-reference-card"] .skill-read-card');
-    assert.equal(await skillCard.locator('strong').textContent(), 'agent-factory:convention');
-    assert.equal(await skillCard.locator('.skill-read-document span').textContent(), 'references/communication.md');
-    assert.equal(await skillCard.locator('details').first().getAttribute('open'), null);
-    await skillCard.locator('summary').first().click();
+    const skillCard = page.locator('[data-id="skill-reference-card"] .act-row-wrap[data-kind="skill"]');
+    assert.equal(await skillCard.locator('.act-target').textContent(), 'agent-factory:convention');
+    assert.equal(await skillCard.locator('.act-meta').textContent(), 'references/communication.md');
+    assert.equal(await skillCard.locator('.act-row').getAttribute('aria-expanded'), 'true');
     assert.equal(await skillCard.locator('.syntax-code').first().isVisible(), true);
     await emit({ type: 'run.activity', id: 'skill-reference-card', category: 'command', phase: 'failed', text: 'cat /home/test/.codex/plugins/cache/agent-factory/agent-factory/1.0.0/skills/convention/references/communication.md', output: 'read failed' });
     // The failed update renders on the next frame; wait for it instead of racing the render.
-    await page.waitForFunction(() => document.querySelector('[data-id="skill-reference-card"] .skill-read-card summary')?.getAttribute('title') === 'Failed');
-    assert.equal(await skillCard.locator('details').first().getAttribute('open'), '');
+    await page.waitForFunction(() => document.querySelector('[data-id="skill-reference-card"] .act-row-wrap')?.dataset.phase === 'failed');
+    assert.equal(await skillCard.locator('.act-mark').textContent(), '!');
+    assert.equal(await skillCard.locator('.act-row').getAttribute('aria-expanded'), 'true', 'An opened row stays open across updates');
     const managedSubmit = 'python3 skills/agent/scripts/exec.py submit --agent work-card --role work --message "Update UI"';
     await emit({ type: 'run.activity', id: 'managed-submit', category: 'command', phase: 'completed', text: managedSubmit, output: '{"agentId":"work-card","runId":"run-card"}' });
     const managedCard = page.locator('[data-id="managed-submit"] .managed-agent-card');
@@ -901,10 +981,11 @@ async function main() {
     await emit({ type: 'agents.list', agents: [{ agentId: 'work-card', role: 'work', status: 'completed', runId: 'run-card' }, { agentId: 'verification-card', role: 'verification', status: 'running', runId: 'verify-run' }] });
     assert.equal(await page.locator('[data-id="managed-verify"] strong').textContent(), 'Verification agent');
     await managedCard.scrollIntoViewIfNeeded();
-    fs.mkdirSync(path.join(root, '../docs/artifact/managed-agents'), { recursive: true });
+    const managedArtifactDir = process.env.AF_RENDERING_ARTIFACT_DIR || path.join(root, '../docs/artifact/managed-agents');
+    fs.mkdirSync(managedArtifactDir, { recursive: true });
     const cardBox = await managedCard.boundingBox();
     const verifyBox = await page.locator('[data-id="managed-verify"] .managed-agent-card').boundingBox();
-    await page.screenshot({ path: path.join(root, '../docs/artifact/managed-agents/cards.png'), clip: { x: cardBox.x, y: cardBox.y, width: cardBox.width, height: verifyBox.y + verifyBox.height - cardBox.y } });
+    await page.screenshot({ path: path.join(managedArtifactDir, 'cards.png'), clip: { x: cardBox.x, y: cardBox.y, width: cardBox.width, height: verifyBox.y + verifyBox.height - cardBox.y } });
     await emit({ type: 'run.activity', id: 'managed-pending', category: 'command', phase: 'started', text: managedSubmit });
     assert.equal(await page.locator('[data-id="managed-pending"] .managed-agent-status').textContent(), 'Status unknown');
     if (process.argv.includes('--managed-agents-only')) {
@@ -948,6 +1029,7 @@ async function main() {
     await page.evaluate(() => { document.body.className = 'vscode-dark'; });
     await emit({ type: 'run.state', running: true });
     await emit({ type: 'run.progress', text: '작업 결과를 검증하고 있습니다' });
+    await emit({ type: 'run.observed', status: 'running' });
     await emit({ type: 'agents.list', agents: [
       { agentId: 'work-loop-1', role: 'work', status: 'completed', runId: 'work-run-1' },
       { agentId: 'verification-loop-1', role: 'verification', status: 'running', runId: 'verification-run-1' }
@@ -955,16 +1037,21 @@ async function main() {
       workAgentId: 'work-loop-1', verificationAgentId: 'verification-loop-1', workflow: { id: 'status-flow', title: 'Status fixture', index: 0,
         tasks: [{ id: 'status-task', title: 'Status task', description: 'Bound accepted stages', completionCriteria: 'Open exact child',
           workStatus: 'completed', verificationStatus: 'running', workRunId: 'work-run-1', verificationRunId: 'verification-run-1' }] } }] });
-    assert.match(await page.locator('#run-status-agents').textContent(), /Work 0 · Verification 1/);
+    assert.equal(await page.locator('#run-status-agents').textContent(), '· Verifier 1 · 1 tasks', 'Completed Work is not counted and zero roles are omitted');
+    assert.equal(await page.locator('#run-status-toggle').getAttribute('aria-label'), 'Task workflow · Verifier 1 · 1 tasks');
     if (await page.locator('#run-status-toggle').getAttribute('aria-expanded') !== 'true') await page.locator('#run-status-toggle').click();
     assert.equal(await page.locator('#run-status-toggle').getAttribute('aria-expanded'), 'true');
     assert.equal(await page.locator('#run-details').isVisible(), true);
-    assert.deepEqual(await page.locator('#run-stage-list [data-flow-id="status-flow"] .task-flow-step').evaluateAll(items => items.map(item => item.dataset.status)), ['completed', 'verifying']);
+    const statusTask = page.locator('#run-stage-list [data-flow-id="status-flow"] .task-flow-single');
+    assert.equal(await statusTask.getAttribute('data-status'), 'verifying', 'A single task follows its Verification stage after Work completes');
+    assert.equal(await statusTask.locator('.task-flow-single-title').textContent(), 'Status task');
+    await statusTask.locator(':scope > summary').click();
+    assert.equal(await statusTask.locator('.task-flow-open').count(), 2, 'Both exact stage sessions remain accessible');
     await page.locator('#run-stage-list [data-flow-id="status-flow"] .task-flow-open').last().click();
-    assert.deepEqual(await page.evaluate(() => window.sentMessages.at(-1)), { type: 'agent.open', agentId: 'verification-loop-1' });
+    assert.deepEqual(await page.evaluate(() => window.sentMessages.at(-1)), { type: 'agent.open', agentId: 'verification-loop-1', runId: 'verification-run-1' });
     await page.locator('#run-status-toggle').click();
     assert.equal(await page.locator('#run-details').isHidden(), true);
-    const statusStyle = await page.locator('#run-status').evaluate(element => {
+    const statusStyle = await page.locator('#agent-progress').evaluate(element => {
       const label = getComputedStyle(element.querySelector('.run-status-label'));
       const meta = getComputedStyle(element.querySelector('.run-status-meta'));
       const copy = getComputedStyle(element.querySelector('.run-status-copy'));
@@ -991,7 +1078,7 @@ async function main() {
         background
       };
     });
-    assert.equal(statusStyle.labelColor, 'rgb(212, 212, 212)');
+    assert.equal(statusStyle.labelColor, 'rgb(55, 148, 255)');
     assert.equal(statusStyle.background, 'rgb(30, 30, 30)');
     assert.equal(statusStyle.labelAnimation, 'run-status-text-scan');
     assert.equal(statusStyle.metaAnimation, 'none');
@@ -1014,9 +1101,9 @@ async function main() {
     assert.equal(gradientColors[0], statusStyle.labelColor);
     assert.equal(gradientColors[2], statusStyle.labelColor);
     const middle = gradientColors[1].match(/\d+/g).map(Number);
-    assert.equal(middle[0], middle[1]);
-    assert.equal(middle[1], middle[2]);
-    assert.ok(luminance(gradientColors[1]) < luminance(statusStyle.labelColor));
+    const resting = statusStyle.labelColor.match(/\d+/g).map(Number);
+    middle.forEach((channel, index) => assert.ok(Math.abs(channel - (resting[index] * 0.7 + 212 * 0.3)) <= 1));
+    assert.ok(luminance(gradientColors[1]) > luminance(statusStyle.labelColor));
     assert.ok(gradientColors.every(color => contrast(color) >= 4.5));
     assert.ok(contrast(statusStyle.metaColor) >= 4.5);
     const artifactDir = process.env.AF_RENDERING_ARTIFACT_DIR || path.join(root, '../docs/artifact/cli-comparison');
@@ -1035,6 +1122,12 @@ async function main() {
     await page.locator('.run-status-label').evaluate(element => { element.getAnimations()[0].currentTime = 1200; });
     await page.locator('.composer-region').screenshot({ path: path.join(artifactDir, 'run-status-dark-scan.png'), animations: 'allow' });
     const scanFrames = [];
+    // Sample only the text scan: the composer's glow and status dot also animate its backdrop.
+    await page.evaluate(() => {
+      window.scanFixtureAnimations = document.getAnimations().filter(animation => animation.effect?.target !== document.querySelector('.run-status-label'))
+        .map(animation => ({ animation, state: animation.playState, time: animation.currentTime }));
+      for (const { animation } of window.scanFixtureAnimations) { animation.pause(); animation.currentTime = 0; }
+    });
     for (const viewportWidth of [795, 320]) {
       await page.setViewportSize({ width: viewportWidth, height: 900 });
       for (const [sample, label] of [['short', '검증중'], ['long', '작업 결과를 검증하고 있습니다. 실행 결과와 변경 내용을 확인하고 있습니다']]) {
@@ -1059,6 +1152,8 @@ async function main() {
           assert.equal(computed.delay, '0s');
           if (time === 0) scanWidth = computed.width;
           assert.equal(computed.width, scanWidth, 'Scan frames must share one settled layout width');
+          // Style reads settle immediately; the compositor paints a paused animation on a later frame.
+          await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
           const screenshot = await page.locator('.run-status-label').screenshot({ path: path.join(artifactDir, 'scan-' + viewportWidth + '-' + sample + '-' + time + '.png'), animations: 'allow' });
           snapshots.set(time, screenshot);
           const pixels = await page.evaluate(async ({ base64, baseline }) => {
@@ -1092,7 +1187,7 @@ async function main() {
           if (pixels.count) visibleFrames.push(frame);
           if ([0, 2399, 2400].includes(time)) {
             // The frame 1 ms before the boundary can round a channel by one level.
-            assert.ok(pixels.maxDelta <= (time === 2399 ? 1 : 0), 'Loop boundaries must preserve resting text pixels');
+            assert.ok(pixels.maxDelta <= (time === 2399 ? 1 : 0), 'Loop boundaries must preserve resting text pixels: ' + JSON.stringify(frame));
           }
         }
         assert.ok(visibleFrames.length >= 3);
@@ -1102,6 +1197,13 @@ async function main() {
       }
     }
     fs.writeFileSync(path.join(artifactDir, 'run-status-scan-frames.json'), JSON.stringify(scanFrames, null, 2));
+    await page.evaluate(() => {
+      for (const { animation, state, time } of window.scanFixtureAnimations) {
+        animation.currentTime = time;
+        if (state === 'running') animation.play();
+      }
+      delete window.scanFixtureAnimations;
+    });
     await page.setViewportSize({ width: 795, height: 900 });
     await emit({ type: 'run.progress', text: '작업 결과를 검증하고 있습니다' });
     await page.emulateMedia({ reducedMotion: 'reduce' });
@@ -1117,7 +1219,7 @@ async function main() {
         tasks: [{ id: 'status-task', title: 'Status task', description: 'Bound accepted stages', completionCriteria: 'Open exact child',
           workStatus: 'completed', verificationStatus: 'completed', workRunId: 'work-run-1', verificationRunId: 'verification-run-1' }] } }] });
     await emit({ type: 'run.state', running: false });
-    assert.equal(await page.locator('#run-status').isHidden(), true);
+    assert.equal(await page.locator('#run-status').isVisible(), true, 'The task panel keeps completed task history available');
     assert.equal(await page.locator('#run-status-toggle').getAttribute('aria-expanded'), 'false');
     await checkAutoScroll(page);
     await checkImageComposer(page);

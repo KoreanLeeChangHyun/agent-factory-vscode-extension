@@ -1,5 +1,7 @@
 const assert = require('node:assert/strict');
 exports.checkCompanion = async function (page, { careOnly = false } = {}) {
+  const artifactDir = process.env.AF_RENDERING_ARTIFACT_DIR || require('node:path').resolve(__dirname, '../../../docs/artifact/chat-layout');
+  require('node:fs').mkdirSync(artifactDir, { recursive: true });
   const snapshot = { emotion: 'calm', action: 'call', reactionUntil: 0, lastInteractionAt: Date.now(), fullness: 80, happiness: 80, energy: 80, careCount: 0, updatedAt: Date.now() };
   const send = (companion, working = 0) => page.evaluate(({ companion, working }) => window.postMessage({ type: 'bot.companion', companion, working }, '*'), { companion, working });
   await page.evaluate(() => window.postMessage({ type: 'host.initialize', panelId: 'companion-test', runtimeAvailable: true, running: false, botsEnabled: true, botPrompt: 'Lumi default personality', botDefaultPrompt: 'Lumi default personality', statusItems: [] }, '*'));
@@ -78,7 +80,7 @@ exports.checkCompanion = async function (page, { careOnly = false } = {}) {
   await send(snapshot);
 
   const stableViewport = page.viewportSize();
-  const geometry = () => page.evaluate(() => ['#timeline', '.composer', '.composer-status-column', '#companion-dock'].map(selector => {
+  const geometry = () => page.evaluate(() => ['#timeline', '.composer', '.composer-status-column'].map(selector => {
     const r = document.querySelector(selector).getBoundingClientRect();
     return { x: r.x, y: r.y, width: r.width, height: r.height };
   }));
@@ -125,10 +127,21 @@ exports.checkCompanion = async function (page, { careOnly = false } = {}) {
     const top = Math.max(bot.top, rect.top), bottom = Math.min(bot.bottom, rect.bottom);
     return right > left && bottom > top && menu.contains(document.elementFromPoint((left + right) / 2, (top + bottom) / 2));
   });
-  assert.equal(menuCoversBot, true, 'Open submission menu covers the mascot and receives pointer input');
-  await page.screenshot({ path: '/tmp/companion-menu-layer.png' });
+  assert.equal(menuCoversBot, false, 'Companion stays above the submission menu');
+  await page.screenshot({ path: require('node:path').join(artifactDir, 'companion-menu-layer.png') });
   await page.keyboard.press('Escape');
   await page.setViewportSize(originalViewport);
+  // Wait for the resize event before choosing a drag start point.
+  await page.waitForFunction(() => {
+    const r = document.querySelector('#factory-bot').getBoundingClientRect(), p = window.saved.botPosition;
+    return p && r.x === Math.max(0, Math.min(innerWidth - r.width, p.x)) && r.y === Math.max(0, Math.min(innerHeight - r.height, p.y));
+  });
+  // Fixed viewport coordinates may overlap settings after shrinking; move the bot aside.
+  const settingsBot = await page.locator('#factory-bot').boundingBox();
+  await page.mouse.move(settingsBot.x + settingsBot.width / 2, settingsBot.y + settingsBot.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(50, 500, { steps: 5 });
+  await page.mouse.up();
   await page.setViewportSize({ width: 568, height: 548 });
   await page.locator('#status-settings-button').click();
   await page.locator('#settings-tab-bot').click();
@@ -145,15 +158,15 @@ exports.checkCompanion = async function (page, { careOnly = false } = {}) {
     assert.ok(Math.abs(alignment.optionX - alignment.controlX - 6) < 2, id + ' list aligns with its control');
     const inset = alignment.controlWidth - alignment.optionWidth;
     assert.ok(inset >= 10 && inset <= 30, id + ' list matches its control width including scrollbar');
-    await page.screenshot({ path: '/tmp/' + id + '-aligned.png' });
+    await page.screenshot({ path: require('node:path').join(artifactDir, id + '-aligned.png') });
     await page.keyboard.press('Escape');
   }
 
-  await page.screenshot({ path: '/tmp/bot-settings-compact.png' });
+  await page.screenshot({ path: require('node:path').join(artifactDir, 'bot-settings-compact.png') });
   assert.equal(await page.locator('#settings-panel-bot').evaluate(el => el.scrollHeight <= el.clientHeight + 1), true, 'Bot settings fit the reported viewport without scrolling');
   const saveBox = await page.locator('#bot-prompt-save').boundingBox();
   assert.ok(saveBox.y + saveBox.height < 548, 'Save action remains inside the viewport');
-  await page.screenshot({ path: '/tmp/bot-settings-compact.png' });
+  await page.screenshot({ path: require('node:path').join(artifactDir, 'bot-settings-compact.png') });
   await page.setViewportSize({ width: 360, height: 548 });
   assert.equal(await page.locator('#settings-panel-bot').evaluate(el => el.scrollWidth <= el.clientWidth + 1), true, 'Narrow settings do not overflow horizontally');
   await page.locator('#bot-prompt-reset').scrollIntoViewIfNeeded();
@@ -198,7 +211,7 @@ exports.checkCompanion = async function (page, { careOnly = false } = {}) {
   await send({ ...snapshot, action: 'feed', emotion: 'happy', lastInteractionAt: Date.now(), reactionUntil: Date.now() + 1600 }, 1);
   await page.waitForFunction(() => document.querySelector('.companion-sprite').dataset.motion === 'eating');
   await page.waitForFunction(() => document.querySelector('.companion-sprite').dataset.frame === '1');
-  await page.locator('#factory-bot').screenshot({ path: '/tmp/companion-eating.png' });
+  await page.locator('#factory-bot').screenshot({ path: require('node:path').join(artifactDir, 'companion-eating.png') });
   await page.waitForFunction(() => document.querySelector('.companion-sprite').dataset.motion === 'working');
   await page.emulateMedia({ reducedMotion: 'reduce' });
   await page.waitForFunction(() => document.querySelector('.companion-sprite').dataset.frame === '0');
@@ -222,7 +235,7 @@ exports.checkCompanion = async function (page, { careOnly = false } = {}) {
   assert.ok(Math.abs(scale * 360 - idleHeight) < .1, "Idle and reaction characters have the same height");
   assert.ok(Math.abs((-crop.y + crop.height) / scale - 810) < .1);
   await page.waitForFunction(() => !!document.querySelector('.companion-sprite').dataset.smoothed);
-  await page.locator('#factory-bot').screenshot({ path: '/tmp/agent-factory-companion-crop.png' });
+  await page.locator('#factory-bot').screenshot({ path: require('node:path').join(artifactDir, 'agent-factory-companion-crop.png') });
   const raster = await page.locator('.companion-sprite').evaluate(el => ({
     pixels: Number(el.dataset.smoothed), expected: Math.round(parseFloat(el.style.backgroundSize) * devicePixelRatio),
     background: el.style.backgroundImage
@@ -230,7 +243,7 @@ exports.checkCompanion = async function (page, { careOnly = false } = {}) {
   assert.equal(raster.pixels, raster.expected, 'Raster matches physical screen resolution');
   assert.ok(raster.background.startsWith('url("data:image/png;'), 'High-quality raster is displayed');
   await page.locator('.companion-sprite').evaluate(el => { el.style.backgroundImage = el.dataset.source; });
-  await page.locator('#factory-bot').screenshot({ path: '/tmp/agent-factory-companion-before.png' });
+  await page.locator('#factory-bot').screenshot({ path: require('node:path').join(artifactDir, 'agent-factory-companion-before.png') });
   await page.locator('.companion-sprite').evaluate((el, background) => { el.style.backgroundImage = background; }, raster.background);
 
   await page.locator('#factory-bot').click();
@@ -239,24 +252,27 @@ exports.checkCompanion = async function (page, { careOnly = false } = {}) {
   }));
   assert.equal(buttonStyle.border, '0px');
   assert.equal(await page.locator('.companion-actions button').count(), 6);
-  await page.locator('#bot-menu').screenshot({ path: '/tmp/agent-factory-care-menu.png' });
+  await page.locator('#bot-menu').screenshot({ path: require('node:path').join(artifactDir, 'care-menu.png') });
   assert.equal(await page.locator('#bot-talk-hint, .bot-talk-shortcut').count(), 0);
 
   await page.keyboard.press('Escape');
   await page.evaluate(() => window.postMessage({ type: 'run.state', running: true }, '*'));
+  await page.waitForFunction(() => !document.querySelector('#agent-progress').hidden);
   for (const width of [795, 360]) {
     await page.setViewportSize({ width, height: 900 });
     assert.equal(await page.locator('#companion-size').count(), 0);
     const boxes = await page.evaluate(() => {
       const box = selector => { const r = document.querySelector(selector).getBoundingClientRect(); return { x:r.x, y:r.y, right:r.right, bottom:r.bottom }; };
-      return { bot:box('#factory-bot'), dock:box('#companion-dock'), composer:box('.composer'), status:box('.composer-status-column'), timeline:box('.timeline-region') };
+      return { bot:box('#factory-bot'), dock:box('#companion-dock'), composer:box('.composer'), status:box('#run-status-toggle'), progress:box('#agent-progress'), timeline:box('.timeline-region') };
     });
-    assert.ok(boxes.status.right <= boxes.dock.x, 'Status and bot are side by side');
-    assert.ok(Math.abs(boxes.bot.bottom - boxes.composer.y) <= 1, 'Feet sit on input border');
-    assert.ok(boxes.timeline.bottom <= boxes.dock.y + 1, 'Bot never overlays the transcript');
+    assert.ok(boxes.progress.right <= boxes.status.x, 'Workflow stays right of loading');
+    const origin = await page.evaluate(() => window.saved.botPosition);
+    assert.equal(boxes.bot.x, Math.max(0, Math.min(width - (boxes.bot.right - boxes.bot.x), origin.x)));
+    assert.equal(boxes.bot.y, Math.max(0, Math.min(900 - (boxes.bot.bottom - boxes.bot.y), origin.y)));
+    assert.equal(await page.locator('#companion-layer').evaluate(el => getComputedStyle(el).pointerEvents), 'none', 'Root overlay does not intercept the transcript');
     assert.ok(boxes.bot.x >= 0 && boxes.bot.right <= width, 'Bot remains inside narrow window');
   }
-  await page.screenshot({ path: '/tmp/agent-factory-companion.png' });
+  await page.screenshot({ path: require('node:path').join(artifactDir, 'companion.png') });
   await page.evaluate(() => window.postMessage({ type: 'host.initialize', botsEnabled: false, botsAvailable: false, runtimeAvailable: true }, '*'));
   await page.waitForFunction(() => document.querySelector('#companion-dock').hidden);
   assert.equal(await page.locator('#settings-tab-bot').isVisible(), false);
@@ -278,11 +294,205 @@ exports.checkCompanion = async function (page, { careOnly = false } = {}) {
   assert.equal(await page.locator('#factory-bot').getAttribute('class'), 'factory-bot');
   await page.evaluate(() => window.postMessage({ type: 'run.state', running: false }, '*'));
   await page.locator('#factory-bot').click();
-  assert.equal(await page.locator('[data-companion-action="pet"]').isVisible(), false);
+  assert.equal(await page.locator('[data-companion-action="pet"]').isVisible(), true, 'Existing vector care menu keeps pet action');
   assert.equal(await page.locator('[data-bot-action="feed"]').isVisible(), true);
   assert.equal(await page.locator('[data-bot-action="feed"]').isEnabled(), true);
   await page.locator('[data-bot-action="feed"]').click();
   assert.equal(await page.locator('#factory-bot').getAttribute('data-gesture'), 'feed');
-  await page.locator('#factory-bot').screenshot({ path: '/tmp/release-factory-bot.png' });
+  await page.locator('#factory-bot').screenshot({ path: require('node:path').join(artifactDir, 'release-factory-bot.png') });
 
+};
+
+exports.checkCompanionOverlay = async function (page) {
+  const path = require('node:path');
+  const artifactDir = process.env.AF_RENDERING_ARTIFACT_DIR || path.resolve(__dirname, '../../../docs/artifact/ui-overlay-dnd');
+  require('node:fs').mkdirSync(artifactDir, { recursive: true });
+  await page.evaluate(() => window.postMessage({ type: 'host.initialize', panelId: 'overlay-test', role: 'main', runtimeAvailable: true, running: false, botsEnabled: true, botVisible: true }, '*'));
+  const bot = page.locator('#factory-bot');
+  await bot.waitFor({ state: 'visible' });
+  const point = async () => bot.boundingBox();
+  const move = async (x, y) => {
+    const box = await point();
+    await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(x, y, { steps: 5 });
+    await page.mouse.up();
+    assert.equal(await page.locator('#bot-menu').isVisible(), false, 'drag release does not open the menu');
+    assert.equal(await bot.getAttribute('data-dragging'), null);
+    assert.equal(await page.locator('html').getAttribute('data-companion-dragging'), null);
+  };
+  assert.equal(await page.locator('#companion-layer').evaluate(el => el.parentElement.tagName), 'BODY');
+  assert.equal(await page.locator('#companion-dock').evaluate(el => getComputedStyle(el).position), 'absolute');
+  const matchesOrigin = async origin => {
+    await page.waitForFunction(origin => {
+      const r = document.querySelector('#factory-bot').getBoundingClientRect();
+      return Math.abs(r.x - Math.max(0, Math.min(innerWidth - r.width, origin.x))) < 1 &&
+        Math.abs(r.y - Math.max(0, Math.min(innerHeight - r.height, origin.y))) < 1;
+    }, origin);
+    assert.deepEqual(await page.evaluate(() => window.saved.botPosition), origin, 'display correction never overwrites origin');
+  };
+  const checkLayout = async origin => {
+    await page.evaluate(() => window.postMessage({ type: "host.initialize", panelId: "overlay-test", role: "main", runtimeAvailable: true, botsEnabled: true, capabilities: { submit: {}, send: {} } }, "*"));
+    await page.locator('#prompt').fill('Line of draft\n'.repeat(20));
+    await matchesOrigin(origin);
+    await page.locator('#send-button').click(); // fixture postMessage records only; no live work
+    await page.locator('#pending-queue-toggle').waitFor({ state: 'visible' });
+    await page.locator('#pending-queue-toggle').click();
+    await page.locator('#pending-message-queue').waitFor({ state: 'visible' });
+    await matchesOrigin(origin);
+    await page.locator('#pending-queue-toggle').click();
+    await page.evaluate(() => window.postMessage({ type: 'agents.list', agents: [], workflows: [{
+      loopId: 'position-fixture-loop', status: 'active', workflow: { id: 'position-fixture-flow', title: 'Position fixture',
+        tasks: [{ id: 'position-fixture-task', title: 'Owned fixture', workStatus: 'completed' }] }
+    }] }, '*'));
+    await page.locator('#run-status-toggle').click();
+    await page.locator('#run-details').waitFor({ state: 'visible' });
+    await matchesOrigin(origin);
+    await page.locator('#run-status-toggle').click();
+    await page.evaluate(() => {
+      const filler = document.createElement('div'); filler.id = 'position-scroll-fixture'; filler.style.height = '2000px'; filler.style.flexShrink = '0';
+      document.querySelector('#timeline').append(filler);
+    });
+    for (const bottom of [true, false]) {
+      const scrollTop = await page.evaluate(bottom => {
+        const timeline = document.querySelector('#timeline'); timeline.scrollTop = bottom ? timeline.scrollHeight : 0;
+        timeline.dispatchEvent(new Event('scroll')); return timeline.scrollTop;
+      }, bottom);
+      assert.ok(bottom ? scrollTop > 0 : scrollTop === 0, 'fixture really scrolls the transcript');
+      await matchesOrigin(origin);
+    }
+    await page.evaluate(() => document.querySelector('#position-scroll-fixture').remove());
+    await page.locator('#prompt').fill('');
+    await matchesOrigin(origin);
+  };
+  const initial = await point();
+  const composer = await page.locator('.composer').boundingBox();
+  assert.ok(Math.abs(initial.y + initial.height - composer.y) <= 1, 'initial feet stay at the existing composer edge');
+  assert.ok(Math.abs(initial.x + initial.width - composer.x - composer.width) <= 1);
+  await page.waitForFunction(() => Number.isFinite(window.saved.botPosition?.x));
+  await checkLayout(await page.evaluate(() => window.saved.botPosition));
+  await page.locator('#prompt').fill('Input remains interactive');
+  await page.locator('#prompt').click();
+  assert.equal(await page.locator('#prompt').evaluate(el => el === document.activeElement), true);
+  await bot.click();
+  assert.equal(await page.locator('#bot-menu').isVisible(), true, 'ordinary click opens the existing menu');
+  await page.keyboard.press('Escape');
+  await move(220, 180);
+  const moved = await point();
+  await page.waitForFunction(() => Number.isFinite(window.saved.botPosition?.x));
+  const saved = await page.evaluate(() => window.saved);
+  await checkLayout(saved.botPosition);
+  for (const size of [{width: 900, height: 950}, {width: 500, height: 600}, {width: 795, height: 900}]) {
+    await page.setViewportSize(size);
+    await matchesOrigin(saved.botPosition);
+  }
+  assert.ok(Math.abs(saved.botPosition.x - moved.x) < 1);
+  await page.evaluate(saved => sessionStorage.setItem('submission-restoration-fixture', JSON.stringify(saved)), saved);
+  await page.reload();
+  await page.evaluate(() => window.postMessage({ type: 'bots.updated', enabled: true, botCharacter: 'lumi', localCompanionAvailable: true }, '*'));
+  await bot.waitFor({ state: 'visible' });
+  const restored = await point();
+  assert.ok(Math.abs(restored.x - moved.x) < 1 && Math.abs(restored.y - moved.y) < 1, 'position survives tab restoration');
+  // Both characters share the same draggable button, menu and saved coordinates.
+  for (const character of ['factory', 'lumi']) {
+    await page.evaluate(character => window.postMessage({ type: 'bots.updated', enabled: true, botCharacter: character, localCompanionAvailable: true }, '*'), character);
+    await page.waitForFunction(character => document.querySelector('#factory-bot').classList.contains('sd-companion') === (character === 'lumi'), character);
+    await move(180, 70);
+    await bot.click();
+    const menu = await page.locator('#bot-menu').boundingBox();
+    const viewport = page.viewportSize();
+    assert.ok(menu.x >= 0 && menu.y >= 0 && menu.x + menu.width <= viewport.width && menu.y + menu.height <= viewport.height, 'menu fits near top edge');
+    await page.keyboard.press('Escape');
+  }
+  await move(-100, -100);
+  let edge = await point();
+  assert.equal(edge.x, 0); assert.equal(edge.y, 0, 'drag clamps to top-left');
+  await page.locator('#prompt').fill('Top edge reply');
+  await bot.click();
+  await page.locator('#bot-talk').click();
+  await page.evaluate(() => { const request = window.sentMessages.filter(m => m.type === 'bot.talk').at(-1); window.postMessage({ type: 'bot.reply', requestId: request.requestId, text: 'Long reply '.repeat(80), emotion: 'happy' }, '*'); });
+  await page.locator('#bot-speech').waitFor({ state: 'visible' });
+  assert.equal(await page.locator('#bot-speech').getAttribute('data-placement'), 'below');
+  const speech = await page.locator('#bot-speech').boundingBox();
+  assert.ok(speech.y >= edge.y + edge.height && speech.y + speech.height <= page.viewportSize().height);
+  await page.locator('#bot-speech-close').click();
+  await move(2000, 2000);
+  edge = await point();
+  assert.equal(edge.x + edge.width, page.viewportSize().width);
+  assert.equal(edge.y + edge.height, page.viewportSize().height, 'drag clamps to bottom-right');
+  // A high-priority layer must receive hits even above existing composer menus.
+  await page.locator('#submission-button').click();
+  const menu = await page.locator('#submission-menu').boundingBox();
+  await move(menu.x + menu.width / 2, menu.y + menu.height / 2);
+  assert.equal(await bot.evaluate(el => { const r = el.getBoundingClientRect(); return el.contains(document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2)); }), true);
+  await page.keyboard.press('Escape');
+  await move(790, 895);
+  const largeOrigin = await page.evaluate(() => window.saved.botPosition);
+  for (const [width, height] of [[465, 900], [1200, 900], [1200, 402], [1200, 900], [465, 556], [721, 402], [320, 500], [1200, 900], [320, 500], [1200, 900]]) {
+    await page.setViewportSize({ width, height });
+    await page.waitForFunction(() => { const r = document.querySelector('#factory-bot').getBoundingClientRect(); return r.x >= 0 && r.y >= 0 && r.right <= innerWidth && r.bottom <= innerHeight; });
+    await matchesOrigin(largeOrigin);
+    await page.locator('#prompt').fill('Narrow input ' + width);
+    await page.locator('#prompt').click();
+    assert.equal(await page.locator('#prompt').evaluate(el => el === document.activeElement), true);
+    await bot.click();
+    const bounds = await page.locator('#bot-menu').boundingBox();
+    assert.ok(bounds.y >= 0 && bounds.y + bounds.height <= height && bounds.x + bounds.width <= width);
+    await page.keyboard.press('Escape');
+    await page.screenshot({ path: path.join(artifactDir, 'overlay-' + width + '.png') });
+  }
+  await page.setViewportSize({ width: 320, height: 500 });
+  await matchesOrigin(largeOrigin);
+  // Restore a legacy pixel position while clamped, then widen to its original point.
+  const smallSaved = await page.evaluate(() => window.saved);
+  await page.evaluate(saved => sessionStorage.setItem('submission-restoration-fixture', JSON.stringify(saved)), smallSaved);
+  await page.reload();
+  await page.evaluate(() => window.postMessage({ type: 'bots.updated', enabled: true, botCharacter: 'lumi', localCompanionAvailable: true }, '*'));
+  await bot.waitFor({ state: 'visible' });
+  await matchesOrigin(largeOrigin);
+  await page.setViewportSize({ width: 1200, height: 900 });
+  await matchesOrigin(largeOrigin);
+  await page.setViewportSize({ width: 320, height: 500 });
+  await matchesOrigin(largeOrigin);
+  await move(170, 160);
+  const smallOrigin = await page.evaluate(() => window.saved.botPosition);
+  assert.notDeepEqual(smallOrigin, largeOrigin, 'small-window drag replaces the original point');
+  await page.setViewportSize({ width: 1200, height: 900 });
+  await matchesOrigin(smallOrigin);
+  await checkLayout(smallOrigin);
+  // Pointer cancellation releases capture and leaves the input usable without a spurious click.
+  const cancelBox = await point();
+  await page.mouse.move(cancelBox.x + cancelBox.width / 2, cancelBox.y + cancelBox.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(cancelBox.x + cancelBox.width / 2 - 20, cancelBox.y + cancelBox.height / 2 - 20);
+  assert.equal(await bot.getAttribute('data-dragging'), 'true');
+  await bot.dispatchEvent('pointercancel', { pointerId: 1, isPrimary: true });
+  await page.mouse.up();
+  assert.equal(await page.locator('#bot-menu').isVisible(), false, 'cancelled drag does not click');
+  assert.equal(await bot.getAttribute('data-dragging'), null);
+  assert.equal(await page.locator('html').getAttribute('data-companion-dragging'), null);
+  assert.equal(await bot.evaluate(el => el.hasPointerCapture(1)), false, 'cancel releases capture');
+  for (const interruption of ['lostpointercapture', 'blur']) {
+    const box = await point();
+    await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(box.x + box.width / 2 + 20, box.y + box.height / 2 + 20);
+    if (interruption === 'blur') await page.evaluate(() => window.dispatchEvent(new Event('blur')));
+    else await bot.evaluate(el => el.releasePointerCapture(1));
+    await page.mouse.up();
+    assert.equal(await bot.getAttribute('data-dragging'), null, interruption + ' clears drag');
+    assert.equal(await page.locator('#bot-menu').isVisible(), false, interruption + ' does not click');
+    assert.equal(await bot.evaluate(el => el.hasPointerCapture(1)), false);
+  }
+  await bot.focus();
+  await page.keyboard.press('Enter');
+  assert.equal(await page.locator('#bot-menu').isVisible(), true, 'keyboard click still works after cancellation');
+  await page.keyboard.press('Escape');
+  await page.evaluate(() => window.postMessage({ type: 'bots.updated', enabled: false }, '*'));
+  await page.waitForFunction(() => document.querySelector('#companion-dock').hidden);
+  await page.locator('#prompt').fill('Without bot');
+  await page.locator('#prompt').click();
+  assert.equal(await page.locator('#prompt').evaluate(el => el === document.activeElement), true);
+  await page.evaluate(() => window.postMessage({ type: 'bots.updated', enabled: true, botCharacter: 'lumi', localCompanionAvailable: true }, '*'));
+  await bot.waitFor({ state: 'visible' });
 };

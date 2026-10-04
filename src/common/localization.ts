@@ -14,6 +14,11 @@ export function localize(key: string, ...values: (string | number | boolean | Lo
   return messages.format(key, hostLanguage, ...values);
 }
 
+/** Formats for an explicit UI language (for example the webview's selection); otherwise the host locale. */
+export function localizeIn(language: string | undefined, key: string, ...values: (string | number | boolean | LocalizedMessage)[]): string {
+  return messages.format(key, language ?? hostLanguage, ...values);
+}
+
 /** Only strings produced by localize carry UI metadata; arbitrary source data stays opaque. */
 export function describeLocalizedMessage(value: string): LocalizedMessage | undefined {
   return messages.describe(value);

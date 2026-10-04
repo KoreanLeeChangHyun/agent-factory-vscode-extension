@@ -120,6 +120,44 @@ test("client.ready sends theme before attempting unavailable runtime and resends
   assert.equal(host.themes().length, 2);
 });
 
+test("new drafts do not inherit identity or execution state from legacy composer preferences", async t => {
+  const host = await fixture(t);
+  await host.manager.context.globalState.update("agentFactory.mainChat.composerPreferences", {
+    panelId: "old-panel", agentId: "main-running", conversationId: "old-conversation",
+    role: "verification", title: "Running chat", contextUsedTokens: 900,
+    verifiedWorkRunId: "run-old", capturedRun: {agentId: "main-running", runId: "run-old", parentAgentId: "parent"},
+    model: "claude-old", reasoning: "high", fastMode: true,
+    agentPermissions: {main: "workspace-write"}
+  });
+  const preferences = host.manager.newChatPreferences();
+  assert.equal(preferences.agentId, undefined);
+  assert.equal(preferences.panelId, undefined);
+  await host.manager.openDraft();
+  await host.manager.openDraft();
+  const drafts = [...host.manager.panels.values()].slice(-2).map(panel => panel.state);
+  assert.equal(drafts.length, 2);
+  assert.notEqual(drafts[0].panelId, drafts[1].panelId);
+  for (const draft of drafts) {
+    assert.equal(draft.agentId, undefined);
+    assert.equal(draft.conversationId, undefined);
+    assert.equal(draft.capturedRun, undefined);
+    assert.equal(draft.verifiedWorkRunId, undefined);
+    assert.equal(draft.contextUsedTokens, undefined);
+    assert.equal(draft.role, "main");
+    assert.equal(draft.title, "Main Agent");
+    assert.equal(draft.agentPermissions.main, "workspace-write");
+  }
+  const managed = [...host.manager.panels.values()].at(-1);
+  await host.receive({type: "composer.settings", model: "claude-opus-5-5", reasoning: "high", fastMode: false, goalMode: false,
+    agentSettingsScope: "chat", agentSettingsSet: "Default"});
+  assert.equal(managed.state.model, "claude-opus-5-5");
+  const saved = host.manager.context.workspaceState.get("agentFactory.sidebar.agents").find(state => state.panelId === managed.state.panelId);
+  assert.equal(saved.model, "claude-opus-5-5");
+  assert.equal(saved.reasoning, "high");
+  await host.ready();
+  assert.equal(host.messages.filter(message => message.type === "host.initialize").at(-1).model, "claude-opus-5-5");
+});
+
 test("client.ready still initializes the chat when runtime probes fail and reports each failure", async t => {
   const client = {
     async capabilities() { throw new Error("Capability probe failed"); },

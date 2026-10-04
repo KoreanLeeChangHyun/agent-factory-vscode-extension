@@ -57,15 +57,15 @@ globalThis.AgentFactoryChat.statusBar = function (host) {
         item.classList.add("runtime-offline");
       }
       item.textContent = label;
-      item.title = catalog[itemId][1];
-      item.setAttribute("aria-description", catalog[itemId][1]);
+      item.title = itemId === "model" && state.role !== "main" && state.capturedRun ? t("ui.captured.run.model") + " · " + state.capturedRun.runId : catalog[itemId][1];
+      item.setAttribute("aria-description", item.title);
       item.setAttribute("aria-label", catalog[itemId][0] + ": " + item.textContent + t("ui.move.with.alt.left.right"));
       if (itemId === "agents" && state.role === "main") {
         item.classList.add("work-unit-activity");
         item.dataset.active = String(state.workUnits.activeUnits > 0);
         item.title = state.workUnitsKnown ? t("ui.active.agent.tasks") + state.workUnits.activeUnits + t("ui.total.calls") + state.workUnits.totalCalled : t("ui.agent.status.unavailable.click.to.refresh");
         item.setAttribute("role", "button");
-        item.setAttribute("aria-haspopup", "listbox");
+        item.setAttribute("aria-haspopup", "dialog");
         item.setAttribute("aria-expanded", String(!agentsMenu.hidden));
       } else if (itemId === "context" && state.contextUsedTokens !== undefined && state.contextWindowTokens > 0) {
         renderContextStatus(item);
@@ -284,7 +284,8 @@ globalThis.AgentFactoryChat.statusBar = function (host) {
       case "goalBudget": return main && !host.goalError && safeCountOrUndefined(host.nativeGoal?.tokenBudget) !== undefined;
       case "goal": return main && !host.goalError && Boolean(host.nativeGoal || supported.goal);
       case "task": return main;
-      case "model": case "reasoning": case "fast": return Boolean(supported[id]);
+      case "model": if (state.role !== "main") return true; return Boolean(supported.model);
+      case "reasoning": case "fast": return Boolean(supported[id]);
       case "elapsed": return Boolean(state.running && state.runStartedAt);
       case "project": return Boolean(state.projectName || chatWorkUnits.conversationWorktree?.workingDirectory);
       case "branch": return Boolean(state.branch);
@@ -320,7 +321,7 @@ globalThis.AgentFactoryChat.statusBar = function (host) {
       elapsed: state.running && state.runStartedAt ? t("ui.elapsed") + formatElapsed(Math.max(0, Date.now() - state.runStartedAt)) : t("ui.elapsed.54e60c"),
       queue: t("ui.queue") + Math.max(state.queueCount, (state.pendingRequests || []).length),
       runtime: state.runtimeAvailable ? t("ui.runtime.online") : t("ui.runtime.offline"),
-      model: t("ui.model.b32422") + (supported.model ? host.chatAgentSettings.effectiveAgentValue("main", "model") || t("ui.default") : t("ui.unknown")),
+      model: t("ui.model.b32422") + (state.role !== "main" ? state.capturedRun?.model || t("flow.model.unavailable") : supported.model ? host.chatAgentSettings.effectiveAgentValue("main", "model") || t("ui.default") : t("ui.unknown")),
       reasoning: t("ui.reasoning.529e9c") + (supported.reasoning ? reasoningDisplayLabel(host.chatAgentSettings.effectiveAgentValue("main", "reasoningEffort")) : t("ui.unknown")),
       fast: t("ui.fast.314aef") + (supported.fast ? state.fastMode ? t("ui.on") : t("ui.off") : t("ui.unknown")),
       task: main ? t("ui.task") + taskModeNames()[enterAction()]?.replaceAll(t("ui.verification"), t("ui.verify")) : t("ui.task.main.only"),

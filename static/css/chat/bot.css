@@ -287,3 +287,11 @@
 @media (max-width: 420px) {
   .bot-settings-selectors { grid-template-columns: minmax(0, 1fr); gap: 8px; }
 }
+
+/* Root layer escapes the composer and transcript stacking/overflow contexts. */
+.companion-layer { position: absolute; inset: 0; z-index: 2147483647; pointer-events: none; }
+.companion-layer .companion-dock { right: auto; bottom: auto; max-width: none; width: max-content; }
+.companion-layer :is(.factory-bot, .bot-menu, .bot-speech, .companion-reaction) { pointer-events: auto; }
+.companion-layer .factory-bot { touch-action: none; user-select: none; cursor: grab; }
+.companion-layer .factory-bot[data-dragging="true"] { cursor: grabbing; }
+html[data-companion-dragging="true"], html[data-companion-dragging="true"] * { user-select: none !important; }

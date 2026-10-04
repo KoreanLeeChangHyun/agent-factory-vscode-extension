@@ -2,7 +2,8 @@ const assert = require('node:assert/strict');
 exports.checkContracts = async page => {
  const emit = data => page.evaluate(data => window.dispatchEvent(new MessageEvent('message', {data})), data);
  await emit({type:'host.initialize', panelId:'contracts', agentId:'main-test', role:'main', runtimeAvailable:true, capabilities:{submit:{},send:{}}});
- await page.locator('#submission-button').click();
+ assert.equal(await page.locator('#submission-menu #contract-list').count(), 0);
+ if (await page.locator('#workflow-history-toggle').isVisible()) await page.locator('#workflow-history-toggle').click();
  assert.equal(await page.locator('#contract-list').evaluate(el => el.nextElementSibling.id), 'task-history');
  await page.locator('#contract-list > summary').click();
  await page.waitForFunction(() => window.sentMessages.some(m => m.type === 'contracts.request'));
@@ -18,14 +19,15 @@ exports.checkContracts = async page => {
  await page.locator('#contract-list > summary').click();
  for (const width of [1000, 440]) {
   await page.setViewportSize({width,height:800});
+  await page.waitForTimeout(100);
+  if (await page.locator('#workflow-history-toggle').isVisible() && !await page.locator('#workflow-history').evaluate(el => el.classList.contains('is-open'))) await page.locator('#workflow-history-toggle').click();
+  if (!await page.locator('#contract-list').evaluate(el => el.open)) await page.locator('#contract-list > summary').click();
   await emit({type:'contracts.list', contracts:[1,2].map(i=>({id:'WC-20260927-DOCUMENT-STRUCTURE-'+i,version:'5',title:'회귀 검사 복구 및 범위 외 변경 기록 계약 '+i}))});
   const dimensions = await page.locator('#contract-list-list').evaluate(e=>({width:e.clientWidth,scroll:e.scrollWidth,height:e.getBoundingClientRect().height}));
   assert.ok(dimensions.scroll <= dimensions.width, 'long contract names fit horizontally');
   if (await page.locator('#contract-list-list').evaluate(e=>e.classList.contains('is-flyout'))) {
-   const menu = await page.locator('#submission-menu').boundingBox();
    const list = await page.locator('#contract-list-list').boundingBox();
-   assert.ok(Math.abs(list.y - menu.y) < 1, 'flyout top aligns with parent menu');
-   assert.ok(Math.abs(list.height - menu.height) < 1, 'flyout retains the full parent menu height');
+   assert.ok(list.x >= 0 && list.x + list.width <= width && list.y >= 0 && list.y + list.height <= 800, 'List fits viewport');
   }
  }
  await emit({type:'contracts.list',contracts:[],error:'read error'});

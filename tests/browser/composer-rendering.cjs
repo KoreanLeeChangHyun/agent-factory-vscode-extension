@@ -26,7 +26,8 @@ async function checkComposerRendering(page) {
     await page.locator('#prompt').fill('');
     await page.waitForFunction(height => document.querySelector('#prompt').getBoundingClientRect().height === height, empty['#prompt'].height);
     await page.evaluate(() => window.postMessage({ type: 'run.state', running: false }, '*'));
-    await page.waitForFunction(() => document.querySelector('#run-status').hidden);
+    // The Main workflow header stays visible; completion hides only the loading indicator.
+    await page.waitForFunction(() => document.querySelector('#agent-progress').hidden);
     assert.deepEqual(await geometry(), empty, 'Clearing and completing restores the same geometry');
   }
   await page.locator('#notes-close').click();
@@ -45,8 +46,9 @@ async function checkComposerRendering(page) {
   await page.evaluate(() => window.postMessage({ type: 'chat.assistant', phase: 'final', text: 'Latest visible transcript line' }, '*'));
   await page.evaluate(() => window.postMessage({ type: 'run.state', running: true }, '*'));
   await page.waitForFunction(() => !document.querySelector('#run-status').hidden);
-  assert.notEqual(await page.locator('#timeline').evaluate(element => getComputedStyle(element).paddingBottom), restingTimelinePadding,
-    'Compact loading status reserves transcript clearance');
+  // The Main workflow header is always shown, so its transcript clearance is already in place before loading starts.
+  assert.equal(await page.locator('#timeline').evaluate(element => getComputedStyle(element).paddingBottom), restingTimelinePadding,
+    'Compact loading status keeps the header clearance');
   await page.evaluate(() => { const timeline = document.querySelector('#timeline'); timeline.scrollTop = timeline.scrollHeight; });
   await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
   const latestMessage = await page.locator('.message-assistant').last().boundingBox();

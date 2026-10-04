@@ -30,6 +30,8 @@ async function checkRenderingThroughput(page) {
       type: 'run.activity', id, category: 'command', phase: 'completed', text: 'echo ready', output: text
     } }));
   });
+  // The output folds behind the action row; open it so every update re-renders the raw output too.
+  await page.locator('[data-id="activity-9999"] .act-row').click();
   report.burstHandlerMs = await page.evaluate(() => {
     const start = performance.now();
     for (let i = 0; i < 100; i++) window.emitPerfActivity('activity-9999', 'update-' + i);
@@ -62,6 +64,7 @@ async function checkRenderingThroughput(page) {
     window.dispatchEvent(new MessageEvent('message', { data: { type: 'run.activity', id: 'delayed', category: 'command', phase: 'started', text: 'echo delayed-old' } }));
   });
   await settle();
+  await page.locator('[data-id="delayed"] .act-row').click();
   await page.evaluate(() => {
     window.oldCode = document.querySelector('[data-id="delayed"] .syntax-code');
     window.dispatchEvent(new MessageEvent('message', { data: { type: 'run.activity', id: 'delayed', category: 'command', phase: 'completed', text: 'echo delayed-new' } }));
@@ -156,6 +159,7 @@ async function checkIndexAndPersistence(page) {
   await emit({ type: 'run.activity', id: 'activity-9999', category: 'command', phase: 'completed', text: 'echo restored', output: 'after reload' });
   await page.clock.runFor(60);
   assert.equal(await page.locator('[data-id="activity-9999"]').count(), 1, 'Restored activity updates use the saved ID');
+  await page.locator('[data-id="activity-9999"] .act-row').click();
   assert.match(await page.locator('[data-id="activity-9999"]').textContent(), /after reload/);
   assert.equal(await page.locator('#prompt').inputValue(), 'blur-latest', 'Immediate lifecycle flush restores the latest draft');
 }

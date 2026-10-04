@@ -351,6 +351,123 @@
   color: var(--af-cli-hunk);
 }
 
+/* Tracking rows: one action per line; only raw command, output, diff or summary folds. */
+.message.message-activity-row { margin-bottom: 0; }
+.message-activity-row + .message:not(.message-activity-row) { margin-top: 0.5em; }
+.message-activity-row > .message-content.act-list { min-width: 0; white-space: normal; }
+/* Mark, gap, icon, gap, verb, gap: where the target column starts. */
+.act-row-wrap { --act-target-start: calc(1ch + 1em + var(--act-verb-width, 0px) + 2.25ch); position: relative; min-width: 0; }
+
+.act-row {
+  display: flex;
+  width: 100%;
+  min-width: 0;
+  /* Verb, target and result share one text baseline; the icon and mark are centred separately. */
+  align-items: baseline;
+  gap: 0.75ch;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  line-height: 1.5;
+  text-align: left;
+  white-space: nowrap;
+}
+button.act-row { cursor: pointer; }
+.act-row:hover { color: var(--af-cli-foreground); }
+.act-row:focus-visible { outline: 1px solid var(--vscode-focusBorder, #0080e8); outline-offset: 1px; }
+
+.act-mark { flex: 0 0 1ch; align-self: center; width: 1ch; text-align: center; }
+.act-row-wrap[data-phase="failed"] .act-mark { color: var(--af-cli-failure); font-weight: 700; }
+.act-mark.is-running::before {
+  content: "";
+  display: inline-block;
+  width: 0.6em;
+  height: 0.6em;
+  border: 1.5px solid var(--af-cli-link);
+  border-right-color: transparent;
+  border-radius: 50%;
+  vertical-align: -0.05em;
+  animation: act-spin 0.9s linear infinite;
+}
+@keyframes act-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) {
+  .act-mark.is-running::before { animation: none; border-right-color: var(--af-cli-link); }
+}
+
+.act-icon {
+  flex: 0 0 auto;
+  align-self: center;
+  width: 1em;
+  height: 1em;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.3;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+/* Consecutive rows share their longest verb's width (set by activity-rows.js), so targets start in one column. */
+.act-verb { flex: 0 0 auto; min-width: var(--act-verb-width, 0); color: var(--af-cli-foreground); }
+.act-row-wrap[data-phase="started"] .act-verb { color: var(--af-cli-link); }
+.act-row-wrap[data-phase="failed"] .act-verb { color: var(--af-cli-failure); }
+/* A path's directory gives way before its file name. */
+.act-target {
+  display: flex;
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  font-family: var(--vscode-editor-font-family, monospace);
+}
+.act-target > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: pre; }
+.act-target-head { flex: 0 100 auto; }
+.act-target-tail { flex: 0 1 auto; }
+.act-scope { flex: 0 1000 auto; color: var(--af-cli-muted); }
+.act-meta {
+  flex: 0 0 auto;
+  margin-left: auto;
+  padding-left: 1ch;
+  color: var(--af-cli-muted);
+  font-size: 0.92em;
+  font-variant-numeric: tabular-nums;
+}
+.act-result-compact { display: none; }
+@media (max-width: 560px) {
+  .act-result-full { display: none; }
+  .act-result-compact { display: inline; }
+}
+.act-error {
+  display: block;
+  overflow: hidden;
+  padding-left: var(--act-target-start);
+  color: color-mix(in srgb, var(--af-cli-failure) 70%, var(--af-cli-foreground));
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.act-detail { margin: 0 0 0.25em var(--act-target-start); min-width: 0; }
+.act-detail[hidden] { display: none; }
+.act-detail .git-diff-overview { display: none; }
+.act-detail .act-raw { margin: 0; color: var(--af-cli-foreground); font: inherit; white-space: pre-wrap; overflow-wrap: anywhere; }
+.act-summary { color: var(--af-cli-muted); white-space: normal; }
+.act-tooltip {
+  position: fixed;
+  z-index: 40;
+  max-width: min(60ch, calc(100vw - 8px));
+  max-height: 12em;
+  overflow: hidden;
+  padding: 4px 8px;
+  border: 1px solid var(--vscode-editorHoverWidget-border, var(--vscode-panel-border, #454545));
+  background: var(--vscode-editorHoverWidget-background, var(--vscode-editorWidget-background, #252526));
+  color: var(--vscode-editorHoverWidget-foreground, var(--vscode-foreground, #cccccc));
+  font-family: var(--vscode-editor-font-family, monospace);
+  font-size: 0.92em;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  pointer-events: none;
+}
+.act-tooltip[hidden] { display: none; }
+
 .message-activity-tool {
   --activity-heading-color: var(--af-cli-foreground);
 }
@@ -568,6 +685,13 @@
 .decision-actions .decision-reply:hover { background: var(--vscode-button-secondaryHoverBackground); }
 .decision-actions button:focus-visible { outline: 1px solid var(--af-color-accent); outline-offset: 2px; }
 .decision-actions button:disabled { opacity: 0.5; cursor: default; }
+.decision-target { margin: 12px 0 0; color: var(--vscode-descriptionForeground); overflow-wrap: anywhere; }
+.decision-target + .decision-actions { margin-top: 6px; }
+.decision-target-label { font-weight: 600; }
+.decision-irreversible { margin-top: 12px; color: var(--vscode-descriptionForeground); }
+.decision-irreversible p { margin: 0; }
+.decision-irreversible ul { margin: 4px 0 0; padding-left: 18px; }
+.decision-irreversible code { overflow-wrap: anywhere; }
 
 .execution-reference { display: flex; min-width: 0; align-items: center; gap: 6px; padding-right: 6px; }
 .execution-reference-main {

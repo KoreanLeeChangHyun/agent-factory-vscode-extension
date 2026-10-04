@@ -8,7 +8,7 @@ async function checkFastSetting(page) {
   await page.goto(new URL('/?lang=ko', page.url()).href);
   const emit = async value => { await page.evaluate(value => window.postMessage(value, '*'), value); await page.evaluate(() => new Promise(requestAnimationFrame)); };
   const capability = { model: true, reasoning: true, fast: true, taskModes: ['direct'] };
-  const initialize = { type: 'host.initialize', panelId: 'fast-setting', role: 'main', title: 'Main', model: 'main-model', reasoning: 'medium', fastMode: true, runtimeAvailable: true, capabilities: { submit: capability, send: capability } };
+  const initialize = { type: 'host.initialize', panelId: 'fast-setting', role: 'main', title: 'Main', model: 'main-model', reasoning: 'medium', fastMode: true, agentFastModes: {main:{'main-model':true}}, runtimeAvailable: true, capabilities: { submit: capability, send: capability } };
   await emit(initialize);
   await emit({ type: 'models.list', models: ['main-model', 'work-model', 'verify-model'] });
   await emit({ type: 'agent.defaults', settings: { global: {}, project: {
@@ -42,7 +42,7 @@ async function checkFastSetting(page) {
   assert.equal(await reopenedFast.getAttribute('aria-pressed'), 'false', 'Closing and reopening settings preserves Fast');
   const fs = require('node:fs');
   const path = require('node:path');
-  const artifactDir = path.resolve(__dirname, '../../../docs/artifact/agent-settings-followup');
+  const artifactDir = process.env.AF_MODEL_SETTINGS_ARTIFACT_DIR || path.resolve(__dirname, '../../../docs/artifact/model-settings-copy-20261004');
   fs.mkdirSync(artifactDir, { recursive: true });
   for (const size of [{ width: 465, height: 556 }, { width: 721, height: 402 }]) {
     await page.setViewportSize(size);
@@ -64,11 +64,10 @@ async function checkFastSetting(page) {
       const box = selector => { const rect = row.querySelector(selector).getBoundingClientRect(); return { left: rect.left, right: rect.right, top: rect.top, bottom: rect.bottom, centerY: rect.top + rect.height / 2 }; };
       return { model: box('button[data-field="model"]'), reasoning: box('input[data-field="reasoningEffort"]'), fast: box('button[data-field="fast"]') };
     });
-    if (size.width <= 560) {
-      assert.ok(rowLayout.model.bottom <= rowLayout.reasoning.top && Math.abs(rowLayout.reasoning.centerY - rowLayout.fast.centerY) < 2, JSON.stringify({ size, rowLayout }));
-    } else {
-      assert.ok(Math.abs(rowLayout.model.centerY - rowLayout.reasoning.centerY) < 2 && Math.abs(rowLayout.reasoning.centerY - rowLayout.fast.centerY) < 2, JSON.stringify({ size, rowLayout }));
-    }
+    assert.ok(Math.abs(rowLayout.model.centerY - rowLayout.reasoning.centerY) < 2, JSON.stringify({ size, rowLayout }));
+    assert.ok(rowLayout.model.right <= rowLayout.reasoning.left, JSON.stringify({ size, rowLayout }));
+    // Fast shares the row when space permits; the compact layout keeps it by the role label.
+    assert.ok(Math.abs(rowLayout.reasoning.centerY - rowLayout.fast.centerY) < 2 || rowLayout.fast.bottom <= rowLayout.reasoning.top, JSON.stringify({ size, rowLayout }));
     for (const control of await page.locator('#model-menu .agent-model-row :is(button[data-field="model"], input, button[data-field="fast"])').all()) {
       await control.scrollIntoViewIfNeeded();
       assert.equal(await control.isVisible(), true, JSON.stringify({ size, control: await control.getAttribute('data-field') }));
@@ -93,7 +92,7 @@ async function checkAgentModels(page) {
   await emit({ type: 'agent.defaults', settings: { global: {}, project: {}, projectAvailable: true } });
   assert.equal(await page.locator('#reasoning-button').isVisible(), false);
   await page.locator('#model-button').click();
-  assert.equal(await page.locator('#agent-default-scope').inputValue(), 'project');
+  assert.equal(await page.locator('#agent-default-scope').inputValue(), 'chat');
   assert.equal(await page.locator('#agent-fast-setting').isVisible(), false);
   await page.locator('#agent-default-scope').selectOption('chat');
   const mainFast = page.locator('#model-menu button[data-role="main"][data-field="fast"]');
@@ -161,7 +160,7 @@ async function checkAgentModels(page) {
 
   const fs = require('node:fs');
   const path = require('node:path');
-  const artifactDir = path.resolve(__dirname, '../../../docs/artifact/agent-settings-followup');
+  const artifactDir = process.env.AF_MODEL_SETTINGS_ARTIFACT_DIR || path.resolve(__dirname, '../../../docs/artifact/model-settings-copy-20261004');
   fs.mkdirSync(artifactDir, { recursive: true });
   for (const width of [795, 320]) {
     await page.setViewportSize({ width, height: 740 });
@@ -182,8 +181,8 @@ async function checkAgentModels(page) {
       return [rect(row.querySelector('button[data-field="model"]')), rect(row.querySelector('input[type="range"]'))];
     }));
     for (const [model, reasoning] of rows) {
-      if (width > 480) assert.ok(Math.abs(model.y - reasoning.y) < 1, 'Desktop role controls must share a horizontal centerline');
-      else assert.ok(model.width > reasoning.width && model.y < reasoning.y, 'Narrow role controls must keep the model readable above reasoning and Fast');
+      assert.ok(Math.abs(model.y - reasoning.y) < 1, 'Role model and reasoning controls share a horizontal centerline at every width');
+      assert.ok(model.x + model.width <= reasoning.x + 1, 'Role controls must not overlap');
     }
     await reasoning.fill('3');
     assert.equal(await page.evaluate(() => window.saved.reasoning), 'high');
@@ -209,7 +208,7 @@ async function checkAgentModels(page) {
   }
   assert.equal(await page.locator('[data-permission-role]').count(), 0);
   assert.equal(await page.locator('#model-menu [data-setting="permissions"]').count(), 0);
-  // Project and global defaults are edited from the same panel through its scope selector.
+  // Project editing cannot change the current chat; global editing belongs to full settings.
   await emit({ type: 'agent.defaults', settings: { global: {}, project: {
     main: { model: 'gpt-6-astra', reasoningEffort: 'medium', fast: false },
     work: { model: 'gpt-6-astra', reasoningEffort: 'medium', fast: true },
@@ -232,12 +231,19 @@ async function checkAgentModels(page) {
   await projectFast.click();
   assert.deepEqual(await page.evaluate(() => window.sentMessages.filter(m => m.type === 'agent.defaults.fast').at(-1)), { type: 'agent.defaults.fast', scope: 'project', role: 'work', model: 'gpt-6-astra', value: false });
   assert.equal(await page.locator('#agent-default-fields button[data-role=verification][data-field=fast]').getAttribute('aria-pressed'), 'true', 'Verification remains independent on the same model');
-  await page.locator('#agent-default-scope').selectOption('global');
+  const chatSettingsBeforeParents = await page.evaluate(() => window.sentMessages.filter(m => m.type === 'composer.settings').at(-1));
+  await page.locator('#status-settings-button').evaluate(element => element.click());
+  await page.locator('#settings-tab-agents').click();
+  assert.equal(await page.locator('#agent-default-scope').inputValue(), 'global');
   await page.locator('#agent-default-fields input[data-role=verification]').fill('5');
   assert.deepEqual(await page.evaluate(() => window.sentMessages.filter(m => m.type === 'agent.defaults.save').at(-1)), { type: 'agent.defaults.save', scope: 'global', role: 'verification', field: 'reasoningEffort', value: 'max' });
   // A defaults update keeps the chosen scope instead of snapping back to chat rows.
   await emit({ type: 'agent.defaults', settings: { global: { verification: { reasoningEffort: 'max' } }, project: {}, projectAvailable: true } });
-  assert.equal(await page.locator('#model-menu #agent-default-fields .agent-model-row').count(), 4);
+  assert.equal(await page.locator('#global-agent-settings #agent-default-fields .agent-model-row').count(), 4);
+  assert.deepEqual(await page.evaluate(() => window.sentMessages.filter(m => m.type === 'composer.settings').at(-1)), chatSettingsBeforeParents);
+  await page.locator('#status-settings-close').click();
+  await page.locator('#model-button').click();
+  await page.locator('#agent-default-scope').selectOption('project');
   for (const width of [795, 566, 320]) {
     await page.setViewportSize({ width, height: 740 });
     // The scope selector and saved-set picker share the heading row with the close button.
@@ -248,11 +254,8 @@ async function checkAgentModels(page) {
     for (const row of await page.locator('#agent-default-fields .agent-model-row').all()) {
       const model = await row.locator('button[data-field=model]').boundingBox();
       const effort = await row.locator('input[type=range]').boundingBox();
-      if (width <= 480) {
-        assert.ok(model.y + model.height <= effort.y, JSON.stringify([width, model, effort]));
-      } else {
-        assert.ok(Math.abs(model.y + model.height / 2 - effort.y - effort.height / 2) < 1, JSON.stringify([width, model, effort]));
-      }
+      assert.ok(model.x + model.width <= effort.x + 1, JSON.stringify([width, model, effort]));
+      assert.ok(Math.abs(model.y + model.height / 2 - effort.y - effort.height / 2) < 1, JSON.stringify([width, model, effort]));
     }
     assert.equal(await page.locator('#model-menu').evaluate(el => el.scrollWidth > el.clientWidth + 1), false);
     const control = page.locator('#agent-default-fields button[data-field=model]').first();
@@ -264,7 +267,7 @@ async function checkAgentModels(page) {
   await page.locator('#agent-default-scope').selectOption('chat');
   assert.equal(await page.locator('#model-menu button[data-role="main"][data-field="model"]').count(), 1);
   await page.keyboard.press('Escape');
-  await page.locator('#status-settings-button').click();
+  await page.locator('#status-settings-button').evaluate(element => element.click());
   await page.locator('#settings-tab-general').click();
   await page.locator('#ui-language').selectOption('ko');
   await page.locator('#settings-tab-general').click();
@@ -279,7 +282,7 @@ async function checkAgentModels(page) {
   await page.locator('#prompt').press('Enter');
   assert.deepEqual(await page.evaluate(() => window.sentMessages.filter(m => m.type === 'chat.send').at(-1).execution.agentPermissions), { main: 'workspace-write', work: 'workspace-write', verification: 'workspace-write' });
   assert.equal(await page.evaluate(() => window.saved.agentPermissions), undefined);
-  await page.locator('#status-settings-button').click();
+  await page.locator('#status-settings-button').evaluate(element => element.click());
   await emit({ type: 'run.state', running: true });
   assert.equal(await page.locator('#general-permissions select[data-setting="permissions"]').isDisabled(), true);
   await page.locator('#status-settings-close').click();
@@ -382,7 +385,7 @@ async function checkModelVendorTabs(page, emit) {
   await page.locator('#model-button').click();
   const fs = require('node:fs');
   const path = require('node:path');
-  const artifactDir = path.resolve(__dirname, '../../../docs/artifact/agent-settings-followup');
+  const artifactDir = process.env.AF_MODEL_SETTINGS_ARTIFACT_DIR || path.resolve(__dirname, '../../../docs/artifact/model-settings-copy-20261004');
   fs.mkdirSync(artifactDir, { recursive: true });
   for (const width of [795, 320]) {
     await page.setViewportSize({ width, height: 740 });
@@ -405,7 +408,7 @@ async function checkReasoningSlider(page) {
   await emit({ type: 'models.list', models: ['main-model', 'work-model', 'verify-model'] });
   await emit({ type: 'agent.defaults', settings: { global: {}, project: {}, projectAvailable: true } });
   await page.locator('#model-button').click();
-  assert.equal(await page.locator('#agent-default-scope').inputValue(), 'project');
+  assert.equal(await page.locator('#agent-default-scope').inputValue(), 'chat');
   await page.locator('#agent-default-scope').selectOption('chat');
 
   const chatReasoning = page.locator('#model-menu input[data-role=main][data-field=reasoningEffort]');
@@ -425,10 +428,10 @@ async function checkReasoningSlider(page) {
     element.value = '4';
     element.dispatchEvent(new Event('input', { bubbles: true }));
   });
-  assert.equal(await projectReasoning.getAttribute('aria-valuetext'), 'high');
+  assert.equal(await projectReasoning.getAttribute('aria-valuetext'), 'xhigh');
   assert.equal(await page.evaluate(() => window.sentMessages.filter(m => m.type === 'agent.defaults.save').length), savesBeforeInput, 'Dragging must not save and re-render the slider mid-gesture');
   await projectReasoning.evaluate(element => element.dispatchEvent(new Event('change', { bubbles: true })));
-  assert.deepEqual(await page.evaluate(() => window.sentMessages.filter(m => m.type === 'agent.defaults.save').at(-1)), { type: 'agent.defaults.save', scope: 'project', role: 'main', field: 'reasoningEffort', value: 'high' });
+  assert.deepEqual(await page.evaluate(() => window.sentMessages.filter(m => m.type === 'agent.defaults.save').at(-1)), { type: 'agent.defaults.save', scope: 'project', role: 'main', field: 'reasoningEffort', value: 'xhigh' });
 }
 
 module.exports = { checkFastSetting, checkAgentModels, checkReasoningSlider };

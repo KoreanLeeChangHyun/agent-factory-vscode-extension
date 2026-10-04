@@ -19,8 +19,9 @@ globalThis.AgentFactoryChat.bot = function (host) {
   let companionOutcomeUntil = 0;
   let companionTimer;
   let companionReactionDismissedUntil = 0;
-  let companionPetStart;
-  let companionPetDistance = 0;
+  const companionDock = document.getElementById("companion-dock");
+  let botDrag;
+  let suppressDragClick = false;
   function interactCompanion(action) {
     if (state.botsEnabled && state.companionAvailable) vscode.postMessage({ type: "bot.interact", action: action });
   }
@@ -167,16 +168,74 @@ globalThis.AgentFactoryChat.bot = function (host) {
     } else interactCompanion(button.dataset.companionAction);
     closeBotMenu(true);
   });
+  function clampBotPosition(position) {
+    return { x: Math.max(0, Math.min(window.innerWidth - factoryBot.offsetWidth, position.x)),
+      y: Math.max(0, Math.min(window.innerHeight - factoryBot.offsetHeight, position.y)) };
+  }
+  function positionCompanion() {
+    if (companionDock.hidden) return;
+    if (!state.botPosition) {
+      const composer = document.querySelector(".composer").getBoundingClientRect();
+      // Keep the existing first perch, then store viewport pixels just like a drag.
+      state.botPosition = clampBotPosition({ x: composer.right - factoryBot.offsetWidth,
+        y: composer.top - factoryBot.offsetHeight });
+      persist(false);
+    }
+    // The companion floats at its stored point; the status row and panel reserve no space for it.
+    companionDock.dataset.moved = "true";
+    // A smaller viewport changes only the display; widening restores the stored point.
+    const next = clampBotPosition(state.botPosition);
+    companionDock.style.left = next.x + "px";
+    companionDock.style.top = next.y + "px";
+    positionBotMenu();
+    positionBotSpeech();
+    positionAboveCompanion(document.getElementById("companion-reaction"));
+  }
   factoryBot.addEventListener("pointerdown", function (event) {
-    companionPetStart = { x: event.clientX, y: event.clientY };
-    companionPetDistance = 0;
+    if (event.button !== 0 || !event.isPrimary || botDrag) return;
+    suppressDragClick = false;
+    const box = factoryBot.getBoundingClientRect();
+    botDrag = { pointerId: event.pointerId, x: event.clientX, y: event.clientY,
+      left: box.left, top: box.top, moved: false };
+    factoryBot.setPointerCapture(event.pointerId);
   });
   factoryBot.addEventListener("pointermove", function (event) {
-    if (!companionPetStart || !event.buttons) return;
-    companionPetDistance += Math.hypot(event.clientX - companionPetStart.x, event.clientY - companionPetStart.y);
-    companionPetStart = { x: event.clientX, y: event.clientY };
+    if (!botDrag || botDrag.pointerId !== event.pointerId) return;
+    const dx = event.clientX - botDrag.x, dy = event.clientY - botDrag.y;
+    if (!botDrag.moved && Math.hypot(dx, dy) < 5) return;
+    botDrag.moved = true;
+    suppressDragClick = true;
+    factoryBot.dataset.dragging = "true";
+    document.documentElement.dataset.companionDragging = "true";
+    event.preventDefault();
+    window.getSelection()?.removeAllRanges();
+    // A new drag chooses a new origin inside the current viewport, even after clamping.
+    state.botPosition = clampBotPosition({ x: botDrag.left + dx, y: botDrag.top + dy });
+    positionCompanion();
   });
-  factoryBot.addEventListener("pointerleave", function () { companionPetStart = undefined; });
+  function endBotDrag(event) {
+    if (!botDrag || (event?.pointerId !== undefined && botDrag.pointerId !== event.pointerId)) return;
+    const drag = botDrag;
+    botDrag = undefined;
+    delete factoryBot.dataset.dragging;
+    delete document.documentElement.dataset.companionDragging;
+    if (factoryBot.hasPointerCapture(drag.pointerId)) factoryBot.releasePointerCapture(drag.pointerId);
+    if (drag.moved) persist();
+  }
+  factoryBot.addEventListener("pointerup", endBotDrag);
+  factoryBot.addEventListener("pointercancel", endBotDrag);
+  factoryBot.addEventListener("lostpointercapture", endBotDrag);
+  factoryBot.addEventListener("dragstart", event => event.preventDefault());
+  window.addEventListener("blur", () => endBotDrag());
+  window.addEventListener("resize", positionCompanion);
+  // ResizeObserver also handles character switches, expanded tasks and draft height changes.
+  new ResizeObserver(positionCompanion).observe(document.querySelector(".composer-region"));
+  new ResizeObserver(positionCompanion).observe(factoryBot);
+  function consumeDragClick(event) {
+    const suppressed = suppressDragClick && event.detail !== 0;
+    suppressDragClick = false;
+    return suppressed;
+  }
 
   let botRestingSince;
   let botGestureTimer;
@@ -292,7 +351,8 @@ globalThis.AgentFactoryChat.bot = function (host) {
     if (botMenu.hidden) return;
     const box = factoryBot.getBoundingClientRect();
     botMenu.style.left = Math.max(8, Math.min(window.innerWidth - botMenu.offsetWidth - 8, box.right - botMenu.offsetWidth)) + "px";
-    botMenu.style.top = Math.max(8, box.top - botMenu.offsetHeight - 8) + "px";
+    const top = box.top - botMenu.offsetHeight - 8;
+    botMenu.style.top = Math.max(8, Math.min(window.innerHeight - botMenu.offsetHeight - 8, top >= 8 ? top : box.bottom + 8)) + "px";
   }
   function talkToBot() {
     if (botTalkButton.disabled || botTalkPending || !state.botsEnabled || !prompt.value.trim()) return;
@@ -322,19 +382,21 @@ globalThis.AgentFactoryChat.bot = function (host) {
   }
   function positionBotSpeech() {
     if (botSpeech.hidden) return;
-    const box = factoryBot.getBoundingClientRect();
     botSpeech.style.width = Math.min(300, window.innerWidth - 16) + "px";
-    botSpeech.style.maxHeight = Math.max(1, box.top - 16) + "px";
-    botSpeechText.style.maxHeight = Math.max(1, box.top - 42) + "px";
     positionAboveCompanion(botSpeech);
   }
   function positionAboveCompanion(bubble) {
-    if (bubble.hidden) return;
+    if (!bubble || bubble.hidden) return;
     const box = factoryBot.getBoundingClientRect();
-    bubble.style.maxHeight = Math.max(1, box.top - 16) + "px";
+    const above = box.top - 16, below = window.innerHeight - box.bottom - 16;
+    const useAbove = above >= Math.min(160, bubble.scrollHeight) || above >= below;
+    const available = Math.max(1, useAbove ? above : below);
+    bubble.style.maxHeight = available + "px";
+    if (bubble === botSpeech) botSpeechText.style.maxHeight = Math.max(1, available - 32) + "px";
     bubble.style.left = Math.max(8, Math.min(window.innerWidth - bubble.offsetWidth - 8, box.right - bubble.offsetWidth)) + "px";
-    bubble.style.top = Math.max(8, box.top - bubble.offsetHeight - 8) + "px";
-    bubble.dataset.placement = "above";
+    bubble.style.top = Math.max(8, Math.min(window.innerHeight - bubble.offsetHeight - 8,
+      useAbove ? box.top - bubble.offsetHeight - 8 : box.bottom + 8)) + "px";
+    bubble.dataset.placement = useAbove ? "above" : "below";
   }
   // Conversation owns the speech surface while thinking or showing an answer.
   // Consume suppressed greetings so closing the answer cannot bring them back.
@@ -476,6 +538,8 @@ globalThis.AgentFactoryChat.bot = function (host) {
     factoryBot.hidden = !state.botsEnabled || !state.botVisible;
     const dock = document.getElementById("companion-dock");
     dock.hidden = factoryBot.hidden;
+    if (dock.hidden) endBotDrag();
+    positionCompanion();
     document.getElementById("bot-visible").disabled = !state.botsEnabled;
     document.getElementById("bot-animations").disabled = !state.botsEnabled;
     if (!state.botsEnabled) {
@@ -543,7 +607,7 @@ globalThis.AgentFactoryChat.bot = function (host) {
     set botRestingSince(value) { botRestingSince = value; },
     get companionSnapshot() { return companionSnapshot; },
     set companionSnapshot(value) { companionSnapshot = value; },
-    renderFactoryBot, botReducedMotion, wakeFactoryBot, positionBotMenu, positionBotSpeech,
+    renderFactoryBot, botReducedMotion, wakeFactoryBot, positionBotMenu, positionBotSpeech, positionCompanion, consumeDragClick,
     positionAboveCompanion, talkToBot,
     get botSpeechVisible() { return botSpeechVisible; },
     set botSpeechVisible(value) { botSpeechVisible = value; },
@@ -559,9 +623,6 @@ globalThis.AgentFactoryChat.bot = function (host) {
     get botLastPlayActivity() { return botLastPlayActivity; },
     set botLastPlayActivity(value) { botLastPlayActivity = value; },
     renderBotCare,
-    get companionPetStart() { return companionPetStart; },
-    set companionPetStart(value) { companionPetStart = value; },
-    get companionPetDistance() { return companionPetDistance; },
     get botReactionTimer() { return botReactionTimer; },
     get botDraftRevision() { return botDraftRevision; },
     set botDraftRevision(value) { botDraftRevision = value; },

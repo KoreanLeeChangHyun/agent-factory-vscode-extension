@@ -3,11 +3,43 @@ globalThis.AgentFactoryChat.activities = function (host) {
   "use strict";
 
   const {
-    state, t, vscode, activityPhaseAccessibleLabel, chatTerminal, taskModeNames, chatAgents
+    state, t, uiLocale, vscode, activityPhaseAccessibleLabel, chatTerminal, taskModeNames, chatAgents
   } = host;
 
   function renderDecisionActions(content, runId) {
-    if (!state.pendingDecisionCanApprove) return;
+    const approval = state.pendingDecisionApproval;
+    const irreversible = approval ? approval.irreversible : [];
+    if (!state.pendingDecisionCanApprove && !irreversible.length) return;
+    if (approval && approval.request) {
+      const target = document.createElement("p");
+      target.className = "decision-target";
+      const label = document.createElement("span");
+      label.className = "decision-target-label";
+      label.textContent = t("ui.approval.target");
+      const request = document.createElement("q");
+      request.textContent = approval.request;
+      target.append(label, " ", request);
+      content.append(target);
+    }
+    if (irreversible.length) {
+      // Irreversible operations need an explicit typed reply; the host also refuses one-click approval.
+      const notice = document.createElement("div");
+      notice.className = "decision-irreversible";
+      notice.setAttribute("role", "note");
+      const description = document.createElement("p");
+      description.textContent = t("ui.this.proposal.includes.irreversible.operations.reply.directly.naming.the.operations.to.approve");
+      const list = document.createElement("ul");
+      for (const operation of irreversible) {
+        const item = document.createElement("li");
+        const code = document.createElement("code");
+        code.textContent = operation;
+        item.append(code);
+        list.append(item);
+      }
+      notice.append(description, list);
+      content.append(notice);
+      return;
+    }
     const actions = document.createElement("div");
     actions.className = "decision-actions";
     actions.setAttribute("role", "group");
@@ -20,7 +52,7 @@ globalThis.AgentFactoryChat.activities = function (host) {
       if (!state.pendingDecisionCanApprove || state.running || state.decisionSubmitting || state.pendingDecisionRunId !== runId) return;
       state.decisionSubmitting = true;
       approve.disabled = true;
-      vscode.postMessage({ type: "decision.approve", runId });
+      vscode.postMessage({ type: "decision.approve", runId, language: uiLocale() });
     });
     actions.append(approve);
     content.append(actions);

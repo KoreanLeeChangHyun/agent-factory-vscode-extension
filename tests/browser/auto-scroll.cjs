@@ -37,7 +37,23 @@ async function checkAutoScroll(page) {
   await emit({ type: 'agents.list', agents: [] });
   assert.equal(await page.locator('#timeline').evaluate(element => element.scrollTop), 150);
   assert.equal(await page.evaluate(() => window.scrollWrites), 0);
+  // Opening an action row grows the transcript below the reader; a paused view stays put.
+  await page.locator('[data-id="scroll-stream"] .act-row').evaluate(element => element.click());
+  await settle();
+  assert.equal(await page.locator('[data-id="scroll-stream"] .act-row').getAttribute('aria-expanded'), 'true');
+  assert.equal(await page.locator('#timeline').evaluate(element => element.scrollTop), 150);
+  assert.equal(await page.evaluate(() => window.scrollWrites), 0, 'Opening a row must not write transcript scrollTop');
   await emit({ type: 'host.initialize', runtimeAvailable: true, capabilities: { submit: {}, send: {} } });
+  // A viewport-persisted bot can cover the jump control after other fixtures resize the page.
+  // Place it through its actual drag interaction before testing transcript controls.
+  const bot = await page.locator('#factory-bot').boundingBox();
+  if (bot) {
+    await page.mouse.move(bot.x + bot.width / 2, bot.y + bot.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(40, 40, { steps: 5 });
+    await page.mouse.up();
+    await settle();
+  }
   for (const method of ['Enter', 'button']) {
     await page.locator('#prompt').fill('Send while automatic scrolling is OFF: ' + method);
     await page.locator('#timeline').evaluate(element => { element.scrollTop = 150; window.scrollWrites = 0; });
@@ -104,10 +120,12 @@ async function checkAutoScroll(page) {
     await page.setViewportSize({ width, height: 740 });
     await settle();
     const jump = await page.locator('#jump-to-bottom').boundingBox();
-    const bot = await page.locator('#factory-bot').boundingBox();
-    assert.ok(jump && bot);
-    assert.ok(Math.abs(jump.x + jump.width / 2 - bot.x - bot.width / 2) <= 1, 'Jump button must align above the bot');
-    assert.ok(jump.y + jump.height + 6 <= bot.y, 'Jump button must not overlap the bot');
+    const region = await page.locator('.timeline-region').boundingBox();
+    assert.ok(jump && region);
+    // The bot now retains a draggable viewport position. The jump control belongs to the transcript.
+    assert.ok(Math.abs(region.x + region.width - jump.x - jump.width - (width <= 560 ? 17 : 21)) <= 1, 'Jump button stays at the transcript right inset');
+    assert.ok(Math.abs(region.y + region.height - jump.y - jump.height - 32) <= 1, 'Jump button stays above the transcript bottom');
+    assert.ok(jump.x >= 0 && jump.x + jump.width <= width && jump.y >= 0 && jump.y + jump.height <= 740, 'Jump control stays in the viewport');
   }
   await page.setViewportSize(originalViewport);
   await settle();

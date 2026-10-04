@@ -16,7 +16,7 @@ async function checkFactoryRendering(page) {
     assert.equal(await page.locator(`[data-id="${id}"] .managed-agent-card`).count(), 1);
   }
   assert.match(await page.locator('[data-id="factory-plan"] .managed-agent-heading').textContent(), /Plan/);
-  assert.equal(await page.locator('[data-id="factory-skill"] .skill-read-card').count(), 1);
+  assert.equal(await page.locator('[data-id="factory-skill"] .act-row-wrap[data-kind="skill"]').count(), 1);
   assert.equal(await page.locator('[data-id="ordinary-example"] .managed-agent-card').count(), 0);
   assert.match(await page.locator('[data-id="factory-util"] .managed-agent-heading').textContent(), /Check supported features.*Command completed/);
   const failed = { id: 'failed-submit', text: 'python3 skills/agent/scripts/exec.py submit --agent work-failed --role work', output: JSON.stringify({ kind: 'error', error: { code: 'invalid_dispatch_id', message: 'Invalid ID <script>unsafe</script>' } }) };
@@ -40,10 +40,13 @@ async function checkFactoryRendering(page) {
     assert.equal(await content.locator('.managed-agent-card').count(), 0);
   }
   assert.equal(await page.locator('[data-id="factory-util"] .managed-agent-card').evaluate(el => getComputedStyle(el).borderTopStyle), 'solid');
+  // Ordinary commands are tracking rows; their output opens from the row.
+  await page.locator('[data-id="plain-test"] .act-row').click();
   const ordinaryDetails = page.locator('[data-id="plain-test"] .terminal-output-details');
   await ordinaryDetails.locator('summary').click();
   assert.match(await ordinaryDetails.textContent(), /OK/);
-  assert.equal(await page.locator('[data-id="plain-failure"] .message-phase').getAttribute('aria-label'), 'Failed');
+  assert.equal(await page.locator('[data-id="plain-failure"] .act-row-wrap').getAttribute('data-phase'), 'failed');
+  assert.equal(await page.locator('[data-id="plain-failure"] .act-error').textContent(), 'Broken link');
   // A utility's lifecycle updates one item; it does not append another card.
   await page.evaluate(() => window.postMessage({ type: 'run.activity', id: 'factory-util', category: 'command', phase: 'failed', text: 'env X=1 python3 -u skills/agent/scripts/exec.py capabilities', output: 'failed output' }, '*'));
   await page.waitForFunction(() => document.querySelector('[data-id="factory-util"] .managed-agent-status')?.textContent === 'Failed');

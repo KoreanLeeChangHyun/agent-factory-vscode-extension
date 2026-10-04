@@ -1,7 +1,8 @@
 import { localize, describeLocalizedMessage, joinLocalizedMessages, type LocalizedMessage } from "../../common/localization";
-import type { MessageSubmission } from "../../protocol/messages";
+import type { ActivityDetails, MessageSubmission } from "../../protocol/messages";
 import { withInspectionGuidance, withContractExecutionGuidance } from "./task-selection";
 import { withBusinessMode } from "../../common/types/business-mode";
+import { approvalMessage, describeDecisionApproval, type DecisionApproval } from "./decision-approval";
 import { randomUUID } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import type { AttachmentReference } from "../../common/types/attachment";
@@ -32,8 +33,8 @@ export interface SessionControllerEvents {
     readonly title?: string;
     readonly diff?: string;
     readonly output?: string;
-  }) => void;
-  readonly onDecision?: (runId: string | null, canApprove?: boolean) => void;
+  } & ActivityDetails) => void;
+  readonly onDecision?: (runId: string | null, canApprove?: boolean, approval?: DecisionApproval) => void;
   readonly onHumanDecision?: (text: string, submission: MessageSubmission) => void;
   readonly onGoal?: (goal: NativeGoal | null, error?: string) => void;
   readonly onStatusObserved?: (status: string) => void;
@@ -61,6 +62,7 @@ export class ChatSessionController {
   private busy = false;
   private pendingDecisionRunId: string | undefined;
   private pendingDecisionCanApprove = false;
+  private pendingDecisionApproval: DecisionApproval | undefined;
   private submittedAgentPermissions: ExecutionOptions["agentPermissions"];
   private pendingDecisionAgentPermissions: ExecutionOptions["agentPermissions"];
   private submittedAgentModels: ExecutionOptions["agentModels"];
@@ -212,6 +214,7 @@ export class ChatSessionController {
       if (pending) {
         this.pendingDecisionRunId = pending.runId;
         this.pendingDecisionCanApprove = false;
+        this.pendingDecisionApproval = undefined;
         this.events.onDecision?.(pending.runId, false);
       } else if (this.pendingDecisionRunId) {
         this.clearDecision();
@@ -336,6 +339,7 @@ export class ChatSessionController {
           || JSON.stringify(item.execution.agentPermissions ?? {}) !== JSON.stringify(next[0]!.execution.agentPermissions ?? {})
           || JSON.stringify(item.execution.agentModels ?? {}) !== JSON.stringify(next[0]!.execution.agentModels ?? {})
           || Boolean(item.execution.inspectionOnly) !== Boolean(next[0]!.execution.inspectionOnly)
+          || Boolean(item.execution.workIsolation) !== Boolean(next[0]!.execution.workIsolation)
           || Boolean(item.execution.goalMode) !== Boolean(next[0]!.execution.goalMode)
           || (item.execution.goalMode === true && item.execution.goalObjective !== next[0]!.execution.goalObjective));
         if (boundary > 0) {
@@ -344,9 +348,12 @@ export class ChatSessionController {
         }
         attempted = true;
         const advertised = await this.delegationCapabilities(next[0]!.execution);
-        const merged = mergePendingSends(next, advertised.workProfile, advertised.failureClass);
+        const merged = mergePendingSends(next, advertised.workProfile, advertised.failureClass, advertised.taskWorkspaces, advertised.workIsolation);
         if (next.length > 1) this.events.onProgress(localize("ui.submitting.0.queued.messages.as.one.request.task.mode.model.and.reasoning.use.the.first.message.settings.permissions.use.their.common.allowed.scope", next.length));
-        await this.sendOne(merged.text, merged.attachments, merged.execution, (preparationGuidance) => {
+        // An older runtime rejects the unknown flag; the guidance then reports the limitation instead.
+        const { workIsolation, ...withoutIsolation } = merged.execution;
+        const execution = advertised.workIsolation && workIsolation !== undefined ? { ...withoutIsolation, workIsolation } : withoutIsolation;
+        await this.sendOne(merged.text, merged.attachments, execution, (preparationGuidance) => {
           started = true;
           next.forEach((item, index) => {
             const submission = merged.submissions[index]!;
@@ -391,13 +398,13 @@ export class ChatSessionController {
   }
 
   /** What the installed runtime advertises: it accepts `--work-profile` (an older one rejects the unknown flag) and reports `failureClass`. */
-  private async delegationCapabilities(execution: ExecutionOptions): Promise<{ readonly workProfile: boolean; readonly failureClass: boolean }> {
-    const none = { workProfile: false, failureClass: false };
+  private async delegationCapabilities(execution: ExecutionOptions): Promise<{ readonly workProfile: boolean; readonly failureClass: boolean; readonly taskWorkspaces: boolean; readonly workIsolation: boolean }> {
+    const none = { workProfile: false, failureClass: false, taskWorkspaces: false, workIsolation: false };
     if ((execution.taskMode ?? "direct") === "direct") return none;
     // Same cached probe the dispatch itself uses; a failed probe only omits the instructions.
     try {
       const { submit } = await this.runtime.capabilities(this.agentId, execution.model);
-      return { workProfile: submit.workProfile === true, failureClass: submit.failureClass === true };
+      return { workProfile: submit.workProfile === true, failureClass: submit.failureClass === true, taskWorkspaces: submit.taskWorkspaces === true, workIsolation: submit.workIsolation === true };
     } catch { return none; }
   }
 
@@ -457,9 +464,9 @@ Answer the Human's current question without cancelling these workflows. For task
     this.cancelRequested = false;
   }
 
-  public approveDecision(runId: string, execution: ExecutionOptions): boolean {
+  public approveDecision(runId: string, execution: ExecutionOptions, language?: "ko" | "en"): boolean {
     if (!this.pendingDecisionCanApprove || this.busy || this.goalControlPending || this.pendingDecisionRunId !== runId) return false;
-    const text = "바로 위 응답에서 제안한 범위와 조건대로 진행하세요.";
+    const text = approvalMessage(runId, this.pendingDecisionApproval?.request, language);
     const taskMode = this.pendingDecisionTaskMode;
     const businessMode = this.pendingDecisionBusinessMode;
     const inspectionOnly = this.pendingDecisionInspectionOnly;
@@ -470,6 +477,7 @@ Answer the Human's current question without cancelling these workflows. For task
   private clearDecision(): void {
     this.pendingDecisionRunId = undefined;
     this.pendingDecisionCanApprove = false;
+    this.pendingDecisionApproval = undefined;
     this.pendingDecisionTaskMode = undefined;
     this.pendingDecisionBusinessMode = undefined;
     this.pendingDecisionInspectionOnly = undefined;
@@ -629,7 +637,8 @@ Answer the Human's current question without cancelling these workflows. For task
           this.events.onAccountLimits?.(update.limits);
         } else {
           lastCommentary = undefined;
-          const activity = { ...update, id: `${runId}:${update.id}` };
+          const { kind: _update, activityKind, ...fields } = update;
+          const activity = { ...fields, ...(activityKind ? { kind: activityKind } : {}), id: `${runId}:${update.id}` };
           if (activity.phase === "started") openActivities.set(activity.id, activity);
           else openActivities.delete(activity.id);
           this.events.onActivity(activity);
@@ -677,13 +686,17 @@ Answer the Human's current question without cancelling these workflows. For task
           }
           if (result.status === "needs-human-decision" && result.text.trim() && !diagnostic && !goalError) {
             this.pendingDecisionRunId = runId;
-            this.pendingDecisionCanApprove = result.decisionKind === "approval";
+            // Irreversible operations are never approvable by one click; the Human names them in a reply.
+            const approval = result.decisionKind === "approval" ? describeDecisionApproval(result.text) : undefined;
+            this.pendingDecisionApproval = approval;
+            this.pendingDecisionCanApprove = approval !== undefined && approval.irreversible.length === 0;
             this.pendingDecisionInspectionOnly = this.submittedInspectionOnly;
             this.pendingDecisionBusinessMode = this.submittedBusinessMode;
             this.pendingDecisionAgentModels = this.submittedAgentModels;
             this.pendingDecisionAgentPermissions = this.submittedAgentPermissions;
             this.pendingDecisionTaskMode = status.taskMode ?? this.submittedTaskMode;
-            this.events.onDecision?.(runId, this.pendingDecisionCanApprove);
+            if (approval) this.events.onDecision?.(runId, this.pendingDecisionCanApprove, approval);
+            else this.events.onDecision?.(runId, this.pendingDecisionCanApprove);
           }
           return;
         }
@@ -694,12 +707,15 @@ Answer the Human's current question without cancelling these workflows. For task
   }
 }
 
-function mergePendingSends(items: readonly PendingSend[], workProfileRecorded = false, failureClassReported = false): Pick<PendingSend, "text" | "attachments" | "execution"> & { submissions: MessageSubmission[] } {
+function mergePendingSends(items: readonly PendingSend[], workProfileRecorded = false, failureClassReported = false, taskWorkspaces = false, workIsolation = false): Pick<PendingSend, "text" | "attachments" | "execution"> & { submissions: MessageSubmission[] } {
   const first = items[0]!;
   const mode = first.execution.taskMode ?? "direct";
+  // Off (the default) keeps the shared checkout; only the Human's toggle selects isolated Work Units.
+  const isolationGuidance = first.execution.workIsolation !== true ? ""
+    : taskWorkspaces && workIsolation ? taskWorkspaceGuidance : workIsolationUnavailableGuidance;
   const modelGuidance = mode === "direct"
     ? ""
-    : (mode === "orchestrate" ? orchestratorModeGuidance(workProfileRecorded, failureClassReported) : backgroundWorkflowGuidance) + delegatedModelGuidance(first.execution.agentModels, workProfileRecorded) + delegatedPermissionGuidance(first.execution.agentPermissions);
+    : (mode === "orchestrate" ? orchestratorModeGuidance(workProfileRecorded, failureClassReported) : backgroundWorkflowGuidance) + delegatedModelGuidance(first.execution.agentModels, workProfileRecorded) + delegatedPermissionGuidance(first.execution.agentPermissions) + isolationGuidance;
   const inspectionGuidance = first.execution.inspectionOnly ? withInspectionGuidance("") : "";
   const workflowGuidanceParts: string[] = [];
   const submissions = items.map(item => {
@@ -829,6 +845,19 @@ Before dispatch, check that the conversation gives enough to act; if a target, d
 }
 
 export const orchestratorGuidance = orchestratorModeGuidance(false);
+
+export const taskWorkspaceGuidance = `
+
+[Work isolation: task Work Units]
+The Human turned Work isolation ON for this project. Every delegated Work runs in an isolated Git worktree you choose; the runtime commits, checks, merges into the target and cleans up automatically. For every brief or task pass loop.py start --workspace-file FILE; the runtime rejects a start without it. Write this small JSON in the Main run directory. For changes: {"mode":"code","repositories":[{"path":"exact repository root","targetBranch":"branch","checks":[["executable","check argument"]]}]}. For research, questions and other read-only Work: {"mode":"read-only"} without repositories. Shared mode is unavailable while isolation is on. Derive repositories from the brief's target paths and select only those the task changes. When the work touches nested repositories (a parent and a repository inside it), split it into one task per repository instead of listing overlapping roots. targetBranch is the repository's current branch (omit it and the runtime uses the current branch), otherwise its default branch; never guess main/master. Derive real integration check argv arrays from project rules, such as the plugin test suite or the extension npm test. If a required product/authority decision is missing, ask a focused question before dispatch. The runtime creates branches under the project's managed ~/.agent-factory worktrees, binds Work CWD/permissions there and keeps the original projectRoot/history. Original dirty changes stay in the original checkout and are excluded; report captured base and exclusion. Do not retrofit any accepted loop or run. Planning-only and independent Verification acquire no code workspace.
+Runtime owns local commits, serialized checked ordinary merges and conflict revisions in the SAME Work session; Work resolves conflicts itself. Work/Verification still do not commit. Checks against the latest target must pass before the target updates. Conflicts never wait for the Human: when Work cannot resolve them, the revision limit is reached, the target checkout has uncommitted changes, checks fail or the merge is otherwise impossible, the loop ends completed with terminalReason.code integration_preserved and lists the preserved branches and paths. Report them; never ask the Human to decide the conflict. Report partial multi-repository outcomes without claiming atomicity. Do not push, deploy, rebase, amend, reset or revert; never stash or discard unrelated changes. Terminal taskWorkspaces metadata retains base/result/merge commits, checks and cleanup state; report exact merge identifiers for rollback without executing rollback.
+[End Work isolation]`;
+
+export const workIsolationUnavailableGuidance = `
+
+[Work isolation]
+The Human turned Work isolation on, but the installed runtime does not support it. Dispatch in the shared checkout as usual and report this limitation in your reply.
+[End Work isolation]`;
 
 const backgroundWorkflowGuidance = `
 

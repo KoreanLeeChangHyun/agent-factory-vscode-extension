@@ -2,6 +2,13 @@
   display: none;
 }
 
+:root {
+  /* Shared outer frame for the composer and the task status panel above it. */
+  --af-composer-border: 1px solid color-mix(in srgb, var(--vscode-panel-border, var(--vscode-input-border, #454545)) 84%, var(--vscode-foreground) 6%);
+  --af-composer-radius: 20px;
+  --af-composer-background: color-mix(in srgb, var(--vscode-editorWidget-background) 32%, var(--af-chat-background));
+}
+
 .composer-region {
   z-index: 2;
   padding: 10px 12px 12px;
@@ -134,9 +141,9 @@
   width: 100%;
   margin: 0 auto;
   padding: 14px 14px 10px;
-  border: 1px solid color-mix(in srgb, var(--vscode-panel-border, var(--vscode-input-border, #454545)) 84%, var(--vscode-foreground) 6%);
-  border-radius: 20px;
-  background: color-mix(in srgb, var(--vscode-editorWidget-background) 32%, var(--af-chat-background));
+  border: var(--af-composer-border);
+  border-radius: var(--af-composer-radius);
+  background: var(--af-composer-background);
   box-shadow:
     0 12px 32px color-mix(in srgb, #000 22%, transparent),
     inset 0 1px 0 color-mix(in srgb, white 4%, transparent);
@@ -199,6 +206,9 @@
   min-width: 0;
   flex-wrap: wrap;
 }
+
+/* The send controls keep their size; narrow toolbars wrap the start group instead of pushing send out. */
+.composer-actions > .composer-actions-end { flex: 0 0 auto; }
 
 /* Keep mixed text, toggle and icon controls on the same toolbar centerline. */
 .composer-actions-start > .setting-control,
@@ -646,9 +656,66 @@
 /* Float the companion above the composer without reserving transcript height. */
 .composer-topline { position: relative; display: flex; align-items: flex-end; gap: 8px; }
 .composer-status-column { flex: 1 1 0; min-width: 0; }
-.composer-topline:has(.companion-dock:not([hidden])) .composer-status-column { padding-right: 0; }
 
-.composer-topline:has(.companion-dock:not([hidden])) .composer-status-column .input-feedback { padding-right: 80px; }
-.composer-topline:has(.companion-dock:not([hidden])) .composer-status-column .pending-queue-toggle { margin-right: 80px; }
 
 .deploy-controls .setting-option { width: 100%; }
+
+/* Keep loading at the left, with workflow before the rightmost bot. */
+.agent-progress-dock { position: absolute; left: 0; bottom: 4px; display: flex; align-items: flex-end; gap: 4px; max-width: min(calc(100% - 150px), 50%); pointer-events: none; }
+/* While loading shows, the workflow button keeps the other half and truncates its counts instead of sliding under it. */
+.composer-topline:has(#agent-progress:not([hidden])) .run-status:not(.is-expanded) .run-status-toggle { max-width: calc(max(150px, 50%) - 8px); }
+.agent-progress { --run-status-active-color: var(--run-status-text-color); --run-status-text-color: var(--vscode-textLink-foreground, var(--af-color-accent)); --run-status-scan-color: color-mix(in srgb, var(--run-status-text-color) 70%, var(--vscode-editor-foreground) 30%); color: var(--run-status-text-color); display: flex; align-items: center; gap: 8px; min-width: 0; font-size: 12px; min-height: 24px; }
+.agent-progress[hidden] { display: none; }
+.agent-progress .run-status-pulse { background: var(--run-status-text-color); }
+.composer-status-column .run-status-toggle { margin-left: auto; }
+
+.composer-status-column .run-status { pointer-events: none; }
+.composer-status-column .run-status-toggle,
+.composer-status-column .run-details { pointer-events: auto; }
+
+/* Expanded task status occupies the entire row even while the queue control is visible. */
+.composer-status-row > .run-status.is-expanded { flex: 0 0 100%; width: 100%; max-width: 100%; }
+
+/* Keep the full-width panel above the existing rightmost bot and its baseline controls. */
+
+
+.composer.is-progressing { border-color: var(--af-color-accent); animation: composer-progress-pulse 2.4s ease-in-out infinite; }
+@keyframes composer-progress-pulse { 50% { box-shadow: 0 0 0 3px color-mix(in srgb, var(--af-color-accent) 20%, transparent); } }
+@media (prefers-reduced-motion: reduce) { .composer.is-progressing { animation: none; } }
+
+/* Preserve the initial header clearance; moved bots reserve no header space. */
+.chat-shell:has(~ .companion-layer .companion-dock:not([hidden])[data-moved="false"]) .run-status-toggle { margin-right: 80px; }
+
+.chat-shell:has(~ .companion-layer .companion-dock:not([hidden])[data-moved="false"]) .agent-progress-dock { max-width: min(calc(100% - 230px), calc(50% - 40px)); }
+.chat-shell:has(~ .companion-layer .companion-dock:not([hidden])[data-moved="false"]) .composer-topline:has(#agent-progress:not([hidden])) .run-status:not(.is-expanded) .run-status-toggle { max-width: calc(max(150px, 50% - 40px) - 8px); }
+
+.chat-shell:has(~ .companion-layer .companion-dock:not([hidden])[data-moved="false"]) .composer-status-row:has(> .run-status.is-expanded) { padding-bottom: 64px; }
+.chat-shell:has(~ .companion-layer .companion-dock:not([hidden])[data-moved="false"]) .composer-status-row:has(> .run-status.is-expanded) > .pending-queue-toggle { position: absolute; right: 80px; bottom: 4px; margin: 0; }
+
+/* Workflow and its existing history actions share one right-aligned header. */
+.composer-status-column .run-status,
+.composer-status-column .run-status.is-expanded { display: flex; flex-wrap: wrap; justify-content: flex-end; align-items: center; gap: 0; }
+.composer-status-column .run-status[hidden] { display: none; }
+.composer-status-column .run-status > .run-details { flex: 0 0 100%; }
+.composer-status-column .run-status > .run-status-toggle { margin: 0; flex: 0 1 auto; max-width: calc(100% - 36px); }
+.composer-status-column .workflow-history { pointer-events: auto; }
+.workflow-history { position: relative; flex: 0 0 auto; display: flex; align-items: center; }
+.workflow-history::before, .workflow-history-items > details + details::before { content: ""; width: 1px; height: 12px; background: var(--vscode-descriptionForeground); opacity: .3; margin-inline: 6px; flex-shrink: 0; }
+.workflow-history-items { display: flex; align-items: center; }
+.workflow-history-items > .task-history { display: flex; align-items: center; border: 0; margin: 0; padding: 0; }
+.history-action { display: flex; align-items: center; cursor: pointer; min-height: 24px; padding: 3px 4px; border: 0; border-radius: 0; background: transparent; color: var(--vscode-foreground); font: inherit; white-space: nowrap; list-style: none; }
+.history-action:hover { color: var(--af-color-accent); }
+.history-action:focus-visible { outline: 1px solid var(--vscode-focusBorder); outline-offset: -1px; }
+.workflow-history .history-overflow { display: none; }
+.workflow-history.is-compact .history-overflow { display: flex; }
+.workflow-history.is-compact .workflow-history-items { display: none; }
+.workflow-history.is-compact.is-open .workflow-history-items { display: flex; position: absolute; right: 0; top: 100%; z-index: 100; flex-direction: column; align-items: stretch; padding: 4px; background: var(--vscode-menu-background, var(--af-chat-background)); border: 1px solid var(--vscode-menu-border, var(--vscode-panel-border)); }
+.workflow-history.is-compact .workflow-history-items > details + details::before { display: none; }
+.workflow-history .task-history-list.is-flyout { pointer-events: auto; }
+.chat-shell:has(~ .companion-layer .companion-dock:not([hidden])[data-moved="false"]) .workflow-history { margin-right: 80px; }
+.chat-shell:has(~ .companion-layer .companion-dock:not([hidden])[data-moved="false"]) .run-status-toggle { margin-right: 0; }
+
+.composer-status-column .run-status > .run-status-toggle { max-width: calc(var(--workflow-header-width, 100%) - 36px); }
+.composer-status-column .run-status:has(.workflow-history:not(.is-compact)) > .run-status-toggle { max-width: calc(var(--workflow-header-width, 100%) - 174px); }
+.composer-topline:has(#agent-progress:not([hidden])) .composer-status-column .run-status:not(.is-expanded) > .run-status-toggle { max-width: calc(var(--workflow-header-width, 100%) - 36px); }
+.composer-topline:has(#agent-progress:not([hidden])) .composer-status-column .run-status:not(.is-expanded):has(.workflow-history:not(.is-compact)) > .run-status-toggle { max-width: calc(var(--workflow-header-width, 100%) - 174px); }

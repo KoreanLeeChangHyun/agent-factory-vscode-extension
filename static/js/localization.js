@@ -33,6 +33,8 @@
   "ui.shortcuts.group.basic": {"en": "Basic controls", "ko": "기본 조작"},
   "ui.shortcuts.bot.menu": {"en": "Open or close {0} menu", "ko": "{0} 메뉴 열기·닫기"},
   "ui.agent.defaults": {"en": "Agent defaults", "ko": "에이전트 기본값"},
+  "ui.global.agent.settings.tab": {"en": "Agents", "ko": "에이전트"},
+  "ui.global.agent.settings": {"en": "Global agent settings", "ko": "글로벌 에이전트 설정"},
   "ui.settings.scope": {"en": "Scope", "ko": "설정 범위"},
   "ui.chat.scope": {"en": "This chat", "ko": "이 채팅"},
   "ui.project.defaults": {"en": "Project", "ko": "프로젝트"},
@@ -132,6 +134,18 @@
   "unit.name.required": {"en": "Enter a name.", "ko": "이름을 입력해 주세요."},
   "unit.base": {"en": "Base branch", "ko": "생성 기준 브랜치"},
   "unit.branch": {"en": "Work branch name", "ko": "작업 브랜치 이름"},
+  "unit.task.detail": {"en": "{0} · {1} → {2} · {3}\n{4}\nBase {5} · source changes excluded{6}{7}", "ko": "{0} · {1} → {2} · {3}\n{4}\n기준 {5} · 원본 변경 미포함{6}{7}"},
+  "unit.task.merge": {"en": "\nIntegration commit {0}", "ko": "\n통합 커밋 {0}"},
+  "unit.task.cleanup.pending": {"en": " · cleanup pending", "ko": " · 정리 대기"},
+  "unit.task.creating": {"en": "Preparing Work Unit", "ko": "워크트리 준비 중"},
+  "unit.task.active": {"en": "Isolated work", "ko": "격리 작업 중"},
+  "unit.task.committing": {"en": "Saving task changes", "ko": "작업 변경 보존 중"},
+  "unit.task.checking": {"en": "Checking task changes", "ko": "작업 검사 중"},
+  "unit.task.integrating": {"en": "Integrating task", "ko": "작업 통합 중"},
+  "unit.task.conflict": {"en": "Resolving integration conflict", "ko": "통합 충돌 해결 중"},
+  "unit.task.merged": {"en": "Integrated", "ko": "통합 완료"},
+  "unit.task.check-failed": {"en": "Integration check failed", "ko": "통합 검사 실패"},
+  "unit.task.failed": {"en": "Integration failed", "ko": "통합 실패"},
   "unit.summary.review": {"en": "Review and edit the requirements and decisions in the open draft. Uncommitted source changes are not included in the new worktree.", "ko": "열린 요약 초안에서 필요한 요구사항·결정을 확인하고 수정해 주세요. 원본 미커밋 변경은 새 워크트리에 포함되지 않습니다."},
   "unit.summary.confirm": {"en": "Create with edited summary", "ko": "수정한 요약으로 생성"},
   "unit.merge.missing": {"en": "The Work Unit to merge could not be found.", "ko": "병합할 Work Unit을 찾을 수 없습니다."},
@@ -273,6 +287,25 @@
   "flow.stage.execution": {"en":"Execution", "ko":"실행"},
   "flow.stage.result": {"en":"Result", "ko":"결과"},
   "flow.task.status": {"en":"Task status", "ko":"작업 현황"},
+  "flow.display.accepted": {"en": "Accepted", "ko": "접수됨"},
+  "flow.display.queued": {"en": "Queued", "ko": "큐 대기"},
+  "flow.display.starting": {"en": "Preparing", "ko": "준비 중"},
+  "flow.display.cancelling": {"en": "Stopping", "ko": "중지 중"},
+  "flow.display.needs-human-decision": {"en": "Awaiting decision", "ko": "결정 대기"},
+  "flow.display.verification.completed": {"en": "Verification ended", "ko": "검증 종료"},
+  "flow.status.detail.pending": {"en": "This task is waiting to run.", "ko": "작업 실행을 기다리고 있습니다."},
+  "flow.status.detail.accepted": {"en": "The runtime accepted this run. Execution has not started.", "ko": "런타임이 이 실행을 접수했습니다. 아직 실행을 시작하지 않았습니다."},
+  "flow.status.detail.queued": {"en": "This run is queued in the runtime.", "ko": "런타임 실행 대기열에서 기다리고 있습니다."},
+  "flow.status.detail.starting": {"en": "The runtime is preparing this run.", "ko": "런타임이 이 실행을 준비하고 있습니다."},
+  "flow.status.detail.running": {"en": "This task is running.", "ko": "이 작업이 실행 중입니다."},
+  "flow.status.detail.verifying": {"en": "The selected independent Verification is running.", "ko": "선택된 독립 Verification이 실행 중입니다."},
+  "flow.status.detail.completed": {"en": "Work has ended. This does not mean independent Verification passed.", "ko": "Work가 종료되었습니다. 독립 Verification 통과를 뜻하지 않습니다."},
+  "flow.status.detail.verification.completed": {"en": "The Verification run has ended. Check its recorded result for the verdict.", "ko": "Verification 실행이 종료되었습니다. 판정은 기록된 결과에서 확인하십시오."},
+  "flow.status.detail.failed": {"en": "This task failed. Check its recorded result for details.", "ko": "작업이 실패했습니다. 자세한 내용은 기록된 결과에서 확인하십시오."},
+  "flow.status.detail.blocked": {"en": "This task cannot proceed. Check its recorded details.", "ko": "작업이 진행할 수 없는 상태입니다. 기록된 상세 내용을 확인하십시오."},
+  "flow.status.detail.needs-human-decision": {"en": "This run or workflow is waiting for your decision.", "ko": "이 실행 또는 작업 흐름이 사용자님의 결정을 기다리고 있습니다."},
+  "flow.status.detail.cancelled": {"en": "This task was cancelled. Its execution history is retained.", "ko": "작업이 취소되었습니다. 실행 이력은 보존됩니다."},
+  "flow.status.detail.cancelling": {"en": "The runtime is stopping this run. Cancellation is not yet complete.", "ko": "런타임이 이 실행을 중지하고 있습니다. 아직 취소가 완료되지 않았습니다."},
   "flow.status.pending": {"en": "Pending", "ko": "대기"},
   "flow.status.running": {"en": "In progress", "ko": "진행 중"},
   "flow.status.verifying": {"en": "Verifying", "ko": "검증 중"},
@@ -287,6 +320,16 @@
   "ui.history.older": {"en":"Load earlier messages", "ko":"이전 대화 불러오기"},
   "ui.goal.active.send": {"en":"Goal active · Send message (Enter)", "ko":"Goal 활성 · 메시지 전송 (Enter)"},
   "ui.goal.active.queue": {"en":"Goal active · Add message to queue (Enter)", "ko":"Goal 활성 · 대기열에 메시지 추가 (Enter)"},
+  "flow.dismiss": {"en":"Delete", "ko":"삭제"},
+  "flow.dismiss.detail": {"en":"Remove from this list; execution and history are kept", "ko":"목록에서만 제거하며 실행과 이력은 유지합니다"},
+  "flow.stop": {"en":"Stop", "ko":"중지"},
+  "flow.header.expert": {"en":"Expert {0}", "ko":"전문가 {0}"},
+  "flow.header.worker": {"en":"Worker {0}", "ko":"작업자 {0}"},
+  "flow.header.verifier": {"en":"Verifier {0}", "ko":"검증자 {0}"},
+  "flow.header.unrecorded": {"en":"No record {0}", "ko":"기록 없음 {0}"},
+  "flow.stop.pending": {"en":"Stopping…", "ko":"중지 중…"},
+  "flow.stop.multi.unsupported": {"en":"Stopping one task in a multi-task Loop is unsupported", "ko":"여러 작업을 포함한 Loop에서는 개별 중지를 지원하지 않습니다"},
+  "flow.stop.unbound": {"en":"No cancellable run is bound to this task", "ko":"이 항목에 중지 가능한 실행이 연결되지 않았습니다"},
   "flow.close.failed": {"en":"Close failed workflow", "ko":"실패한 작업 흐름 종료"},
   "flow.decision.title": {"en":"Revision limit reached", "ko":"수정 상한 도달"},
   "flow.decision.revisions": {"en":"Revisions used: {0} of {1}", "ko":"수정 {0}/{1}회 사용"},
@@ -297,6 +340,15 @@
   "flow.decision.stop": {"en":"Stop", "ko":"중지"},
   "flow.decision.stop.detail": {"en":"Stop and end this workflow", "ko":"이 작업 흐름을 종료"},
   "flow.summary.label": {"en":"Task summary", "ko":"업무 항목 요약"},
+  "flow.role.worker": {"en":"Worker", "ko":"작업자"},
+  "flow.role.expert": {"en":"Expert", "ko":"전문가"},
+  "flow.role.unassigned": {"en":"Unassigned", "ko":"미배정"},
+  "flow.role.unavailable": {"en":"Role unavailable", "ko":"역할 미제공"},
+  "ui.captured.run.model": {"en":"Captured run model", "ko":"실행에 기록된 모델"},
+  "ui.next.message.model": {"en":"Next message", "ko":"다음 전송"},
+  "flow.model.unavailable": {"en":"Model unavailable", "ko":"모델 미제공"},
+  "flow.progress": {"en":"{0} of {1} steps done", "ko":"단계 {1}개 중 {0}개 완료"},
+  "flow.activity.label": {"en":"Current activity: {0}", "ko":"현재 작업: {0}"},
   "flow.assignment.worker.assigned": {"en":"Worker assigned", "ko":"작업자 배정"},
   "flow.assignment.worker.count": {"en":"Workers: {0}", "ko":"작업자 {0}명"},
   "flow.assignment.worker.unassigned": {"en":"Worker unassigned", "ko":"작업자 미배정"},
@@ -369,7 +421,7 @@
   },
   "ui.keyboard.shortcuts": {
     "en": "Keyboard shortcuts",
-    "ko": "키보드 단축키"
+    "ko": "단축키"
   },
   "ui.close.settings": {
     "en": "Close settings",
@@ -807,6 +859,22 @@
     "en": "Orchestrator mode is unavailable with the installed runtime · Main works directly",
     "ko": "설치된 런타임은 조율자 모드를 지원하지 않음 · Main이 직접 작업"
   },
+  "ui.work.isolation": {
+    "en": "Isolation",
+    "ko": "작업 격리"
+  },
+  "ui.work.isolation.on": {
+    "en": "Work isolation on · Delegated work runs in its own worktree and merges automatically · Click to turn off",
+    "ko": "작업 격리 켜짐 · 위임 작업을 별도 워크트리에서 실행하고 자동 병합 · 클릭하면 끔"
+  },
+  "ui.work.isolation.off": {
+    "en": "Work isolation off · Delegated work uses the shared checkout · Click to turn on",
+    "ko": "작업 격리 꺼짐 · 위임 작업이 공유 체크아웃을 사용 · 클릭하면 켬"
+  },
+  "ui.work.isolation.unavailable": {
+    "en": "Work isolation is unavailable with the installed runtime",
+    "ko": "설치된 런타임은 작업 격리를 지원하지 않음"
+  },
   "ui.fast": {
     "en": "Fast",
     "ko": "빠른 모드"
@@ -902,6 +970,7 @@
   "submission.lessons.request": { "en": "Collect lessons from the current conversation and work results and turn supported lessons into rules.", "ko": "현재 대화와 작업 결과에서 교훈을 수집하고 근거가 있는 교훈을 규칙화해 주세요." },
   "submission.work.request": { "en": "Submit work for the current work contract.", "ko": "현재 작업 계약에 대한 작업을 제출해 주세요." },
   "submission.work.verification.request": { "en": "Submit a Work–Verification loop for the current work contract.", "ko": "현재 작업 계약에 대한 작업-검증 루프를 제출해 주세요." },
+  "flow.empty": { "en": "No tasks", "ko": "작업 없음" },
   "ui.task.workflow": {
     "en": "Task workflow",
     "ko": "작업 흐름"
@@ -1185,6 +1254,26 @@
   "ui.proceed.as.proposed": {
     "en": "Proceed as proposed",
     "ko": "제안대로 진행"
+  },
+  "decision.approval.message.scoped": {
+    "en": "Proceed only with the following decision request from the response directly above (run {0}), within the scope and conditions it proposed.\nApproves: “{1}”\n{2}",
+    "ko": "바로 위 응답(run {0})의 다음 결정 요청에 한해, 그 응답에서 제안한 범위와 조건대로 진행하세요.\n승인 대상: “{1}”\n{2}"
+  },
+  "decision.approval.message.unscoped": {
+    "en": "Proceed within the scope and conditions proposed in the response directly above (run {0}).\n{1}",
+    "ko": "바로 위 응답(run {0})에서 제안한 범위와 조건대로 진행하세요.\n{1}"
+  },
+  "decision.approval.message.scope": {
+    "en": "Work not stated in the response and irreversible operations (git checkout·restore·reset·clean, force push, file deletion, etc.) are not included in this approval.",
+    "ko": "응답에 명시되지 않은 작업과 되돌릴 수 없는 작업(git checkout·restore·reset·clean, 강제 푸시, 파일 삭제 등)은 이 승인에 포함되지 않습니다."
+  },
+  "ui.approval.target": {
+    "en": "Approves:",
+    "ko": "승인 대상:"
+  },
+  "ui.this.proposal.includes.irreversible.operations.reply.directly.naming.the.operations.to.approve": {
+    "en": "This proposal includes irreversible operations, so one-click approval is not offered. To proceed, reply directly and name the operations you approve.",
+    "ko": "이 제안에는 되돌릴 수 없는 작업이 있어 한 번 클릭 승인을 제공하지 않습니다. 진행하려면 승인할 작업을 직접 답변으로 명시하십시오."
   },
   "ui.reply.directly": {
     "en": "Reply directly",
@@ -2845,6 +2934,55 @@
     "en": "Reading run result",
     "ko": "실행 결과 읽는 중"
   },
+  "activity.verb.read.started": {"en": "Reading", "ko": "읽는 중"},
+  "activity.verb.read.completed": {"en": "Read", "ko": "읽음"},
+  "activity.verb.read.failed": {"en": "Read failed", "ko": "읽기 실패"},
+  "activity.verb.search.started": {"en": "Searching", "ko": "검색 중"},
+  "activity.verb.search.completed": {"en": "Searched", "ko": "검색함"},
+  "activity.verb.search.failed": {"en": "Search failed", "ko": "검색 실패"},
+  "activity.verb.list.started": {"en": "Listing", "ko": "목록 확인 중"},
+  "activity.verb.list.completed": {"en": "Listed", "ko": "목록 확인함"},
+  "activity.verb.list.failed": {"en": "Listing failed", "ko": "목록 확인 실패"},
+  "activity.verb.skill.started": {"en": "Reading Skill", "ko": "스킬 읽는 중"},
+  "activity.verb.skill.completed": {"en": "Read Skill", "ko": "스킬 읽음"},
+  "activity.verb.skill.failed": {"en": "Skill read failed", "ko": "스킬 읽기 실패"},
+  "activity.verb.git.started": {"en": "Running Git", "ko": "Git 실행 중"},
+  "activity.verb.git.completed": {"en": "Ran Git", "ko": "Git 실행함"},
+  "activity.verb.git.failed": {"en": "Git failed", "ko": "Git 실패"},
+  "activity.verb.edit.started": {"en": "Editing", "ko": "수정 중"},
+  "activity.verb.edit.completed": {"en": "Edited", "ko": "수정함"},
+  "activity.verb.edit.failed": {"en": "Edit failed", "ko": "수정 실패"},
+  "activity.verb.run.started": {"en": "Running", "ko": "실행 중"},
+  "activity.verb.run.completed": {"en": "Ran", "ko": "실행함"},
+  "activity.verb.run.failed": {"en": "Run failed", "ko": "실행 실패"},
+  "activity.verb.test.started": {"en": "Testing", "ko": "테스트 중"},
+  "activity.verb.test.completed": {"en": "Tested", "ko": "테스트함"},
+  "activity.verb.test.failed": {"en": "Test failed", "ko": "테스트 실패"},
+  "activity.verb.web.started": {"en": "Searching the web", "ko": "웹 검색 중"},
+  "activity.verb.web.completed": {"en": "Searched the web", "ko": "웹 검색함"},
+  "activity.verb.web.failed": {"en": "Web search failed", "ko": "웹 검색 실패"},
+  "activity.verb.page.started": {"en": "Opening page", "ko": "페이지 여는 중"},
+  "activity.verb.page.completed": {"en": "Opened page", "ko": "페이지 열람함"},
+  "activity.verb.page.failed": {"en": "Page failed to open", "ko": "페이지 열기 실패"},
+  "activity.verb.tool.started": {"en": "Calling tool", "ko": "도구 호출 중"},
+  "activity.verb.tool.completed": {"en": "Called tool", "ko": "도구 호출함"},
+  "activity.verb.tool.failed": {"en": "Tool failed", "ko": "도구 호출 실패"},
+  "activity.verb.think.started": {"en": "Thinking", "ko": "생각 중"},
+  "activity.verb.think.completed": {"en": "Thought", "ko": "생각함"},
+  "activity.verb.think.failed": {"en": "Thinking stopped", "ko": "생각 중단"},
+  "activity.result.lines.range": {"en": "lines {0}–{1}", "ko": "{0}–{1}행"},
+  "activity.result.lines.from": {"en": "from line {0}", "ko": "{0}행부터"},
+  "activity.result.lines": {"en": "{0} lines", "ko": "{0}줄"},
+  "activity.result.matches": {"en": "{0} matches", "ko": "{0}개 일치"},
+  "activity.result.items": {"en": "{0} items", "ko": "{0}개 항목"},
+  "activity.result.output": {"en": "{0} lines of output", "ko": "{0}줄 출력"},
+  "activity.result.exit": {"en": "exit code {0}", "ko": "종료 코드 {0}"},
+  "activity.result.exit.compact": {"en": "exit {0}", "ko": "종료 {0}"},
+  "activity.target.in": {"en": "{0} in {1}", "ko": "{0} in {1}"},
+  "activity.duration.ms": {"en": "{0}ms", "ko": "{0}ms"},
+  "activity.tooltip.started": {"en": "Started {0}", "ko": "시작 {0}"},
+  "activity.tooltip.duration": {"en": "Took {0}", "ko": "소요 {0}"},
+  "activity.tooltip.exit": {"en": "Exit code {0}", "ko": "종료 코드 {0}"},
   "activity.command.completed": {
     "en": "Command completed",
     "ko": "명령 완료"

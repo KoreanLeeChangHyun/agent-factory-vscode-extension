@@ -16,9 +16,11 @@ globalThis.AgentFactoryChat.agents = function (host) {
     renderAgentsList();
     renderStatusBar();
     vscode.postMessage({ type: "agents.request" });
+    agentsMenu.querySelector("button:not(:disabled)")?.focus();
   }
 
   function closeAgentsMenu() {
+    host.closeWorktreeMenu();
     agentsMenu.hidden = true;
     renderStatusBar();
   }

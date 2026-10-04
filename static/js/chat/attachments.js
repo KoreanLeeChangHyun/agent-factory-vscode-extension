@@ -172,9 +172,7 @@ globalThis.AgentFactoryChat.attachments = function (host) {
       return;
     }
     const files = Array.from(dataTransfer.files || []);
-    const uris = dataTransfer.getData("text/uri-list").split(/\r?\n/).filter(function (uri) {
-      return uri && !uri.startsWith("#");
-    });
+    const uris = droppedResourceUris(dataTransfer);
     // URI drops (including VS Code Explorer and Finder) must be opened by the Extension Host.
     // A Webview-only reference cannot stage image bytes or provide a usable local runtime path.
     if (uris.length) {
@@ -183,12 +181,37 @@ globalThis.AgentFactoryChat.attachments = function (host) {
     }
     await addBrowserFiles(files);
   }
+  function droppedResourceUris(dataTransfer) {
+    // Chromium normalizes MIME names to lowercase. During dragover only types
+    // are readable; read the payload synchronously at drop time.
+    const types = Array.from(dataTransfer.types || []);
+    const read = function (type) {
+      const actual = types.find(value => value.toLowerCase() === type);
+      return dataTransfer.getData(actual || type);
+    };
+    const uriList = function (value) {
+      return value.split(/\r?\n/).map(uri => uri.trim()).filter(uri => uri && !uri.startsWith("#"));
+    };
+    // VS Code exposes only the first resource through text/uri-list. Its internal
+    // list preserves all files AND directories, including vscode-remote URIs.
+    const internal = uriList(read("application/vnd.code.uri-list"));
+    if (internal.length) return [...new Set(internal)];
+    const uris = uriList(read("text/uri-list"));
+    try {
+      const resources = JSON.parse(read("resourceurls") || "[]");
+      if (Array.isArray(resources)) uris.push(...resources.filter(uri => typeof uri === "string" && uri));
+    } catch {
+      // A malformed optional transfer must not suppress a standard URI/file drop.
+    }
+    return [...new Set(uris)];
+  }
   function hasAttachmentData(dataTransfer) {
     if (!dataTransfer) {
       return false;
     }
-    const types = Array.from(dataTransfer.types || []);
-    return types.includes("Files") || types.includes("text/uri-list");
+    const types = Array.from(dataTransfer.types || [], type => type.toLowerCase());
+    return ["files", "text/uri-list", "application/vnd.code.uri-list", "resourceurls"]
+      .some(type => types.includes(type));
   }
   async function addBrowserFiles(files) {
     for (const file of files) {
