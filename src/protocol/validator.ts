@@ -3,7 +3,7 @@ import { COMPANION_ACTIONS, type CompanionAction } from "../modules/chat/compani
 import { validNoteFolder } from "../infrastructure/vscode/note-store";
 import { AGENT_ROLES, validAgentValue } from "../core/config/agent-settings";
 import { parseAgentPermissions } from "../common/types/agent-permissions";
-import { parseAgentModels, parseModelFastModes } from "../common/types/agent-models";
+import { parseAgentFastModes, parseAgentModels, parseModelFastModes } from "../common/types/agent-models";
 import { BUSINESS_MODES, type BusinessMode } from "../common/types/business-mode";
 export { parseInterviewQuestion } from "../common/types/business-mode";
 import { TASK_SELECTIONS, type TaskSelection } from "../modules/chat/task-selection";
@@ -216,19 +216,19 @@ export function parseClientMessage(value: unknown): ClientMessage | undefined {
       if ((value.scope !== "global" && value.scope !== "project" && value.scope !== "chat") || typeof value.name !== "string" || !value.name.trim() || !AGENT_ROLES.includes(value.role as typeof AGENT_ROLES[number]) || !["model", "reasoningEffort", "fast"].includes(String(value.field)) || !validAgentValue(String(value.field), value.value)) return undefined;
       return {type: value.type, scope: value.scope, name: value.name.trim(), role: value.role as typeof AGENT_ROLES[number], field: value.field as "model" | "reasoningEffort" | "fast", value: value.value as string | boolean};
     case "agent.preset.fast":
-      if ((value.scope !== "global" && value.scope !== "project" && value.scope !== "chat") || typeof value.name !== "string" || !value.name.trim() || !validAgentValue("model", value.model) || typeof value.value !== "boolean") return undefined;
-      return {type: value.type, scope: value.scope, name: value.name.trim(), model: value.model as string, value: value.value};
+      if ((value.scope !== "global" && value.scope !== "project" && value.scope !== "chat") || typeof value.name !== "string" || !value.name.trim() || !AGENT_ROLES.includes(value.role as typeof AGENT_ROLES[number]) || !validAgentValue("model", value.model) || typeof value.value !== "boolean") return undefined;
+      return {type: value.type, scope: value.scope, name: value.name.trim(), role: value.role as typeof AGENT_ROLES[number], model: value.model as string, value: value.value};
     case "agent.preset":
-      if ((value.action !== "save" && value.action !== "apply" && value.action !== "update" && value.action !== "delete") || (value.scope !== "global" && value.scope !== "project" && value.scope !== "chat") || typeof value.name !== "string" || !value.name.trim()) return undefined;
-      return {type: value.type, action: value.action, scope: value.scope, name: value.name.trim()};
+      if ((value.action !== "save" && value.action !== "apply" && value.action !== "update" && value.action !== "delete" && value.action !== "rename") || (value.scope !== "global" && value.scope !== "project" && value.scope !== "chat") || typeof value.name !== "string" || !value.name.trim() || (value.action === "rename" && (typeof value.newName !== "string" || !value.newName.trim()))) return undefined;
+      return {type: value.type, action: value.action, scope: value.scope, name: value.name.trim(), ...(value.action === "rename" ? {newName: (value.newName as string).trim()} : {})};
     case "agent.defaults.save":
       if ((value.scope !== "global" && value.scope !== "project") ||
           !AGENT_ROLES.includes(value.role as typeof AGENT_ROLES[number]) ||
           (value.field !== "model" && value.field !== "reasoningEffort" && value.field !== "fast") || !validAgentValue(value.field, value.value)) return undefined;
       return { type: value.type, scope: value.scope, role: value.role as typeof AGENT_ROLES[number], field: value.field, value: value.value };
     case "agent.defaults.fast":
-      if ((value.scope !== "global" && value.scope !== "project") || !validAgentValue("model", value.model) || typeof value.value !== "boolean") return undefined;
-      return { type: value.type, scope: value.scope, model: value.model as string, value: value.value };
+      if ((value.scope !== "global" && value.scope !== "project") || !AGENT_ROLES.includes(value.role as typeof AGENT_ROLES[number]) || !validAgentValue("model", value.model) || typeof value.value !== "boolean") return undefined;
+      return { type: value.type, scope: value.scope, role: value.role as typeof AGENT_ROLES[number], model: value.model as string, value: value.value };
     case "client.ready":
     case "queue.resume":
     case "run.cancel":
@@ -287,6 +287,7 @@ export function parseClientMessage(value: unknown): ClientMessage | undefined {
         (value.taskMode !== undefined && !TASK_SELECTIONS.includes(value.taskMode as TaskSelection)) ||
         (value.agentModels !== undefined && !parseAgentModels(value.agentModels)) ||
         (value.modelFastModes !== undefined && !parseModelFastModes(value.modelFastModes)) ||
+        (value.agentFastModes !== undefined && !parseAgentFastModes(value.agentFastModes)) ||
         (value.agentPermissions !== undefined && !parseAgentPermissions(value.agentPermissions)) ||
         (value.model !== undefined && (typeof value.model !== "string" || value.model.length > 100)) ||
         (value.reasoning !== undefined && (typeof value.reasoning !== "string" || !reasoningEfforts.has(value.reasoning))) ||
@@ -302,6 +303,7 @@ export function parseClientMessage(value: unknown): ClientMessage | undefined {
         type: value.type,
         ...(value.agentModels !== undefined ? { agentModels: parseAgentModels(value.agentModels) } : {}),
         ...(value.modelFastModes !== undefined ? { modelFastModes: parseModelFastModes(value.modelFastModes) } : {}),
+        ...(value.agentFastModes !== undefined ? { agentFastModes: parseAgentFastModes(value.agentFastModes) } : {}),
         ...(value.agentPermissions !== undefined ? { agentPermissions: parseAgentPermissions(value.agentPermissions) } : {}),
         ...(typeof value.model === "string" && value.model ? { model: value.model } : {}),
         ...(typeof value.reasoning === "string"

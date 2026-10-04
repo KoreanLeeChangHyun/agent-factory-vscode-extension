@@ -15,13 +15,13 @@ export interface MessageSubmission {
 
 export type ClientMessage =
   | { readonly type: "agent.preset.field"; readonly scope: import("../core/config/agent-settings").AgentPresetScope; readonly name: string; readonly role: "main" | "work" | "workLight" | "verification"; readonly field: "model" | "reasoningEffort" | "fast"; readonly value: string | boolean }
-  | { readonly type: "agent.preset.fast"; readonly scope: import("../core/config/agent-settings").AgentPresetScope; readonly name: string; readonly model: string; readonly value: boolean }
+  | { readonly type: "agent.preset.fast"; readonly scope: import("../core/config/agent-settings").AgentPresetScope; readonly name: string; readonly role: "main" | "work" | "workLight" | "verification"; readonly model: string; readonly value: boolean }
   | { readonly type: "bot.interact"; readonly action: import("../modules/chat/companion").CompanionAction }
   | { readonly type: "contract.open"; readonly id: string }
   | { readonly type: "contracts.request" }
-  | { readonly type: "agent.preset"; readonly action: "save" | "apply" | "update" | "delete"; readonly scope: "global" | "project" | "chat"; readonly name: string }
+  | { readonly type: "agent.preset"; readonly action: "save" | "apply" | "update" | "delete" | "rename"; readonly scope: "global" | "project" | "chat"; readonly name: string; readonly newName?: string }
   | { readonly type: "agent.defaults.save"; readonly scope: "global" | "project"; readonly role: "main" | "work" | "workLight" | "verification"; readonly field: "model" | "reasoningEffort" | "fast"; readonly value: string | boolean }
-  | { readonly type: "agent.defaults.fast"; readonly scope: "global" | "project"; readonly model: string; readonly value: boolean }
+  | { readonly type: "agent.defaults.fast"; readonly scope: "global" | "project"; readonly role: "main" | "work" | "workLight" | "verification"; readonly model: string; readonly value: boolean }
   | { readonly type: "worktree.create"; readonly repository: string; readonly name: string; readonly base: string }
   | { readonly type: "worktree.merge" | "worktree.refresh" | "worktree.repositories" }
   | { readonly type: "deploy.detect" }
@@ -98,6 +98,7 @@ export type ClientMessage =
       readonly model?: string;
       readonly agentModels?: AgentModels;
       readonly modelFastModes?: import("../common/types/agent-models").ModelFastModes;
+      readonly agentFastModes?: import("../common/types/agent-models").AgentFastModes;
   readonly agentPermissions?: AgentPermissions;
       readonly reasoning?: "none" | "low" | "medium" | "high" | "xhigh" | "max";
       readonly fastMode: boolean;
@@ -181,6 +182,7 @@ export type HostMessage =
       readonly model?: string;
       readonly agentModels?: AgentModels;
       readonly modelFastModes?: import("../common/types/agent-models").ModelFastModes;
+      readonly agentFastModes?: import("../common/types/agent-models").AgentFastModes;
   readonly agentPermissions?: AgentPermissions;
       readonly reasoning?: "none" | "low" | "medium" | "high" | "xhigh" | "max";
       readonly fastMode: boolean;

@@ -578,7 +578,7 @@ export class ChatPanelManager implements vscode.Disposable {
           botModel: this.botModel(), botDefaultPrompt: BOT_DEFAULT_PROMPTS[this.botCharacter()], botPrompt: resolveBotPrompt(this.botCharacter(), this.botPrompt()),
           model: managed.state.model,
           agentModels: managed.state.agentModels,
-          modelFastModes: managed.state.modelFastModes,
+          agentFastModes: managed.state.agentFastModes,
           agentPermissions: managed.state.agentPermissions,
           reasoning: managed.state.reasoning,
           agentSettingsScope: managed.state.agentSettingsScope,
@@ -698,7 +698,7 @@ export class ChatPanelManager implements vscode.Disposable {
       }
       case "agent.preset.fast": {
         try {
-          await updateAgentPresetFastMode(this.context.globalState, this.context.workspaceState, managed.state.panelId, message.scope, message.name, message.model, message.value);
+          await updateAgentPresetFastMode(this.context.globalState, this.context.workspaceState, managed.state.panelId, message.scope, message.name, message.role, message.model, message.value);
           await this.post(managed.panel, {type: "agent.preset.field.result"});
           for (const panel of this.panels.values()) await this.refreshAgentDefaults(panel);
         } catch (cause) {
@@ -711,18 +711,22 @@ export class ChatPanelManager implements vscode.Disposable {
         let settings: AgentDefaults | undefined;
         try {
           if (message.action === "apply") {
+            await this.assertPresetSelectionAvailable(managed);
             const preset = (readAgentDefaults(this.context.globalState, this.context.workspaceState, managed.state.panelId).presets ?? [])
               .find(item => item.scope === message.scope && item.name === message.name);
             if (preset) await this.assertAgentSettingsCompatible(managed, preset.settings);
           }
-          settings = await useAgentPreset(this.context.globalState, this.context.workspaceState, managed.state.panelId, message.action, message.scope, message.name, this.agentSettingsFromState(managed.state));
+          settings = await useAgentPreset(this.context.globalState, this.context.workspaceState, managed.state.panelId, message.action, message.scope, message.name, this.agentSettingsFromState(managed.state), message.newName);
           if (settings) {
             managed.state = this.applyAgentSettings(managed.state, settings, message.scope, message.name);
+            await this.rememberAgent(managed.state);
+          } else if (message.action === "rename" && managed.state.agentSettingsScope === message.scope && managed.state.agentSettingsSet === message.name) {
+            managed.state = {...managed.state, agentSettingsSet: message.newName};
             await this.rememberAgent(managed.state);
           }
         } catch (cause) { error = cause instanceof Error ? cause.message : String(cause); }
         finally {
-          await this.post(managed.panel, {type: "agent.preset.result", scope: message.scope, name: message.name, ...(settings && !error ? {settings} : {}), ...(error ? {error} : {})});
+          await this.post(managed.panel, {type: "agent.preset.result", scope: message.scope, name: message.action === "rename" && message.newName ? message.newName : message.name, ...(settings && !error ? {settings} : {}), ...(error ? {error} : {})});
           for (const panel of this.panels.values()) await this.refreshAgentDefaults(panel);
         }
         return;
@@ -736,7 +740,7 @@ export class ChatPanelManager implements vscode.Disposable {
         return;
       case "agent.defaults.fast":
         try {
-          await saveModelFastMode(message.scope, message.model, message.value);
+          await saveModelFastMode(message.scope, message.role, message.model, message.value);
         } finally {
           for (const panel of this.panels.values()) await this.refreshAgentDefaults(panel);
         }
@@ -756,7 +760,7 @@ export class ChatPanelManager implements vscode.Disposable {
           taskMode: "direct",
           model: message.model,
           agentModels: message.agentModels,
-          modelFastModes: message.modelFastModes,
+          agentFastModes: message.agentFastModes,
           agentPermissions: message.agentPermissions,
           reasoning: message.reasoning,
           agentSettingsScope: message.agentSettingsScope,
@@ -1515,18 +1519,14 @@ Read the exact stored child result/receipt and existing workflow status for repo
     const role = managed.state.role ?? "main";
     const next = settings[role];
     if (!next?.model && !next?.reasoningEffort) return;
-    const existingProvider = modelProvider(managed.state.model);
-    if (next.model && existingProvider && modelProvider(next.model) !== existingProvider) {
-      throw new Error(localize("ui.model.route.new.chat"));
-    }
     const connection = await this.connectRuntime();
     if (!connection.available) return;
     const resolved = await connection.client.capabilities(managed.state.agentId, managed.state.model).catch(() => undefined);
     if (!resolved) return;
     const capabilities = resolved.send;
-    const lockedProvider = capabilities.sessionProvider ?? existingProvider;
+    const lockedProvider = capabilities.sessionProvider;
     if (next.model && lockedProvider && modelProvider(next.model) !== lockedProvider) {
-      throw new Error(localize("ui.model.route.new.chat"));
+      throw new Error(localize("ui.model.provider.fixed"));
     }
     if (next.model && next.model !== managed.state.model && capabilities.model !== true) {
       throw new Error(localize("ui.model.change.unavailable.active.chat"));
@@ -1534,6 +1534,14 @@ Read the exact stored child result/receipt and existing workflow status for repo
     if (next.reasoningEffort && next.reasoningEffort !== managed.state.reasoning && capabilities.reasoning !== true) {
       throw new Error(localize("ui.reasoning.change.unavailable.active.chat"));
     }
+  }
+
+  private async assertPresetSelectionAvailable(managed: ManagedPanel): Promise<void> {
+    if (!managed.state.agentId) return;
+    const connection = await this.connectRuntime();
+    if (!connection.available) return;
+    const capabilities = await connection.client.capabilities(managed.state.agentId, managed.state.model).catch(() => undefined);
+    if (capabilities?.send.sessionProvider) throw new Error(localize("preset.selection.bound"));
   }
 
   private async refreshAgentDefaults(managed: ManagedPanel): Promise<void> {
@@ -1563,8 +1571,8 @@ Read the exact stored child result/receipt and existing workflow status for repo
       ...this.composerPreferences(),
       ...(own.model ? { model: own.model } : {}),
       ...(own.reasoningEffort ? { reasoning: own.reasoningEffort } : {}),
-      ...(own.model && typeof source.fastByModel?.[own.model] === "boolean" ? { fastMode: source.fastByModel[own.model] } : typeof own.fast === "boolean" ? { fastMode: own.fast } : {}),
-      ...(source.fastByModel ? { modelFastModes: source.fastByModel } : {}),
+      ...(own.model && typeof source.fastByRoleModel?.[role]?.[own.model] === "boolean" ? { fastMode: source.fastByRoleModel[role]![own.model] } : typeof own.fast === "boolean" ? { fastMode: own.fast } : {}),
+      ...(source.fastByRoleModel ? { agentFastModes: source.fastByRoleModel } : {}),
       agentSettingsScope: defaults.projectAvailable ? "project" : "global",
       agentSettingsSet: "Default",
       ...(role === "main" ? { agentModels: {
@@ -1582,7 +1590,7 @@ Read the exact stored child result/receipt and existing workflow status for repo
       work: { ...state.agentModels?.work },
       workLight: { ...state.agentModels?.workLight },
       verification: { ...state.agentModels?.verification },
-      ...(state.modelFastModes ? {fastByModel: state.modelFastModes} : {})
+      ...(state.agentFastModes ? {fastByRoleModel: state.agentFastModes} : {})
     };
   }
 
@@ -1593,8 +1601,8 @@ Read the exact stored child result/receipt and existing workflow status for repo
       ...state,
       ...(own.model ? {model: own.model} : {}),
       ...(own.reasoningEffort ? {reasoning: own.reasoningEffort} : {}),
-      ...(own.model && typeof settings.fastByModel?.[own.model] === "boolean" ? {fastMode: settings.fastByModel[own.model]} : typeof own.fast === "boolean" ? {fastMode: own.fast} : {}),
-      ...(settings.fastByModel ? {modelFastModes: settings.fastByModel} : {}),
+      ...(own.model && typeof settings.fastByRoleModel?.[role]?.[own.model] === "boolean" ? {fastMode: settings.fastByRoleModel[role]![own.model]} : typeof own.fast === "boolean" ? {fastMode: own.fast} : {}),
+      ...(settings.fastByRoleModel ? {agentFastModes: settings.fastByRoleModel} : {}),
       ...(role === "main" ? {agentModels: {
         ...(settings.work ? {work: {...settings.work}} : {}),
         ...(settings.workLight || settings.work ? {workLight: {...(settings.work ?? {}), ...(settings.workLight ?? {})}} : {}),
@@ -1610,7 +1618,7 @@ Read the exact stored child result/receipt and existing workflow status for repo
     if (state.role && state.role !== "main") return;
     await this.context.globalState.update(COMPOSER_PREFERENCES_KEY, {
       agentPermissions: state.agentPermissions,
-      modelFastModes: state.modelFastModes,
+      agentFastModes: state.agentFastModes,
       businessMode: "normal",
       taskMode: "direct",
       fastMode: state.fastMode === true,
@@ -2121,6 +2129,11 @@ Read the exact stored child result/receipt and existing workflow status for repo
       };
       await this.rememberAgent(managed.state);
       await this.post(managed.panel, { type: "conversation.cleared", conversationId: reset.conversationId });
+      const refreshedConnection = await this.connectRuntime();
+      const refreshed = refreshedConnection.available
+        ? await refreshedConnection.client.capabilities(managed.state.agentId, managed.state.model).catch(() => undefined)
+        : undefined;
+      if (refreshed) await this.post(managed.panel, { type: "capabilities.updated", capabilities: refreshed });
       this.scheduleAgentList(managed, true);
     } catch (error) {
       await this.post(managed.panel, {

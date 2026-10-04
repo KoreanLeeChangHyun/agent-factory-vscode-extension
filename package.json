@@ -377,6 +377,18 @@
             "type": "boolean"
           }
         },
+        "agentFactory.agents.fastByRoleModel": {
+          "type": "object",
+          "default": {},
+          "scope": "resource",
+          "description": "%agentFactory.agents.fastByRoleModel.description%",
+          "additionalProperties": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "boolean"
+            }
+          }
+        },
         "agentFactory.agents.work.model": {
           "type": "string",
           "default": "",

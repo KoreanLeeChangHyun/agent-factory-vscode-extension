@@ -49,7 +49,7 @@
 .agent-settings-columns, .agent-model-row { display: grid; grid-template-columns: 84px minmax(0, 1.45fr) minmax(124px, 1fr) 78px; align-items: center; gap: 10px; }
 .agent-settings-columns { padding-bottom: 5px; font-size: 11px; color: var(--vscode-descriptionForeground); }
 .agent-settings-columns > :last-child { justify-self: center; white-space: nowrap; }
-.agent-model-row { padding: 8px 0; min-width: 0; }
+.agent-model-row { box-sizing: border-box; min-height: 74px; padding: 8px 0; min-width: 0; }
 .agent-model-name { font-size: 12px; font-weight: 500; overflow-wrap: anywhere; }
 .agent-model-row label { min-width: 0; }
 .agent-model-caption { display: none; }
@@ -62,6 +62,7 @@
 .agent-fast-toggle:disabled { opacity: .5; cursor: default; }
 .agent-fast-toggle .toggle-icon { width: 28px; height: 18px; flex: 0 0 auto; stroke-width: 1.5; }
 .agent-fast-control { min-width: 0; }
+.agent-fast-placeholder { min-width: 0; min-height: 74px; visibility: hidden; }
 .agent-fast-control .agent-fast-toggle { width: fit-content; min-width: 72px; justify-self: center; padding-inline: 4px; gap: 6px; }
 .agent-fast-control .agent-fast-toggle > span { font-size: 10px; line-height: 16px; white-space: nowrap; }
 :is(.agent-model-menu, #settings-panel-bot, #settings-panel-keyboard, #settings-panel-providers, #general-permissions, .general-language, #image-converter, #unit-create-dialog) select { box-sizing: border-box; width: 100%; min-width: 0; height: var(--settings-control-height, 34px); padding: 0 9px; border-radius: 6px; font: inherit; font-size: 12px; color: var(--vscode-dropdown-foreground, var(--vscode-foreground)); background: var(--vscode-dropdown-background, var(--vscode-editor-background)); border: 1px solid var(--vscode-dropdown-border, var(--vscode-panel-border, #ffffff20)); cursor: pointer; }
@@ -398,10 +399,10 @@
 }
 
 #agent-preset-content { border-top: 1px solid var(--vscode-panel-border, #ffffff18); margin-top: 8px; padding-top: 4px; }
-#agent-preset-create { grid-column: 1 / -1; min-width: 0; }
-#agent-preset-create summary { width: fit-content; padding: 5px 0; color: var(--vscode-textLink-foreground, #3794ff); cursor: pointer; list-style: none; font-size: 12px; }
-#agent-preset-create summary::-webkit-details-marker { display: none; }
-#agent-preset-create summary:focus-visible { outline: 1px solid var(--vscode-focusBorder); outline-offset: 2px; }
+#agent-preset-create, #agent-preset-rename { grid-column: 1 / -1; min-width: 0; }
+#agent-preset-create summary, #agent-preset-rename summary { width: fit-content; padding: 5px 0; color: var(--vscode-textLink-foreground, #3794ff); cursor: pointer; list-style: none; font-size: 12px; }
+#agent-preset-create summary::-webkit-details-marker, #agent-preset-rename summary::-webkit-details-marker { display: none; }
+#agent-preset-create summary:focus-visible, #agent-preset-rename summary:focus-visible { outline: 1px solid var(--vscode-focusBorder); outline-offset: 2px; }
 .agent-preset-create-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: end; gap: 8px; padding-top: 4px; }
 .agent-preset-controls button { font: inherit; font-size: 12px; border: 1px solid var(--vscode-button-border, #ffffff20); background: var(--vscode-button-secondaryBackground, #333); color: var(--vscode-button-secondaryForeground, #ddd); cursor: pointer; }
 .agent-preset-controls button:disabled { opacity: .45; cursor: default; }
@@ -425,10 +426,10 @@
 /* Group related preset actions without stretching them across the panel. */
 #agent-preset-content .agent-preset-controls { display: flex; flex-wrap: wrap; justify-content: flex-start; align-items: center; gap: 4px 8px; margin-top: 0; }
 #agent-preset-content { padding-top: 8px; }
-#agent-preset-create { flex: 0 0 auto; }
-#agent-preset-create summary { box-sizing: border-box; min-height: 28px; min-width: 24px; padding: 5px 4px; white-space: nowrap; }
-#agent-preset-create[open] { flex-basis: 100%; }
-#agent-preset-create .agent-preset-create-row { padding-top: 4px; }
+#agent-preset-create, #agent-preset-rename { flex: 0 0 auto; }
+#agent-preset-create summary, #agent-preset-rename summary { box-sizing: border-box; min-height: 28px; min-width: 24px; padding: 5px 4px; white-space: nowrap; }
+#agent-preset-create[open], #agent-preset-rename[open] { flex-basis: 100%; }
+#agent-preset-create .agent-preset-create-row, #agent-preset-rename .agent-preset-create-row { padding-top: 4px; }
 #agent-preset-content #agent-preset-apply { height: 28px; padding: 0 8px; white-space: nowrap; }
 
 #agent-preset-content #agent-preset-delete { height: 28px; padding: 0 4px; border: 0; background: transparent; color: var(--vscode-descriptionForeground); }
@@ -437,18 +438,18 @@
 #model-menu .agent-settings-heading { gap: 4px; }
 #model-menu .agent-settings-heading > #agent-preset-picker { flex: 1.2 1 0; }
 #model-menu .agent-settings-heading > .agent-scope-row { flex: 1 1 0; }
-#model-menu #agent-preset-create { position: relative; flex: 0 0 28px; }
+#model-menu :is(#agent-preset-create, #agent-preset-rename) { position: relative; flex: 0 0 28px; }
 #model-menu .agent-preset-icon { display: flex; align-items: center; justify-content: center; width: 28px; min-width: 28px; height: 28px; padding: 0; border: 0; border-radius: 4px; background: transparent; color: var(--vscode-descriptionForeground); cursor: pointer; box-sizing: border-box; }
 #model-menu .agent-preset-icon:hover { color: var(--vscode-foreground); background: var(--vscode-toolbar-hoverBackground); }
 #model-menu .agent-preset-icon:focus-visible { outline: 1px solid var(--vscode-focusBorder); }
 #model-menu .agent-preset-icon:disabled { opacity: .4; cursor: default; }
 #model-menu .agent-preset-icon svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
-#model-menu #agent-preset-create .agent-preset-create-row { position: absolute; z-index: 5; top: 32px; right: 0; width: min(260px, calc(100vw - 100px)); box-sizing: border-box; padding: 10px; border: 1px solid var(--vscode-panel-border, #444); border-radius: 6px; background: var(--vscode-editorWidget-background, #252526); box-shadow: 0 4px 12px #0005; }
+#model-menu :is(#agent-preset-create, #agent-preset-rename) .agent-preset-create-row { position: absolute; z-index: 5; top: 32px; right: 0; width: min(260px, calc(100vw - 100px)); box-sizing: border-box; padding: 10px; border: 1px solid var(--vscode-panel-border, #444); border-radius: 6px; background: var(--vscode-editorWidget-background, #252526); box-shadow: 0 4px 12px #0005; }
 #model-menu .agent-preset-create-row label { min-width: 0; font-size: 11px; display: grid; gap: 4px; }
-#model-menu #agent-preset-name { width: 100%; min-width: 0; box-sizing: border-box; }
+#model-menu :is(#agent-preset-name, #agent-preset-rename-name) { width: 100%; min-width: 0; box-sizing: border-box; }
 #model-menu #agent-preset-content { display: contents; }
 #model-menu #agent-preset-content .agent-preset-controls { display: none; }
 #model-menu .agent-preset-create-row :is(input, button) { height: 28px; border-radius: 4px; font: inherit; font-size: 12px; }
-#model-menu #agent-preset-name { padding: 0 7px; color: var(--vscode-input-foreground, #ddd); background: var(--vscode-input-background, #1e1e1e); border: 1px solid var(--vscode-input-border, #444); }
-#model-menu #agent-preset-save { padding: 0 8px; color: var(--vscode-button-foreground, #fff); background: var(--vscode-button-background, #287da0); border: 0; cursor: pointer; }
-#model-menu #agent-preset-save:disabled { opacity: .45; cursor: default; }
+#model-menu :is(#agent-preset-name, #agent-preset-rename-name) { padding: 0 7px; color: var(--vscode-input-foreground, #ddd); background: var(--vscode-input-background, #1e1e1e); border: 1px solid var(--vscode-input-border, #444); }
+#model-menu :is(#agent-preset-save, #agent-preset-rename-save) { padding: 0 8px; color: var(--vscode-button-foreground, #fff); background: var(--vscode-button-background, #287da0); border: 0; cursor: pointer; }
+#model-menu :is(#agent-preset-save, #agent-preset-rename-save):disabled { opacity: .45; cursor: default; }

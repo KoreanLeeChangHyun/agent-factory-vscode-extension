@@ -4,7 +4,7 @@ globalThis.AgentFactoryChat.agentSettings = function (host) {
 
   const {
     state, t, fastModeButton, currentCapabilities, settingOptions, reasoningDisplayLabel, createId,
-    uiLocale, normalizeModelFastModes, persist, saveComposerSettings, updateModeControls, vscode,
+    uiLocale, normalizeAgentFastModes, persist, saveComposerSettings, updateModeControls, vscode,
     modelMenu, createModeIcon, fastModeSetting, closeSettingMenu, executionModeName,
     executionModeExplanation, renderStatusBar
   } = host;
@@ -16,7 +16,7 @@ globalThis.AgentFactoryChat.agentSettings = function (host) {
     const own = role === "main" ? (field === "model" ? state.model : field === "reasoningEffort" ? state.reasoning : state.fastMode) : state.agentModels?.[role]?.[field];
     if (field !== "fast") return own || "";
     const model = role === "main" ? state.model : state.agentModels?.[role]?.model || (role === "workLight" ? state.agentModels?.work?.model : "");
-    return modelFastMode(model, own);
+    return agentFastMode(role, model, own);
   }
   function effectiveDelegatedModels() {
     return Object.fromEntries(["work", "workLight", "verification"].map(role => {
@@ -39,6 +39,7 @@ globalThis.AgentFactoryChat.agentSettings = function (host) {
       wrapper.classList.add("agent-fast-control");
       const control = fastModeButton.cloneNode(true);
       control.removeAttribute("id");
+      control.removeAttribute("hidden");
       control.dataset.role = role;
       control.dataset.field = field;
       const value = control.querySelector("span");
@@ -136,15 +137,15 @@ globalThis.AgentFactoryChat.agentSettings = function (host) {
   // Vendor tabs group a long catalog. A route is the CLI that runs the model: Codex, Claude Code
   // or Antigravity (gemini-* and antigravity/<id>, which may be another vendor's model).
   const MODEL_VENDORS = [["openai", "OpenAI"], ["anthropic", "Anthropic"], ["google", "Google"]];
-  function modelFastMode(model, fallback = false) {
-    return model && typeof state.modelFastModes?.[model] === "boolean" ? state.modelFastModes[model] : fallback === true;
+  function agentFastMode(role, model, fallback = false) {
+    return model && typeof state.agentFastModes?.[agentSettingRole(role)]?.[model] === "boolean" ? state.agentFastModes[agentSettingRole(role)][model] : fallback === true;
   }
-  function setModelFastMode(model, enabled) {
+  function setAgentFastMode(role, model, enabled) {
     if (!model) return;
-    state.modelFastModes = {...state.modelFastModes, [model]: enabled === true};
-    if (state.model === model) state.fastMode = enabled === true;
-    state.agentModels = Object.fromEntries(Object.entries(state.agentModels || {}).map(([role, setting]) =>
-      [role, setting?.model === model ? {...setting, fast: enabled === true} : setting]));
+    const storedRole = agentSettingRole(role);
+    state.agentFastModes = {...state.agentFastModes, [storedRole]: {...state.agentFastModes?.[storedRole], [model]: enabled === true}};
+    if (role === "main" && state.model === model) state.fastMode = enabled === true;
+    else if (state.agentModels?.[role]?.model === model) state.agentModels = {...state.agentModels, [role]: {...state.agentModels[role], fast: enabled === true}};
   }
   function modelRoute(model) {
     return model.startsWith("antigravity/") || model.startsWith("gemini-") ? "antigravity" : model.startsWith("claude-") ? "claude" : "codex";
@@ -165,10 +166,7 @@ globalThis.AgentFactoryChat.agentSettings = function (host) {
   function renderModelPicker(wrapper, control, values, current, lockRoute) {
     const models = values.filter(Boolean);
     wrapper.classList.add("agent-model-picker");
-    // A started conversation keeps its provider; other routes apply to a new or cleared chat.
-    const locked = lockRoute && hasStartedModelConversation()
-      ? currentCapabilities().sessionProvider || (current ? modelRoute(current) : undefined)
-      : undefined;
+    const locked = lockRoute ? currentCapabilities().sessionProvider : undefined;
     const popup = document.createElement("div");
     popup.className = "model-picker-popup";
     popup.hidden = true;
@@ -223,7 +221,6 @@ globalThis.AgentFactoryChat.agentSettings = function (host) {
         option.setAttribute("aria-selected", String(model === selectedModel));
         option.textContent = modelOptionLabel(model);
         option.disabled = Boolean(locked && modelRoute(model) !== locked && model !== current);
-        if (option.disabled) option.title = t("ui.model.route.new.chat");
         option.addEventListener("click", event => {
           event.stopPropagation();
           if (option.disabled) return;
@@ -293,8 +290,8 @@ globalThis.AgentFactoryChat.agentSettings = function (host) {
     const nextReasoning = nextOwn.reasoningEffort || state.reasoning || "medium";
     const capabilities = currentCapabilities();
     const started = hasStartedModelConversation();
-    const locked = started && (capabilities.sessionProvider || (state.model ? modelRoute(state.model) : undefined));
-    if (locked && modelRoute(nextModel) !== locked) return t("ui.model.route.new.chat");
+    const locked = capabilities.sessionProvider;
+    if (locked && modelRoute(nextModel) !== locked) return t("ui.model.provider.fixed");
     if (started && capabilities.model !== true && nextModel !== state.model) return t("ui.model.change.unavailable.active.chat");
     if (started && capabilities.reasoning !== true && nextReasoning !== (state.reasoning || "medium")) return t("ui.reasoning.change.unavailable.active.chat");
     return "";
@@ -307,13 +304,13 @@ globalThis.AgentFactoryChat.agentSettings = function (host) {
     const nextOwn = values?.[state.role === "main" ? "main" : state.role] || {};
     state.model = nextOwn.model || state.model || settingOptions.model.find(Boolean);
     state.reasoning = nextOwn.reasoningEffort || state.reasoning || "medium";
-    state.modelFastModes = normalizeModelFastModes(values?.fastByModel);
-    if (nextOwn.model) state.fastMode = modelFastMode(nextOwn.model, nextOwn.fast);
+    state.agentFastModes = normalizeAgentFastModes(values?.fastByRoleModel, values?.fastByModel);
+    if (nextOwn.model) state.fastMode = agentFastMode("main", nextOwn.model, nextOwn.fast);
     if (state.role === "main") state.agentModels = {
       ...state.agentModels,
-      ...(values.work ? {work: {...values.work, fast: modelFastMode(values.work.model, values.work.fast)}} : {}),
-      ...(values.workLight || values.work ? {workLight: {...(values.work || {}), ...(values.workLight || {}), fast: modelFastMode(values.workLight?.model || values.work?.model, values.workLight?.fast ?? values.work?.fast)}} : {}),
-      ...(values.verification ? {verification: {...values.verification, fast: modelFastMode(values.verification.model, values.verification.fast)}} : {})
+      ...(values.work ? {work: {...values.work, fast: agentFastMode("work", values.work.model, values.work.fast)}} : {}),
+      ...(values.workLight || values.work ? {workLight: {...(values.work || {}), ...(values.workLight || {}), fast: agentFastMode("workLight", values.workLight?.model || values.work?.model, values.workLight?.fast ?? values.work?.fast)}} : {}),
+      ...(values.verification ? {verification: {...values.verification, fast: agentFastMode("verification", values.verification.model, values.verification.fast)}} : {})
     };
     state.agentSettingsScope = scope;
     state.agentSettingsSet = name;
@@ -352,11 +349,11 @@ globalThis.AgentFactoryChat.agentSettings = function (host) {
       const heading = document.createElement("strong"); heading.textContent = t("ui.role." + role); heading.className = "agent-model-name"; heading.prepend(createAgentRoleIcon(role)); row.append(heading);
       for (const field of ["model", "reasoningEffort", "fast"]) {
         const selectedModel = settings[scope]?.[role]?.model || "";
-        const current = field === "fast" ? modelFastModeFromSettings(settings[scope], selectedModel, settings[scope]?.[role]?.fast) : settings[scope]?.[role]?.[field] || "";
-        if (field === "fast" && (!selectedModel || modelRoute(selectedModel) !== "codex")) continue;
+        const current = field === "fast" ? modelFastModeFromSettings(settings[scope], role, selectedModel, settings[scope]?.[role]?.fast) : settings[scope]?.[role]?.[field] || "";
+        if (field === "fast" && (!selectedModel || modelRoute(selectedModel) !== "codex")) { row.append(createFastPlaceholder()); continue; }
         row.append(createAgentSettingControl(role, t("ui.role." + role), field, current, value => {
           const nextSettings = field === "fast"
-            ? {...(settings[scope] || {}), fastByModel: {...settings[scope]?.fastByModel, [selectedModel]: value === true}}
+            ? {...(settings[scope] || {}), fastByRoleModel: {...settings[scope]?.fastByRoleModel, [role]: {...settings[scope]?.fastByRoleModel?.[role], [selectedModel]: value === true}}}
             : {...(settings[scope] || {}), [role]: {...(settings[scope]?.[role] || {}), [field]: value}};
           const error = agentSettingsApplyError(nextSettings);
           if (error) {
@@ -366,8 +363,8 @@ globalThis.AgentFactoryChat.agentSettings = function (host) {
           }
           state.agentDefaults[scope] = nextSettings;
           if (field === "fast") {
-            vscode.postMessage({ type: "agent.defaults.fast", scope, model: selectedModel, value: value === true });
-            autoSavePresetFast(selectedModel, value === true);
+            vscode.postMessage({ type: "agent.defaults.fast", scope, role, model: selectedModel, value: value === true });
+            autoSavePresetFast(role, selectedModel, value === true);
           } else {
             vscode.postMessage({ type: "agent.defaults.save", scope, role, field, value });
             autoSavePresetField(role, field, value);
@@ -386,13 +383,19 @@ globalThis.AgentFactoryChat.agentSettings = function (host) {
     if (!name) return;
     vscode.postMessage({type: "agent.preset.field", scope: document.getElementById("agent-default-scope").value, name, role, field, value});
   }
-  function autoSavePresetFast(model, value) {
+  function autoSavePresetFast(role, model, value) {
     const name = document.getElementById("agent-preset-select").value;
     if (!name || !model) return;
-    vscode.postMessage({type: "agent.preset.fast", scope: document.getElementById("agent-default-scope").value, name, model, value});
+    vscode.postMessage({type: "agent.preset.fast", scope: document.getElementById("agent-default-scope").value, name, role: agentSettingRole(role), model, value});
   }
-  function modelFastModeFromSettings(settings, model, fallback = false) {
-    return model && typeof settings?.fastByModel?.[model] === "boolean" ? settings.fastByModel[model] : fallback === true;
+  function modelFastModeFromSettings(settings, role, model, fallback = false) {
+    return model && typeof settings?.fastByRoleModel?.[role]?.[model] === "boolean" ? settings.fastByRoleModel[role][model] : fallback === true;
+  }
+  function createFastPlaceholder() {
+    const placeholder = document.createElement("div");
+    placeholder.className = "agent-fast-placeholder";
+    placeholder.setAttribute("aria-hidden", "true");
+    return placeholder;
   }
   let agentPresetBusy = false;
   let pendingPresetName = "";
@@ -414,14 +417,21 @@ globalThis.AgentFactoryChat.agentSettings = function (host) {
     }
     select.value = Array.from(select.options).some(option => option.value === selected) ? selected : "";
     if (select.value === pendingPresetName) pendingPresetName = "";
-    select.disabled = agentPresetBusy;
-    document.getElementById("agent-preset-delete").disabled = agentPresetBusy || !select.value || presets.find(preset => preset.name === select.value)?.isDefault === true;
+    const providerBound = Boolean(currentCapabilities().sessionProvider);
+    select.disabled = agentPresetBusy || providerBound;
+    const selectedPreset = presets.find(preset => preset.name === select.value);
+    document.getElementById("agent-preset-delete").disabled = agentPresetBusy || !select.value || selectedPreset?.isDefault === true;
+    const rename = document.getElementById("agent-preset-rename");
+    rename.querySelector("summary").setAttribute("aria-disabled", String(agentPresetBusy || !select.value || selectedPreset?.isDefault === true));
+    document.getElementById("agent-preset-rename-name").disabled = agentPresetBusy || !select.value || selectedPreset?.isDefault === true;
+    document.getElementById("agent-preset-rename-save").disabled = agentPresetBusy || !select.value || selectedPreset?.isDefault === true || !document.getElementById("agent-preset-rename-name").value.trim();
     document.getElementById("agent-preset-save").disabled = agentPresetBusy || !document.getElementById("agent-preset-name").value.trim();
     document.getElementById("agent-preset-name").disabled = agentPresetBusy;
     document.getElementById("agent-default-scope").disabled = agentPresetBusy;
   }
   function performPresetAction(action) {
     if (agentPresetBusy) return;
+    if (action === "apply" && currentCapabilities().sessionProvider) return;
     const name = document.getElementById(action === "save" ? "agent-preset-name" : "agent-preset-select").value.trim();
     if (!name) return;
     const scope = document.getElementById("agent-default-scope").value;
@@ -434,17 +444,29 @@ globalThis.AgentFactoryChat.agentSettings = function (host) {
         return;
       }
     }
-    if (action === "save" || action === "update" || action === "apply") pendingPresetName = name;
+    const newName = action === "rename" ? document.getElementById("agent-preset-rename-name").value.trim() : "";
+    if (action === "rename" && !newName) return;
+    if (action === "save" || action === "update" || action === "apply" || action === "rename") pendingPresetName = newName || name;
     pendingPresetAction = action;
     agentPresetBusy = true;
     const status = document.getElementById("agent-preset-status"); status.hidden = false; status.textContent = t("preset.busy");
     renderAgentDefaults();
     renderAgentPresets();
     if (scope === "chat" && action !== "delete") saveComposerSettings();
-    vscode.postMessage({type: "agent.preset", action, scope: document.getElementById("agent-default-scope").value, name});
+    vscode.postMessage({type: "agent.preset", action, scope: document.getElementById("agent-default-scope").value, name, ...(newName ? {newName} : {})});
   }
   for (const action of ["save", "delete"]) document.getElementById("agent-preset-" + action).addEventListener("click", () => performPresetAction(action));
   document.getElementById("agent-preset-name").addEventListener("input", renderAgentPresets);
+  document.getElementById("agent-preset-rename-name").addEventListener("input", renderAgentPresets);
+  document.getElementById("agent-preset-rename").addEventListener("toggle", event => {
+    if (!event.currentTarget.open) return;
+    const select = document.getElementById("agent-preset-select");
+    const preset = (state.agentDefaults?.presets || []).find(item => item.scope === document.getElementById("agent-default-scope").value && item.name === select.value);
+    if (!preset || preset.isDefault || agentPresetBusy) { event.currentTarget.open = false; return; }
+    if (!document.getElementById("agent-preset-rename-name").value.trim()) document.getElementById("agent-preset-rename-name").value = preset.name;
+    renderAgentPresets();
+  });
+  document.getElementById("agent-preset-rename-save").addEventListener("click", () => performPresetAction("rename"));
   document.getElementById("agent-preset-select").addEventListener("change", () => performPresetAction("apply"));
 
   document.getElementById("agent-default-scope")?.addEventListener("change", event => {
@@ -473,7 +495,7 @@ globalThis.AgentFactoryChat.agentSettings = function (host) {
     // Scope and default controls are persistent nodes; park them so they stay in the document.
     document.getElementById("agent-scope-parts").append(document.getElementById("agent-scope-row"), document.getElementById("agent-defaults-content"));
     document.getElementById("agent-defaults-content").append(document.getElementById("agent-preset-content"));
-    document.getElementById("agent-scope-parts").append(document.getElementById("agent-preset-picker"), document.getElementById("agent-preset-create"), document.getElementById("agent-preset-delete"));
+    document.getElementById("agent-scope-parts").append(document.getElementById("agent-preset-picker"), document.getElementById("agent-preset-create"), document.getElementById("agent-preset-rename"), document.getElementById("agent-preset-delete"));
     menu.replaceChildren();
     menu.setAttribute("role", "dialog");
     menu.setAttribute("aria-label", t("ui.models.and.reasoning"));
@@ -489,7 +511,7 @@ globalThis.AgentFactoryChat.agentSettings = function (host) {
     // Keep the preset, scope and close controls together in one compact heading.
     const scopeControl = document.getElementById("agent-default-scope");
     if (!preserveScope && state.agentSettingsScope && (state.agentSettingsScope !== "project" || state.agentDefaults?.projectAvailable)) scopeControl.value = state.agentSettingsScope;
-    header.append(document.getElementById("agent-scope-row"), document.getElementById("agent-preset-picker"), document.getElementById("agent-preset-create"), document.getElementById("agent-preset-delete"), close);
+    header.append(document.getElementById("agent-scope-row"), document.getElementById("agent-preset-picker"), document.getElementById("agent-preset-create"), document.getElementById("agent-preset-rename"), document.getElementById("agent-preset-delete"), close);
     menu.classList.add("aligned-settings");
     menu.append(header);
     renderAgentPresets();
@@ -525,7 +547,7 @@ globalThis.AgentFactoryChat.agentSettings = function (host) {
         // The light Work profile starts from the Work profile, never from Main's model.
         const current = field === "fast" ? effectiveAgentValue(role, field) : own || effectiveAgentValue(role, field) || (role === "workLight" ? effectiveAgentValue("work", field) : "") || (field === "model" ? state.model || settingOptions.model.find(Boolean) || "" : state.reasoning || "medium");
         const selectedModel = field === "model" ? current : effectiveAgentValue(role, "model") || (role === "workLight" ? effectiveAgentValue("work", "model") : "");
-        if (field === "fast" && (!selectedModel || modelRoute(selectedModel) !== "codex")) continue;
+        if (field === "fast" && (!selectedModel || modelRoute(selectedModel) !== "codex")) { row.append(createFastPlaceholder()); continue; }
         if (own === undefined && current !== "") {
           if (role === "main") state[field === "model" ? "model" : field === "reasoningEffort" ? "reasoning" : "fastMode"] = current;
           else state.agentModels = { ...state.agentModels, [role]: { ...state.agentModels?.[role], [field]: current } };
@@ -534,18 +556,18 @@ globalThis.AgentFactoryChat.agentSettings = function (host) {
         row.append(createAgentSettingControl(role, label, field, current, value => {
           state.agentSettingsScope = "chat";
           state.agentSettingsSet = document.getElementById("agent-preset-select").value || "Default";
-          if (field === "fast") setModelFastMode(selectedModel, value === true);
+          if (field === "fast") setAgentFastMode(role, selectedModel, value === true);
           else if (role === "main") {
             state[field === "reasoningEffort" ? "reasoning" : "model"] = value;
-            if (field === "model") state.fastMode = modelFastMode(value);
+            if (field === "model") state.fastMode = agentFastMode(role, value);
           } else {
             state.agentModels = { ...state.agentModels, [role]: { ...state.agentModels?.[role], [field]: value || undefined } };
-            if (field === "model") state.agentModels[role].fast = modelFastMode(value);
+            if (field === "model") state.agentModels[role].fast = agentFastMode(role, value);
           }
           updateModeControls();
           persist();
           saveComposerSettings();
-          if (field === "fast") autoSavePresetFast(selectedModel, value === true);
+          if (field === "fast") autoSavePresetFast(role, selectedModel, value === true);
           else autoSavePresetField(agentSettingRole(role), field, value);
           if ((field === "model" || field === "fast") && host.openSettingId === "model") renderModelSettings(modelMenu, true);
         }));

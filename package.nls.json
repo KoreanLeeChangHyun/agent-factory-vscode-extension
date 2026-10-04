@@ -42,6 +42,7 @@
   "agentFactory.agents.main.reasoningEffort.description": "Main agent reasoning effort for this scope. Copied settings remain independent.",
   "agentFactory.agents.main.fast.description": "Use the Codex Fast service tier for Main in this scope. This does not change reasoning effort.",
   "agentFactory.agents.fastByModel.description": "Save Fast independently for each supported model in this scope.",
+  "agentFactory.agents.fastByRoleModel.description": "Save Fast independently for each agent role and supported model in this scope.",
   "agentFactory.agents.work.model.description": "Work agent model for this scope. New projects copy global settings, and new chats copy project settings.",
   "agentFactory.agents.work.reasoningEffort.description": "Work agent reasoning effort for this scope. Copied settings remain independent.",
   "agentFactory.agents.work.fast.description": "Use the Codex Fast service tier for Expert Work in this scope. This does not change reasoning effort.",

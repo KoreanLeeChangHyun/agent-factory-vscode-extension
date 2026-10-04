@@ -1,11 +1,13 @@
-import { parseModelFastModes, type AgentModelSetting, type ModelFastModes } from "../../common/types/agent-models";
+import { parseAgentFastModes, parseModelFastModes, type AgentFastModes, type AgentModelSetting, type ModelFastModes } from "../../common/types/agent-models";
 // workLight is the optional light Work profile Main uses for bounded, already-decided changes.
 export const AGENT_ROLES = ["main", "work", "workLight", "verification"] as const;
 /** Roles every complete settings set and preset must contain; older sets omit workLight. */
 export const REQUIRED_AGENT_ROLES = ["main", "work", "verification"] as const;
 export const AGENT_FIELDS = ["model", "reasoningEffort", "fast"] as const;
 export interface AgentDefaults extends Partial<Record<typeof AGENT_ROLES[number], AgentModelSetting>> {
-  /** Fast belongs to a model; role fields remain the runtime projection. */
+  /** Current role-scoped model preferences. */
+  fastByRoleModel?: AgentFastModes;
+  /** Legacy model-wide preferences, read only for compatibility. */
   fastByModel?: ModelFastModes;
 }
 export type AgentPresetScope = "global" | "project" | "chat";
@@ -29,13 +31,23 @@ export function validAgentValue(field: string, value: unknown): value is string 
 }
 export function mergeAgentSettings(...layers: AgentDefaults[]): AgentDefaults {
   const result: AgentDefaults = {};
-  const fastByModel: Record<string, boolean> = {};
+  const fastByRoleModel: Record<string, Record<string, boolean>> = {};
   for (const layer of layers) {
-    const explicit = parseModelFastModes(layer.fastByModel);
-    if (explicit) Object.assign(fastByModel, explicit);
+    const explicit = parseAgentFastModes(layer.fastByRoleModel);
+    if (explicit) for (const role of AGENT_ROLES) {
+      if (explicit[role]) Object.assign(fastByRoleModel[role] ??= {}, explicit[role]);
+    }
+    const legacy = parseModelFastModes(layer.fastByModel);
+    if (legacy) for (const role of AGENT_ROLES) {
+      const roleModes = fastByRoleModel[role] ??= {};
+      for (const [model, enabled] of Object.entries(legacy)) if (roleModes[model] === undefined) roleModes[model] = enabled;
+    }
     for (const role of AGENT_ROLES) {
       const setting = layer[role];
-      if (setting?.model && typeof setting.fast === "boolean" && fastByModel[setting.model] === undefined) fastByModel[setting.model] = setting.fast;
+      if (setting?.model && typeof setting.fast === "boolean") {
+        const roleModes = fastByRoleModel[role] ??= {};
+        if (roleModes[setting.model] === undefined) roleModes[setting.model] = setting.fast;
+      }
     }
   }
   for (const role of AGENT_ROLES) {
@@ -49,6 +61,7 @@ export function mergeAgentSettings(...layers: AgentDefaults[]): AgentDefaults {
     }
     result[role] = setting;
   }
-  if (Object.keys(fastByModel).length) result.fastByModel = fastByModel;
+  const populatedFast = Object.fromEntries(Object.entries(fastByRoleModel).filter(([, modes]) => Object.keys(modes).length));
+  if (Object.keys(populatedFast).length) result.fastByRoleModel = populatedFast;
   return result;
 }

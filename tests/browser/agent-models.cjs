@@ -16,7 +16,7 @@ async function checkFastSetting(page) {
     work: { model: 'gpt-6-astra', reasoningEffort: 'medium', fast: true },
     workLight: { model: 'gpt-6-astra', reasoningEffort: 'low', fast: false },
     verification: { model: 'gpt-6-astra', reasoningEffort: 'high', fast: true },
-    fastByModel: { 'gpt-6-astra': false }
+    fastByRoleModel: { main: {'gpt-6-astra': false}, work: {'gpt-6-astra': true}, workLight: {'gpt-6-astra': false}, verification: {'gpt-6-astra': true} }
   }, projectAvailable: true } });
   assert.equal(await page.locator('#fast-mode-button').isVisible(), false, 'Fast has no duplicate composer control');
   await page.locator('#model-button').click();
@@ -42,7 +42,7 @@ async function checkFastSetting(page) {
   assert.equal(await reopenedFast.getAttribute('aria-pressed'), 'false', 'Closing and reopening settings preserves Fast');
   const fs = require('node:fs');
   const path = require('node:path');
-  const artifactDir = path.resolve(__dirname, '../../../docs/artifact/agent-fast-mode');
+  const artifactDir = path.resolve(__dirname, '../../../docs/artifact/agent-settings-followup');
   fs.mkdirSync(artifactDir, { recursive: true });
   for (const size of [{ width: 465, height: 556 }, { width: 721, height: 402 }]) {
     await page.setViewportSize(size);
@@ -161,7 +161,7 @@ async function checkAgentModels(page) {
 
   const fs = require('node:fs');
   const path = require('node:path');
-  const artifactDir = path.resolve(__dirname, '../../../docs/artifact/agent-fast-mode');
+  const artifactDir = path.resolve(__dirname, '../../../docs/artifact/agent-settings-followup');
   fs.mkdirSync(artifactDir, { recursive: true });
   for (const width of [795, 320]) {
     await page.setViewportSize({ width, height: 740 });
@@ -215,7 +215,7 @@ async function checkAgentModels(page) {
     work: { model: 'gpt-6-astra', reasoningEffort: 'medium', fast: true },
     workLight: { model: 'gpt-6-astra', reasoningEffort: 'low', fast: false },
     verification: { model: 'gpt-6-astra', reasoningEffort: 'high', fast: true },
-    fastByModel: { 'gpt-6-astra': false }
+    fastByRoleModel: { main: {'gpt-6-astra': false}, work: {'gpt-6-astra': true}, workLight: {'gpt-6-astra': false}, verification: {'gpt-6-astra': true} }
   }, projectAvailable: true } });
   assert.equal(await page.locator('#agent-default-scope').inputValue(), 'chat');
   assert.equal(await page.locator('#model-menu #agent-default-fields').count(), 0);
@@ -228,10 +228,10 @@ async function checkAgentModels(page) {
   await page.locator('#agent-default-fields input[data-role=work]').fill('4');
   assert.deepEqual(await page.evaluate(() => window.sentMessages.filter(m => m.type === 'agent.defaults.save').at(-1)), { type: 'agent.defaults.save', scope: 'project', role: 'work', field: 'reasoningEffort', value: 'xhigh' });
   const projectFast = page.locator('#agent-default-fields button[data-role=work][data-field=fast]');
-  assert.equal(await projectFast.getAttribute('aria-pressed'), 'false', 'The model preference is shared instead of preserving conflicting role values');
+  assert.equal(await projectFast.getAttribute('aria-pressed'), 'true', 'Work restores its own Fast value for the shared model');
   await projectFast.click();
-  assert.deepEqual(await page.evaluate(() => window.sentMessages.filter(m => m.type === 'agent.defaults.fast').at(-1)), { type: 'agent.defaults.fast', scope: 'project', model: 'gpt-6-astra', value: true });
-  assert.equal(await page.locator('#agent-default-fields button[data-role=verification][data-field=fast]').getAttribute('aria-pressed'), 'true', 'The same model has one Fast value across roles');
+  assert.deepEqual(await page.evaluate(() => window.sentMessages.filter(m => m.type === 'agent.defaults.fast').at(-1)), { type: 'agent.defaults.fast', scope: 'project', role: 'work', model: 'gpt-6-astra', value: false });
+  assert.equal(await page.locator('#agent-default-fields button[data-role=verification][data-field=fast]').getAttribute('aria-pressed'), 'true', 'Verification remains independent on the same model');
   await page.locator('#agent-default-scope').selectOption('global');
   await page.locator('#agent-default-fields input[data-role=verification]').fill('5');
   assert.deepEqual(await page.evaluate(() => window.sentMessages.filter(m => m.type === 'agent.defaults.save').at(-1)), { type: 'agent.defaults.save', scope: 'global', role: 'verification', field: 'reasoningEffort', value: 'max' });
@@ -291,7 +291,7 @@ async function checkAgentModels(page) {
 
 async function checkModelVendorTabs(page, emit) {
   const freshCapability = { model: true, reasoning: true, taskModes: ['direct'] };
-  await emit({ type: 'host.initialize', panelId: 'roles', role: 'main', title: 'Main', model: 'gpt-5.6-sol', reasoning: 'medium', modelFastModes: {'gpt-5.6-sol': true, 'gpt-6-astra': false}, agentSettingsScope: 'chat', agentSettingsSet: 'Default', resetConversation: true, runtimeAvailable: true, capabilities: { submit: freshCapability, send: freshCapability } });
+  await emit({ type: 'host.initialize', panelId: 'roles', role: 'main', title: 'Main', model: 'gpt-5.6-sol', reasoning: 'medium', agentFastModes: {main:{'gpt-5.6-sol':true,'gpt-6-astra':false},work:{'gpt-5.6-sol':false},workLight:{'gpt-5.6-sol':false},verification:{'gpt-5.6-sol':true}}, agentSettingsScope: 'chat', agentSettingsSet: 'Default', resetConversation: true, runtimeAvailable: true, capabilities: { submit: freshCapability, send: freshCapability } });
   await page.locator('#model-button').click();
   await page.locator('#agent-default-scope').selectOption('chat');
   await emit({ type: 'models.list', models: ['gpt-5.6-sol', 'gpt-6-astra', 'claude-opus-5-5', 'antigravity/claude-sonnet-4-6', 'gemini-3.8-flash', 'antigravity/gpt-oss-120b-medium'] });
@@ -345,17 +345,25 @@ async function checkModelVendorTabs(page, emit) {
   await page.keyboard.press('Escape');
   await emit({ type: 'host.initialize', panelId: 'role-fast-support', role: 'main', title: 'Main', model: 'claude-opus-5-5', reasoning: 'medium',
     agentModels: {work: {model: 'gpt-5.6-sol', reasoningEffort: 'medium', fast: true}, workLight: {model: 'claude-opus-5-5', reasoningEffort: 'low'}, verification: {model: 'gpt-6-astra', reasoningEffort: 'high', fast: false}},
-    modelFastModes: {'gpt-5.6-sol': true, 'gpt-6-astra': false}, resetConversation: true, runtimeAvailable: true,
+    agentFastModes: {main:{'gpt-5.6-sol':true,'gpt-6-astra':false},work:{'gpt-5.6-sol':false},workLight:{'gpt-5.6-sol':false},verification:{'gpt-5.6-sol':true}}, resetConversation: true, runtimeAvailable: true,
     capabilities: { submit: {...freshCapability, fast: false}, send: {...freshCapability, fast: false} } });
   if (!await page.locator('#model-menu').isVisible()) await page.locator('#model-button').click();
   assert.equal(await page.locator('.agent-model-row[data-agent-role=main] button[data-field=fast]').count(), 0, 'Claude Main omits Fast');
   assert.equal(await page.locator('.agent-model-row[data-agent-role=work] button[data-field=fast]').count(), 1, 'Codex Work keeps its own Fast control');
   assert.equal(await page.locator('.agent-model-row[data-agent-role=workLight] button[data-field=fast]').count(), 0, 'Claude light Work omits Fast');
   assert.equal(await page.locator('.agent-model-row[data-agent-role=verification] button[data-field=fast]').count(), 1, 'Codex Verification keeps its own Fast control');
+  await page.setViewportSize({width:795,height:900});
+  const measuredHeights = async () => page.locator('#model-menu .agent-model-row').evaluateAll(rows => rows.map(row => row.getBoundingClientRect().height));
+  const mixedHeights = await measuredHeights();
+  assert.equal(new Set(mixedHeights.map(value => value.toFixed(2))).size, 1, 'Rows with and without Fast have the same measured height');
+  const workFast = page.locator('.agent-model-row[data-agent-role=work] button[data-field=fast]');
+  await workFast.click();
+  const toggledHeights = await measuredHeights();
+  assert.deepEqual(toggledHeights.map(value => value.toFixed(2)), mixedHeights.map(value => value.toFixed(2)), 'Fast On/Off does not change row height');
   await page.keyboard.press('Escape');
   await emit({ type: 'host.initialize', panelId: 'fast-models', role: 'main', title: 'Main', model: 'gpt-5.6-sol', reasoning: 'medium',
     agentModels: {work: {model: 'gpt-5.6-sol', reasoningEffort: 'medium', fast: false}, workLight: {model: 'gpt-5.6-sol', reasoningEffort: 'low', fast: false}, verification: {model: 'gpt-5.6-sol', reasoningEffort: 'high', fast: false}},
-    modelFastModes: {'gpt-5.6-sol': true, 'gpt-6-astra': false}, resetConversation: true, runtimeAvailable: true, capabilities: { submit: {...freshCapability, fast: true}, send: {...freshCapability, fast: true} } });
+    agentFastModes: {main:{'gpt-5.6-sol':true,'gpt-6-astra':false},work:{'gpt-5.6-sol':false,'gpt-6-astra':true},workLight:{'gpt-5.6-sol':false},verification:{'gpt-5.6-sol':true}}, resetConversation: true, runtimeAvailable: true, capabilities: { submit: {...freshCapability, fast: true}, send: {...freshCapability, fast: true} } });
   if (!await page.locator('#model-menu').isVisible()) await page.locator('#model-button').click();
   const fast = row.locator('button[data-field=fast]');
   assert.equal(await fast.getAttribute('aria-pressed'), 'true');
@@ -368,11 +376,13 @@ async function checkModelVendorTabs(page, emit) {
   await page.locator('#prompt').press('Enter');
   const request = await page.evaluate(() => window.sentMessages.filter(message => message.type === 'chat.send').at(-1));
   assert.equal(request.execution.fast, true);
-  for (const role of ['work', 'workLight', 'verification']) assert.equal(request.execution.agentModels[role].fast, true, role + ' receives the selected model Fast value');
+  assert.equal(request.execution.agentModels.work.fast, false, 'Work keeps its own Fast value for the same model');
+  assert.equal(request.execution.agentModels.workLight.fast, false, 'Light Work keeps its own Fast value for the same model');
+  assert.equal(request.execution.agentModels.verification.fast, true, 'Verification keeps its own Fast value for the same model');
   await page.locator('#model-button').click();
   const fs = require('node:fs');
   const path = require('node:path');
-  const artifactDir = path.resolve(__dirname, '../../../docs/artifact/agent-fast-mode');
+  const artifactDir = path.resolve(__dirname, '../../../docs/artifact/agent-settings-followup');
   fs.mkdirSync(artifactDir, { recursive: true });
   for (const width of [795, 320]) {
     await page.setViewportSize({ width, height: 740 });

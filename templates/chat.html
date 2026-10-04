@@ -219,6 +219,13 @@
                   <div id="agent-defaults-content">
                     <div id="agent-preset-content"><div class="agent-preset-controls">
                       <label id="agent-preset-picker"><span data-i18n="preset.saved">Saved sets</span><select id="agent-preset-select"></select></label>
+                      <details id="agent-preset-rename">
+                        <summary class="agent-preset-icon" aria-label="Rename set" title="Rename set" data-i18n-aria-label="preset.rename" data-i18n-title="preset.rename"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m4 16-1 5 5-1L19 9l-4-4L4 16Zm9-9 4 4"/></svg></summary>
+                        <div class="agent-preset-create-row">
+                          <label><span data-i18n="preset.rename.name">Set name</span><input id="agent-preset-rename-name" type="text" /></label>
+                          <button id="agent-preset-rename-save" type="button" data-i18n="preset.save.short">Save</button>
+                        </div>
+                      </details>
                       <button id="agent-preset-delete" class="agent-preset-icon" type="button" aria-label="Delete set" title="Delete set" data-i18n-aria-label="preset.delete" data-i18n-title="preset.delete"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6h18M9 6V3h6v3M5 6l1 15h12l1-15M10 10v7m4-7v7"/></svg></button>
                       <details id="agent-preset-create">
                         <summary class="agent-preset-icon" aria-label="New set" title="New set" data-i18n-aria-label="preset.new" data-i18n-title="preset.new"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg></summary>

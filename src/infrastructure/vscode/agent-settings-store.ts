@@ -1,6 +1,6 @@
 import * as vscode from "vscode";
 import { localize } from "../../common/localization";
-import { parseModelFastModes } from "../../common/types/agent-models";
+import { parseAgentFastModes, parseModelFastModes } from "../../common/types/agent-models";
 import { AGENT_ROLES, AGENT_FIELDS, REQUIRED_AGENT_ROLES, mergeAgentSettings, type AgentDefaultsSnapshot, type AgentDefaults, type AgentPreset, type AgentPresetScope, validAgentValue } from "../../core/config/agent-settings";
 const section = "agentFactory.agents";
 const globalInitializationKey = "agentFactory.agentDefaults.initialized.v3";
@@ -40,7 +40,7 @@ export async function initializeAgentDefaults(
       await projectConfig.update(key, global[role]![field], vscode.ConfigurationTarget.WorkspaceFolder);
     }
   }
-  if (global.fastByModel) await projectConfig.update("fastByModel", global.fastByModel, vscode.ConfigurationTarget.WorkspaceFolder);
+  if (global.fastByRoleModel) await projectConfig.update("fastByRoleModel", global.fastByRoleModel, vscode.ConfigurationTarget.WorkspaceFolder);
   await workspaceState.update(projectInitializationKey, true);
 }
 
@@ -64,18 +64,26 @@ export function readAgentDefaults(
     global[role] = g; project[role] = p;
   }
   const fastEntry = config?.inspect?.<unknown>("fastByModel");
+  const roleFastEntry = config?.inspect?.<unknown>("fastByRoleModel");
   const globalFast = parseModelFastModes(fastEntry?.globalValue);
   const projectFast = parseModelFastModes(fastEntry?.workspaceFolderValue ?? fastEntry?.workspaceValue);
+  const globalRoleFast = parseAgentFastModes(roleFastEntry?.globalValue);
+  const projectRoleFast = parseAgentFastModes(roleFastEntry?.workspaceFolderValue ?? roleFastEntry?.workspaceValue);
+  if (globalRoleFast) global.fastByRoleModel = globalRoleFast;
+  if (projectRoleFast) project.fastByRoleModel = projectRoleFast;
   if (globalFast) global.fastByModel = globalFast;
   if (projectFast) project.fastByModel = projectFast;
-  // Legacy role-scoped values seed one model preference until that scope is next saved.
+  // Legacy model-wide and role-scoped values seed role-specific preferences in memory.
   for (const settings of [global, project]) {
-    const migrated = {...settings.fastByModel};
+    const migrated = Object.fromEntries(AGENT_ROLES.map(role => [role, {...settings.fastByRoleModel?.[role]}])) as Record<typeof AGENT_ROLES[number], Record<string, boolean>>;
     for (const role of AGENT_ROLES) {
       const value = settings[role];
-      if (value?.model && typeof value.fast === "boolean" && migrated[value.model] === undefined) migrated[value.model] = value.fast;
+      for (const [model, enabled] of Object.entries(settings.fastByModel ?? {})) if (migrated[role][model] === undefined) migrated[role][model] = enabled;
+      if (value?.model && typeof value.fast === "boolean" && migrated[role][value.model] === undefined) migrated[role][value.model] = value.fast;
     }
-    if (Object.keys(migrated).length) settings.fastByModel = migrated;
+    const populated = Object.fromEntries(Object.entries(migrated).filter(([, modes]) => Object.keys(modes).length));
+    if (Object.keys(populated).length) settings.fastByRoleModel = populated;
+    delete settings.fastByModel;
   }
   return { presets: readAgentPresets(globalState, workspaceState, chatId), global, project, projectAvailable: Boolean(uri) };
 }
@@ -87,14 +95,14 @@ export async function saveAgentDefault(scope: "global" | "project", role: string
   await config.update(`${role}.${field}`, value, scope === "global" ? vscode.ConfigurationTarget.Global : vscode.ConfigurationTarget.WorkspaceFolder);
 }
 
-export async function saveModelFastMode(scope: "global" | "project", model: string, value: boolean): Promise<void> {
-  if (!validAgentValue("model", model)) throw new Error("Invalid model Fast setting");
+export async function saveModelFastMode(scope: "global" | "project", role: typeof AGENT_ROLES[number], model: string, value: boolean): Promise<void> {
+  if (!AGENT_ROLES.includes(role) || !validAgentValue("model", model)) throw new Error("Invalid model Fast setting");
   const uri = vscode.workspace.workspaceFolders?.[0]?.uri;
   if (scope === "project" && !uri) throw new Error("Open a project before changing project settings");
   const config = vscode.workspace.getConfiguration(section, uri);
-  const entry = config.inspect<unknown>("fastByModel");
-  const current = parseModelFastModes(scope === "global" ? entry?.globalValue : entry?.workspaceFolderValue ?? entry?.workspaceValue) ?? {};
-  await config.update("fastByModel", {...current, [model]: value}, scope === "global" ? vscode.ConfigurationTarget.Global : vscode.ConfigurationTarget.WorkspaceFolder);
+  const entry = config.inspect<unknown>("fastByRoleModel");
+  const current = parseAgentFastModes(scope === "global" ? entry?.globalValue : entry?.workspaceFolderValue ?? entry?.workspaceValue) ?? {};
+  await config.update("fastByRoleModel", {...current, [role]: {...current[role], [model]: value}}, scope === "global" ? vscode.ConfigurationTarget.Global : vscode.ConfigurationTarget.WorkspaceFolder);
 }
 
 interface StoredAgentPreset { name: string; settings: AgentDefaults; isDefault?: boolean }
@@ -171,13 +179,23 @@ async function writeScopePresets(globalState: PresetState, workspaceState: Prese
 }
 
 /** Serialize preset updates across panels sharing this extension host. */
-export function useAgentPreset(globalState: PresetState, workspaceState: PresetState | undefined, chatId: string | undefined, action: "save" | "apply" | "update" | "delete", scope: AgentPresetScope, name: string, chatSettings?: AgentDefaults): Promise<AgentDefaults | undefined> {
+export function useAgentPreset(globalState: PresetState, workspaceState: PresetState | undefined, chatId: string | undefined, action: "save" | "apply" | "update" | "delete" | "rename", scope: AgentPresetScope, name: string, chatSettings?: AgentDefaults, newName?: string): Promise<AgentDefaults | undefined> {
   const previous = presetOperations.get(globalState) ?? Promise.resolve();
   const operation = previous.catch(() => undefined).then(async () => {
     await seedAgentPresets(globalState, workspaceState, chatId, chatSettings);
     const presets = readScopePresets(globalState, workspaceState, chatId, scope);
     name = name.trim();
     if (!name) throw new Error(localize("preset.name.required"));
+    if (action === "rename") {
+      const preset = presets.find(item => item.name === name);
+      const replacementName = newName?.trim() ?? "";
+      if (!preset) throw new Error(localize("preset.missing"));
+      if (preset.isDefault) throw new Error(localize("preset.default.required"));
+      if (!replacementName) throw new Error(localize("preset.name.required"));
+      if (presets.some(item => item !== preset && item.name === replacementName)) throw new Error(localize("preset.duplicate"));
+      await writeScopePresets(globalState, workspaceState, chatId, scope, presets.map(item => item === preset ? {...item, name: replacementName} : item));
+      return;
+    }
     if (action === "delete") {
       const preset = presets.find(item => item.name === name);
       if (!preset) throw new Error(localize("preset.missing"));
@@ -209,7 +227,7 @@ export function useAgentPreset(globalState: PresetState, workspaceState: PresetS
     const config = vscode.workspace.getConfiguration(section, vscode.workspace.workspaceFolders?.[0]?.uri);
     const target = scope === "global" ? vscode.ConfigurationTarget.Global : vscode.ConfigurationTarget.WorkspaceFolder;
     const before = new Map<string, string | boolean | undefined>();
-    const fastEntry = config.inspect<unknown>("fastByModel");
+    const fastEntry = config.inspect<unknown>("fastByRoleModel");
     const beforeFast = scope === "global" ? fastEntry?.globalValue : fastEntry?.workspaceFolderValue;
     for (const [role, field] of pairs) {
       const key = `${role}.${field}`;
@@ -223,15 +241,15 @@ export function useAgentPreset(globalState: PresetState, workspaceState: PresetS
         await saveAgentDefault(scope, role, field, preset.settings[role]![field]!);
         changed.push([role, field]);
       }
-      if (preset.settings.fastByModel) {
-        await config.update("fastByModel", preset.settings.fastByModel, target);
+      if (preset.settings.fastByRoleModel) {
+        await config.update("fastByRoleModel", preset.settings.fastByRoleModel, target);
         changedFast = true;
       }
     } catch (error) {
       // Restore earlier writes if a later configuration write fails.
       const rollback = await Promise.allSettled([
         ...changed.map(([role, field]) => config.update(`${role}.${field}`, before.get(`${role}.${field}`), target)),
-        ...(changedFast ? [config.update("fastByModel", beforeFast, target)] : [])
+        ...(changedFast ? [config.update("fastByRoleModel", beforeFast, target)] : [])
       ]);
       if (rollback.some(result => result.status === "rejected")) throw new Error(localize("preset.rollback.failed"));
       throw error;
@@ -260,13 +278,13 @@ export function updateAgentPresetField(globalState: PresetState, workspaceState:
   return operation;
 }
 
-export function updateAgentPresetFastMode(globalState: PresetState, workspaceState: PresetState | undefined, chatId: string | undefined, scope: AgentPresetScope, name: string, model: string, value: boolean): Promise<void> {
+export function updateAgentPresetFastMode(globalState: PresetState, workspaceState: PresetState | undefined, chatId: string | undefined, scope: AgentPresetScope, name: string, role: typeof AGENT_ROLES[number], model: string, value: boolean): Promise<void> {
   const operation = (presetOperations.get(globalState) ?? Promise.resolve()).catch(() => undefined).then(async () => {
-    if (!validAgentValue("model", model)) throw new Error(localize("preset.invalid"));
+    if (!AGENT_ROLES.includes(role) || !validAgentValue("model", model)) throw new Error(localize("preset.invalid"));
     const presets = readScopePresets(globalState, workspaceState, chatId, scope);
     const preset = presets.find(item => item.name === name);
     if (!preset) throw new Error(localize("preset.missing"));
-    const replacement = {...preset, settings: {...preset.settings, fastByModel: {...preset.settings.fastByModel, [model]: value}}};
+    const replacement = {...preset, settings: {...preset.settings, fastByRoleModel: {...preset.settings.fastByRoleModel, [role]: {...preset.settings.fastByRoleModel?.[role], [model]: value}}}};
     await writeScopePresets(globalState, workspaceState, chatId, scope, presets.map(item => item === preset ? replacement : item));
   });
   presetOperations.set(globalState, operation);

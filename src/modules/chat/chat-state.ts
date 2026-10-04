@@ -1,7 +1,7 @@
 import { parseAgentPermissions } from "../../common/types/agent-permissions";
 import type { AgentPermissions } from "../../common/types/agent-permissions";
-import { parseAgentModels, parseModelFastModes } from "../../common/types/agent-models";
-import type { AgentModels, ModelFastModes } from "../../common/types/agent-models";
+import { parseAgentFastModes, parseAgentModels, parseModelFastModes } from "../../common/types/agent-models";
+import type { AgentFastModes, AgentModels, ModelFastModes } from "../../common/types/agent-models";
 import type { BusinessMode } from "../../common/types/business-mode";
 import { type TaskSelection } from "./task-selection";
 import { randomUUID } from "node:crypto";
@@ -16,6 +16,7 @@ export interface ChatPanelState {
   readonly model?: string;
   readonly agentModels?: AgentModels;
   readonly modelFastModes?: ModelFastModes;
+  readonly agentFastModes?: AgentFastModes;
   readonly agentPermissions?: AgentPermissions;
   readonly reasoning?: "none" | "low" | "medium" | "high" | "xhigh" | "max";
   readonly agentSettingsScope?: "global" | "project" | "chat";
@@ -36,7 +37,7 @@ export interface ChatPanelState {
 
 export type ComposerPreferences = Pick<
   ChatPanelState,
-  "agentPermissions" | "agentModels" | "modelFastModes" | "model" | "reasoning" | "agentSettingsScope" | "agentSettingsSet" | "fastMode" | "goalMode" | "workLoopMode" | "taskMode" | "businessMode"
+  "agentPermissions" | "agentModels" | "modelFastModes" | "agentFastModes" | "model" | "reasoning" | "agentSettingsScope" | "agentSettingsSet" | "fastMode" | "goalMode" | "workLoopMode" | "taskMode" | "businessMode"
 >;
 
 export function createDraftChatState(preferences: ComposerPreferences = {}): ChatPanelState {
@@ -78,6 +79,7 @@ export function restoreChatState(
       : preferences.agentSettingsSet ? { agentSettingsSet: preferences.agentSettingsSet } : {}),
     ...((parseAgentModels(value.agentModels) ?? preferences.agentModels) ? { agentModels: parseAgentModels(value.agentModels) ?? preferences.agentModels } : {}),
     ...((parseModelFastModes(value.modelFastModes) ?? preferences.modelFastModes) ? { modelFastModes: parseModelFastModes(value.modelFastModes) ?? preferences.modelFastModes } : {}),
+    ...((parseAgentFastModes(value.agentFastModes) ?? preferences.agentFastModes) ? { agentFastModes: parseAgentFastModes(value.agentFastModes) ?? preferences.agentFastModes } : {}),
     ...((parseAgentPermissions(value.agentPermissions) ?? preferences.agentPermissions) ? { agentPermissions: parseAgentPermissions(value.agentPermissions) ?? preferences.agentPermissions } : {}),
     fastMode: typeof value.fastMode === "boolean" ? value.fastMode : preferences.fastMode === true,
     goalMode: false,

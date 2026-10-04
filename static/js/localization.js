@@ -455,10 +455,7 @@
     "en": "Model vendor",
     "ko": "모델 제공사"
   },
-  "ui.model.route.new.chat": {
-    "en": "This model runs on another CLI; select it in a new or cleared conversation.",
-    "ko": "다른 CLI에서 실행되는 모델입니다. 새 대화나 초기화한 대화에서 선택할 수 있습니다."
-  },
+  "ui.model.provider.fixed": {"en":"This conversation keeps its current model provider.","ko":"이 대화는 현재 모델 공급자를 유지합니다."},
   "ui.model.change.unavailable.active.chat": {
     "en": "The current CLI cannot change the model in this ongoing conversation.",
     "ko": "현재 CLI는 진행 중인 대화에서 모델을 변경할 수 없습니다."
@@ -882,6 +879,9 @@
   "preset.rollback.failed": {"en": "Applying the set failed and some settings could not be restored. Check the current settings.", "ko": "세트 적용에 실패했고 일부 설정을 복원하지 못했습니다. 현재 설정을 확인해 주세요."},
   "preset.default.required": {"en": "The default set cannot be deleted.", "ko": "기본 세트는 삭제할 수 없습니다."},
   "preset.delete": {"en":"Delete", "ko":"삭제"},
+  "preset.rename": {"en":"Rename set", "ko":"세트 이름 변경"},
+  "preset.rename.name": {"en":"Set name", "ko":"세트 이름"},
+  "preset.selection.bound": {"en":"Set selection is unavailable while this conversation is bound to a model provider.","ko":"이 대화가 모델 공급자에 바인딩된 동안에는 세트를 선택할 수 없습니다."},
   "preset.update": {"en": "Save set", "ko": "변경 저장"},
   "preset.default": {"en": "Default", "ko": "기본"},
   "preset.new": {"en": "+ New set", "ko": "+ 새 세트"},

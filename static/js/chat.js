@@ -204,7 +204,7 @@
     capabilities: undefined,
     running: saved?.running === true,
     agentModels: saved?.agentModels || {},
-    modelFastModes: normalizeModelFastModes(saved?.modelFastModes),
+    agentFastModes: normalizeAgentFastModes(saved?.agentFastModes, saved?.modelFastModes),
     model: normalizeModel(saved?.model),
     reasoning: normalizeSettingValue(saved?.reasoning, settingOptions.reasoning),
     agentSettingsScope: ["global", "project", "chat"].includes(saved?.agentSettingsScope) ? saved.agentSettingsScope : undefined,
@@ -328,7 +328,7 @@
   });
   const chatAgentSettings = globalThis.AgentFactoryChat.agentSettings({
     state, t, fastModeButton, currentCapabilities, settingOptions, reasoningDisplayLabel, createId,
-    uiLocale, normalizeModelFastModes, persist, saveComposerSettings, updateModeControls, vscode,
+    uiLocale, normalizeAgentFastModes, persist, saveComposerSettings, updateModeControls, vscode,
     modelMenu, createModeIcon, fastModeSetting, closeSettingMenu, executionModeName,
     executionModeExplanation, renderStatusBar: chatStatusBar.renderStatusBar,
     get openSettingId() { return openSettingId; },
@@ -873,6 +873,13 @@
           document.getElementById("agent-preset-create").open = false;
           document.getElementById("agent-preset-name").value = "";
         }
+        if (!message.error && chatAgentSettings.pendingPresetAction === "rename") {
+          state.agentSettingsSet = message.name;
+          document.getElementById("agent-preset-rename").open = false;
+          document.getElementById("agent-preset-rename-name").value = "";
+          persist();
+          saveComposerSettings();
+        }
         chatAgentSettings.pendingPresetAction = "";
         if (!message.error && message.settings && message.scope && message.name) chatAgentSettings.applyAgentSettingsToChat(message.settings, message.scope, message.name);
         chatAgentSettings.renderAgentDefaults();
@@ -909,7 +916,7 @@
         if (!state.running) state.cancellationRequested = false;
         state.model = normalizeModel(message.model);
         state.agentModels = message.agentModels || state.agentModels || {};
-        state.modelFastModes = normalizeModelFastModes(message.modelFastModes || state.modelFastModes);
+        state.agentFastModes = normalizeAgentFastModes(message.agentFastModes || state.agentFastModes, message.modelFastModes);
         state.reasoning = normalizeSettingValue(message.reasoning, settingOptions.reasoning);
         state.agentSettingsScope = ["global", "project", "chat"].includes(message.agentSettingsScope) ? message.agentSettingsScope : state.agentSettingsScope;
         state.agentSettingsSet = typeof message.agentSettingsSet === "string" && message.agentSettingsSet.trim() ? message.agentSettingsSet.trim() : state.agentSettingsSet;
@@ -2823,7 +2830,7 @@
       runtimeAvailable: state.runtimeAvailable,
       running: state.running,
       agentModels: state.agentModels,
-      modelFastModes: state.modelFastModes,
+      agentFastModes: state.agentFastModes,
       model: state.model,
       reasoning: state.reasoning,
       agentSettingsScope: state.agentSettingsScope,
@@ -2866,7 +2873,7 @@
     vscode.postMessage({
       type: "composer.settings",
       agentModels: state.agentModels,
-      modelFastModes: state.modelFastModes,
+      agentFastModes: state.agentFastModes,
       model: state.model || undefined,
       reasoning: state.reasoning || undefined,
       agentSettingsScope: state.agentSettingsScope,
@@ -2939,6 +2946,17 @@
     if (!value || typeof value !== "object" || Array.isArray(value)) return {};
     return Object.fromEntries(Object.entries(value).filter(([model, enabled]) =>
       /^[A-Za-z0-9][A-Za-z0-9._:/-]{0,99}$/.test(model) && typeof enabled === "boolean"));
+  }
+  function normalizeAgentFastModes(value, legacy) {
+    const roles = ["main", "work", "workLight", "verification"];
+    const legacyModes = normalizeModelFastModes(legacy);
+    const result = {};
+    for (const role of roles) {
+      const modes = normalizeModelFastModes(value?.[role]);
+      const merged = {...legacyModes, ...modes};
+      if (Object.keys(merged).length) result[role] = merged;
+    }
+    return result;
   }
   function normalizeModel(value) {
     return typeof value === "string" && /^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$|^antigravity\/[A-Za-z0-9][A-Za-z0-9._-]{0,80}$/.test(value) ? value : "";

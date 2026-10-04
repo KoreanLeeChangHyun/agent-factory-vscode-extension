@@ -7,6 +7,7 @@ export interface AgentModelSetting {
 }
 export type AgentModels = Partial<Record<"work" | "workLight" | "verification", AgentModelSetting>>;
 export type ModelFastModes = Readonly<Record<string, boolean>>;
+export type AgentFastModes = Partial<Record<"main" | "work" | "workLight" | "verification", ModelFastModes>>;
 /** Work profile Main recorded at dispatch: `work` is Expert, `workLight` is Worker. */
 export type WorkProfile = "work" | "workLight";
 
@@ -36,6 +37,18 @@ export function parseModelFastModes(value: unknown): ModelFastModes | undefined 
   for (const [model, enabled] of Object.entries(value)) {
     if (!/^[A-Za-z0-9][A-Za-z0-9._:/-]{0,99}$/.test(model) || typeof enabled !== "boolean") return undefined;
     result[model] = enabled;
+  }
+  return result;
+}
+
+export function parseAgentFastModes(value: unknown): AgentFastModes | undefined {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return undefined;
+  const result: AgentFastModes = {};
+  for (const [role, modes] of Object.entries(value)) {
+    if (role !== "main" && role !== "work" && role !== "workLight" && role !== "verification") return undefined;
+    const parsed = parseModelFastModes(modes);
+    if (!parsed) return undefined;
+    result[role] = parsed;
   }
   return result;
 }

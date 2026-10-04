@@ -97,7 +97,7 @@ test("conversation transition finishes while the completion notification remains
   const notification = new Promise(resolve => { dismissNotification = resolve; });
   vscode.window.showInformationMessage = () => notification;
   const manager = new module.exports.ChatPanelManager({}, {}, () => [], async () => ({
-    available: true, client: { async listChildSessions() { return []; } }
+    available: true, client: { async listChildSessions() { return []; }, async capabilities() { return { submit: {}, send: {} }; } }
   }));
   manager.ensureController = async () => {};
   manager.rememberAgent = async () => {};
@@ -118,7 +118,7 @@ test("conversation transition finishes while the completion notification remains
     await manager.transitionConversation(managed);
     assert.equal(resetCount, 2);
     assert.equal(refreshCount, 2);
-    assert.deepEqual(posted.map(message => message.type), ["conversation.clearing", "conversation.cleared", "conversation.clearing", "conversation.clearing", "conversation.cleared", "conversation.clearing"]);
+    assert.deepEqual(posted.map(message => message.type), ["conversation.clearing", "conversation.cleared", "capabilities.updated", "conversation.clearing", "conversation.clearing", "conversation.cleared", "capabilities.updated", "conversation.clearing"]);
   } finally {
     dismissNotification();
     delete vscode.window.showInformationMessage;
@@ -617,7 +617,7 @@ test("Host rejects a provider-changing composer payload for a bound conversation
   });
   assert.equal(managed.state.model, "claude-opus-5-5");
   assert.equal(managed.state.reasoning, "medium");
-  assert.match(posted.at(-1).text, /new (?:or cleared )?conversation|새 대화/);
+  assert.match(posted.at(-1).text, /current model provider|현재 모델 공급자/);
 });
 
 test("Host rejects a provider-changing saved set before applying it", async () => {
@@ -636,7 +636,7 @@ test("Host rejects a provider-changing saved set before applying it", async () =
   assert.equal(managed.state.model, "claude-opus-5-5");
   assert.equal(writes.length, 0, "An incompatible set is rejected before any preset/configuration write");
   assert.equal(posted.at(-1).type, "agent.preset.result");
-  assert.match(posted.at(-1).error, /new (?:or cleared )?conversation|새 대화/);
+  assert.match(posted.at(-1).error, /bound to a model provider|모델 공급자에 바인딩/);
 });
 
 test("status customization serializes rapid edits, broadcasts saved empty selection and restores on failure", async () => {

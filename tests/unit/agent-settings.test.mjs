@@ -25,17 +25,17 @@ test('scope writes reject unknown roles, fields, unsafe models and effort',()=>{
   assert.deepEqual(parseClientMessage(good),good);
   assert.deepEqual(parseClientMessage({...good,role:'workLight'}),{...good,role:'workLight'});
   assert.deepEqual(parseClientMessage({...good,field:'fast',value:true}),{...good,field:'fast',value:true});
-  assert.deepEqual(parseClientMessage({type:'agent.defaults.fast',scope:'project',model:'gpt-6-astra',value:true}),{type:'agent.defaults.fast',scope:'project',model:'gpt-6-astra',value:true});
-  assert.deepEqual(parseClientMessage({type:'agent.preset.fast',scope:'chat',name:'Default',model:'gpt-6-astra',value:false}),{type:'agent.preset.fast',scope:'chat',name:'Default',model:'gpt-6-astra',value:false});
-  assert.equal(parseClientMessage({type:'agent.defaults.fast',scope:'chat',model:'gpt-6-astra',value:true}),undefined);
-  assert.equal(parseClientMessage({type:'agent.preset.fast',scope:'chat',name:'Default',model:'bad\nmodel',value:true}),undefined);
+  assert.deepEqual(parseClientMessage({type:'agent.defaults.fast',scope:'project',role:'work',model:'gpt-6-astra',value:true}),{type:'agent.defaults.fast',scope:'project',role:'work',model:'gpt-6-astra',value:true});
+  assert.deepEqual(parseClientMessage({type:'agent.preset.fast',scope:'chat',name:'Default',role:'verification',model:'gpt-6-astra',value:false}),{type:'agent.preset.fast',scope:'chat',name:'Default',role:'verification',model:'gpt-6-astra',value:false});
+  assert.equal(parseClientMessage({type:'agent.defaults.fast',scope:'chat',role:'work',model:'gpt-6-astra',value:true}),undefined);
+  assert.equal(parseClientMessage({type:'agent.preset.fast',scope:'chat',name:'Default',role:'work',model:'bad\nmodel',value:true}),undefined);
   assert.equal(parseClientMessage({...good,field:'fast',value:'true'}),undefined);
   assert.equal(parseClientMessage({...good,value:''}),undefined);
   for(const change of [{scope:'chat'},{role:'other'},{field:'permissions'},{value:'bad\n--flag'},{field:'reasoningEffort',value:'extreme'}]) assert.equal(parseClientMessage({...good,...change}),undefined);
 });
 test('chat uses only its copied settings after defaults change',()=>{
   const sent=[];
-  const ctx={state:{role:'main',model:'chat-main',reasoning:'high',fastMode:true,agentModels:{work:{model:'gpt-project-work',reasoningEffort:'low',fast:true},verification:{model:'claude-review',reasoningEffort:'medium',fast:true}},agentDefaults:{project:{work:{model:'changed'}}}},vscode:{postMessage:m=>sent.push(m)}};
+  const ctx={state:{role:'main',model:'chat-main',reasoning:'high',fastMode:true,agentModels:{work:{model:'gpt-project-work',reasoningEffort:'low',fast:true},verification:{model:'claude-review',reasoningEffort:'medium',fast:true}},agentDefaults:{project:{work:{model:'changed'}}}},normalizeAgentFastModes:()=>({}),vscode:{postMessage:m=>sent.push(m)}};
   runInNewContext(section('  function normalizeModelFastModes(', '  function normalizeModel(')+section('  function agentSettingRole(', '  function renderAgentDefaults(')+section('  function saveComposerSettings()', '  function contextStatusLabel('),ctx);
   const run=s=>runInNewContext(s,ctx);
   assert.equal(run('effectiveAgentValue("main","model")'),'chat-main');
@@ -50,24 +50,24 @@ test('chat uses only its copied settings after defaults change',()=>{
 test('active chat settings allow same-CLI changes and distinguish route from capability failures',()=>{
   const status={hidden:true,textContent:''}, scope={value:''};
   const ctx={
-    state:{role:'main',agentId:'main-test',model:'claude-opus-5-5',reasoning:'medium',modelFastModes:{'gpt-old':true},timeline:[{type:'user'}]},
+    state:{role:'main',agentId:'main-test',model:'claude-opus-5-5',reasoning:'medium',agentFastModes:{main:{'gpt-old':true}},timeline:[{type:'user'}]},
     settingOptions:{model:['claude-opus-5-5','claude-fable-5-1','gpt-6-astra']},
     capabilities:{model:true,reasoning:true,sessionProvider:'claude'},
     t:key=>key,
     document:{getElementById:id=>id==='agent-preset-status'?status:id==='agent-default-scope'?scope:null},
-    persist(){},saveComposerSettings(){},updateModeControls(){}
+    normalizeAgentFastModes:()=>({}),persist(){},saveComposerSettings(){},updateModeControls(){}
   };
   ctx.currentCapabilities=()=>ctx.capabilities;
-  runInNewContext(section('  function normalizeModelFastModes(', '  function normalizeModel(')+section('  const MODEL_VENDORS =', '  function renderAgentDefaults('),ctx);
+  runInNewContext(section('  function normalizeModelFastModes(', '  function normalizeModel(')+section('  function agentSettingRole(', '  function renderAgentDefaults('),ctx);
   const run=expression=>runInNewContext(expression,ctx);
   const sameCli={main:{model:'claude-fable-5-1',reasoningEffort:'high'}};
   assert.equal(run(`agentSettingsApplyError(${JSON.stringify(sameCli)})`),'');
   assert.equal(run(`applyAgentSettingsToChat(${JSON.stringify(sameCli)},'chat','Default')`),true);
   assert.equal(ctx.state.model,'claude-fable-5-1');
   assert.equal(ctx.state.reasoning,'high');
-  assert.equal(Object.keys(ctx.state.modelFastModes).length,0,'Applying a set without model Fast values must not inherit another scope\'s map');
+  assert.equal(Object.keys(ctx.state.agentFastModes).length,0,'Applying a set without role/model Fast values must not inherit another scope\'s map');
   ctx.state.model='claude-opus-5-5';ctx.state.reasoning='medium';
-  assert.equal(run(`agentSettingsApplyError(${JSON.stringify({main:{model:'gpt-6-astra',reasoningEffort:'high'}})})`),'ui.model.route.new.chat');
+  assert.equal(run(`agentSettingsApplyError(${JSON.stringify({main:{model:'gpt-6-astra',reasoningEffort:'high'}})})`),'ui.model.provider.fixed');
   ctx.capabilities={model:false,reasoning:true,sessionProvider:'claude'};
   assert.equal(run(`agentSettingsApplyError(${JSON.stringify(sameCli)})`),'ui.model.change.unavailable.active.chat');
   ctx.capabilities={model:true,reasoning:false,sessionProvider:'claude'};
@@ -84,8 +84,8 @@ test('VS Code scopes are declared as independent resource settings',()=>{
     const value=props[`agentFactory.agents.${role}.${field}`];assert.equal(value.scope,'resource');
     if(field==='reasoningEffort') assert.equal(value.default,role==='workLight'?'low':'medium');
   }
-  assert.equal(props['agentFactory.agents.fastByModel'].scope,'resource');
-  assert.deepEqual(props['agentFactory.agents.fastByModel'].default,{});
+  assert.equal(props['agentFactory.agents.fastByRoleModel'].scope,'resource');
+  assert.deepEqual(props['agentFactory.agents.fastByRoleModel'].default,{});
   for(const role of ['main','work','workLight','verification']) assert.equal(props[`agentFactory.agents.${role}.fast`],undefined);
 });
 
@@ -99,8 +99,8 @@ test('store reads each scope separately and writes only the selected scope', asy
   assert.equal(store.readAgentDefaults().global.main.reasoningEffort,'high');
   await store.saveAgentDefault('global','work','model','new-worker');
   await store.saveAgentDefault('project','main','model','project-new');
-  await store.saveModelFastMode('project','gpt-6-astra',true);
-  assert.deepEqual(writes,[['work.model','new-worker',1],['main.model','project-new',3],['fastByModel',{'gpt-6-astra':true},3]]);
+  await store.saveModelFastMode('project','work','gpt-6-astra',true);
+  assert.deepEqual(writes,[['work.model','new-worker',1],['main.model','project-new',3],['fastByRoleModel',{work:{'gpt-6-astra':true}},3]]);
   await assert.rejects(store.saveAgentDefault('project','main','model',''),/Invalid agent setting/);
   globalThis.__agentConfigFixture.workspace.workspaceFolders=[];
   await assert.rejects(store.saveAgentDefault('project','main','model','oops'),/Open a project/);
@@ -199,7 +199,7 @@ test('store reads each scope separately and writes only the selected scope', asy
   presetValues['verification.model']={workspaceFolderValue:'stale'};
   await store.useAgentPreset(globalMemory,workspaceMemory,chatId,'apply','project','Quality');
   assert.equal(presetWrites.length,7);
-  assert.deepEqual(presetValues.fastByModel.workspaceFolderValue,{'gpt-6-astra':true,'claude-opus-5-5':false,'gpt-6-sol':true});
+  assert.deepEqual(presetValues.fastByRoleModel.workspaceFolderValue,{main:{'gpt-6-astra':true},work:{'claude-opus-5-5':false},verification:{'gpt-6-sol':true}});
   assert.equal(presetValues['main.model'].workspaceFolderValue,'gpt-6-astra');
   assert.equal(presetValues['main.model'].globalValue,'changed-after-save');
   assert.equal(presetValues['verification.model'].workspaceFolderValue,'gpt-6-sol');
@@ -235,6 +235,10 @@ test('store reads each scope separately and writes only the selected scope', asy
   assert.equal(store.readAgentDefaults(globalMemory,workspaceMemory,chatId).presets.filter(p=>p.isDefault).length,3,'Every scope keeps its default set');
   await store.useAgentPreset(globalMemory,workspaceMemory,chatId,'save','chat',' Fresh ',completeChat);
   assert.equal(store.readAgentDefaults(globalMemory,workspaceMemory,chatId).presets.find(p=>p.scope==='chat'&&p.name==='Fresh').name,'Fresh');
+  await store.useAgentPreset(globalMemory,workspaceMemory,chatId,'rename','chat','Fresh',undefined,'Renamed');
+  assert.equal(store.readAgentDefaults(globalMemory,workspaceMemory,chatId).presets.find(p=>p.scope==='chat'&&p.name==='Renamed').settings.main.model,'gpt-6-sol');
+  await assert.rejects(store.useAgentPreset(globalMemory,workspaceMemory,chatId,'rename','chat','Renamed',undefined,'Default'),/already exists/);
+  await assert.rejects(store.useAgentPreset(globalMemory,workspaceMemory,chatId,'rename','chat','Renamed',undefined,'  '),/name is required/i);
 
   delete globalThis.__agentConfigFixture;
 });
@@ -250,5 +254,7 @@ test('preset messages validate scope, action and names',()=>{
   assert.equal(parseClientMessage({...good,scope:'chat',action:'apply'}).action,'apply');
   assert.equal(parseClientMessage({...good,scope:'chat',action:'update'}).action,'update');
   assert.equal(parseClientMessage({...good,scope:'chat',action:'delete'}).action,'delete');
+  assert.deepEqual(parseClientMessage({...good,scope:'chat',action:'rename',newName:' Better '}),{...good,scope:'chat',action:'rename',newName:'Better'});
+  assert.equal(parseClientMessage({...good,scope:'chat',action:'rename',newName:' '}),undefined);
   for(const change of [{action:'remove'},{scope:'bad'},{name:''},{name:'   '},{name:4}])assert.equal(parseClientMessage({...good,...change}),undefined);
 });

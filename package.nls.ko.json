@@ -42,6 +42,7 @@
   "agentFactory.agents.main.reasoningEffort.description": "이 범위에서 사용할 메인 에이전트 추론 수준입니다. 복사된 설정은 이후 독립적으로 유지됩니다.",
   "agentFactory.agents.main.fast.description": "이 범위의 메인에서 Codex Fast 실행 티어를 사용합니다. 추론 수준은 바꾸지 않습니다.",
   "agentFactory.agents.fastByModel.description": "이 범위에서 지원 모델별 빠른 모드를 독립 저장합니다.",
+  "agentFactory.agents.fastByRoleModel.description": "이 범위에서 에이전트 역할과 지원 모델별 빠른 모드를 독립 저장합니다.",
   "agentFactory.agents.work.model.description": "이 범위에서 사용할 작업 에이전트 모델입니다. 새 프로젝트는 글로벌 설정을, 새 채팅은 프로젝트 설정을 복사합니다.",
   "agentFactory.agents.work.reasoningEffort.description": "이 범위에서 사용할 작업 에이전트 추론 수준입니다. 복사된 설정은 이후 독립적으로 유지됩니다.",
   "agentFactory.agents.work.fast.description": "이 범위의 전문가 Work에서 Codex Fast 실행 티어를 사용합니다. 추론 수준은 바꾸지 않습니다.",
