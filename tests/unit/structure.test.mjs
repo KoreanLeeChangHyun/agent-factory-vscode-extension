@@ -254,15 +254,20 @@ test("running state appears above the composer as an expandable work loop panel"
   assert.doesNotMatch(template, /run-status-marker/);
   assert.doesNotMatch(chatStyles, /\.run-status-marker/);
   assert.match(chatStyles, /@keyframes run-status-text-scan\s*\{[\s\S]*?from\s*\{\s*background-position: 100% 0;[\s\S]*?to\s*\{\s*background-position: 0% 0;/);
-  assert.match(chatStyles, /\.run-status-label\s*\{[^}]*background-size: 230% 100%;[^}]*background-repeat: no-repeat;/);
+  assert.match(chatStyles, /\.run-status-label\s*\{[^}]*background-size: 300% 100%;[^}]*background-repeat: no-repeat;/);
   assert.match(template, /class="run-status-copy"[\s\S]*run-status-label[\s\S]*run-status-meta/);
   assert.match(chatStyles, /\.run-status\.is-running\s*\{[^}]*--run-status-active-color: var\(--vscode-progressBar-background, var\(--vscode-focusBorder, var\(--af-color-accent\)\)\)[^}]*--run-status-text-color: var\(--run-status-active-color\)/);
-  assert.match(chatStyles, /\.run-status-label\s*\{[^}]*color: var\(--run-status-text-color\)[^}]*background-clip: text[^}]*animation: run-status-text-scan/);
-  assert.match(chatStyles, /var\(--run-status-text-color\) 45%,[\s\S]*var\(--run-status-scan-color, color-mix\(in srgb, var\(--run-status-text-color\) 70%, var\(--af-chat-background\)\)\) 50%,[\s\S]*var\(--run-status-text-color\) 55%/);
+  assert.match(chatStyles, /\.run-status-label\s*\{[^}]*color: var\(--run-status-text-color\)[^}]*background-clip: text/);
+  // The shimmer runs only while Main is observed running; the base label stays still.
+  assert.doesNotMatch(chatStyles.match(/\.run-status-label\s*\{[^}]*\}/)[0], /animation/);
+  assert.match(chatStyles, /\.agent-progress\.is-progressing \.run-status-label\s*\{\s*animation: run-status-text-scan/);
+  assert.match(chatStyles, /\.agent-progress\.is-progressing \.run-status-pulse::before[\s\S]*?animation: run-status-dot-ripple/);
+  assert.match(chatStyles, /var\(--run-status-text-color\) 42%,[\s\S]*var\(--run-status-scan-color, color-mix\(in srgb, var\(--run-status-text-color\) 70%, var\(--af-chat-background\)\)\) 50%,[\s\S]*var\(--run-status-text-color\) 58%/);
   assert.doesNotMatch(chatStyles.match(/\.run-status-label\s*\{[^}]*\}/)[0], /ansiCyan|#94e2d5/);
   assert.doesNotMatch(chatStyles.match(/\.run-status-copy\s*\{[^}]*\}/)[0], /animation|transparent|background-image/);
   assert.match(chatStyles, /\.run-status-meta\s*\{[^}]*color: var\(--run-status-text-color\)/);
-  assert.match(chatStyles, /prefers-reduced-motion: reduce[\s\S]*\.run-status-label[\s\S]*color: var\(--run-status-text-color\)[\s\S]*animation: none/);
+  assert.match(chatStyles, /prefers-reduced-motion: reduce\)\s*\{\s*\.agent-progress\.is-progressing \.run-status-label \{ animation: none; \}/);
+  assert.match(chatStyles, /prefers-reduced-motion: reduce\)[^@]*\.run-status-pulse::before, \.run-status-pulse::after \{ content: none !important; animation: none !important; \}/);
   assert.doesNotMatch(chatStyles, /\.run-status::after/);
   assert.doesNotMatch(chatStyles, /\.message-running/);
   assert.match(chatScript, /state\.runPanelExpanded = !state\.runPanelExpanded/);

@@ -98,7 +98,27 @@ async function checkActivityRows(page) {
   await page.setViewportSize({ width: 795, height: 900 });
   assert.equal(await row('rows-read').locator('.act-verb').textContent(), 'Read');
   assert.equal(await row('rows-read').locator('.act-meta').textContent(), 'lines 120–240 · 30ms');
-  assert.equal(await row('rows-search').locator('.act-target').textContent(), '"run.activity" in static/js');
+  assert.equal(await row('rows-search').locator('.act-target').textContent(), '"run.activity" in js', 'A search scope shows its last directory');
+  const readPath = 'static/js/chat/' + 'nested/'.repeat(30) + 'terminal.js';
+  assert.equal(await row('rows-read').locator('.act-target').textContent(), 'terminal.js', 'A read row shows only the file name');
+  assert.match(await row('rows-read').getAttribute('aria-label'), new RegExp('^Read, ' + readPath.replace(/[.]/g, '\\.') + ','), 'The accessible name keeps the full path');
+  await row('rows-read').click();
+  assert.deepEqual(await page.locator('[data-id="rows-read"] .act-detail .act-paths > div').allTextContents(), [readPath], 'The opened row starts with the full path');
+  assert.equal(await page.locator('[data-id="rows-read"] .act-detail > :first-child').getAttribute('class'), 'act-paths');
+  assert.equal(await page.locator('[data-id="rows-read"] .act-paths').evaluate(element => getComputedStyle(element).userSelect), 'text');
+  await row('rows-read').click();
+  await row('rows-search').click();
+  assert.deepEqual(await page.locator('[data-id="rows-search"] .act-paths > div').allTextContents(), ['static/js'], 'The opened search row shows its full scope');
+  await row('rows-search').click();
+  // Same names in one group gain the parent directories that tell them apart; several files list names only.
+  await emit({ type: 'run.activity', id: 'rows-same-a', category: 'command', phase: 'completed', text: 'cat docs/design-main-chat/README.md' });
+  await emit({ type: 'run.activity', id: 'rows-same-b', category: 'command', phase: 'completed', text: 'cat docs/rule-documents/README.md src/a.ts' });
+  assert.equal(await row('rows-same-a').locator('.act-target').textContent(), 'design-main-chat/README.md');
+  assert.equal(await row('rows-same-b').locator('.act-target').textContent(), 'rule-documents/README.md, a.ts');
+  await row('rows-same-b').hover();
+  await page.locator('#activity-tooltip').waitFor();
+  assert.match(await page.locator('#activity-tooltip').textContent(), /^docs\/rule-documents\/README\.md\nsrc\/a\.ts\n/, 'The tooltip lists full paths');
+  await page.mouse.move(0, 0);
   assert.equal(await row('rows-search').locator('.act-meta').textContent(), '2 matches');
   assert.equal(await row('rows-legacy').locator('.act-target').textContent(), 'Glob', 'Saved history without new fields still shows its tool');
   const failed = page.locator('[data-id="rows-failed"] .act-row-wrap');

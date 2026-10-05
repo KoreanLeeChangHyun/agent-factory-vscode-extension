@@ -409,8 +409,13 @@ async function checkTaskFlow(page, { panelOnly = false } = {}) {
     const compact = await page.locator('#workflow-history').evaluate(el => el.classList.contains('is-compact'));
     if (compact && !await page.locator('#workflow-history').evaluate(el => el.classList.contains('is-open'))) await page.locator('#workflow-history-toggle').click();
     if (!await page.locator('#task-history').evaluate(el => el.open)) await page.locator('#task-history > summary').click();
+    await page.waitForFunction(() => document.querySelector('#task-history-list').style.width === Math.min(440, innerWidth - 16) + 'px');
     const bounds = await page.locator('#task-history-list').boundingBox();
     assert.ok(bounds.x >= 0 && bounds.x + bounds.width <= width && bounds.y >= 0 && bounds.y + bounds.height <= 556, JSON.stringify(bounds));
+    // Both tabs share one frame: switching to contracts neither moves nor resizes the list.
+    await page.locator('#history-tab-contracts').click();
+    assert.deepEqual(Object.values(await page.locator('#task-history-list').boundingBox()).map(Math.round), Object.values(bounds).map(Math.round), 'Contracts and task history share one frame');
+    await page.locator('#history-tab-tasks').click();
     const toggle = await page.locator('#run-status-toggle').boundingBox();
     const actions = await page.locator('#workflow-history').boundingBox();
     assert.ok(toggle.x + toggle.width <= actions.x + 1, 'Workflow and history do not overlap');
@@ -425,6 +430,17 @@ async function checkTaskFlow(page, { panelOnly = false } = {}) {
   assert.equal(await page.evaluate(() => window.sentMessages.filter(message => message.type === 'chat.send').length), sentBeforeHistory);
   const historyEntry = page.locator('.task-history-disclosure[data-history-id="engine-flow"]');
   assert.equal(await historyEntry.count(), 1, 'One history row represents the whole workflow');
+  // Opening history asks for the project's briefs; other conversations' briefs join read-only, this one's stay local.
+  assert.ok(await page.evaluate(() => window.sentMessages.some(message => message.type === 'project.tasks.request')));
+  await page.evaluate(() => window.postMessage({ type: 'project.tasks', entries: [
+    { id: 'brief-other', title: 'Other conversation brief', status: 'completed', mainAgentId: 'main-other', contract: { id: 'WC-9', version: 2 },
+      tasks: [{ id: 'task-a', title: 'Task A', description: 'Requested change', workStatus: 'completed' }] },
+    { id: 'engine-flow', title: 'Duplicate of a local flow', status: 'completed', mainAgentId: 'main-other', tasks: [] }] }, '*'));
+  const projectEntry = page.locator('#task-history-panel .project-history-entry[data-history-id="brief-other"]');
+  await projectEntry.waitFor();
+  assert.match(await projectEntry.locator('.task-history-count').textContent(), /^WC-9 v2 · /);
+  assert.equal(await page.locator('#task-history-panel .project-history-entry').count(), 1, 'A local flow is not repeated from project records');
+  assert.equal(await historyEntry.count(), 1);
   assert.equal(await historyEntry.locator('.task-history-disclosure').count(), 0, 'Individual stages are not history entries');
   assert.equal(await historyEntry.locator('.task-flow').isVisible(), false, 'History details start collapsed');
   await historyEntry.locator(':scope > summary').focus();
@@ -1051,7 +1067,9 @@ module.exports.checkTaskFlowStates = async function (page) {
   assert.equal(await toggle.getAttribute('aria-expanded'), 'false', 'refresh respects explicit collapsed choice');
   await toggle.click();
   await page.waitForFunction(() => document.querySelector('#run-status').classList.contains('is-running'));
-  assert.equal(await page.locator('#run-status-toggle .run-status-pulse').evaluate(el => getComputedStyle(el).animationName), 'run-status-dot-glow');
+  assert.deepEqual(await page.locator('#run-status-toggle .run-status-pulse').evaluate(el => [getComputedStyle(el).animationName,
+    getComputedStyle(el, '::before').animationName, getComputedStyle(el, '::after').animationName]),
+    ['run-status-dot-breathe', 'run-status-dot-ripple', 'run-status-dot-ripple'], 'A running workflow dot breathes and radiates rings');
   snapshot.status = 'needs-human-decision';
   await post({ type: 'agents.list', workflows: [snapshot], agents: [{ agentId: 'state-work', runId: 'state-run', role: 'work', status: 'running' }] });
   await page.waitForFunction(() => !document.querySelector('#run-status').classList.contains('is-running'));
@@ -1066,7 +1084,8 @@ module.exports.checkTaskFlowStates = async function (page) {
   for (const status of ['pending', 'blocked', 'completed', 'failed', 'cancelled']) {
     await publish(status);
     await page.waitForFunction(() => !document.querySelector('#run-status').classList.contains('is-running'));
-    assert.equal(await page.locator('#run-status-toggle .run-status-pulse').evaluate(el => getComputedStyle(el).animationName), 'none');
+    assert.deepEqual(await page.locator('#run-status-toggle .run-status-pulse').evaluate(el => [getComputedStyle(el).animationName,
+      getComputedStyle(el, '::before').content, getComputedStyle(el, '::after').content]), ['none', 'none', 'none'], status + ' dot stays still');
     assert.equal(await toggle.getAttribute('aria-expanded'), 'true');
     assert.equal(await page.locator('#run-stage-list [data-task-id="state-task"]').count(), 1, status + ' remains visible');
     assert.doesNotMatch(await page.locator('#run-stage-list').textContent(), /작업 없음/);
@@ -1088,12 +1107,27 @@ module.exports.checkTaskFlowStates = async function (page) {
   await publish('completed');
   await post({ type: 'run.state', running: true });
   assert.equal(await page.locator('.composer').evaluate(el => el.classList.contains('is-progressing')), false, 'preparing Main has no pulse until its observed running status');
+  const mainMotion = () => page.locator('#agent-progress').evaluate(el => {
+    const pulse = el.querySelector('.run-status-pulse');
+    return { pulse: getComputedStyle(pulse).animationName, ring: getComputedStyle(pulse, '::before').animationName,
+      lateRing: getComputedStyle(pulse, '::after').animationName, label: getComputedStyle(el.querySelector('.run-status-label')).animationName,
+      rings: getComputedStyle(pulse, '::before').content !== 'none' };
+  });
+  assert.deepEqual(await mainMotion(), { pulse: 'none', ring: 'none', lateRing: 'none', label: 'none', rings: false }, 'Preparing Main indicator stays still');
+  const idleBox = await page.locator('#agent-progress').boundingBox();
   await post({ type: 'run.observed', status: 'running' });
   await page.waitForFunction(() => document.querySelector('.composer').classList.contains('is-progressing'));
   assert.equal(await page.locator('#run-status').evaluate(el => el.classList.contains('is-running')), false, 'Main progress does not pulse completed child workflow');
+  assert.deepEqual(await mainMotion(), { pulse: 'run-status-dot-breathe', ring: 'run-status-dot-ripple', lateRing: 'run-status-dot-ripple',
+    label: 'run-status-text-scan', rings: true }, 'Running Main shows ripple rings, a breathing dot and a running text shimmer');
+  assert.equal((await page.locator('#agent-progress').boundingBox()).height, idleBox.height, 'Indicator motion does not change the row height');
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  assert.deepEqual(await mainMotion(), { pulse: 'none', ring: 'none', lateRing: 'none', label: 'none', rings: false }, 'Reduced motion stops the Main indicator');
+  await page.emulateMedia({ reducedMotion: 'no-preference' });
   for (const status of ['accepted', 'queued', 'starting', 'needs-human-decision', 'completed', 'failed', 'cancelled']) {
     await post({ type: 'run.observed', status });
     await page.waitForFunction(() => !document.querySelector('.composer').classList.contains('is-progressing'));
+    assert.deepEqual(await mainMotion(), { pulse: 'none', ring: 'none', lateRing: 'none', label: 'none', rings: false }, status + ' Main indicator stays still');
   }
   await post({ type: 'run.observed', status: 'running' });
   await page.waitForFunction(() => document.querySelector('.composer').classList.contains('is-progressing'));

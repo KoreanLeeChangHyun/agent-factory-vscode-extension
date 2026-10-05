@@ -50,6 +50,7 @@
 }
 
 .run-status-pulse {
+  position: relative;
   width: 7px;
   height: 7px;
   flex: 0 0 auto;
@@ -57,19 +58,43 @@
   background: var(--vscode-descriptionForeground);
 }
 
+/* Running dot: a soft breathing core with two staggered rings radiating outward; transforms only, so the row never shifts. */
 .run-status.is-running > .run-status-toggle .run-status-pulse, .agent-progress.is-progressing .run-status-pulse {
   background: var(--run-status-active-color);
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--run-status-active-color) 18%, transparent);
-  animation: run-status-dot-glow 2.4s ease-in-out infinite;
+  animation: run-status-dot-breathe 1.8s ease-in-out infinite;
 }
 
-@keyframes run-status-dot-glow {
-  0%, 100% { opacity: .45; }
-  50% { opacity: 1; }
+.run-status.is-running > .run-status-toggle .run-status-pulse::before, .run-status.is-running > .run-status-toggle .run-status-pulse::after,
+.agent-progress.is-progressing .run-status-pulse::before, .agent-progress.is-progressing .run-status-pulse::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  border: 1.5px solid color-mix(in srgb, var(--run-status-active-color) 85%, transparent);
+  background: color-mix(in srgb, var(--run-status-active-color) 22%, transparent);
+  opacity: 0;
+  pointer-events: none;
+  animation: run-status-dot-ripple 1.8s ease-out infinite;
+}
+
+.run-status.is-running > .run-status-toggle .run-status-pulse::after, .agent-progress.is-progressing .run-status-pulse::after {
+  animation-delay: .9s;
+}
+
+@keyframes run-status-dot-breathe {
+  0%, 100% { transform: scale(.85); box-shadow: 0 0 0 0 color-mix(in srgb, var(--run-status-active-color) 0%, transparent); }
+  50% { transform: scale(1.1); box-shadow: 0 0 6px 1px color-mix(in srgb, var(--run-status-active-color) 55%, transparent); }
+}
+
+@keyframes run-status-dot-ripple {
+  0% { transform: scale(1); opacity: .9; }
+  55% { opacity: .55; }
+  100% { transform: scale(2.4); opacity: 0; }
 }
 
 @media (prefers-reduced-motion: reduce) {
   .run-status.is-running > .run-status-toggle .run-status-pulse, .agent-progress.is-progressing .run-status-pulse { animation: none; }
+  .run-status-pulse::before, .run-status-pulse::after { content: none !important; animation: none !important; }
 }
 
 @keyframes run-status-text-scan {
@@ -99,17 +124,25 @@
   color: var(--run-status-text-color);
   background-image: linear-gradient(
     90deg,
-    var(--run-status-text-color) 45%,
+    var(--run-status-text-color) 42%,
     var(--run-status-scan-color, color-mix(in srgb, var(--run-status-text-color) 70%, var(--af-chat-background))) 50%,
-    var(--run-status-text-color) 55%
+    var(--run-status-text-color) 58%
   );
   background-position: 100% 0;
-  background-size: 230% 100%;
+  background-size: 300% 100%;
   background-repeat: no-repeat;
   background-clip: text;
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
-  animation: run-status-text-scan 2.4s linear infinite;
+}
+
+/* The shimmer runs only while Main is observed running; completed or waiting text stays still. */
+.agent-progress.is-progressing .run-status-label {
+  animation: run-status-text-scan 2s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .agent-progress.is-progressing .run-status-label { animation: none; }
 }
 
 .run-status-meta {
@@ -402,6 +435,20 @@
   box-shadow: 0 5px 18px var(--vscode-widget-shadow, rgba(0, 0, 0, 0.35));
 }
 .task-history[open]:has(.is-flyout) > summary .chevron-icon { transform: rotate(180deg); }
+/* Task history and contracts: one flyout, two tabs; the frame stays fixed and each panel scrolls. */
+.task-history-list.is-flyout { display: flex; flex-direction: column; overflow: hidden; padding: 0 5px 5px; }
+.history-tabs { display: flex; flex: none; border-bottom: 1px solid var(--vscode-menu-separatorBackground, var(--vscode-panel-border)); }
+.history-tabs button { flex: 0 0 auto; padding: 8px 12px; border: 0; border-bottom: 2px solid transparent; color: var(--vscode-descriptionForeground); background: transparent; font: inherit; font-size: 12px; cursor: pointer; white-space: nowrap; }
+.history-tabs button:hover { color: var(--vscode-foreground); }
+.history-tabs button[aria-selected="true"] { border-bottom-color: var(--vscode-focusBorder); color: var(--vscode-foreground); }
+.history-tabs button:focus-visible { outline: 1px solid var(--vscode-focusBorder); outline-offset: -2px; }
+.history-tab-panel { flex: 1 1 auto; min-height: 0; overflow-x: hidden; overflow-y: auto; padding-top: 4px; }
+.history-tab-panel[hidden] { display: none; }
+.project-history-detail { padding: 0 8px 10px; }
+/* Titles keep one line; the contract/status label truncates first and both carry their full text as a tooltip. */
+.project-history-entry .task-history-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; overflow-wrap: normal; }
+.project-history-entry .task-history-count { max-width: 22ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.project-history-entry[data-status="failed"] .task-history-count { color: var(--vscode-errorForeground); }
 
 .task-flow-detail { display: grid; gap: 8px; padding: 0 8px 10px 40px; min-width: 0; }
 .task-flow-description { font-size: 11px; min-width: 0; }
@@ -466,7 +513,6 @@ html[data-af-hidden="true"] *::after {
   animation-play-state: paused !important;
 }
 
-#contract-list-list:not(.is-flyout) { max-height: min(400px, 60vh); }
 #contract-list-list { overflow-y: auto; overflow-x: hidden; box-sizing: border-box; }
 #contract-list-list .contract-list-entry { display: flex; flex-direction: column; align-items: stretch; gap: 4px; white-space: normal; padding: 10px; min-width: 0; border-radius: 4px; }
 .contract-list-entry + .contract-list-entry { border-top: 1px solid var(--vscode-panel-border, #454545); }

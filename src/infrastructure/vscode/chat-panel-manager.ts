@@ -17,7 +17,7 @@ import { extname, isAbsolute, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { readCliTheme } from "../agent-factory/cli-theme";
 import { randomUUID } from "node:crypto";
-import { constants as fsConstants } from "node:fs";
+import { constants as fsConstants, existsSync } from "node:fs";
 import { open as openFile, realpath, unlink } from "node:fs/promises";
 import { readGitBranch } from "./git-branch";
 import { NoteStore } from "./note-store";
@@ -525,7 +525,11 @@ export class ChatPanelManager implements vscode.Disposable {
         finally { if (managed.sessionTransition === transition) managed.sessionTransition = undefined; }
         return;
       }
+      case "chat.status":
+        await this.reconcileChatRequests(managed, message.ids);
+        return;
       case "client.ready":
+        await this.reconcileChatRequests(managed, message.pendingMessageIds ?? []);
         await this.ensureSudoBroker(managed);
         void this.detectDeploy(managed, true);
         managed.lunaBot?.cancelTalk();
@@ -631,11 +635,6 @@ export class ChatPanelManager implements vscode.Disposable {
         if (managed.state.agentId) await this.post(managed.panel, { type: "session.bound", agentId: managed.state.agentId });
         if (managed.state.agentId && connection.available) {
           await this.restoreConversationHistory(managed, connection.client);
-          // Completed messages come from durable history. Only the active request
-          // can still need its in-memory acceptance replay.
-          if (managed.controller?.running) {
-            for (const started of (managed.startedMessages ?? []).slice(-1)) await this.post(managed.panel, started);
-          }
           await this.ensureController(managed);
           try { await managed.controller?.reconnect(); }
           catch (error) {
@@ -669,22 +668,26 @@ export class ChatPanelManager implements vscode.Disposable {
         this.sudoBroker.respond(managed.state.panelId, message);
         return;
       case "chat.send": {
-        await this.refreshWorktree(managed);
-        if (managed.worktree?.worktree?.workUnit && managed.worktree.worktree.phase === "merged") {
-          await this.post(managed.panel, { type: "host.notice", level: "warning", text: localize("unit.archived") });
-          return;
-        }
-        await this.warnDirectBranch(managed);
-        await this.ensureSudoBroker(managed);
+        // Reserve identity before any asynchronous preparation or status snapshot.
         const previous = managed.startedMessages?.find(item => item.id === message.id);
         if (previous) { await this.post(managed.panel, previous); return; }
-        if (managed.pendingMessageIds?.has(message.id)) return;
+        if (managed.pendingMessageIds?.has(message.id)) {
+          await this.post(managed.panel, { type: "chat.pending", id: message.id });
+          return;
+        }
         (managed.pendingMessageIds ??= new Set()).add(message.id);
-        // Capture permissions before asynchronous attachment preparation or setting changes.
         const executionMode = managed.executionMode ?? this.defaultExecutionMode();
         const executionModeExplicit = managed.executionModeExplicit || !managed.state.agentId;
-        const sendPreparation = (managed.chatSendPreparation ?? Promise.resolve()).then(() =>
-          this.sendChat(managed, message.text, message.attachments, message.execution, message.id, executionMode, executionModeExplicit));
+        // Serialize the whole preparation, preserving arrival order even when probes differ in latency.
+        const sendPreparation = (managed.chatSendPreparation ?? Promise.resolve()).then(async () => {
+          await this.refreshWorktree(managed);
+          if (managed.worktree?.worktree?.workUnit && managed.worktree.worktree.phase === "merged") {
+            throw new Error(localize("unit.archived"));
+          }
+          await this.warnDirectBranch(managed);
+          await this.ensureSudoBroker(managed);
+          await this.sendChat(managed, message.text, message.attachments, message.execution, message.id, executionMode, executionModeExplicit);
+        });
         managed.chatSendPreparation = sendPreparation.then(() => undefined, () => undefined);
         try {
           await sendPreparation;
@@ -939,7 +942,8 @@ export class ChatPanelManager implements vscode.Disposable {
         return;
       }
       case "contract.open": {
-        const root = managed.worktree?.workingDirectory ?? vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+        const roots = contractRoots(managed.worktree?.workingDirectory);
+        const root = roots.find(candidate => existsSync(join(candidate, "docs", "progress", message.id))) ?? roots[0];
         if (!root) return;
         try { await openContractPanel(this.context.extensionUri, root, message.id, async () => {
           const connection = await this.connectRuntime();
@@ -954,11 +958,25 @@ export class ChatPanelManager implements vscode.Disposable {
         return;
       }
       case "contracts.request": {
-        const root = managed.worktree?.workingDirectory ?? vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+        // Contracts are project records: list the project's, plus any still only on this chat's isolated branch.
         try {
-          await this.post(managed.panel, { type: "contracts.list", contracts: root ? await listContracts(root) : [] });
+          const lists = await Promise.all(contractRoots(managed.worktree?.workingDirectory).map(listContracts));
+          const contracts = lists.flat().filter((entry, index, all) =>
+            all.findIndex(other => other.id === entry.id && other.version === entry.version) === index)
+            .sort((a, b) => a.id.localeCompare(b.id) || Number(b.version) - Number(a.version));
+          await this.post(managed.panel, { type: "contracts.list", contracts });
         } catch (error) {
           await this.post(managed.panel, { type: "contracts.list", contracts: [], error: String(error) });
+        }
+        return;
+      }
+      case "project.tasks.request": {
+        try {
+          const connection = await this.connectRuntime();
+          const entries = connection.available ? await connection.client.listProjectTasks?.() ?? [] : [];
+          await this.post(managed.panel, { type: "project.tasks", entries });
+        } catch (error) {
+          await this.post(managed.panel, { type: "project.tasks", entries: [], error: String(error) });
         }
         return;
       }
@@ -2230,6 +2248,15 @@ Read the exact stored child result/receipt and existing workflow status for repo
     }
   }
 
+  private async reconcileChatRequests(managed: ManagedPanel, ids: readonly string[]): Promise<void> {
+    // This is acknowledgement replay only: never dispatch or reconnect a runtime run.
+    for (const id of new Set(ids)) {
+      const started = managed.startedMessages?.find(item => item.id === id);
+      if (started) await this.post(managed.panel, started);
+      else await this.post(managed.panel, { type: managed.pendingMessageIds?.has(id) ? "chat.pending" : "chat.rejected", id });
+    }
+  }
+
   private async sendChat(
     managed: ManagedPanel,
     text: string,
@@ -2293,7 +2320,8 @@ Read the exact stored child result/receipt and existing workflow status for repo
       managed.pendingMessageIds?.delete(id);
       const event: Extract<HostMessage, { type: "chat.started" }> = { type: "chat.started", id, text, attachments, submission };
       (managed.startedMessages ??= []).push(event);
-      managed.startedMessages = managed.startedMessages.slice(-200);
+      // Retain accepted identities for this panel/conversation so delayed confirmations
+      // and explicit recovery cannot turn an already accepted request into a new run.
       void this.post(managed.panel, event);
     }).catch(error => {
       void this.post(managed.panel, { type: "host.notice", level: "error", text: String(error) });
@@ -2821,4 +2849,9 @@ function fallbackHtml(error: unknown): string {
     .replaceAll("<", "&lt;")
     .replaceAll(">", "&gt;");
   return `<!doctype html><html><body><p>${localize("ui.unable.to.load.the.chat.view")}</p><pre>${escaped}</pre></body></html>`;
+}
+
+/** The isolated chat branch first (its newer versions), then the project root; each root once. */
+function contractRoots(worktree: string | undefined): string[] {
+  return [...new Set([worktree, vscode.workspace.workspaceFolders?.[0]?.uri.fsPath].filter((root): root is string => Boolean(root)))];
 }

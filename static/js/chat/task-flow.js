@@ -770,6 +770,49 @@ globalThis.AgentFactoryChat.taskFlow = function (host) {
     item.append(disclosure);
     return item;
   }
+  // A brief from another conversation of this project: its tasks, statuses and request, without run controls.
+  function createProjectHistoryEntry(entry) {
+    const item = document.createElement("li");
+    const disclosure = document.createElement("details");
+    disclosure.className = "task-history-disclosure project-history-entry";
+    disclosure.dataset.historyId = entry.id;
+    const status = projectTaskStatus(entry.status);
+    disclosure.dataset.status = status;
+    const heading = document.createElement("summary");
+    const name = document.createElement("span");
+    name.className = "task-history-name";
+    name.textContent = entry.title;
+    name.title = entry.title;
+    const count = document.createElement("span");
+    count.className = "task-history-count";
+    count.textContent = [entry.contract ? entry.contract.id + (entry.contract.version ? " v" + entry.contract.version : "") : "",
+      t("flow.status." + status), t("flow.task.count", entry.tasks.length)].filter(Boolean).join(" · ");
+    count.title = count.textContent;
+    heading.append(name, count);
+    const body = document.createElement("div");
+    body.className = "task-flow-detail project-history-detail";
+    for (const task of entry.tasks) {
+      const description = document.createElement("div");
+      description.className = "task-flow-description";
+      const title = document.createElement("strong");
+      title.textContent = task.title + " · " + t("flow.status." + projectTaskStatus(task.workStatus));
+      const text = document.createElement("div");
+      text.textContent = task.description || "";
+      description.append(title, text);
+      body.append(description);
+    }
+    disclosure.append(heading, body);
+    item.append(disclosure);
+    return item;
+  }
+  function projectTaskStatus(status) {
+    return { active: "running", running: "running", verifying: "verifying", completed: "completed", cancelled: "cancelled",
+      failed: "failed", "runtime-error": "failed", "needs-human-decision": "blocked", blocked: "blocked" }[status] || "pending";
+  }
+  function renderProjectHistory() {
+    delete document.getElementById("task-history-panel").dataset.signature;
+    renderWorkLoopPanel();
+  }
   function acceptedTaskAgent(agent) {
     return Boolean(agent.runId) && ["accepted", "queued", "starting", "running", "cancelling", "needs-human-decision", "completed", "failed", "cancelled"].includes(agent.status);
   }
@@ -791,7 +834,6 @@ globalThis.AgentFactoryChat.taskFlow = function (host) {
     return flow.stopPending || flow.tasks.some(task => ["pending", "running", "verifying", "blocked"].includes(liveTaskStatus(task)));
   }
   function renderWorkLoopPanel() {
-    const contractList = document.getElementById("contract-list");
     const allFlows = displayTaskFlows();
     const flows = visibleTaskFlows(allFlows);
     const active = flows.filter(unfinishedFlow);
@@ -803,16 +845,17 @@ globalThis.AgentFactoryChat.taskFlow = function (host) {
         [{ id: agent.taskBinding?.taskId, agentId: agent.agentId, runId: agent.runId }])) && !boundRuns.has(agent.agentId + "/" + agent.runId) &&
       !(state.workflows || []).some(snapshot => snapshot.workflow?.id === agent.taskBinding?.workflowId));
     const historyPanel = document.getElementById("task-history");
-    const historyList = document.getElementById("task-history-list");
-    contractList.hidden = state.role !== "main";
-    if (contractList.hidden) contractList.open = false;
+    const historyList = document.getElementById("task-history-panel");
     historyPanel.hidden = state.role !== "main";
     document.getElementById("question-tab-history").hidden = state.role !== "main";
     if (state.role !== "main" && document.getElementById("question-tab-history").getAttribute("aria-selected") === "true") {
       selectQuestionTab("questions", false, false);
     }
     if (historyPanel.hidden) historyPanel.open = false;
-    const historySignature = JSON.stringify([history, state.childAgents, t("flow.status.pending")]);
+    const ownFlowIds = new Set(allFlows.map(flow => flow.id));
+    // This conversation's records come from its own panel state (with dismissals); others are read-only briefs.
+    const projectHistory = (state.projectTasks || []).filter(entry => entry && !(state.agentId && entry.mainAgentId === state.agentId) && !ownFlowIds.has(entry.id));
+    const historySignature = JSON.stringify([history, state.childAgents, projectHistory, t("flow.status.pending")]);
     if (historyList.dataset.signature !== historySignature) {
       historyList.dataset.signature = historySignature;
       const expanded = new Set(Array.from(historyList.querySelectorAll(".task-history-disclosure[open]"), item => item.dataset.historyId));
@@ -822,9 +865,9 @@ globalThis.AgentFactoryChat.taskFlow = function (host) {
         const item = document.createElement("li");
         item.append(createRunStage(agent));
         return item;
-      }));
+      }), ...projectHistory.map(createProjectHistoryEntry));
       for (const item of list.querySelectorAll(".task-history-disclosure")) item.open = expanded.has(item.dataset.historyId);
-      historyList.replaceChildren(history.length || legacyHistory.length ? list : historyEmpty("ui.task.history.empty"));
+      historyList.replaceChildren(history.length || legacyHistory.length || projectHistory.length ? list : historyEmpty("ui.task.history.empty"));
     }
     const hasActive = active.length > 0;
     if (hasActive && runDetails.dataset.hasActive !== "true" && !state.runPanelUserChoice) state.runPanelExpanded = true;
@@ -930,7 +973,7 @@ globalThis.AgentFactoryChat.taskFlow = function (host) {
   }
 
   return {
-    renderWorkLoopPanel, currentTaskFlows, workflowDecisionsPending, finishTaskStop, extractTaskFlows,
+    renderWorkLoopPanel, renderProjectHistory, currentTaskFlows, workflowDecisionsPending, finishTaskStop, extractTaskFlows,
     releaseWorkflowDecisions, taskFlowParseCache, createTaskFlow, displayTaskFlows, visibleTaskFlows, taskDismissKey, unfinishedFlow,
     childTaskName
   };

@@ -1,3 +1,4 @@
+const { checkQueueConfirmation } = require("./queue-confirmation.cjs");
 const { checkTaskFlow, checkTaskStop, checkTaskDismiss } = require('./task-flow.cjs');
 const { checkLocalization, checkGalleryLocalization } = require('./localization.cjs');
 const { checkGeneralSettings } = require('./general-settings.cjs');
@@ -98,6 +99,13 @@ async function main() {
     await page.goto('http://127.0.0.1:' + server.address().port);
     // A startup exception (e.g. a TDZ access) stops chat.js entirely; fail here instead of timing out in a later check.
     assert.deepEqual(pageErrors, [], 'chat.js threw during startup');
+    if (process.argv.includes('--queue-confirmation-only')) {
+      await checkQueueConfirmation(page);
+      assert.deepEqual(pageErrors, [], 'queue confirmation caused a browser error');
+      console.log('Queue confirmation, recovery, reload and duplicate protection checks passed.');
+      return;
+    }
+
     if (process.argv.includes('--companion-position-only')) {
       await require('./companion.cjs').checkCompanionOverlay(page);
       assert.deepEqual(errors, []);
@@ -153,6 +161,11 @@ async function main() {
       // Chromium reports the same refusal as "Refused to apply inline style" or "Applying inline style violates".
       assert.deepEqual(errors.filter(error => !/^(Refused to apply inline style|Applying inline style violates)/.test(error)), []);
       console.log('Rich Markdown browser checks passed');
+      return;
+    }
+    if (process.argv.includes('--pending-queue-header-only')) {
+      await require('./composer-rendering.cjs').checkPendingQueueHeader(page);
+      assert.deepEqual(errors, []);
       return;
     }
     if (process.argv.includes('--composer-rendering-only')) {

@@ -4,6 +4,19 @@ import type { StatusItemId } from "../core/config/types";
 import type { AttachmentReference } from "../common/types/attachment";
 import type { InterviewQuestion } from "../common/types/business-mode";
 
+/** One task brief (short-term contract) of this project, read from its loop state in any conversation. */
+export interface ProjectTaskEntry {
+  readonly id: string;
+  readonly title: string;
+  readonly status: string;
+  readonly createdAt?: string;
+  readonly updatedAt?: string;
+  readonly mainAgentId?: string;
+  /** The long-term contract this brief executes, when it was bound to one. */
+  readonly contract?: { readonly id: string; readonly version?: number };
+  readonly tasks: readonly { readonly id: string; readonly title: string; readonly description?: string; readonly workStatus?: string; readonly verificationStatus?: string }[];
+}
+
 /** Captured submission intent and app-added guidance, never the full provider prompt. */
 /** What one timeline action did and touched; every field is optional and omitted when unobserved. */
 export type ActivityKind = "read" | "search" | "list" | "run" | "test" | "git" | "edit" | "web" | "page" | "tool" | "think" | "skill";
@@ -37,6 +50,7 @@ export type ClientMessage =
   | { readonly type: "bot.interact"; readonly action: import("../modules/chat/companion").CompanionAction }
   | { readonly type: "contract.open"; readonly id: string }
   | { readonly type: "contracts.request" }
+  | { readonly type: "project.tasks.request" }
   | { readonly type: "agent.preset"; readonly action: "save" | "apply" | "update" | "delete" | "rename"; readonly scope: "global" | "project" | "chat"; readonly name: string; readonly newName?: string }
   | { readonly type: "agent.defaults.save"; readonly scope: "global" | "project"; readonly role: "main" | "work" | "workLight" | "verification"; readonly field: "model" | "reasoningEffort" | "fast"; readonly value: string | boolean }
   | { readonly type: "agent.defaults.fast"; readonly scope: "global" | "project"; readonly role: "main" | "work" | "workLight" | "verification"; readonly model: string; readonly value: boolean }
@@ -53,7 +67,8 @@ export type ClientMessage =
   | { readonly type: "bot.character.save"; readonly character: "lumi" | "factory" }
   | { readonly type: "bot.model.save"; readonly model: string }
   | { readonly type: "bot.prompt.save"; readonly requestId: string; readonly prompt: string; readonly character?: "lumi" | "factory" }
-  | { readonly type: "client.ready" }
+  | { readonly type: "client.ready"; readonly pendingMessageIds?: readonly string[] }
+  | { readonly type: "chat.status"; readonly ids: readonly string[] }
   | { readonly type: "execution.select"; readonly mode: import("../infrastructure/agent-factory/agent-client").ExecutionMode }
   | { readonly type: "message.copy"; readonly text: string }
   | { readonly type: "reference.copy"; readonly id: string }
@@ -150,6 +165,7 @@ export type HostMessage =
   | { readonly type: "usage.accounts"; readonly accounts: Readonly<Record<string, AccountUsage>> }
   | { readonly type: "agent.preset.field.result"; readonly error?: string }
   | { readonly type: "contracts.list"; readonly contracts: readonly import("../infrastructure/filesystem/contracts").ContractEntry[]; readonly error?: string }
+  | { readonly type: "project.tasks"; readonly entries: readonly ProjectTaskEntry[]; readonly error?: string }
   | { readonly type: "agent.preset.result"; readonly scope?: import("../core/config/agent-settings").AgentPresetScope; readonly name?: string; readonly settings?: import("../core/config/agent-settings").AgentDefaults; readonly error?: string }
   | { readonly type: "agent.defaults"; readonly settings: import("../core/config/agent-settings").AgentDefaultsSnapshot }
   | import("../infrastructure/vscode/sudo-broker").SudoChallenge
@@ -169,6 +185,7 @@ export type HostMessage =
   | { readonly type: "bot.model.saved"; readonly model: string; readonly failed?: boolean }
   | { readonly type: "bot.prompt.saved"; readonly requestId: string; readonly prompt?: string; readonly failed?: boolean }
   | { readonly type: "chat.rejected"; readonly id: string }
+  | { readonly type: "chat.pending"; readonly id: string }
   | { readonly type: "chat.started"; readonly submission?: MessageSubmission; readonly id: string; readonly text: string; readonly attachments: readonly AttachmentReference[] }
   | { readonly type: "agent.run.selected"; readonly capturedRun?: import("../modules/chat/chat-state").CapturedAgentRun }
   | { readonly type: "execution.updated"; readonly mode?: import("../infrastructure/agent-factory/agent-client").ExecutionMode | "read-only" }

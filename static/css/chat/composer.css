@@ -645,9 +645,8 @@
 
 /* Compact progress overlays the composer edge without resizing the conversation. */
 .composer-status-row { position: relative; }
-.composer-status-row:not(:has(> :not(.run-status):not([hidden]))) > .run-status:not(.is-expanded) { position: absolute; bottom: 4px; left: 0; width: 100%; margin-bottom: 0; }
-.composer-status-row > .run-status:not(.is-expanded),
-.composer-status-row > .pending-queue-toggle { margin-bottom: 4px; }
+.composer-status-row:not(:has(> :not(.run-status):not([hidden]))):not(:has(.pending-queue-toggle:not([hidden]))) > .run-status:not(.is-expanded) { position: absolute; bottom: 4px; left: 0; width: 100%; margin-bottom: 0; }
+.composer-status-row > .run-status:not(.is-expanded) { margin-bottom: 4px; }
 
 /* Float the companion above the composer without reserving transcript height. */
 .composer-topline { position: relative; display: flex; align-items: flex-end; gap: 8px; }
@@ -660,7 +659,7 @@
 .agent-progress-dock { position: absolute; left: 0; bottom: 4px; display: flex; align-items: flex-end; gap: 4px; max-width: min(calc(100% - 150px), 50%); pointer-events: none; }
 /* While loading shows, the workflow button keeps the other half and truncates its counts instead of sliding under it. */
 .composer-topline:has(#agent-progress:not([hidden])) .run-status:not(.is-expanded) .run-status-toggle { max-width: calc(max(150px, 50%) - 8px); }
-.agent-progress { --run-status-active-color: var(--run-status-text-color); --run-status-text-color: var(--vscode-textLink-foreground, var(--af-color-accent)); --run-status-scan-color: color-mix(in srgb, var(--run-status-text-color) 70%, var(--vscode-editor-foreground) 30%); color: var(--run-status-text-color); display: flex; align-items: center; gap: 8px; min-width: 0; font-size: 12px; min-height: 24px; }
+.agent-progress { --run-status-active-color: var(--run-status-text-color); --run-status-text-color: var(--vscode-textLink-foreground, var(--af-color-accent)); --run-status-scan-color: color-mix(in srgb, var(--run-status-text-color) 35%, var(--vscode-editor-foreground) 65%); color: var(--run-status-text-color); display: flex; align-items: center; gap: 8px; min-width: 0; font-size: 12px; min-height: 24px; }
 .agent-progress[hidden] { display: none; }
 .agent-progress .run-status-pulse { background: var(--run-status-text-color); }
 .composer-status-column .run-status-toggle { margin-left: auto; }
@@ -686,13 +685,14 @@
 .chat-shell:has(~ .companion-layer .companion-dock:not([hidden])[data-moved="false"]) .composer-topline:has(#agent-progress:not([hidden])) .run-status:not(.is-expanded) .run-status-toggle { max-width: calc(max(150px, 50% - 40px) - 8px); }
 
 .chat-shell:has(~ .companion-layer .companion-dock:not([hidden])[data-moved="false"]) .composer-status-row:has(> .run-status.is-expanded) { padding-bottom: 64px; }
-.chat-shell:has(~ .companion-layer .companion-dock:not([hidden])[data-moved="false"]) .composer-status-row:has(> .run-status.is-expanded) > .pending-queue-toggle { position: absolute; right: 80px; bottom: 4px; margin: 0; }
 
 /* Workflow and its existing history actions share one right-aligned header. */
 .composer-status-column .run-status,
 .composer-status-column .run-status.is-expanded { display: flex; flex-wrap: wrap; justify-content: flex-end; align-items: center; gap: 0; }
 .composer-status-column .run-status[hidden] { display: none; }
 .composer-status-column .run-status > .run-details { flex: 0 0 100%; }
+/* Main's working indicator, moved into the open header, stays at the left edge; the header actions keep the right. */
+.composer-status-column .run-status.is-expanded > .agent-progress { flex: 0 1 auto; margin-inline-end: auto; }
 .composer-status-column .run-status > .run-status-toggle { margin: 0; flex: 0 1 auto; max-width: calc(100% - 36px); }
 .composer-status-column .workflow-history { pointer-events: auto; }
 .workflow-history { position: relative; flex: 0 0 auto; display: flex; align-items: center; }
@@ -715,3 +715,16 @@
 .composer-status-column .run-status:has(.workflow-history:not(.is-compact)) > .run-status-toggle { max-width: calc(var(--workflow-header-width, 100%) - 174px); }
 .composer-topline:has(#agent-progress:not([hidden])) .composer-status-column .run-status:not(.is-expanded) > .run-status-toggle { max-width: calc(var(--workflow-header-width, 100%) - 36px); }
 .composer-topline:has(#agent-progress:not([hidden])) .composer-status-column .run-status:not(.is-expanded):has(.workflow-history:not(.is-compact)) > .run-status-toggle { max-width: calc(var(--workflow-header-width, 100%) - 174px); }
+
+/* Queue count follows the workflow/history header; its list stays below the status row. */
+.composer-status-column .run-status > .pending-queue-toggle { pointer-events: auto; margin: 0 0 0 8px; max-width: none; white-space: nowrap; }
+.chat-shell:has(~ .companion-layer .companion-dock:not([hidden])[data-moved="false"]) .run-status:has(> .pending-queue-toggle:not([hidden])) > .workflow-history { margin-right: 0; }
+.chat-shell:has(~ .companion-layer .companion-dock:not([hidden])[data-moved="false"]) .run-status > .pending-queue-toggle { margin-right: 80px; }
+
+.composer-status-column .run-status.is-expanded:has(> .pending-queue-toggle:not([hidden])) > .agent-progress { max-width: max(0px, calc(100% - var(--queue-header-width, 0px) - 116px)); }
+
+/* Share the available height when both scrollable lists are open on a small webview. */
+@media (max-height: 600px), (max-width: 480px) {
+  .composer-topline:has(#pending-message-queue:not([hidden])) .run-details { max-height: 18vh; }
+  .composer-topline:has(.run-status.is-expanded) #pending-message-queue { max-height: min(180px, 20vh); }
+}

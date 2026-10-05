@@ -86,3 +86,14 @@ test("saved history without row fields still renders with a classified target", 
     ["edit", "completed", "example.py"]
   ]);
 });
+
+test("paths shorten to their names, with parent directories only where names collide", () => {
+  assert.deepEqual(plain(rows.splitPaths("a/x.ts, b/y.ts")), ["a/x.ts", "b/y.ts"]);
+  assert.deepEqual(plain(rows.shortPaths(["static/js/chat/terminal.js"])), ["terminal.js"]);
+  assert.deepEqual(plain(rows.shortPaths(["src/"])), ["src"]);
+  assert.deepEqual(plain(rows.shortPaths(["."])), ["."]);
+  const peers = ["docs/skills/design-main-chat/SKILL.md", "docs/skills/rule-documents/SKILL.md", "a/b/x/c.md", "a/d/x/c.md", "src/app.ts"];
+  assert.deepEqual(plain(rows.shortPaths(peers)), ["design-main-chat/SKILL.md", "rule-documents/SKILL.md", "b/x/c.md", "d/x/c.md", "app.ts"]);
+  // The same path read twice is not a collision.
+  assert.deepEqual(plain(rows.shortPaths(["src/a.ts"], ["src/a.ts", "src/a.ts"])), ["a.ts"]);
+});

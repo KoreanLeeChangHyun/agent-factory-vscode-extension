@@ -30,6 +30,7 @@ const clientMessageTypes = new Set([
   "link.open",
   "image.resolve",
   "chat.send",
+  "chat.status",
   "decision.approve",
   "sudo.reply",
   "run.cancel",
@@ -52,6 +53,7 @@ const clientMessageTypes = new Set([
   "history.request",
   "contract.open",
   "contracts.request",
+  "project.tasks.request",
   "conversations.request",
   "conversation.read",
   "task.stop",
@@ -234,11 +236,17 @@ export function parseClientMessage(value: unknown): ClientMessage | undefined {
     case "agent.defaults.fast":
       if ((value.scope !== "global" && value.scope !== "project") || !AGENT_ROLES.includes(value.role as typeof AGENT_ROLES[number]) || !validAgentValue("model", value.model) || typeof value.value !== "boolean") return undefined;
       return { type: value.type, scope: value.scope, role: value.role as typeof AGENT_ROLES[number], model: value.model as string, value: value.value };
+    case "chat.status":
+      if (!Array.isArray(value.ids) || !value.ids.every(id => typeof id === "string" && id.length > 0 && id.length <= 128)) return undefined;
+      return { type: value.type, ids: value.ids as string[] };
     case "client.ready":
+      if (value.pendingMessageIds !== undefined && (!Array.isArray(value.pendingMessageIds) || !value.pendingMessageIds.every(id => typeof id === "string" && id.length > 0 && id.length <= 128))) return undefined;
+      return { type: value.type, ...(value.pendingMessageIds ? { pendingMessageIds: value.pendingMessageIds as string[] } : {}) };
     case "queue.resume":
     case "run.cancel":
     case "conversation.clear":
     case "contracts.request":
+    case "project.tasks.request":
     case "conversations.request":
     case "sessions.request":
     case "models.request":

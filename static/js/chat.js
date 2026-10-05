@@ -173,7 +173,8 @@
     get botTalkButton() { return chatBot.botTalkButton; },
     get botMenu() { return chatBot.botMenu; },
     get openSettingId() { return openSettingId; },
-    get chatNavigation() { return chatNavigation; }
+    get chatNavigation() { return chatNavigation; },
+    get chatHistory() { return chatHistory; }
   });
   function botDisplayName() {
     return t(state.companionAvailable ? "bot.name.lumi" : "bot.name.factory");
@@ -206,6 +207,7 @@
     }) : [],
     startedMessageIds: Array.isArray(saved?.startedMessageIds) ? saved.startedMessageIds : [],
     pendingRequests: Array.isArray(saved?.pendingRequests) ? saved.pendingRequests : [],
+    recoveredRequest: saved?.recoveredRequest,
     timeline: collapseAdjacentReads(collapseCancellationNotices(Array.isArray(saved?.timeline) ? saved.timeline : [])),
     statusItems: normalizeStatusItems(saved?.statusItems),
     projectName: typeof saved?.projectName === "string" ? saved.projectName : "",
@@ -315,6 +317,31 @@
     runStatus, runStatusToggle, runStatusAgents,
     persist, childAgentStatusLabel: chatAgents.childAgentStatusLabel
   });
+  let contractListMessage;
+  // Long-term contracts, each with the number of task briefs (short-term contracts) bound to it.
+  function renderContractList() {
+    const message = contractListMessage;
+    const list = document.getElementById("contract-list-list");
+    list.replaceChildren();
+    if (message.error) list.append(historyEmpty("contracts.failed"));
+    else if (!message.contracts.length) list.append(historyEmpty("contracts.empty"));
+    else for (const contract of message.contracts.filter((item, index, all) => all.findIndex(other => other.id === item.id) === index)) {
+      const button = document.createElement("button");
+      button.className = "setting-option contract-list-entry";
+      const title = document.createElement("span");
+      title.className = "contract-list-title";
+      title.textContent = contract.title;
+      const metadata = document.createElement("span");
+      metadata.className = "contract-list-metadata";
+      const linked = (state.projectTasks || []).filter(entry => entry && entry.contract?.id === contract.id).length;
+      metadata.textContent = [contract.id + " · v" + contract.version, linked ? t("flow.task.count", linked) : ""].filter(Boolean).join(" · ");
+      button.title = contract.title + " · " + metadata.textContent;
+      button.append(title, metadata);
+      button.addEventListener("click", () => vscode.postMessage({ type: "contract.open", id: contract.id }));
+      list.append(button);
+    }
+    chatHistory.positionTaskHistory();
+  }
   const messageRenderKeys = new WeakMap();
   const eventVersions = new WeakMap();
   const managedCommandCache = new WeakMap();
@@ -359,7 +386,7 @@
   prompt.value = state.draft;
   renderAll();
   resizePrompt();
-  vscode.postMessage({ type: "client.ready" });
+  vscode.postMessage({ type: "client.ready", pendingMessageIds: state.pendingRequests.map(item => item.id) });
   const restoreImages = state.attachments.filter(function (item) { return item.kind === "image"; })
     .map(function (item) { return { id: item.id, name: item.name, target: "composer" }; });
   for (const event of [...state.timeline, ...state.pendingRequests]) {
@@ -780,7 +807,6 @@
   document.addEventListener("click", function (event) {
     const history = document.getElementById("task-history");
     if (!event.target.closest("#task-history")) history.open = false;
-    if (!event.target.closest("#contract-list")) chatHistory.contractList.open = false;
     const link = event.target.closest(".markdown-body a");
     if (link) {
       event.preventDefault();
@@ -969,7 +995,7 @@
         state.queueCount = safeCount(message.queueCount);
         if (Array.isArray(message.pendingMessageIds)) {
           for (const item of state.pendingRequests || []) {
-            if (!message.pendingMessageIds.includes(item.id)) item.rejected = true;
+            if (message.pendingMessageIds.includes(item.id)) item.rejected = false;
           }
         }
         if (state.running && !state.runStartedAt) {
@@ -1199,28 +1225,15 @@
       case "notes.save.result":
         chatNotes.receiveNotes(message);
         break;
-      case "contracts.list": {
-        const list = document.getElementById("contract-list-list");
-        list.replaceChildren();
-        if (message.error) list.append(historyEmpty("contracts.failed"));
-        else if (!message.contracts.length) list.append(historyEmpty("contracts.empty"));
-        else for (const contract of message.contracts.filter((item, index, all) => all.findIndex(other => other.id === item.id) === index)) {
-          const button = document.createElement("button");
-          button.className = "setting-option contract-list-entry";
-          const title = document.createElement("span");
-          title.className = "contract-list-title";
-          title.textContent = contract.title;
-          const metadata = document.createElement("span");
-          metadata.className = "contract-list-metadata";
-          metadata.textContent = contract.id + " · v" + contract.version;
-          button.title = contract.title + " · " + metadata.textContent;
-          button.append(title, metadata);
-          button.addEventListener("click", () => vscode.postMessage({ type: "contract.open", id: contract.id }));
-          list.append(button);
-        }
-        chatHistory.positionTaskHistory();
+      case "contracts.list":
+        contractListMessage = message;
+        renderContractList();
         break;
-      }
+      case "project.tasks":
+        state.projectTasks = Array.isArray(message.entries) ? message.entries : [];
+        chatTaskFlow.renderProjectHistory();
+        if (contractListMessage) renderContractList();
+        break;
       case "conversations.list":
         chatHistory.showConversationList(message);
         break;
@@ -1472,6 +1485,13 @@
         chatStatusBar.renderStatusBar();
         persist(false);
         break;
+      case "chat.pending": {
+        const pending = (state.pendingRequests || []).find(item => item.id === message.id);
+        if (pending) pending.rejected = false;
+        chatPendingQueue.renderPendingQueue();
+        persist(false);
+        break;
+      }
       case "chat.rejected": {
         const pending = (state.pendingRequests || []).find(function (item) { return item.id === message.id; });
         if (pending) pending.rejected = true;
@@ -1603,14 +1623,15 @@
       appendNotice("info", t("ui.preparing.image.attachments.please.send.again.shortly"));
       return;
     }
+    const recovered = choiceAnswer === null && action === enterAction() && workflow === "normal" && !asGoal ? state.recoveredRequest : undefined;
     const message = {
-      id: createId(),
+      id: recovered?.id || createId(),
       text,
       attachments: (choiceAnswer === null ? state.attachments : []).map(function (attachment) {
         const { previewUri, pending, ...reference } = attachment;
         return reference;
       }),
-      execution: {
+      execution: recovered?.execution || {
         ...(state.role === "main" ? { taskMode: action, businessMode: workflow } : {}),
         agentModels: state.role === "main" ? chatAgentSettings.effectiveDelegatedModels() : undefined,
         agentPermissions: state.role === "main" ? Object.fromEntries(["main", "work", "verification"].map(role => [role, state.executionMode || "cli-default"])) : undefined,
@@ -1629,6 +1650,7 @@
       return submitted;
     });
     (state.pendingRequests ??= []).push({ ...message, attachments: submittedAttachments });
+    if (choiceAnswer === null) state.recoveredRequest = undefined;
     if (choiceAnswer === null) {
       saveComposerSettings();
       state.draft = "";
@@ -2668,6 +2690,7 @@
     state.taskFlows = [];
     state.dismissedTasks = [];
     state.pendingRequests = [];
+    state.recoveredRequest = undefined;
     state.startedMessageIds = [];
     state.pendingDecisionRunId = undefined;
     state.decisionSubmitting = false;
@@ -2811,7 +2834,6 @@
     const menu = settingMenu(openSettingId);
     menu.hidden = true;
     if (openSettingId === "submission") {
-      chatHistory.contractList.open = false;
       document.getElementById("task-history").open = false;
     }
     button.setAttribute("aria-expanded", "false");
@@ -2882,6 +2904,7 @@
       startedMessageIds: state.startedMessageIds,
       guidanceExpanded: state.guidanceExpanded,
       pendingRequests: state.pendingRequests,
+      recoveredRequest: state.recoveredRequest,
       notesScope: chatNotes.selectedNotesScope,
       noteDraft: chatNotes.noteDraft && (chatNotes.noteDirty || chatNotes.noteSending) ? { ...chatNotes.noteDraft } : null,
       panelId: state.panelId,

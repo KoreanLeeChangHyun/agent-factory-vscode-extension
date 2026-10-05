@@ -32,8 +32,8 @@ globalThis.AgentFactoryChat.shortcuts = function (host) {
     submitShortcut("submitWorkVerification", "workflow", "Alt+Shift+V", () => t("submission.work.verification.label"), "work-verification", "normal", false),
     submitShortcut("submitPipeline", "workflow", "Alt+Shift+D", () => businessModeNames().pipeline, "direct", "pipeline", false),
     submitShortcut("submitGoal", "workflow", "Alt+Shift+G", () => t("ui.goal"), "direct", "normal", true),
-    { id: "openContracts", group: "history", fallback: "Alt+Shift+K", history: "contract-list", label: () => t("contracts.title") },
-    { id: "openTaskHistory", group: "history", fallback: "Alt+Shift+T", history: "task-history", label: () => t("flow.history") },
+    { id: "openContracts", group: "history", fallback: "Alt+Shift+K", history: "task-history", historyTab: "contracts", label: () => t("contracts.title") },
+    { id: "openTaskHistory", group: "history", fallback: "Alt+Shift+T", history: "task-history", historyTab: "tasks", label: () => t("flow.history") },
     { id: "openConversationHistory", group: "history", fallback: "Alt+Shift+H", questionTab: "history", label: () => t("ui.conversation.history") },
     { id: "botMenu", group: "bot", bot: true, fallback: "Alt+Shift+B", label: () => t("ui.shortcuts.bot.menu", botDisplayName()) },
     { id: "botFeed", group: "bot", bot: true, fallback: "Alt+Shift+1", button: '[data-bot-action="feed"]', label: () => t("bot.feed") },
@@ -225,6 +225,7 @@ globalThis.AgentFactoryChat.shortcuts = function (host) {
       const details = document.getElementById(action.history);
       if (details.hidden) return;
       if (host.openSettingId !== "submission") openSetting("submission");
+      host.chatHistory?.selectHistoryTab(action.historyTab);
       details.open = true;
       details.querySelector("summary").focus({ preventScroll: true });
       return;

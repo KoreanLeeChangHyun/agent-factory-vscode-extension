@@ -7,7 +7,20 @@ globalThis.AgentFactoryChat.pendingQueue = function (host) {
     hasComposerContent, renderSubmission, prompt, renderAll, resizePrompt, persist
   } = host;
 
+  let confirmationTimer;
+  function checkPendingConfirmations() {
+    confirmationTimer = undefined;
+    const ids = (state.pendingRequests || []).filter(item => !item.rejected).map(item => item.id);
+    if (ids.length) vscode.postMessage({ type: "chat.status", ids });
+    scheduleConfirmationCheck();
+  }
+  function scheduleConfirmationCheck() {
+    if (confirmationTimer !== undefined || !(state.pendingRequests || []).some(item => !item.rejected)) return;
+    confirmationTimer = setTimeout(checkPendingConfirmations, 2000);
+  }
+
   function renderPendingQueue() {
+    scheduleConfirmationCheck();
     const queue = document.getElementById("pending-message-queue");
     const toggle = document.getElementById("pending-queue-toggle");
     const label = document.getElementById("pending-queue-label");
@@ -80,6 +93,7 @@ globalThis.AgentFactoryChat.pendingQueue = function (host) {
           const request = state.pendingRequests.find(function (pending) { return pending.id === item.id; });
           if (!request) return;
           state.pendingRequests = state.pendingRequests.filter(function (request) { return request.id !== item.id; });
+          state.recoveredRequest = { id: request.id, execution: request.execution };
           state.draft = request.text;
           prompt.value = request.text;
           state.attachments = request.attachments;

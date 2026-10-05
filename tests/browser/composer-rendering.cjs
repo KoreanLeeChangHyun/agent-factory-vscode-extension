@@ -135,4 +135,68 @@ async function checkComposerRendering(page) {
   await emit({ type: 'run.state', running: false });
   console.log('Composer rendering: 100 queued messages, 20 input frames, 0 queue child mutations; lazy queue, recovery and send/stop controls passed.');
 }
-module.exports = { checkComposerRendering };
+async function checkPendingQueueHeader(page) {
+  let cases = 0;
+  for (const language of ['en', 'ko']) for (const count of [0, 1, 3]) {
+    const pendingRequests = Array.from({length:count}, (_, i) => ({id:'header-queue-'+i, text:'Queued message '+i, attachments:[], execution:{taskMode:'direct', businessMode:'normal', model:'test-model', fast:false}}));
+    await page.evaluate(pendingRequests => sessionStorage.setItem('submission-restoration-fixture', JSON.stringify({pendingRequests, timeline:[], botVisible:false})), pendingRequests);
+    await page.goto(new URL('?lang='+language, page.url()).href);
+    await page.evaluate(() => window.dispatchEvent(new MessageEvent('message', {data:{type:'agents.list',agents:[],workflows:[
+      {kind:'work-verification-loop',loopId:'queue-header-active',taskMode:'work-verification',status:'active',workflow:{id:'queue-header-active',title:'Queue header tasks',tasks:Array.from({length:4},(_,i)=>({id:'task-'+i,title:'Task '+i,workStatus:i===0?'running':'completed',verificationStatus:'pending'}))}},
+      {kind:'work-verification-loop',loopId:'queue-header-history',taskMode:'work-verification',status:'completed',workflow:{id:'queue-header-history',title:'Retained history',tasks:[{id:'done',title:'Completed task',workStatus:'completed',verificationStatus:'completed'}]}}
+    ]}})));
+    for (const size of [{width:1200,height:900}, {width:721,height:402}, {width:465,height:556}, {width:320,height:800}]) {
+      await page.setViewportSize(size);
+      for (const bot of [false,true]) for (const running of [false,true]) for (const expanded of [false,true]) {
+        await page.evaluate(bot => {document.getElementById("companion-dock").hidden=!bot;document.getElementById("factory-bot").hidden=!bot;},bot);
+        await page.evaluate(running => window.dispatchEvent(new MessageEvent('message',{data:{type:'run.state',running}})),running);
+        const flow = page.locator('#run-status-toggle'), toggle = page.locator('#pending-queue-toggle');
+        if ((await flow.getAttribute('aria-expanded') === 'true') !== expanded) await flow.click();
+        await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+        assert.equal(await toggle.isVisible(), count > 0, 'Zero queues keep the existing hidden toggle');
+        const boxes = await page.evaluate(() => {
+          const box = selector => {const r=document.querySelector(selector).getBoundingClientRect();return {x:r.x,right:r.right,y:r.y,bottom:r.bottom,center:r.y+r.height/2};};
+          return {flow:box('#run-status-toggle'),history:box('#workflow-history'),queue:box('#pending-queue-toggle'),progress:box('#agent-progress'),details:box('#run-details')};
+        });
+        const context=JSON.stringify({language,count,size,bot,running,expanded,boxes});
+        if (count) {
+          assert.ok(Math.abs(boxes.queue.center-boxes.flow.center)<2, 'Queue shares workflow baseline '+context);
+          assert.ok(boxes.flow.right<=boxes.history.x+1 && boxes.history.right<=boxes.queue.x+1, 'Header order is preserved '+context);
+          assert.ok(boxes.flow.x>=0 && boxes.queue.right<=size.width, 'Header fits viewport '+context);
+          if(running) assert.ok(boxes.progress.right<=boxes.flow.x+1, 'Loading does not overlap '+context);
+          // The open header keeps Main's indicator at its left edge, as the closed dock does.
+          if(running && expanded) assert.ok(boxes.progress.x<=boxes.details.x+8, 'Loading leads the open header at the left '+context);
+          if(expanded) assert.ok(boxes.queue.bottom<=boxes.details.y+1, 'Queue stays above task cards '+context);
+          if (process.env.AF_RENDERING_ARTIFACT_DIR && language==='ko' && count===1 && !bot && running && expanded && [465,1200].includes(size.width)) {
+            await page.screenshot({path:require('node:path').join(process.env.AF_RENDERING_ARTIFACT_DIR,'queue-header-'+size.width+'.png')});
+          }
+          await toggle.focus(); await page.keyboard.press('Enter');
+          assert.equal(await page.locator('#pending-message-queue').isVisible(),true);
+          assert.match(await page.locator('#pending-message-queue').textContent(),/Queued message 0/);
+          if (language==='ko' && count===1 && !bot && expanded && size.width===1200) {
+            await page.locator(running?'[data-queue-send-now]':'[data-queue-resume]').click();
+            assert.deepEqual(await page.evaluate(()=>window.sentMessages.at(-1)), {type:running?'run.cancel':'queue.resume'}, 'Existing manual queue actions keep their Host message');
+          }
+          if (process.env.AF_RENDERING_ARTIFACT_DIR && language==='ko' && count===1 && !bot && running && expanded && [465,1200].includes(size.width)) {
+            await page.screenshot({path:require('node:path').join(process.env.AF_RENDERING_ARTIFACT_DIR,'queue-list-'+size.width+'.png')});
+          }
+          const openHeader=await flow.boundingBox(), composer=await page.locator('.composer').boundingBox();
+          assert.ok(openHeader.y>=0 && composer.y+composer.height<=size.height, 'Open queue retains the header and composer inside the viewport '+context);
+          const notes=await page.locator('#notes-toggle').boundingBox(), openToggle=await toggle.boundingBox();
+          if(notes) assert.ok(openToggle.y>=notes.y+notes.height || openToggle.x+openToggle.width<=notes.x || openToggle.x>=notes.x+notes.width, 'Open queue clears the fixed notes button '+JSON.stringify({context,notes,openToggle}));
+          const list=await page.locator('#pending-message-queue').boundingBox();
+          const statusBottom=await page.locator(expanded?'#run-details':'#pending-queue-toggle').evaluate(el=>el.getBoundingClientRect().bottom);
+          assert.ok(list.y>=statusBottom-1,'Queue list opens below status');
+          await flow.click();
+          assert.equal(await toggle.getAttribute('aria-expanded'),'true','Workflow disclosure preserves open queue');
+          await flow.click(); await toggle.focus(); await page.keyboard.press('Space');
+          assert.equal(await page.locator('#pending-message-queue').isVisible(),false);
+          assert.equal(await page.evaluate(()=>window.saved.pendingRequests.length),count,'Queued data survives layout and disclosure');
+        }
+        cases++;
+      }
+    }
+  }
+  console.log('Queue header: '+cases+' language/count/viewport/loading/disclosure combinations passed.');
+}
+module.exports = { checkComposerRendering, checkPendingQueueHeader };

@@ -411,7 +411,7 @@ button.act-row { cursor: pointer; }
 .act-verb { flex: 0 0 auto; min-width: var(--act-verb-width, 0); color: var(--af-cli-foreground); }
 .act-row-wrap[data-phase="started"] .act-verb { color: var(--af-cli-link); }
 .act-row-wrap[data-phase="failed"] .act-verb { color: var(--af-cli-failure); }
-/* A path's directory gives way before its file name. */
+/* Paths show their names only; full paths open in the detail. */
 .act-target {
   display: flex;
   flex: 1 1 auto;
@@ -447,6 +447,7 @@ button.act-row { cursor: pointer; }
 .act-detail { margin: 0 0 0.25em var(--act-target-start); min-width: 0; }
 .act-detail[hidden] { display: none; }
 .act-detail .git-diff-overview { display: none; }
+.act-detail .act-paths { color: var(--af-cli-muted); font-family: var(--vscode-editor-font-family, monospace); white-space: pre-wrap; overflow-wrap: anywhere; user-select: text; }
 .act-detail .act-raw { margin: 0; color: var(--af-cli-foreground); font: inherit; white-space: pre-wrap; overflow-wrap: anywhere; }
 .act-summary { color: var(--af-cli-muted); white-space: normal; }
 .act-tooltip {

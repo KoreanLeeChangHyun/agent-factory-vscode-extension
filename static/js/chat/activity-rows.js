@@ -266,7 +266,37 @@
       detail: "text", result }];
   }
 
-  globalThis.agentFactoryActivityRows = Object.freeze({ shellWords, classifyCommand, splitDiff, pageTarget, errorLine, describe });
+  /** The separate paths of a path or scope list; commands join several files with ", ". */
+  function splitPaths(value) {
+    return String(value || "").split(", ").filter(Boolean);
+  }
+
+  function pathSegments(path) {
+    return String(path).replace(/\/+$/, "").split("/").filter(Boolean);
+  }
+
+  /**
+   * Short label for each path: its last segment, plus as many parent directories as needed
+   * to tell it apart from other paths in the same group that end the same way.
+   */
+  function shortPaths(paths, peers = paths) {
+    const others = [...new Set(peers.map(String))];
+    return paths.map(function (path) {
+      const segments = pathSegments(path);
+      if (!segments.length) return String(path);
+      let count = 1;
+      for (const other of others) {
+        if (other === String(path)) continue;
+        const theirs = pathSegments(other);
+        let shared = 0;
+        while (shared < segments.length && shared < theirs.length && segments[segments.length - 1 - shared] === theirs[theirs.length - 1 - shared]) shared++;
+        count = Math.max(count, shared + 1);
+      }
+      return segments.slice(-Math.min(count, segments.length)).join("/");
+    });
+  }
+
+  globalThis.agentFactoryActivityRows = Object.freeze({ shellWords, classifyCommand, splitDiff, pageTarget, errorLine, describe, splitPaths, shortPaths });
 })();
 
 globalThis.AgentFactoryChat = globalThis.AgentFactoryChat || {};
@@ -352,17 +382,32 @@ globalThis.AgentFactoryChat.activityRows = function (host) {
     return parts.map(part => part.key ? t(compact && part.key === "activity.result.output" ? "activity.result.lines" : compact && part.key === "activity.result.exit" ? "activity.result.exit.compact" : part.key, ...part.values) : part.text).filter(Boolean);
   }
 
+  /** Full paths a row names: its files, or a search's scope. Shown at the top of the opened detail. */
+  function fullPaths(row) {
+    return [...(row.path ? model.splitPaths(row.target) : []), ...model.splitPaths(row.scope)];
+  }
+
+  // Paths show only their names; a timeline group adds parent directories where names collide.
+  function pathLabel(paths, peers) {
+    return model.shortPaths(paths, peers).join(", ");
+  }
+
   function appendTarget(button, row) {
     const target = span("act-target");
-    const text = row.target || "";
-    const slash = row.path ? text.lastIndexOf("/") : -1;
-    // Paths keep their file name visible: the directory part shrinks first.
-    if (slash > 0 && slash < text.length - 1) {
-      target.append(span("act-target-head", text.slice(0, slash + 1)), span("act-target-tail", text.slice(slash + 1)));
+    if (row.path) {
+      const paths = model.splitPaths(row.target);
+      const name = span("act-target-tail", pathLabel(paths));
+      name.dataset.paths = JSON.stringify(paths);
+      target.append(name);
     } else {
-      target.append(span("act-target-head", text));
+      target.append(span("act-target-head", row.target || ""));
     }
-    if (row.scope) target.append(span("act-scope", " " + t("activity.target.in", "", row.scope).trim()));
+    if (row.scope) {
+      const scopes = model.splitPaths(row.scope);
+      const scope = span("act-scope", " " + t("activity.target.in", "", pathLabel(scopes)).trim());
+      scope.dataset.scopes = JSON.stringify(scopes);
+      target.append(scope);
+    }
     if (row.argument) target.append(span("act-scope", " " + row.argument));
     button.append(target);
   }
@@ -376,12 +421,25 @@ globalThis.AgentFactoryChat.activityRows = function (host) {
     const took = eventDuration(event);
     if (took !== undefined && row.phase !== "started") lines.push(t("activity.tooltip.duration", duration(took)));
     if (Number.isInteger(event.exitCode) && event.exitCode !== 0) lines.push(t("activity.tooltip.exit", event.exitCode));
-    const raw = row.kind === "edit" ? row.target : row.kind === "think" ? "" : event.text;
-    if (raw) lines.push(raw.length > 2000 ? raw.slice(0, 2000) + "…" : raw);
+    const paths = fullPaths(row);
+    lines.push(...paths);
+    const raw = row.kind === "edit" ? "" : row.kind === "think" ? "" : event.text;
+    if (raw && !paths.includes(raw)) lines.push(raw.length > 2000 ? raw.slice(0, 2000) + "…" : raw);
     return lines.join("\n");
   }
 
   function renderDetail(detail, event, row) {
+    const paths = fullPaths(row);
+    if (paths.length) {
+      const list = document.createElement("div");
+      list.className = "act-paths";
+      for (const path of paths) {
+        const line = document.createElement("div");
+        line.textContent = path;
+        list.append(line);
+      }
+      detail.append(list);
+    }
     if (row.detail === "command") {
       chatTerminal.renderTerminalCommand(detail, event.text, event.phase);
       chatTerminal.renderCommandOutput(detail, event.output, false);
@@ -501,6 +559,22 @@ globalThis.AgentFactoryChat.activityRows = function (host) {
     return Boolean(node?.classList?.contains("message-activity-row"));
   }
 
+  // Same names within one group of consecutive row messages get the parent directories that tell them apart.
+  function relabelPaths(group) {
+    const parse = (node, key) => JSON.parse(node.dataset[key]);
+    const names = group.flatMap(item => Array.from(item.querySelectorAll(".act-target-tail[data-paths]")));
+    const scopes = group.flatMap(item => Array.from(item.querySelectorAll(".act-scope[data-scopes]")));
+    const peers = [...names.flatMap(node => parse(node, "paths")), ...scopes.flatMap(node => parse(node, "scopes"))];
+    for (const node of names) {
+      const text = pathLabel(parse(node, "paths"), peers);
+      if (node.textContent !== text) node.textContent = text;
+    }
+    for (const node of scopes) {
+      const text = " " + t("activity.target.in", "", pathLabel(parse(node, "scopes"), peers)).trim();
+      if (node.textContent !== text) node.textContent = text;
+    }
+  }
+
   function alignVerbColumns(records) {
     const done = new Set();
     for (const record of records) {
@@ -513,6 +587,7 @@ globalThis.AgentFactoryChat.activityRows = function (host) {
           group.push(item);
           done.add(item);
         }
+        relabelPaths(group);
         const width = Math.max(...group.map(item => listWidths.get(item.querySelector(":scope > .act-list")) || 0)) + "em";
         for (const item of group) {
           if (item.style.getPropertyValue("--act-verb-width") !== width) item.style.setProperty("--act-verb-width", width);

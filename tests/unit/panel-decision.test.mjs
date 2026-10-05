@@ -1272,3 +1272,78 @@ test("the Work isolation toggle is stored per project, defaults off and reaches 
   await manager.handleMessage(panels[1], { type: "workIsolation.set", value: false });
   assert.equal(manager.workIsolation(), false);
 });
+
+
+test("chat confirmation replay covers every accepted batch member after completion without dispatch", async () => {
+  const posted = [];
+  const manager = new module.exports.ChatPanelManager({}, {}, () => [], async () => { throw new Error("status must not connect runtime"); });
+  const started = ["first", "second"].map(id => ({ type: "chat.started", id, text: id, attachments: [], submission: { taskMode: "work", businessMode: "planning", goal: false } }));
+  const managed = { state: {}, panel: { webview: { async postMessage(message) { posted.push(message); return true; } } },
+    startedMessages: started, pendingMessageIds: new Set(["third"]), controller: { running: false } };
+  await manager.handleMessage(managed, { type: "chat.status", ids: ["first", "second", "third", "unknown", "first"] });
+  assert.deepEqual(JSON.parse(JSON.stringify(posted)), [...started, { type: "chat.pending", id: "third" }, { type: "chat.rejected", id: "unknown" }]);
+  posted.length = 0;
+  await manager.handleMessage(managed, { type: "chat.send", id: "first", text: "first", attachments: [], execution: { fast: false, goal: false } });
+  assert.deepEqual(posted, [started[0]], "a recovered accepted identity replays acknowledgement only");
+});
+
+test("chat identity is reserved before slow preparation and preparation preserves arrival order", async () => {
+  let release;
+  const probe = new Promise(resolve => { release = resolve; });
+  const posted = [], sent = [];
+  const manager = new module.exports.ChatPanelManager({}, {}, () => [], async () => ({ available: false }));
+  let probes = 0;
+  manager.refreshWorktree = async () => { if (++probes === 1) await probe; };
+  manager.warnDirectBranch = async () => {};
+  manager.ensureSudoBroker = async () => {};
+  manager.sendChat = async (_managed, text) => { sent.push(text); };
+  const managed = { state: {}, panel: { webview: { async postMessage(message) { posted.push(message); return true; } } } };
+  const send = id => manager.handleMessage(managed, { type: "chat.send", id, text: id, attachments: [], execution: { fast: false, goal: false } });
+  const first = send("first"), second = send("second");
+  assert.deepEqual([...managed.pendingMessageIds], ["first", "second"]);
+  await send("first");
+  await manager.handleMessage(managed, { type: "chat.status", ids: ["first", "second"] });
+  assert.ok(posted.every(message => message.type === "chat.pending"));
+  assert.deepEqual(sent, []);
+  release(); await Promise.all([first, second]);
+  assert.deepEqual(sent, ["first", "second"]);
+});
+
+test("preparation failure rejects the original identity and does not stop later submissions", async () => {
+  for (const archived of [false, true]) {
+    const posted = [], sent = [];
+    const manager = new module.exports.ChatPanelManager({}, {}, () => [], async () => ({ available: false }));
+    let probes = 0;
+    manager.refreshWorktree = async managed => {
+      if (++probes === 1) {
+        if (!archived) throw new Error("probe failed");
+        managed.worktree = { worktree: { workUnit: "unit", phase: "merged" } };
+      } else managed.worktree = undefined;
+    };
+    manager.warnDirectBranch = async () => {};
+    manager.ensureSudoBroker = async () => {};
+    manager.sendChat = async (_managed, text) => { sent.push(text); };
+    const managed = { state: {}, panel: { webview: { async postMessage(message) { posted.push(message); return true; } } } };
+    const send = id => manager.handleMessage(managed, { type: "chat.send", id, text: id, attachments: [], execution: { fast: false, goal: false } });
+    await Promise.all([send("failed"), send("next")]);
+    assert.equal(managed.pendingMessageIds.has("failed"), false);
+    assert.deepEqual(posted.filter(message => message.type === "chat.rejected").map(message => message.id), ["failed"]);
+    assert.deepEqual(sent, ["next"]);
+  }
+});
+
+
+test("accepted identities remain recoverable beyond the old replay window", async () => {
+  const posted = [];
+  const manager = new module.exports.ChatPanelManager({}, {}, () => [], async () => { throw new Error("must not reconnect"); });
+  manager.ensureController = async () => {};
+  const managed = { state: { role: "work" }, imageAttachments: new Map(), pendingMessageIds: new Set(),
+    panel: { webview: { async postMessage(message) { posted.push(message); return true; } } },
+    controller: { async send(_text, _attachments, _execution, started) { started({ taskMode: "direct", businessMode: "normal", goal: false }); } } };
+  for (let index = 0; index < 201; index++) {
+    await manager.sendChat(managed, `request ${index}`, [], { fast: false, goal: false }, `request-${index}`);
+  }
+  posted.length = 0;
+  await manager.handleMessage(managed, { type: "chat.status", ids: ["request-0", "request-200"] });
+  assert.deepEqual(posted.map(event => [event.type, event.id]), [["chat.started", "request-0"], ["chat.started", "request-200"]]);
+});

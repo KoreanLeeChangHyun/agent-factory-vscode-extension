@@ -753,3 +753,16 @@ test('reset preserves runtime refusal after refresh and does not retry unrelated
     assert.equal(controller.conversationResetBlockedReason, undefined);
   }
 });
+
+
+test('confirmation protocol validates request identities and retains legacy ready messages', async () => {
+  const { importTypeScript } = await import('../support/import-typescript.mjs');
+  const { parseClientMessage } = await importTypeScript('src/protocol/validator.ts');
+  for (const message of [{ type: 'client.ready' }, { type: 'client.ready', pendingMessageIds: ['first', 'second'] }, { type: 'chat.status', ids: ['first', 'second'] }]) {
+    assert.deepEqual(parseClientMessage(message), message);
+  }
+  for (const value of [null, [null], [''], ['x'.repeat(129)], 'first']) {
+    assert.equal(parseClientMessage({ type: 'chat.status', ids: value }), undefined);
+    assert.equal(parseClientMessage({ type: 'client.ready', pendingMessageIds: value }), undefined);
+  }
+});

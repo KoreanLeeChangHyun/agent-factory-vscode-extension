@@ -15,7 +15,7 @@ import { homedir, tmpdir } from "node:os";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { AsyncCache } from "../../common/async-cache";
 import { parseInterviewQuestion } from "../../common/types/business-mode";
-import type { ActivityDetails as ProtocolActivityDetails, ActivityKind } from "../../protocol/messages";
+import type { ActivityDetails as ProtocolActivityDetails, ActivityKind, ProjectTaskEntry } from "../../protocol/messages";
 
 /** Activity details inside a RunUpdate, whose own `kind` is the update discriminant. */
 export type ActivityDetails = Omit<ProtocolActivityDetails, "kind"> & { readonly activityKind?: ActivityKind };
@@ -291,6 +291,7 @@ export interface AgentRuntimeClient {
   closeWorkflow?(mainAgentId: string, workAgentId: string, loopId: string): Promise<Record<string, unknown>>;
   decideRevisionLimit?(mainAgentId: string, workAgentId: string, loopId: string, decision: RevisionLimitDecision): Promise<Record<string, unknown>>;
   advanceWorkflows?(mainAgentId: string, agents: readonly ChildAgentSession[], drive?: boolean): Promise<readonly Record<string, unknown>[]>;
+  listProjectTasks?(): Promise<readonly ProjectTaskEntry[]>;
 }
 
 export class AgentFactoryClient implements AgentRuntimeClient {
@@ -301,6 +302,7 @@ export class AgentFactoryClient implements AgentRuntimeClient {
   private readonly agentListCache = new AsyncCache<Record<string, unknown>>(1_000, 1);
   private readonly childSessionCache = new AsyncCache<readonly ChildAgentSession[]>(0, 64);
   private readonly workflowRefreshCache = new AsyncCache<readonly Record<string, unknown>[]>(0, 32);
+  private readonly projectTaskCache = new AsyncCache<readonly ProjectTaskEntry[]>(2_000, 1);
   private readonly contextUsageSnapshots = new Map<string, ContextUsageSnapshot>();
   private readonly observedChildRuns = new ObservedRunCache<ReadonlyMap<string, ChildAgentReference>>(() => this.now());
   private readonly childEventSnapshots = new Map<string, { readonly signature: string; readonly references: readonly ChildAgentReference[] }>();
@@ -1186,6 +1188,34 @@ When a command needs sudo and the Human has requested it, use python3 ${JSON.str
       }
     }
     return snapshots;
+  }
+
+  /** Every task brief of this project, read from the loop states of every conversation. Read-only: no loop is driven. */
+  public listProjectTasks(): Promise<readonly ProjectTaskEntry[]> {
+    return this.projectTaskCache.get("project", () => this.readProjectTasks());
+  }
+
+  private async readProjectTasks(): Promise<readonly ProjectTaskEntry[]> {
+    const location = await this.location();
+    const latest = new Map<string, ProjectTaskEntry>();
+    for (const agent of await this.managedDirectoryEntries(location.agentsRoot)) {
+      if (!agent.isDirectory() || !MANAGED_ID.test(agent.name)) continue;
+      const members = await this.managedDirectoryEntries(await this.managedPath(agent.name)).catch(error => {
+        if (isMissingFile(error)) return [];
+        throw error;
+      });
+      if (!members.some(entry => entry.name === "loops" && entry.isDirectory())) continue;
+      for (const loop of await this.managedDirectoryEntries(await this.managedPath(agent.name, "loops"))) {
+        if (!loop.isDirectory() || !MANAGED_ID.test(loop.name)) continue;
+        let state: Record<string, unknown> | undefined;
+        try { state = await this.cachedRunState(await this.managedPath(agent.name, "loops", loop.name, "state.json")); }
+        catch (error) { if (isMissingFile(error)) continue; throw error; }
+        const entry = state && projectTaskEntry(state);
+        // A brief re-dispatched in a newer loop keeps one row: the most recent state wins.
+        if (entry && !((latest.get(entry.id)?.updatedAt ?? "") > (entry.updatedAt ?? ""))) latest.set(entry.id, entry);
+      }
+    }
+    return [...latest.values()].sort((left, right) => (right.createdAt ?? "").localeCompare(left.createdAt ?? "") || left.id.localeCompare(right.id));
   }
 
   /** Resolve the clicked historical run, retaining Main ownership and its captured options. */
@@ -2235,6 +2265,32 @@ function safeProjectChangePaths(value: unknown, projectRoot: string): string[] {
 
 function truncate(value: string, limit: number): string {
   return value.length > limit ? `${value.slice(0, limit - 1)}…` : value;
+}
+
+/** The display summary of one loop state; descriptions are bounded and no path or policy leaves the host. */
+function projectTaskEntry(state: Record<string, unknown>): ProjectTaskEntry | undefined {
+  const workflow = readRecordOrUndefined(state.workflow);
+  if (!workflow || typeof workflow.id !== "string" || !MANAGED_ID.test(workflow.id) || typeof workflow.title !== "string" || !Array.isArray(workflow.tasks)) return undefined;
+  const text = (value: unknown, limit: number) => typeof value === "string" ? value.slice(0, limit) : undefined;
+  const parentPath = typeof state.parentStatePath === "string" ? state.parentStatePath.split(sep) : [];
+  const mainAgentId = parentPath.at(-4);
+  const contract = readRecordOrUndefined(state.contract);
+  const tasks = workflow.tasks.flatMap(value => {
+    const task = readRecordOrUndefined(value);
+    if (!task || typeof task.id !== "string" || typeof task.title !== "string") return [];
+    return [{ id: task.id, title: task.title.slice(0, 300),
+      ...(text(task.description, 4_000) ? { description: text(task.description, 4_000) } : {}),
+      ...(typeof task.workStatus === "string" ? { workStatus: task.workStatus } : {}),
+      ...(typeof task.verificationStatus === "string" ? { verificationStatus: task.verificationStatus } : {}) }];
+  });
+  return {
+    id: workflow.id, title: workflow.title.slice(0, 300), status: typeof state.status === "string" ? state.status : "unknown", tasks,
+    ...(typeof state.createdAt === "string" ? { createdAt: state.createdAt } : {}),
+    ...(typeof state.updatedAt === "string" ? { updatedAt: state.updatedAt } : {}),
+    ...(mainAgentId && MANAGED_ID.test(mainAgentId) && parentPath.at(-3) === "runs" ? { mainAgentId } : {}),
+    ...(contract && typeof contract.id === "string" && contract.id
+      ? { contract: { id: contract.id, ...(Number.isInteger(contract.version) ? { version: contract.version as number } : {}) } } : {})
+  };
 }
 
 function readRecordOrUndefined(value: unknown): Record<string, unknown> | undefined {
