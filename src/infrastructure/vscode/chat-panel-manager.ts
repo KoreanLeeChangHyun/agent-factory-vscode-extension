@@ -7,7 +7,7 @@ import { workUnitContextText, workUnitBranch } from "./work-unit-context";
 import { unitGit, validateUnitBranch, directBranchEvidence } from "./work-unit-git";
 import { openContractPanel } from "./contract-panel";
 import { listContracts } from "../filesystem/contracts";
-import { readAgentDefaults, saveAgentDefault, saveModelFastMode, updateAgentPresetField, updateAgentPresetFastMode, useAgentPreset, ensureAgentPresets } from "./agent-settings-store";
+import { readAgentDefaults, updateAgentPresetField, updateAgentPresetFastMode, useAgentPreset, ensureAgentPresets } from "./agent-settings-store";
 import { readMarkdownImage } from "./markdown-image";
 import { localize, describeLocalizedMessage } from "../../common/localization";
 import { LunaBot, type BotContext, type BotMessage } from "../codex/luna-bot";
@@ -16,7 +16,7 @@ import { homedir } from "node:os";
 import { extname, isAbsolute, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { readCliTheme } from "../agent-factory/cli-theme";
-import { randomUUID } from "node:crypto";
+import { randomUUID, createHash } from "node:crypto";
 import { constants as fsConstants, existsSync } from "node:fs";
 import { open as openFile, realpath, unlink } from "node:fs/promises";
 import { readGitBranch } from "./git-branch";
@@ -750,6 +750,7 @@ export class ChatPanelManager implements vscode.Disposable {
           for (const panel of this.panels.values()) await this.refreshAgentDefaults(panel);
         } catch (cause) {
           await this.post(managed.panel, {type: "agent.preset.field.result", error: cause instanceof Error ? cause.message : String(cause)});
+          await this.refreshAgentDefaults(managed);
         }
         return;
       }
@@ -760,6 +761,7 @@ export class ChatPanelManager implements vscode.Disposable {
           for (const panel of this.panels.values()) await this.refreshAgentDefaults(panel);
         } catch (cause) {
           await this.post(managed.panel, {type: "agent.preset.field.result", error: cause instanceof Error ? cause.message : String(cause)});
+          await this.refreshAgentDefaults(managed);
         }
         return;
       }
@@ -774,7 +776,7 @@ export class ChatPanelManager implements vscode.Disposable {
               .find(item => item.scope === message.scope && item.name === message.name);
             if (preset) await this.assertAgentSettingsCompatible(managed, preset.settings);
           }
-          settings = await useAgentPreset(this.context.globalState, this.context.workspaceState, managed.state.panelId, message.action, message.scope, message.name, this.agentSettingsFromState(managed.state), message.newName);
+          settings = await useAgentPreset(this.context.globalState, this.context.workspaceState, managed.state.panelId, message.action, message.scope, message.name, message.action === "save" ? readAgentDefaults(this.context.globalState, this.context.workspaceState).presets?.find(set => set.name === message.sourceName)?.settings ?? {} : this.agentSettingsFromState(managed.state), message.newName);
           if (settings && copyToChat) {
             managed.state = this.applyAgentSettings(managed.state, settings, "chat", message.name);
             await this.rememberAgent(managed.state);
@@ -790,19 +792,10 @@ export class ChatPanelManager implements vscode.Disposable {
         return;
       }
       case "agent.defaults.save":
-        try {
-          await saveAgentDefault(message.scope, message.role, message.field, message.value);
-        } finally {
-          for (const panel of this.panels.values()) await this.refreshAgentDefaults(panel);
-        }
-        return;
       case "agent.defaults.fast":
-        try {
-          await saveModelFastMode(message.scope, message.role, message.model, message.value);
-        } finally {
-          for (const panel of this.panels.values()) await this.refreshAgentDefaults(panel);
-        }
-        return;
+        // Retired scope editors must not mutate the single set library.
+        await this.refreshAgentDefaults(managed);
+        throw new Error(localize("preset.scope.retired"));
       case "workIsolation.set":
         await this.context.workspaceState?.update(WORK_ISOLATION_KEY, message.value);
         for (const panel of this.panels.values()) {
@@ -957,6 +950,19 @@ export class ChatPanelManager implements vscode.Disposable {
           const connection = await this.connectRuntime();
           if (!connection.available || !connection.client.closeWorkflow) throw new Error("Workflow closure is unavailable in this runtime");
           const snapshot = await connection.client.closeWorkflow(managed.state.agentId, message.workAgentId, message.loopId);
+          await this.post(managed.panel, { type: "agents.list", agents: await connection.client.listChildSessions(managed.state.agentId), workflows: [snapshot] });
+        } catch (error) {
+          await this.post(managed.panel, { type: "host.notice", level: "error", text: String(error) });
+        }
+        return;
+      }
+      case "workflow.answer": {
+        if (!managed.state.agentId || (managed.state.role ?? "main") !== "main") return;
+        try {
+          const connection = await this.connectRuntime();
+          if (!connection.available || !connection.client.answerWorkflow) throw new Error("Workflow answers are unavailable in this runtime");
+          const snapshot = await connection.client.answerWorkflow(managed.state.agentId, message.workAgentId, message.loopId,
+            message.decisionId, message.questionHash, message.answer);
           await this.post(managed.panel, { type: "agents.list", agents: await connection.client.listChildSessions(managed.state.agentId), workflows: [snapshot] });
         } catch (error) {
           await this.post(managed.panel, { type: "host.notice", level: "error", text: String(error) });
@@ -1470,31 +1476,78 @@ export class ChatPanelManager implements vscode.Disposable {
 
   private async reportWorkflowResults(managed: ManagedPanel, workflows: readonly Record<string, unknown>[], owner: object = this): Promise<void> {
     const key = `agentFactory.workflowResults.${managed.state.agentId}`;
-    const states = { ...this.context.workspaceState?.get<Record<string, string>>(key) };
-    let dirty = false;
+    type Delivery = { identity: string; state: "prepared" | "accepted" | "completed" | "failed";
+      dispatchId: string; message: string; attempt: number; runId?: string };
     for (const flow of workflows) {
-      if (typeof flow.loopId !== "string" || typeof flow.status !== "string") continue;
-      if (flow.status === "active") { states[flow.loopId] = "active"; dirty = true; continue; }
-      if (states[flow.loopId] === flow.status) continue;
+      if (typeof flow.loopId !== "string" || typeof flow.status !== "string" || flow.status === "active") continue;
+      const identity = JSON.stringify([flow.loopId, flow.status, flow.latestWorkRunId, flow.latestVerificationRunId,
+        flow.terminalReason, flow.controlPlaneError, flow.pendingDecision]);
+      const states = { ...this.context.workspaceState?.get<Record<string, Delivery | string>>(key) };
+      const stored = states[flow.loopId];
+      let previous = typeof stored === "object" && stored.identity === identity ? stored : undefined;
+      if (previous?.state === "completed") continue;
+      if (previous?.runId && previous.state !== "failed" && managed.state.agentId) {
+        const connection = await this.connectRuntime();
+        if (!connection.available) continue;
+        // A failed task can have a successfully delivered failure report. A
+        // transport failure or missing result is not a delivered report.
+        try {
+          const report = await connection.client.result(managed.state.agentId, previous.runId);
+          if (!["completed", "failed", "cancelled", "needs-human-decision"].includes(report.status)) continue;
+          const delivered = ["completed", "failed", "needs-human-decision"].includes(report.status)
+            && !report.error && !report.goalError && Boolean(report.text.trim());
+          previous = { ...previous, state: delivered ? "completed" : "failed" };
+          states[flow.loopId] = previous;
+          await this.context.workspaceState?.update(key, states);
+          if (delivered) continue;
+        } catch { continue; } // Observation loss never establishes submission failure.
+      }
       if (managed.disposed || managed.backgroundContinuation || managed.controller?.running ||
           managed.pendingMessageIds?.size || !managed.controller || managed.controller.conversationResetBlockedReason) continue;
-      const releaseClaim = this.claimTerminalDelivery(owner, `${managed.state.agentId}:workflow:${flow.loopId}:${flow.status}`);
+      const releaseClaim = this.claimTerminalDelivery(owner, `${managed.state.agentId}:workflow:${identity}`);
       if (!releaseClaim) continue;
-      managed.backgroundContinuation = true;
-      const id = flow.loopId;
-      const status = flow.status;
-      void managed.controller.send(`[Engine workflow result — not a new Human request]
+      const attempt = previous?.state === "failed" ? previous.attempt + 1 : previous?.attempt ?? 1;
+      const message = previous?.message ?? `[Engine workflow result — not a new Human request]
 ${JSON.stringify(flow)}
-The engine owns execution and has stopped at this recorded state. Acknowledge the exact result/receipt identity and report the complete result or exception to the Human. Do not review implementation or rerun tests. Distinguish Work completion, independent Verification pass, failure, cancellation and required Human input; Goal completion alone is not a pass. Do not dispatch a next task, restart this workflow, or grant missing approval.`, [], { taskMode: "direct" }, () => {
-        states[id] = status;
-        void this.context.workspaceState?.update(key, states);
-      }).catch(error => {
-        states[id] = `delivery-error:${status}`;
-        void this.context.workspaceState?.update(key, states);
-        return this.post(managed.panel, { type: "host.notice", level: "error", text: String(error) });
+The engine owns execution. Read and acknowledge the exact stored result/receipt identity and report the result or exception. Distinguish Work completion, checks, integration, preservation, cleanup and required input. Do not review implementation or rerun tests. Goal completion alone is not a pass. Do not redispatch Work or grant missing approval.`;
+      let delivery: Delivery = previous && previous.state !== "failed" ? previous : {
+        identity, state: "prepared", attempt, message,
+        dispatchId: "report-" + createHash("sha256").update(identity).digest("hex").slice(0, 32) + "-" + attempt
+      };
+      managed.backgroundContinuation = true;
+      try {
+        // Persist intent before sending. A lost ACK reuses both text and dispatch
+        // identity, so the runtime adopts the accepted run instead of duplicating it.
+        states[flow.loopId] = delivery;
+        await this.context.workspaceState?.update(key, states);
+      } catch (error) {
+        managed.backgroundContinuation = false;
+        releaseClaim();
+        throw error;
+      }
+      let persisted: PromiseLike<void> | undefined;
+      void managed.controller.send(delivery.message, [], { taskMode: "direct", deliveryId: delivery.dispatchId }, () => {
+        const runId = managed.controller?.runId;
+        delivery = { ...delivery, state: "accepted", ...(runId ? { runId } : {}) };
+        states[flow.loopId as string] = delivery;
+        persisted = this.context.workspaceState?.update(key, states);
+      }).then(async () => {
+        await persisted;
+        if (!delivery.runId || !managed.state.agentId) return;
+        const connection = await this.connectRuntime();
+        if (!connection.available) return;
+        const report = await connection.client.result(managed.state.agentId, delivery.runId);
+        if (!["completed", "failed", "cancelled", "needs-human-decision"].includes(report.status)) return;
+        const delivered = ["completed", "failed", "needs-human-decision"].includes(report.status)
+          && !report.error && !report.goalError && Boolean(report.text.trim());
+        states[flow.loopId as string] = { ...delivery, state: delivered ? "completed" : "failed" };
+        await this.context.workspaceState?.update(key, states);
+      }).catch(async error => {
+        // Keep the intent/accepted identity. Only a confirmed terminal run may
+        // allocate a new attempt; network errors alone cannot authorize one.
+        await this.post(managed.panel, { type: "host.notice", level: "error", text: String(error) });
       }).finally(() => { managed.backgroundContinuation = false; releaseClaim(); });
     }
-    if (dirty) await this.context.workspaceState?.update(key, states);
   }
 
   private async continueBackgroundWork(managed: ManagedPanel, agents: readonly import("../agent-factory/agent-client").ChildAgentSession[], owner: object = this): Promise<void> {
@@ -1685,8 +1738,8 @@ Read the exact stored child result/receipt and existing workflow status for repo
   }
 
   private newChatPreferences(role: "main" | "work" | "verification" = "main"): ComposerPreferences {
-    const defaults = readAgentDefaults(this.context.globalState);
-    const source = defaults.projectAvailable ? defaults.project : defaults.global;
+    const defaults = readAgentDefaults(this.context.globalState, this.context.workspaceState);
+    const source = defaults.presets?.find(set => set.id === defaults.defaultSetId)?.settings ?? {};
     const own = source[role] ?? {};
     return {
       ...this.composerPreferences(),
@@ -1695,7 +1748,7 @@ Read the exact stored child result/receipt and existing workflow status for repo
       fastMode: (own.model ? source.fastByRoleModel?.[role]?.[own.model] : undefined) ?? own.fast ?? false,
       agentFastModes: JSON.parse(JSON.stringify(source.fastByRoleModel ?? {})),
       agentSettingsScope: "chat",
-      agentSettingsSet: "Default",
+      agentSettingsSet: defaults.presets?.find(set => set.id === defaults.defaultSetId)?.name,
       ...(role === "main" ? { agentModels: {
         ...(source.work ? { work: { ...source.work } } : {}),
         ...(source.workLight || source.work ? { workLight: { ...(source.work ?? {}), ...(source.workLight ?? {}) } } : {}),

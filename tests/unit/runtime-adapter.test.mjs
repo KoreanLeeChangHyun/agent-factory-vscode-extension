@@ -2017,17 +2017,17 @@ test('workflow monitor reconciles only owned loops with the captured parent bind
     assert.equal(snapshots.length, 1);
     assert.equal(snapshots[0].parent, parent);
     assert.deepEqual(snapshots[0].policy, policy);
-    assert.equal(snapshots[0].operation, 'reconcile');
+    assert.equal(snapshots[0].operation, 'status');
     assert.deepEqual(await client.advanceWorkflows('main-other', children), []);
     await writeFile(join(loopRoot, 'state.json'), JSON.stringify({ workflow: { id: 'flow' }, status: 'completed', parentStatePath: parent }));
     const completed = (await client.advanceWorkflows('main-owner', children))[0];
     assert.equal(completed.operation, 'status');
     assert.deepEqual(completed.policy, policy);
     assert.equal((await client.advanceWorkflows('main-owner', children))[0].operation, 'status');
-    assert.deepEqual((await readFile(operations, 'utf8')).trim().split('\n'), ['reconcile', 'status'],
+    assert.deepEqual((await readFile(operations, 'utf8')).trim().split('\n'), ['status', 'status'],
       'An unchanged completed loop must reuse its observed snapshot without another command');
     await assert.rejects(client.closeWorkflow('main-other', 'work-one', 'loop-one'), /does not belong/);
-    assert.deepEqual((await readFile(operations, 'utf8')).trim().split('\n'), ['reconcile', 'status']);
+    assert.deepEqual((await readFile(operations, 'utf8')).trim().split('\n'), ['status', 'status']);
     const closed = await client.closeWorkflow('main-owner', 'work-one', 'loop-one');
     assert.equal(closed.operation, 'close');
     assert.equal(closed.parent, parent);
@@ -2073,7 +2073,7 @@ print(json.dumps(state))
   const first = await connect().advanceWorkflows('main-six', children);
   assert.equal(first.length, 1, 'Same worker referenced by two runs must not duplicate its loop');
   assert.deepEqual(first[0].workflow.tasks, tasks);
-  assert.equal(first[0].operation, 'reconcile');
+  assert.equal(first[0].operation, 'status');
   assert.deepEqual(await connect().advanceWorkflows('other-main', children), []);
   state.status = 'runtime-error';
   tasks[1].workStatus = 'failed';
@@ -2334,8 +2334,11 @@ test('child run status stays fresh and rejects invalid state files through the s
   assert.equal((await read()).status, 'running');
   await writeFile(path, JSON.stringify({ status: 'completed' }));
   assert.equal((await read()).status, 'completed');
-  await writeFile(path, JSON.stringify({ status: 'completed', padding: 'x'.repeat(256 * 1024) }));
-  assert.equal((await read()).status, 'unknown');
+  const taskBinding = { taskId: 'task-long', description: '한글😀'.repeat(100000) };
+  await writeFile(path, JSON.stringify({ status: 'completed', taskBinding }));
+  const large = await read();
+  assert.equal(large.status, 'completed');
+  assert.deepEqual(large.taskBinding, taskBinding);
   await writeFile(path, '{broken');
   assert.equal((await read()).status, 'unknown');
   await rm(path);
@@ -2491,4 +2494,41 @@ test("expected runtime home follows the runtime's normalization without resolvin
   await mkdir(join(root, "real")); await symlink(join(root, "real"), join(root, "link"));
   // The runtime rejects a linked home component itself, so the binding is compared as written.
   assert.equal(expectedRuntimeHome({ AGENT_FACTORY_HOME: join(root, "link") }, "/home/user"), join(root, "link"));
+});
+
+
+test("child history indexes more than 500 parent runs and 1000 children", async () => {
+  const { AgentFactoryClient } = await importTypeScript("src/infrastructure/agent-factory/agent-client.ts");
+  const client = new AgentFactoryClient("/unused/exec.py", "/unused");
+  client.managedPath = async (...parts) => parts.join("/");
+  client.managedDirectoryEntries = async () => Array.from({ length: 501 }, (_, i) => ({
+    name: `run-${String(i).padStart(4, "0")}`, isDirectory: () => true
+  }));
+  client.discoverRunChildren = async (_parent, run) => new Map([[`work-${run}`, { parentRunId: run, pending: false }]]);
+  assert.equal((await client.discoverChildAgents("main-history")).size, 501);
+  client.discoverChildAgents = async () => new Map(Array.from({ length: 1001 }, (_, i) => [
+    `work-${i}`, { runId: `run-${i}`, pending: false }
+  ]));
+  client.cachedRunState = async path => ({ agentId: path.split("/")[0], role: "work" });
+  client.latestRunInfo = async (agentId, runId) => ({ status: "completed", runId,
+    taskBinding: { taskId: agentId, description: "원문😀".repeat(100) } });
+  const children = await client.listChildSessions("main-history");
+  assert.equal(children.length, 1001);
+  assert.equal(children[1000].taskBinding.description, "원문😀".repeat(100));
+});
+
+
+test("child task indexing preserves a description larger than the metadata cache budget", async t => {
+  const { AgentFactoryClient } = await importTypeScript("src/infrastructure/agent-factory/agent-client.ts");
+  const root = await mkdtemp(join(tmpdir(), "af-long-task-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const directory = join(root, "work-one", "runs", "run-one");
+  await mkdir(directory, { recursive: true });
+  const taskBinding = { taskId: "task-one", title: "큰 작업", description: "한글😀".repeat(100000) };
+  await writeFile(join(directory, "state.json"), JSON.stringify({ status: "failed", taskBinding }));
+  const client = new AgentFactoryClient("/unused/exec.py", root);
+  client.managedPath = async (...parts) => join(root, ...parts);
+  const captured = await client.latestRunInfo("work-one", "run-one");
+  assert.equal(captured.status, "failed");
+  assert.deepEqual(captured.taskBinding, taskBinding);
 });

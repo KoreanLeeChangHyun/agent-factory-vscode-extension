@@ -109,7 +109,7 @@ async function checkFactoryRendering(page) {
   assert.deepEqual(overflowing, [], 'Card headings must fit narrow panels');
   const fs = require('node:fs');
   const path = require('node:path');
-  const artifactDir = path.resolve(__dirname, '../../../docs/artifact/agent-factory-command-rendering');
+  const artifactDir = path.resolve(__dirname, '../../../docs/artifact/evidence/agent-factory-command-rendering');
   fs.mkdirSync(artifactDir, { recursive: true });
   await page.locator('[data-id="long-loop-heading"]').screenshot({ path: path.join(artifactDir, 'narrow-card.png') });
   await lessonCard.screenshot({ path: path.join(artifactDir, 'lesson-narrow.png') });

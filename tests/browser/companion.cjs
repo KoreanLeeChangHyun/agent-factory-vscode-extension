@@ -1,6 +1,6 @@
 const assert = require('node:assert/strict');
 exports.checkCompanion = async function (page, { careOnly = false } = {}) {
-  const artifactDir = process.env.AF_RENDERING_ARTIFACT_DIR || require('node:path').resolve(__dirname, '../../../docs/artifact/chat-layout');
+  const artifactDir = process.env.AF_RENDERING_ARTIFACT_DIR || require('node:path').resolve(__dirname, '../../../docs/artifact/evidence/chat-layout');
   require('node:fs').mkdirSync(artifactDir, { recursive: true });
   const snapshot = { emotion: 'calm', action: 'call', reactionUntil: 0, lastInteractionAt: Date.now(), fullness: 80, happiness: 80, energy: 80, careCount: 0, updatedAt: Date.now() };
   const send = (companion, working = 0) => page.evaluate(({ companion, working }) => window.postMessage({ type: 'bot.companion', companion, working }, '*'), { companion, working });
@@ -305,7 +305,7 @@ exports.checkCompanion = async function (page, { careOnly = false } = {}) {
 
 exports.checkCompanionOverlay = async function (page) {
   const path = require('node:path');
-  const artifactDir = process.env.AF_RENDERING_ARTIFACT_DIR || path.resolve(__dirname, '../../../docs/artifact/ui-overlay-dnd');
+  const artifactDir = process.env.AF_RENDERING_ARTIFACT_DIR || path.resolve(__dirname, '../../../docs/artifact/evidence/ui-overlay-dnd');
   require('node:fs').mkdirSync(artifactDir, { recursive: true });
   await page.evaluate(() => window.postMessage({ type: 'host.initialize', panelId: 'overlay-test', role: 'main', runtimeAvailable: true, running: false, botsEnabled: true, botVisible: true }, '*'));
   const bot = page.locator('#factory-bot');

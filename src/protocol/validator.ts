@@ -59,6 +59,7 @@ const clientMessageTypes = new Set([
   "task.stop",
   "workflow.close",
   "workflow.decision",
+  "workflow.answer",
   "agent.open",
   "attachments.pick",
   "attachments.addUris",
@@ -226,8 +227,8 @@ export function parseClientMessage(value: unknown): ClientMessage | undefined {
       if ((value.scope !== "global" && value.scope !== "project" && value.scope !== "chat") || typeof value.name !== "string" || !value.name.trim() || !AGENT_ROLES.includes(value.role as typeof AGENT_ROLES[number]) || !validAgentValue("model", value.model) || typeof value.value !== "boolean") return undefined;
       return {type: value.type, scope: value.scope, name: value.name.trim(), role: value.role as typeof AGENT_ROLES[number], model: value.model as string, value: value.value};
     case "agent.preset":
-      if ((value.action !== "save" && value.action !== "apply" && value.action !== "copy" && value.action !== "update" && value.action !== "delete" && value.action !== "rename") || (value.scope !== "global" && value.scope !== "project" && value.scope !== "chat") || typeof value.name !== "string" || !value.name.trim() || (value.action === "rename" && (typeof value.newName !== "string" || !value.newName.trim()))) return undefined;
-      return {type: value.type, action: value.action, scope: value.scope, name: value.name.trim(), ...(value.action === "rename" ? {newName: (value.newName as string).trim()} : {})};
+      if ((value.action !== "save" && value.action !== "apply" && value.action !== "copy" && value.action !== "update" && value.action !== "delete" && value.action !== "rename" && value.action !== "default") || (value.scope !== "global" && value.scope !== "project" && value.scope !== "chat") || typeof value.name !== "string" || !value.name.trim() || (value.action === "rename" && (typeof value.newName !== "string" || !value.newName.trim()))) return undefined;
+      return {type: value.type, action: value.action, scope: value.scope, name: value.name.trim(), ...(value.action === "rename" ? {newName: (value.newName as string).trim()} : {}), ...(value.action === "save" && typeof value.sourceName === "string" ? {sourceName: value.sourceName.trim()} : {})};
     case "agent.defaults.save":
       if ((value.scope !== "global" && value.scope !== "project") ||
           !AGENT_ROLES.includes(value.role as typeof AGENT_ROLES[number]) ||
@@ -293,6 +294,12 @@ export function parseClientMessage(value: unknown): ClientMessage | undefined {
     case "workflow.close":
       if (![value.workAgentId, value.loopId].every(id => typeof id === "string" && /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(id))) return undefined;
       return { type: value.type, workAgentId: value.workAgentId as string, loopId: value.loopId as string };
+    case "workflow.answer":
+      if (![value.workAgentId, value.loopId, value.decisionId].every(id => typeof id === "string" && /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(id))
+        || typeof value.questionHash !== "string" || !/^[a-f0-9]{64}$/.test(value.questionHash)
+        || typeof value.answer !== "string" || !value.answer.trim()) return undefined;
+      return { type: value.type, workAgentId: value.workAgentId as string, loopId: value.loopId as string,
+        decisionId: value.decisionId as string, questionHash: value.questionHash, answer: value.answer };
     case "workflow.decision":
       // Exactly the two revision-limit decisions; accepting failed Verification stays an explicit runtime command.
       if (![value.workAgentId, value.loopId].every(id => typeof id === "string" && /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(id))

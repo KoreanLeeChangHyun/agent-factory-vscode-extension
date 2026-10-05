@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { importTypeScript, createTypeScriptImporter } from '../support/import-typescript.mjs';
+import { importTypeScript } from '../support/import-typescript.mjs';
 import { readFileSync } from 'node:fs';
 import { readChatSourceSync, runChatInNewContext as runInNewContext } from "../support/chat-source.mjs";
 const { createDraftChatState, restoreChatState } = await importTypeScript('src/modules/chat/chat-state.ts');
@@ -91,206 +91,6 @@ test('VS Code scopes are declared as independent resource settings',()=>{
   for(const role of ['main','work','workLight','verification']) assert.equal(props[`agentFactory.agents.${role}.fast`],undefined);
 });
 
-test('store reads each scope separately and writes only the selected scope', async()=>{
-  const entries = { 'main.model': {globalValue:'global',workspaceValue:'workspace',workspaceFolderValue:'project'}, 'main.reasoningEffort':{globalValue:'high'}, 'work.model':{globalValue:'worker'} };
-  const writes=[];
-  globalThis.__agentConfigFixture = { workspace:{workspaceFolders:[{uri:{fsPath:'/project'}}],getConfiguration:()=>({inspect:key=>entries[key],update:async(...args)=>writes.push(args)})},ConfigurationTarget:{Global:1,WorkspaceFolder:3} };
-  const loadStore=createTypeScriptImporter({plugins:[{name:'mock-vscode',setup(b){b.onResolve({filter:/^vscode$/},()=>({path:'vscode',namespace:'mock'}));b.onLoad({filter:/.*/,namespace:'mock'},()=>({contents:'module.exports = globalThis.__agentConfigFixture;',loader:'js'}));}}]});
-  const store=await loadStore('src/infrastructure/vscode/agent-settings-store.ts');
-  assert.equal(store.readAgentDefaults().project.main.model,'project');
-  assert.equal(store.readAgentDefaults().global.main.reasoningEffort,'high');
-  await store.saveAgentDefault('global','work','model','new-worker');
-  await store.saveAgentDefault('project','main','model','project-new');
-  await store.saveModelFastMode('project','work','gpt-6-astra',true);
-  assert.deepEqual(writes,[['work.model','new-worker',1],['main.model','project-new',3],['fastByRoleModel',{work:{'gpt-6-astra':true}},3]]);
-  await assert.rejects(store.saveAgentDefault('project','main','model',''),/Invalid agent setting/);
-  entries['main.fast']={globalValue:true};
-  entries.fastByModel={globalValue:{global:true}};
-  entries.fastByRoleModel={globalValue:{}};
-  assert.equal(store.readAgentDefaults().global.main.fast,undefined);
-  assert.deepEqual(store.readAgentDefaults().global.fastByRoleModel,{},'An explicit empty Fast set cannot revive legacy preferences');
-  delete entries['main.fast']; delete entries.fastByModel; delete entries.fastByRoleModel;
-
-  globalThis.__agentConfigFixture.workspace.workspaceFolders=[];
-  await assert.rejects(store.saveAgentDefault('project','main','model','oops'),/Open a project/);
-  for (const [providers, expected] of [
-    [{codex:true,claude:false}, 'gpt-6-astra'],
-    [{codex:false,claude:true}, 'claude-opus-5-5'],
-    [{codex:true,claude:true}, 'gpt-6-astra'],
-    [{codex:false,claude:false}, undefined]
-  ]) {
-    const saved = new Map();
-    const state = {get:key=>saved.get(key), update:async(key,value)=>saved.set(key,value)};
-    const values = {'main.model':{globalValue:'existing-model'},'work.model':{workspaceValue:'project-model'}};
-    const seeded=[];
-    globalThis.__agentConfigFixture.workspace.getConfiguration=()=>({
-      inspect:key=>values[key],update:async(key,value,target)=>{seeded.push([key,value,target]);values[key]={...values[key],globalValue:value};}
-    });
-    await store.initializeAgentDefaults(state,providers);
-    assert.deepEqual(seeded,expected ? [
-      ['main.reasoningEffort','medium',1],['work.model',expected,1],['work.reasoningEffort','medium',1],
-      ['verification.model',expected,1],['verification.reasoningEffort','medium',1]
-    ] : [['main.reasoningEffort','medium',1],['work.reasoningEffort','medium',1],['verification.reasoningEffort','medium',1]]);
-    if (expected) {
-      values['work.model']={}; // A later edit must not trigger reseeding.
-      await store.initializeAgentDefaults(state,providers);
-      assert.equal(seeded.length,5);
-    } else assert.equal(saved.size,0);
-  }
-  const explicitEmpty=[];
-  globalThis.__agentConfigFixture.workspace.getConfiguration=()=>({inspect:()=>({globalValue:''}),update:async(...args)=>explicitEmpty.push(args)});
-  await store.initializeAgentDefaults({get:()=>false,update:async()=>{}},{codex:true,claude:false});
-  assert.equal(explicitEmpty.length,6,'Empty legacy model and reasoning values are replaced without creating role Fast settings');
-  const legacyFastValues={};
-  for(const role of ['main','work','verification']) {
-    legacyFastValues[`${role}.model`]={globalValue:`${role}-legacy`};
-    legacyFastValues[`${role}.reasoningEffort`]={globalValue:'medium'};
-  }
-  legacyFastValues['main.fast']={globalValue:true};
-  const fastMigrationState=new Map([['agentFactory.agentDefaults.initialized.v3',true]]);
-  const fastMigrationWrites=[];
-  globalThis.__agentConfigFixture.workspace.getConfiguration=()=>({inspect:key=>legacyFastValues[key],update:async(key,value,target)=>{
-    fastMigrationWrites.push([key,value,target]);legacyFastValues[key]={...legacyFastValues[key],globalValue:value};
-  }});
-  const fastState={get:key=>fastMigrationState.get(key),update:async(key,value)=>fastMigrationState.set(key,value)};
-  await store.initializeAgentDefaults(fastState,{codex:true,claude:false});
-  assert.deepEqual(fastMigrationWrites,[['fastByRoleModel',{main:{'main-legacy':true}},1]]);
-  legacyFastValues.fastByRoleModel.globalValue={};
-  await store.initializeAgentDefaults(fastState,{codex:true,claude:false});
-  assert.equal(fastMigrationWrites.length,1,'Migration runs once and cannot revive cleared legacy Fast values');
-  const partial={}, completed=new Map(); let fail=true;
-  const state={get:key=>completed.get(key),update:async(key,value)=>completed.set(key,value)};
-  globalThis.__agentConfigFixture.workspace.getConfiguration=()=>({
-    inspect:key=>partial[key],update:async(key,value)=>{
-      if(key==='work.model' && fail) throw new Error('write failed');
-      partial[key]={globalValue:value};
-    }
-  });
-  await assert.rejects(store.initializeAgentDefaults(state,{codex:true,claude:false}),/write failed/);
-  assert.equal(completed.size,0,'Failed initialization remains retryable');
-  partial['main.model']={globalValue:'chosen-after-failure'};fail=false;
-  await store.initializeAgentDefaults(state,{codex:true,claude:false});
-  assert.equal(partial['main.model'].globalValue,'chosen-after-failure');
-  assert.equal(partial['verification.model'].globalValue,'gpt-6-astra');
-  assert.equal(completed.size,1);
-  const copied={};
-  for(const role of ['main','work','verification']){
-    copied[`${role}.model`]={globalValue:`${role}-global`};
-    copied[`${role}.reasoningEffort`]={globalValue:'medium'};
-    copied[`${role}.fast`]={globalValue:role==='work'};
-  }
-  copied.fastByRoleModel={workspaceFolderValue:{work:{'work-global':false}}};
-  const projectWrites=[], projectState=new Map();
-  globalThis.__agentConfigFixture.workspace.workspaceFolders=[{uri:{fsPath:'/project'}}];
-  globalThis.__agentConfigFixture.workspace.getConfiguration=()=>({inspect:key=>copied[key],update:async(key,value,target)=>{
-    projectWrites.push([key,value,target]); copied[key]={...copied[key],workspaceFolderValue:value};
-  }});
-  await store.initializeAgentDefaults({get:()=>true,update:async()=>{}},{codex:true,claude:false},{get:key=>projectState.get(key),update:async(key,value)=>projectState.set(key,value)});
-  assert.equal(projectWrites.length,7,'A new project materializes model, reasoning and role/model Fast preferences');
-  assert.equal(store.readAgentDefaults().project.fastByRoleModel.work['work-global'],false,'Project Fast overrides survive the initial copy');
-  copied['main.model'].globalValue='changed-global';
-  await store.initializeAgentDefaults({get:()=>true,update:async()=>{}},{codex:true,claude:false},{get:key=>projectState.get(key),update:async(key,value)=>projectState.set(key,value)});
-  assert.equal(projectWrites.length,7,'Later global changes do not update an initialized project');
-  assert.equal(copied['main.model'].workspaceFolderValue,'main-global');
-  copied['main.reasoningEffort'].globalValue='max';
-  copied.fastByRoleModel.globalValue={main:{'future-model':true}};
-  assert.equal(store.readAgentDefaults().project.main.reasoningEffort,'medium');
-  assert.equal(store.readAgentDefaults().project.fastByRoleModel.main['future-model'],undefined);
-
-  const createMemory=()=>{const data=new Map();return {data,get:(key,fallback)=>data.has(key)?structuredClone(data.get(key)):fallback,update:async(key,value)=>data.set(key,structuredClone(value))};};
-  const globalMemory=createMemory(), workspaceMemory=createMemory(), chatId='chat-1';
-  const presetValues={
-    'main.model':{globalValue:'gpt-6-astra',workspaceValue:'workspace-default'},'main.reasoningEffort':{globalValue:'high'},'main.fast':{globalValue:true},
-    'work.model':{globalValue:'claude-opus-5-5'},'work.reasoningEffort':{globalValue:'medium'},'work.fast':{globalValue:false},
-    'verification.model':{globalValue:'gpt-6-sol'},'verification.reasoningEffort':{globalValue:'low'},'verification.fast':{globalValue:true}
-  };
-  const presetWrites=[];
-  globalThis.__agentConfigFixture.workspace.workspaceFolders=[{uri:{fsPath:'/project'}}];
-  let failureKey;
-  globalThis.__agentConfigFixture.workspace.getConfiguration=()=>({inspect:key=>presetValues[key],update:async(key,value,target)=>{
-    if(key===failureKey){failureKey=undefined;throw new Error('preset write failed');}
-    presetWrites.push([key,value,target]);presetValues[key]={...presetValues[key],[target===1?'globalValue':'workspaceFolderValue']:value};
-  }});
-  const completeChat={main:{model:'gpt-6-sol',reasoningEffort:'high',fast:true},work:{model:'gpt-6-astra',reasoningEffort:'medium',fast:false},verification:{model:'gpt-6-sol',reasoningEffort:'low',fast:true}};
-  for(const role of ['main','work','verification'])for(const field of ['model','reasoningEffort','fast']){
-    const key=`${role}.${field}`;presetValues[key]??={};presetValues[key].workspaceFolderValue=presetValues[key].globalValue ?? (field==='model'?'gpt-6-sol':field==='reasoningEffort'?'medium':false);
-  }
-  await Promise.all([
-    store.ensureAgentPresets(globalMemory,workspaceMemory,chatId,completeChat),
-    store.ensureAgentPresets(globalMemory,workspaceMemory,chatId,completeChat)
-  ]);
-  assert.equal(store.readAgentDefaults(globalMemory,workspaceMemory,chatId).presets.filter(p=>p.isDefault).length,3);
-  const seeded=store.readAgentDefaults(globalMemory,workspaceMemory,chatId).presets;
-  const initialGlobal=seeded.find(p=>p.scope==='global'&&p.isDefault).settings;
-  const initialProject=seeded.find(p=>p.scope==='project'&&p.isDefault).settings;
-  const initialChat=seeded.find(p=>p.scope==='chat'&&p.isDefault).settings;
-  assert.equal(initialGlobal.main.model,'gpt-6-astra');
-  for(const role of ['main','work','verification']) assert.deepEqual(initialChat[role],completeChat[role],'Chat Default preserves each copied role value');
-  assert.equal(initialChat.fastByRoleModel.main['gpt-6-sol'],true,'Legacy Fast preferences are retained in the canonical role/model map');
-  const laterChat={...completeChat,main:{model:'claude-opus-5-5',reasoningEffort:'none'}};
-  await store.ensureAgentPresets(globalMemory,workspaceMemory,chatId,laterChat);
-  assert.deepEqual(store.readAgentDefaults(globalMemory,workspaceMemory,chatId).presets.find(p=>p.scope==='chat'&&p.isDefault).settings,initialChat,'Opening an existing chat never reseeds its saved Default');
-  await store.ensureAgentPresets(globalMemory,workspaceMemory,'chat-2',laterChat);
-  const otherChat=store.readAgentDefaults(globalMemory,workspaceMemory,'chat-2').presets;
-  assert.equal(otherChat.find(p=>p.scope==='chat'&&p.isDefault).settings.main.model,'claude-opus-5-5','Panel identity separates same-named chat defaults');
-  assert.deepEqual(otherChat.find(p=>p.scope==='global'&&p.isDefault).settings,initialGlobal);
-  assert.deepEqual(otherChat.find(p=>p.scope==='project'&&p.isDefault).settings,initialProject);
-  await store.useAgentPreset(globalMemory,workspaceMemory,chatId,'update','chat','Default',completeChat);
-  await store.ensureAgentPresets(globalMemory,workspaceMemory,chatId,completeChat);
-  assert.equal(store.readAgentDefaults(globalMemory,workspaceMemory,chatId).presets.find(p=>p.scope==='chat'&&p.isDefault).settings.main.model,'gpt-6-sol');
-  await store.useAgentPreset(globalMemory,workspaceMemory,chatId,'save','global','Quality');
-  await store.useAgentPreset(globalMemory,workspaceMemory,chatId,'save','project','Quality');
-  assert.equal(store.readAgentDefaults(globalMemory,workspaceMemory,chatId).presets.filter(p=>p.name==='Quality').length,2,'The same set name is independent in each scope');
-  assert.equal(store.readAgentDefaults(globalMemory,workspaceMemory,chatId).presets.find(p=>p.scope==='global'&&p.name==='Quality').settings.main.model,'gpt-6-astra');
-  await assert.rejects(store.useAgentPreset(globalMemory,workspaceMemory,chatId,'save','global','Quality'),/already exists/);
-  presetValues['main.model'].globalValue='changed-after-save';
-  presetValues['verification.model']={workspaceFolderValue:'stale'};
-  await store.useAgentPreset(globalMemory,workspaceMemory,chatId,'apply','project','Quality');
-  assert.equal(presetWrites.length,7);
-  assert.deepEqual(presetValues.fastByRoleModel.workspaceFolderValue,{main:{'gpt-6-astra':true},work:{'claude-opus-5-5':false},verification:{'gpt-6-sol':true}});
-  assert.equal(presetValues['main.model'].workspaceFolderValue,'gpt-6-astra');
-  assert.equal(presetValues['main.model'].globalValue,'changed-after-save');
-  assert.equal(presetValues['verification.model'].workspaceFolderValue,'gpt-6-sol');
-  const snapshot=structuredClone(presetValues);
-  failureKey='work.model';
-  await assert.rejects(store.useAgentPreset(globalMemory,workspaceMemory,chatId,'apply','global','Quality'),/preset write failed/);
-  assert.deepEqual(presetValues,snapshot,'Partial application restores the exact target layer');
-  await assert.rejects(store.useAgentPreset(globalMemory,workspaceMemory,chatId,'apply','global','missing'),/no longer exists/);
-  globalThis.__agentConfigFixture.workspace.workspaceFolders=[];
-  await assert.rejects(store.useAgentPreset(globalMemory,workspaceMemory,chatId,'apply','project','Quality'),/Open a project/);
-  await store.useAgentPreset(globalMemory,workspaceMemory,chatId,'save','chat','Chat',completeChat);
-  assert.equal(store.readAgentDefaults(globalMemory,workspaceMemory,chatId).presets.find(p=>p.scope==='chat'&&p.name==='Chat').settings.main.model,'gpt-6-sol');
-  await store.useAgentPreset(globalMemory,workspaceMemory,chatId,'update','chat','Chat',{...completeChat,main:{model:'gpt-6-astra',reasoningEffort:'low'}});
-  assert.equal(store.readAgentDefaults(globalMemory,workspaceMemory,chatId).presets.filter(p=>p.scope==='chat'&&p.name==='Chat').length,1);
-  assert.equal(store.readAgentDefaults(globalMemory,workspaceMemory,chatId).presets.find(p=>p.scope==='chat'&&p.name==='Chat').settings.main.reasoningEffort,'low');
-  await assert.rejects(store.useAgentPreset(globalMemory,workspaceMemory,chatId,'update','chat','missing',{}),/no longer exists/);
-  await Promise.all([
-    store.updateAgentPresetField(globalMemory,workspaceMemory,chatId,'chat','Chat','main','model','gpt-6-sol'),
-    store.updateAgentPresetField(globalMemory,workspaceMemory,chatId,'chat','Chat','work','reasoningEffort','high'),
-    store.updateAgentPresetField(globalMemory,workspaceMemory,chatId,'chat','Chat','verification','fast',false)
-  ]);
-  assert.equal(store.readAgentDefaults(globalMemory,workspaceMemory,chatId).presets.find(p=>p.scope==='chat'&&p.name==='Chat').settings.main.model,'gpt-6-sol');
-  assert.equal(store.readAgentDefaults(globalMemory,workspaceMemory,chatId).presets.find(p=>p.scope==='chat'&&p.name==='Chat').settings.work.reasoningEffort,'high');
-  assert.equal(store.readAgentDefaults(globalMemory,workspaceMemory,chatId).presets.find(p=>p.scope==='chat'&&p.name==='Chat').settings.verification.fast,false);
-  await assert.rejects(store.updateAgentPresetField(globalMemory,workspaceMemory,chatId,'chat','Chat','main','model',''),/invalid/i);
-  await assert.rejects(store.updateAgentPresetField(globalMemory,workspaceMemory,chatId,'chat','missing','main','model','gpt-6-sol'),/no longer exists/);
-  const beforeDelete=structuredClone(presetValues);
-  await store.useAgentPreset(globalMemory,workspaceMemory,chatId,'delete','chat','Chat');
-  assert.equal(store.readAgentDefaults(globalMemory,workspaceMemory,chatId).presets.some(p=>p.scope==='chat'&&p.name==='Chat'),false);
-  assert.deepEqual(presetValues,beforeDelete,'Deleting a set preserves applied configuration');
-  await assert.rejects(store.useAgentPreset(globalMemory,workspaceMemory,chatId,'delete','chat','Chat'),/no longer exists/);
-  await assert.rejects(store.useAgentPreset(globalMemory,workspaceMemory,chatId,'delete','global','Default'),/cannot be deleted/);
-  assert.equal(store.readAgentDefaults(globalMemory,workspaceMemory,chatId).presets.filter(p=>p.isDefault).length,3,'Every scope keeps its default set');
-  await store.useAgentPreset(globalMemory,workspaceMemory,chatId,'save','chat',' Fresh ',completeChat);
-  assert.equal(store.readAgentDefaults(globalMemory,workspaceMemory,chatId).presets.find(p=>p.scope==='chat'&&p.name==='Fresh').name,'Fresh');
-  await store.useAgentPreset(globalMemory,workspaceMemory,chatId,'rename','chat','Fresh',undefined,'Renamed');
-  assert.equal(store.readAgentDefaults(globalMemory,workspaceMemory,chatId).presets.find(p=>p.scope==='chat'&&p.name==='Renamed').settings.main.model,'gpt-6-sol');
-  await assert.rejects(store.useAgentPreset(globalMemory,workspaceMemory,chatId,'rename','chat','Renamed',undefined,'Default'),/already exists/);
-  await assert.rejects(store.useAgentPreset(globalMemory,workspaceMemory,chatId,'rename','chat','Renamed',undefined,'  '),/name is required/i);
-
-  delete globalThis.__agentConfigFixture;
-});
-
 test('preset messages validate scope, action and names',()=>{
   assert.deepEqual(parseClientMessage({type:'agent.preset.field',scope:'chat',name:'A',role:'work',field:'reasoningEffort',value:'high'}),{type:'agent.preset.field',scope:'chat',name:'A',role:'work',field:'reasoningEffort',value:'high'});
   assert.deepEqual(parseClientMessage({type:'agent.preset.field',scope:'project',name:'A',role:'workLight',field:'model',value:'gpt-6-luna'}),{type:'agent.preset.field',scope:'project',name:'A',role:'workLight',field:'model',value:'gpt-6-luna'});
@@ -300,6 +100,8 @@ test('preset messages validate scope, action and names',()=>{
   assert.deepEqual(parseClientMessage(good),good);
   assert.deepEqual(parseClientMessage({...good,scope:'chat'}),{...good,scope:'chat'});
   assert.equal(parseClientMessage({...good,scope:'chat',action:'apply'}).action,'apply');
+  assert.deepEqual(parseClientMessage({...good,action:'default'}),{...good,action:'default'});
+  assert.deepEqual(parseClientMessage({...good,sourceName:' Source '}),{...good,sourceName:'Source'});
   assert.equal(parseClientMessage({...good,scope:'chat',action:'update'}).action,'update');
   assert.equal(parseClientMessage({...good,scope:'chat',action:'delete'}).action,'delete');
   assert.deepEqual(parseClientMessage({...good,scope:'chat',action:'rename',newName:' Better '}),{...good,scope:'chat',action:'rename',newName:'Better'});

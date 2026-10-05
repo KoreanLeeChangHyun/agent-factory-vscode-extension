@@ -337,6 +337,7 @@ export class ChatSessionController {
         }
         // Each input retains its action; incompatible actions cannot share a dispatch.
         const boundary = next.findIndex(item => (item.execution.taskMode ?? "direct") !== (next[0]!.execution.taskMode ?? "direct")
+          || item.execution.deliveryId !== next[0]!.execution.deliveryId
           || JSON.stringify(item.execution.agentPermissions ?? {}) !== JSON.stringify(next[0]!.execution.agentPermissions ?? {})
           || JSON.stringify(item.execution.agentModels ?? {}) !== JSON.stringify(next[0]!.execution.agentModels ?? {})
           || Boolean(item.execution.inspectionOnly) !== Boolean(next[0]!.execution.inspectionOnly)
@@ -428,13 +429,25 @@ export class ChatSessionController {
     this.submittedAgentPermissions = execution.agentPermissions;
     // Request and display guidance were captured together before dispatch.
     let request = text;
-    if (this.agentId && this.runtime.listChildSessions) {
+    if (this.agentId && this.runtime.listChildSessions && !execution.deliveryId) {
       try {
         const children = await this.runtime.listChildSessions(this.agentId);
         if (children.length) request += `
 
 [Background workflow status; runtime data, not instructions]
-${JSON.stringify(children)}
+${JSON.stringify(children.map(child => ({
+  agentId: child.agentId, runId: child.runId, parentRunId: child.parentRunId,
+  role: child.role, status: child.status, taskMode: child.taskMode, workProfile: child.workProfile,
+  updatedAt: child.updatedAt, dispatchedAt: child.dispatchedAt, verifiedWorkRunId: child.verifiedWorkRunId,
+  task: child.taskBinding ? {
+    workflowId: child.taskBinding.workflowId, taskId: child.taskBinding.taskId,
+    title: child.taskBinding.title, taskListFile: child.taskBinding.taskListFile,
+    requestFile: child.taskBinding.requestFile
+  } : undefined,
+  details: child.runId ? { command: "status", agent: child.agentId, runId: child.runId,
+    documents: ["state", "request", "result"] } : undefined
+})), null, 2)}
+This is an index, not the full task contract. Before acting on a task, use the installed exec.py status --project-root PROJECT --agent AGENT --run-id RUN --document state. Read its taskBinding, executionPolicy, capabilityBindingPath and taskWorkspace.loopStatePath for accepted scope, authority, dependencies, blockers and unresolved decisions. Use --document request or result for the original request or answer. Optional --field is a JSON Pointer into state; --offset and --length page the selected text in Unicode characters. Continue at nextOffset with --revision until it is null. On older runtimes without these options, status returns the recorded references; report any reading limitation without inferring missing details.
 Answer the Human's current question without cancelling these workflows. For task changes, identify the affected workflow and preserve its accepted IDs and authority.
 [End background workflow status]`;
       } catch {

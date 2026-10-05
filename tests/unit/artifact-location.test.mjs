@@ -10,7 +10,7 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..")
 test("extension repository has no stray docs or out directories", () => {
   for (const name of ["docs", "out"]) {
     assert.equal(existsSync(path.join(root, name)), false,
-      `${name}/ must not exist in extension/; move its files to the workspace docs/lessons-learned or docs/artifact/<topic>/`);
+      `${name}/ must not exist in extension/; move its files to the workspace docs/lessons-learned or docs/artifact/<category>/<topic>/`);
   }
 });
 
@@ -19,5 +19,7 @@ test("browser tests write screenshots to workspace docs/artifact instead of out/
   for (const name of readdirSync(directory)) {
     const source = readFileSync(path.join(directory, name), "utf8");
     assert.doesNotMatch(source, /['"`](?:\.\.\/\.\.\/)?out\//, `${name} writes generated files under extension/out`);
+    assert.doesNotMatch(source, /docs\/artifact\/(?!(?:preview|evidence|media|release)\/)[\w-]+/,
+      `${name} writes an artifact without a purpose category`);
   }
 });

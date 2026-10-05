@@ -336,7 +336,7 @@ globalThis.AgentFactoryChat.agentSettings = function (host) {
     container.classList.add("aligned-settings");
     renderAgentPresets();
     const selected = (settings.presets || []).find(preset => preset.scope === scope && preset.name === document.getElementById("agent-preset-select").value);
-    const values = selected && !selected.isDefault ? selected.settings : settings[scope];
+    const values = selected?.settings || {};
     const columns = document.createElement("div");
     columns.className = "agent-settings-columns";
     columns.setAttribute("aria-hidden", "true");
@@ -358,16 +358,10 @@ globalThis.AgentFactoryChat.agentSettings = function (host) {
           const nextSettings = field === "fast"
             ? {...(values || {}), fastByRoleModel: {...values?.fastByRoleModel, [role]: {...values?.fastByRoleModel?.[role], [selectedModel]: value === true}}}
             : {...(values || {}), [role]: {...(values?.[role] || {}), [field]: value}};
-          if (selected && !selected.isDefault) {
+          if (selected) {
             selected.settings = nextSettings;
             if (field === "fast") autoSavePresetFast(role, selectedModel, value === true);
             else autoSavePresetField(role, field, value);
-          } else if (field === "fast") {
-            state.agentDefaults[scope] = nextSettings;
-            vscode.postMessage({ type: "agent.defaults.fast", scope, role, model: selectedModel, value: value === true });
-          } else {
-            state.agentDefaults[scope] = nextSettings;
-            vscode.postMessage({ type: "agent.defaults.save", scope, role, field, value });
           }
           renderAgentDefaults();
         }, false));
@@ -404,14 +398,14 @@ globalThis.AgentFactoryChat.agentSettings = function (host) {
   let pendingPresetAction = "";
   function renderAgentPresets() {
     const select = document.getElementById("agent-preset-select");
-    const scope = settingsEditor ? document.getElementById("agent-default-scope").value : state.agentDefaults?.projectAvailable ? "project" : "global";
+    const scope = "global"; // Single set library; scope is retained only for wire compatibility.
     const presets = (state.agentDefaults?.presets || []).filter(preset => preset.scope === scope);
     const desired = pendingPresetName || (!settingsEditor ? state.agentSettingsSet : select.value);
-    const selected = presets.some(preset => preset.name === desired) ? desired : presets.find(preset => preset.isDefault)?.name || "";
+    const selected = presets.some(preset => preset.name === desired) ? desired : settingsEditor ? presets.find(preset => preset.isDefault)?.name || presets[0]?.name || "" : "";
     select.replaceChildren();
     const placeholder = document.createElement("option"); placeholder.value = ""; placeholder.textContent = t("preset.choose"); select.append(placeholder);
     for (const preset of presets) {
-      const option = document.createElement("option"); option.value = preset.name; option.textContent = preset.isDefault ? t(scope === "project" ? "preset.project.default" : "preset.default") : preset.name;
+      const option = document.createElement("option"); option.value = preset.name; option.textContent = preset.name + (preset.isDefault ? " · " + t("preset.project.default") : "");
       const error = !settingsEditor ? agentSettingsApplyError(preset.settings || {}) : "";
       option.disabled = Boolean(error);
       if (error) option.title = error;
@@ -422,11 +416,14 @@ globalThis.AgentFactoryChat.agentSettings = function (host) {
     const providerBound = !settingsEditor && Boolean(currentCapabilities().sessionProvider);
     select.disabled = agentPresetBusy || providerBound;
     const selectedPreset = presets.find(preset => preset.name === select.value);
-    document.getElementById("agent-preset-delete").disabled = agentPresetBusy || !select.value || selectedPreset?.isDefault === true;
+    document.getElementById("agent-preset-delete").disabled = agentPresetBusy || !select.value || selectedPreset?.inUse === true;
+    const defaultButton = document.getElementById("agent-preset-default");
+    defaultButton.disabled = agentPresetBusy || !select.value || !state.agentDefaults?.projectAvailable || selectedPreset?.isDefault === true;
+    defaultButton.setAttribute("aria-pressed", String(selectedPreset?.isDefault === true));
     const rename = document.getElementById("agent-preset-rename");
-    rename.querySelector("summary").setAttribute("aria-disabled", String(agentPresetBusy || !select.value || selectedPreset?.isDefault === true));
-    document.getElementById("agent-preset-rename-name").disabled = agentPresetBusy || !select.value || selectedPreset?.isDefault === true;
-    document.getElementById("agent-preset-rename-save").disabled = agentPresetBusy || !select.value || selectedPreset?.isDefault === true || !document.getElementById("agent-preset-rename-name").value.trim();
+    rename.querySelector("summary").setAttribute("aria-disabled", String(agentPresetBusy || !select.value));
+    document.getElementById("agent-preset-rename-name").disabled = agentPresetBusy || !select.value;
+    document.getElementById("agent-preset-rename-save").disabled = agentPresetBusy || !select.value || !document.getElementById("agent-preset-rename-name").value.trim();
     document.getElementById("agent-preset-save").disabled = agentPresetBusy || !document.getElementById("agent-preset-name").value.trim();
     document.getElementById("agent-preset-name").disabled = agentPresetBusy;
     document.getElementById("agent-default-scope").disabled = agentPresetBusy;
@@ -437,7 +434,7 @@ globalThis.AgentFactoryChat.agentSettings = function (host) {
     if (action === "apply" && document.getElementById("agent-default-scope").value === "chat" && currentCapabilities().sessionProvider) return;
     const name = document.getElementById(action === "save" ? "agent-preset-name" : "agent-preset-select").value.trim();
     if (!name) return;
-    const scope = settingsEditor ? document.getElementById("agent-default-scope").value : state.agentDefaults?.projectAvailable ? "project" : "global";
+    const scope = "global"; // Single set library; scope is retained only for wire compatibility.
     if (settingsEditor && action === "apply") { renderAgentDefaults(); return; }
     if (action === "apply") {
       const preset = state.agentDefaults?.presets?.find(item => item.scope === scope && item.name === name);
@@ -457,16 +454,16 @@ globalThis.AgentFactoryChat.agentSettings = function (host) {
     renderAgentDefaults();
     renderAgentPresets();
     if (!settingsEditor) saveComposerSettings();
-    vscode.postMessage({type: "agent.preset", action: settingsEditor ? action : "copy", scope, name, ...(newName ? {newName} : {})});
+    vscode.postMessage({type: "agent.preset", action: settingsEditor ? action : "copy", scope, name, ...(newName ? {newName} : {}), ...(action === "save" ? {sourceName: document.getElementById("agent-preset-select").value} : {})});
   }
-  for (const action of ["save", "delete"]) document.getElementById("agent-preset-" + action).addEventListener("click", () => performPresetAction(action));
+  for (const action of ["save", "delete", "default"]) document.getElementById("agent-preset-" + action).addEventListener("click", () => performPresetAction(action));
   document.getElementById("agent-preset-name").addEventListener("input", renderAgentPresets);
   document.getElementById("agent-preset-rename-name").addEventListener("input", renderAgentPresets);
   document.getElementById("agent-preset-rename").addEventListener("toggle", event => {
     if (!event.currentTarget.open) return;
     const select = document.getElementById("agent-preset-select");
     const preset = (state.agentDefaults?.presets || []).find(item => item.scope === document.getElementById("agent-default-scope").value && item.name === select.value);
-    if (!preset || preset.isDefault || agentPresetBusy) { event.currentTarget.open = false; return; }
+    if (!preset || agentPresetBusy) { event.currentTarget.open = false; return; }
     if (!document.getElementById("agent-preset-rename-name").value.trim()) document.getElementById("agent-preset-rename-name").value = preset.name;
     renderAgentPresets();
   });
@@ -495,14 +492,14 @@ globalThis.AgentFactoryChat.agentSettings = function (host) {
     menu.append(fastModeSetting);
   }
 
-  function renderModelSettings(menu, preserveScope = false, globalEditor = false) {
+  function renderModelSettings(menu, _preserveScope = false, globalEditor = false) {
     const changedEditor = settingsEditor !== globalEditor;
     settingsEditor = globalEditor;
     if (changedEditor) document.getElementById("agent-preset-select").value = "";
     // Scope and default controls are persistent nodes; park them so they stay in the document.
     document.getElementById("agent-scope-parts").append(document.getElementById("agent-scope-row"), document.getElementById("agent-defaults-content"));
     document.getElementById("agent-defaults-content").append(document.getElementById("agent-preset-content"));
-    document.getElementById("agent-scope-parts").append(document.getElementById("agent-preset-picker"), document.getElementById("agent-preset-create"), document.getElementById("agent-preset-rename"), document.getElementById("agent-preset-delete"));
+    document.getElementById("agent-scope-parts").append(document.getElementById("agent-preset-picker"), document.getElementById("agent-preset-create"), document.getElementById("agent-preset-rename"), document.getElementById("agent-preset-delete"), document.getElementById("agent-preset-default"));
     menu.replaceChildren();
     menu.setAttribute("role", "dialog");
     menu.setAttribute("aria-label", t("ui.models.and.reasoning"));
@@ -515,19 +512,14 @@ globalThis.AgentFactoryChat.agentSettings = function (host) {
     close.append(createModeIcon("m6 6 12 12M18 6 6 18", "agent-settings-close-icon"));
     close.addEventListener("click", function () { closeSettingMenu(true); });
     const scopeControl = document.getElementById("agent-default-scope");
-    const previousScope = scopeControl.value;
     scopeControl.replaceChildren();
-    for (const [value, key] of globalEditor ? [["project", "ui.project.defaults"], ["global", "ui.global.defaults"]] : [["chat", "ui.chat.scope"]]) {
-      const option = document.createElement("option"); option.value = value; option.textContent = t(key);
-      option.disabled = value === "project" && !state.agentDefaults?.projectAvailable;
-      scopeControl.append(option);
-    }
-    scopeControl.value = globalEditor ? preserveScope && ["project", "global"].includes(previousScope) ? previousScope : state.agentDefaults?.projectAvailable ? "project" : "global" : "chat";
-    document.getElementById("agent-scope-row").hidden = !globalEditor;
+    const option = document.createElement("option"); option.value = globalEditor ? "global" : "chat";
+    scopeControl.append(option);
+    scopeControl.value = option.value;
+    document.getElementById("agent-scope-row").hidden = true;
     close.hidden = globalEditor;
-    if (globalEditor) header.append(document.getElementById("agent-scope-row"));
     header.append(document.getElementById("agent-preset-picker"));
-    if (globalEditor) header.append(document.getElementById("agent-preset-create"), document.getElementById("agent-preset-rename"), document.getElementById("agent-preset-delete"));
+    if (globalEditor) header.append(document.getElementById("agent-preset-create"), document.getElementById("agent-preset-rename"), document.getElementById("agent-preset-delete"), document.getElementById("agent-preset-default"));
     header.append(close);
     menu.classList.add("aligned-settings");
     menu.append(header);

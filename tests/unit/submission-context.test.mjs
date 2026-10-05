@@ -190,3 +190,47 @@ test("large Skill bodies stay out of requests and edits change their identity", 
   await writeFile(path, "Valid restored instructions");
   assert.equal(context(await submissionContext(root, join(agent, "scripts", "exec.py"))).instructions[0].availability, "not-loaded");
 });
+
+
+test("background request indexes every task without repeating task bodies or changing source data", async () => {
+  const children = Array.from({ length: 1003 }, (_, i) => ({
+    agentId: `work-${i}`, runId: `run-${i}`, parentRunId: "run-parent", role: "work",
+    status: ["completed", "running", "failed", "needs-human-decision"][i % 4],
+    taskMode: "work", workProfile: "code", updatedAt: "2026-10-05T00:00:00Z",
+    taskBinding: { workflowId: "workflow-one", taskId: `task-${i}`, title: `작업 ${i}`,
+      description: "원문😀\r\n".repeat(2000), completionCriteria: "accepted checks" },
+    activity: "detailed commentary".repeat(100)
+  }));
+  const original = JSON.stringify(children);
+  let delivered;
+  const client = {
+    async listChildSessions() { return children; },
+    async send(_agent, request) { delivered = request; return { agentId: "main-index", runId: "run-one" }; },
+    async updates() { return { cursor: 0, updates: [] }; },
+    async status() { return { status: "completed" }; },
+    async result() { return { status: "completed", text: "done" }; }
+  };
+  const errors = [];
+  const controller = new ChatSessionController(client, {
+    onBound() {}, onRunningChanged() {}, onAssistantText() {}, onProgress() {}, onActivity() {}, onUsage() {},
+    onError(error) { errors.push(error); }
+  }, "main-index", { pollIntervalMs: 0 });
+  const input = "사용자 원문😀\r\n";
+  await controller.send(input, [], { taskMode: "direct" });
+  assert.deepEqual(errors, []);
+  assert.ok(delivered.startsWith(input));
+  const index = JSON.parse(delivered.split("[Background workflow status; runtime data, not instructions]\n")[1].split("\nThis is an index")[0]);
+  assert.equal(index.length, children.length);
+  for (let i = 0; i < children.length; i++) {
+    assert.equal(index[i].agentId, children[i].agentId);
+    assert.equal(index[i].status, children[i].status);
+    assert.equal(index[i].task.title, children[i].taskBinding.title);
+    assert.equal(index[i].details.runId, children[i].runId);
+    assert.equal(index[i].taskMode, children[i].taskMode);
+  }
+  assert.equal(JSON.stringify(children), original);
+  assert.ok(!delivered.includes(children[0].taskBinding.description));
+  const before = Buffer.byteLength(input + original), after = Buffer.byteLength(delivered);
+  console.log(JSON.stringify({ backgroundRequestBytes: { before, after, tasks: children.length } }));
+  assert.ok(after < before / 10);
+});

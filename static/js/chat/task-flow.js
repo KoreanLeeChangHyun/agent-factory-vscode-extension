@@ -14,6 +14,7 @@ globalThis.AgentFactoryChat.taskFlow = function (host) {
   const workflowDecisionsPending = new Set();
   const taskStopsPending = new Set();
   const taskStopErrors = new Map();
+  const workDecisionDrafts = new Map();
   // Revisions one "Continue" authorizes; the host passes the same number to the runtime.
   const REVISION_LIMIT_EXTENSION = 3;
   function extractTaskFlows(text) {
@@ -92,6 +93,9 @@ globalThis.AgentFactoryChat.taskFlow = function (host) {
       if (!extractTaskFlows("```task-flow\n" + JSON.stringify(candidate) + "\n```").flows.length) continue;
       const pause = revisionLimitPause(snapshot);
       flows.set(workflow.id, { ...candidate, engine: true, loopId: snapshot.loopId, workAgentId: snapshot.workAgentId, closable: snapshot.status === "runtime-error", engineStatus: snapshot.status, stopPending: snapshot.stopPending === true,
+        pendingDecision: snapshot.pendingDecision?.status === "pending" ? snapshot.pendingDecision : undefined,
+        completion: snapshot.completion,
+        integrationTaskId: workflow.tasks[workflow.index ?? 0]?.id,
         ...(snapshot.status === "needs-human-decision" && (workflow.tasks.length === 1 || Number.isInteger(workflow.index))
           ? { decisionTaskId: workflow.tasks[workflow.index ?? 0]?.id } : {}),
         ...(pause ? { pause } : {}) });
@@ -454,10 +458,17 @@ globalThis.AgentFactoryChat.taskFlow = function (host) {
       observed = "needs-human-decision";
     }
     const verification = (task.sessionRole || agent?.role) === "verification";
+    const integration = !verification && observed === "completed" &&
+      flow.integrationTaskId === (task.taskId || task.id) &&
+      ["checking", "partial", "preserved"].includes(flow.completion?.integration) ? flow.completion.integration : undefined;
     label.dataset.observedStatus = observed;
     label.textContent = t(observed === "completed" && verification ? "flow.display.verification.completed"
       : ["accepted", "queued", "starting", "cancelling", "needs-human-decision"].includes(observed)
         ? "flow.display." + observed : "flow.status." + observed);
+    if (integration) {
+      label.textContent = t("flow.integration." + integration);
+      label.dataset.observedStatus = "integration-" + integration;
+    }
     // A row whose run is actually executing uses the workflow header's pulse: breathing core and staggered rings.
     if (["running", "verifying"].includes(observed) && taskStageRunning(task, flow)) {
       const pulse = document.createElement("span");
@@ -555,6 +566,8 @@ globalThis.AgentFactoryChat.taskFlow = function (host) {
       section.classList.add("task-flow-single-container");
       section.append(createSingleTaskFlowCard(flow, logicalTasks.values().next().value, live));
       if (decision) section.append(createRevisionLimitDecision(flow, flow.tasks[0].title));
+      if (live && flow.pendingDecision && state.role === "main") section.append(createWorkDecision(flow));
+      if (live && flow.completion) section.append(createIntegrationOutcome(flow));
       return section;
     }
     const title = document.createElement("strong");
@@ -613,6 +626,8 @@ globalThis.AgentFactoryChat.taskFlow = function (host) {
       current.setAttribute("aria-atomic", "true");
     }
     section.append(summary, current);
+    if (live && flow.pendingDecision && state.role === "main") section.append(createWorkDecision(flow));
+    if (live && flow.completion) section.append(createIntegrationOutcome(flow));
     if (decision) {
       const paused = flow.tasks.find(task => (task.taskId || task.id) === flow.pause.taskId) || flow.tasks[0];
       section.append(createRevisionLimitDecision(flow, paused.title));
@@ -690,6 +705,35 @@ globalThis.AgentFactoryChat.taskFlow = function (host) {
     });
     section.append(list);
     return section;
+  }
+  function createIntegrationOutcome(flow) {
+    const outcome = document.createElement("p");
+    outcome.className = "task-flow-current";
+    outcome.dataset.integrationStatus = flow.completion.integration;
+    outcome.textContent = t("flow.integration." + flow.completion.integration);
+    return outcome;
+  }
+  function createWorkDecision(flow) {
+    const decision = flow.pendingDecision;
+    const view = document.createElement("div");
+    view.className = "task-flow-decision";
+    const question = document.createElement("pre");
+    question.textContent = decision.question;
+    const input = document.createElement("textarea");
+    input.setAttribute("aria-label", t("flow.answer"));
+    input.value = workDecisionDrafts.get(decision.id) || "";
+    input.addEventListener("input", () => workDecisionDrafts.set(decision.id, input.value));
+    const send = document.createElement("button");
+    send.type = "button";
+    send.textContent = t("flow.answer.send");
+    send.addEventListener("click", () => {
+      if (!input.value.trim()) return;
+      send.disabled = true;
+      vscode.postMessage({ type: "workflow.answer", workAgentId: flow.workAgentId, loopId: flow.loopId,
+        decisionId: decision.id, questionHash: decision.questionHash, answer: input.value });
+    });
+    view.append(question, input, send);
+    return view;
   }
   // A loop stopped on its revision limit: what was tried, what remains, and the Human's two decisions.
   function createRevisionLimitDecision(flow, taskTitle) {

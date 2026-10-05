@@ -1141,7 +1141,7 @@ module.exports.checkTaskFlowStates = async function (page) {
   await toggle.click();
   assert.equal(await toggle.getAttribute('aria-expanded'), 'true');
   assert.match(await page.locator('#run-stage-list').textContent(), /작업 없음/);
-  await page.screenshot({ path: require('node:path').join(process.env.AF_RENDERING_ARTIFACT_DIR || require('node:path').resolve(__dirname, '../../../docs/artifact/ui-overlay-dnd'), 'empty-expanded-ko.png') });
+  await page.screenshot({ path: require('node:path').join(process.env.AF_RENDERING_ARTIFACT_DIR || require('node:path').resolve(__dirname, '../../../docs/artifact/evidence/ui-overlay-dnd'), 'empty-expanded-ko.png') });
   await toggle.click();
   const snapshot = { loopId: 'state-loop', workAgentId: 'state-work', status: 'active', taskMode: 'work', workProfile: 'work', workflow: {
     id: 'state-flow', title: 'Fixture state flow', tasks: [{ id: 'state-task', title: 'Fixture task', workStatus: 'running', workAgentId: 'state-work', workRunId: 'state-run' }] } };

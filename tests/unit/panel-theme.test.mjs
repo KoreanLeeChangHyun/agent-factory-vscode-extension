@@ -85,7 +85,7 @@ async function fixture(t, connectRuntime = async () => ({ available: false, diag
   };
   const module = { exports: {} };
   runInNewContext(output.outputFiles[0].text, {
-    module, exports: module.exports, Buffer, console, AbortController, setInterval, clearInterval,
+    module, exports: module.exports, Buffer, console, AbortController, structuredClone, setInterval, clearInterval,
     process: { env: { CODEX_HOME: "/isolated/theme-test-home" } },
     require: name => name === "vscode" ? vscode : require(name),
     setTimeout(fn, delay) { const id = nextTimer++; timers.set(id, { fn, delay }); return id; },
@@ -197,7 +197,7 @@ test("a saved agent preset is not reported as failed when the follow-up capabili
   };
   const host = await fixture(t, async () => ({ available: true, client }));
   await host.ready();
-  await host.receive({ type: "agent.preset.field", scope: "chat", name: "Default", role: "main", field: "reasoningEffort", value: "high" });
+  await host.receive({ type: "agent.preset.field", scope: "global", name: "Agent Factory · Codex", role: "main", field: "reasoningEffort", value: "high" });
   const result = host.messages.filter(message => message.type === "agent.preset.field.result").at(-1);
   assert.ok(result, "the preset field save is answered");
   assert.equal(result.error, undefined);
@@ -286,7 +286,7 @@ test("a failed chat request is logged and shown instead of becoming an unhandled
   await host.receive({ type: "agent.defaults.save", scope: "project", role: "work", field: "model", value: "claude-sonnet" });
   await host.receive({ type: "agent.defaults.fast", scope: "project", role: "work", model: "claude-sonnet", value: true });
   const notices = host.messages.filter(message => message.type === "host.notice" && message.level === "error").map(message => message.text);
-  assert.deepEqual(notices, ["Open a project before changing project settings", "Open a project before changing project settings"]);
+  assert.deepEqual(notices, ["Manage agent settings through sets in Settings.", "Manage agent settings through sets in Settings."]);
   assert.equal(host.messages.filter(message => message.type === "agent.defaults").length, 2, "the stored values are still refreshed");
   assert.deepEqual(errors.map(([label, detail]) => [label, detail.type]), [
     ["[Agent Factory] Chat request failed", "agent.defaults.save"], ["[Agent Factory] Chat request failed", "agent.defaults.fast"]]);

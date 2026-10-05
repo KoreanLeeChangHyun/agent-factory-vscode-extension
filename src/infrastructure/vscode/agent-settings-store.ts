@@ -1,91 +1,32 @@
 import * as vscode from "vscode";
+import { randomUUID } from "node:crypto";
 import { localize } from "../../common/localization";
 import { parseAgentFastModes, parseModelFastModes } from "../../common/types/agent-models";
-import { providerDefaultSettings } from "../agent-factory/provider-defaults";
-import { AGENT_ROLES, AGENT_FIELDS, REQUIRED_AGENT_ROLES, mergeAgentSettings, type AgentDefaultsSnapshot, type AgentDefaults, type AgentPreset, type AgentPresetScope, validAgentValue } from "../../core/config/agent-settings";
+import { factoryAgentPresets } from "../agent-factory/provider-defaults";
+import { AGENT_ROLES, AGENT_FIELDS, REQUIRED_AGENT_ROLES, mergeAgentSettings, type AgentDefaultsSnapshot, type AgentDefaults, type AgentPresetScope, validAgentValue } from "../../core/config/agent-settings";
 const section = "agentFactory.agents";
-const globalInitializationKey = "agentFactory.agentDefaults.initialized.v4";
-const projectInitializationKey = "agentFactory.projectAgentDefaults.initialized.v3";
-const initializedFields = ["model", "reasoningEffort"] as const;
-const defaultInitializations = new WeakMap<object, Promise<void>>();
+type PresetState = Pick<vscode.Memento, "get" | "update">;
 type DetectedProviders = { codex: boolean; claude: boolean; antigravity?: boolean };
-type ProviderDefaults = Partial<Record<keyof DetectedProviders, AgentDefaults["main"]>>;
-
-/** Serialize initialization so concurrent panels cannot select different project defaults. */
-export function initializeAgentDefaults(
-  globalState: Pick<vscode.Memento, "get" | "update">,
-  providers: DetectedProviders,
-  workspaceState?: Pick<vscode.Memento, "get" | "update">,
-  providerDefaults: ProviderDefaults = {},
-  random: () => number = Math.random
-): Promise<void> {
-  const operation = (defaultInitializations.get(globalState) ?? Promise.resolve()).catch(() => undefined)
-    .then(() => seedAgentDefaults(globalState, providers, workspaceState, providerDefaults, random));
-  defaultInitializations.set(globalState, operation);
+interface StoredSet { id: string; name: string; settings: AgentDefaults }
+interface Library { sets: StoredSet[]; projectDefaults: Record<string, string>; migratedProjects: string[] }
+const libraryKey = "agentFactory.agentSets.v3";
+const operations = new WeakMap<object, Promise<unknown>>();
+const pendingInitialization = new WeakMap<object, Library>();
+function serialized<T>(state: PresetState, action: () => Promise<T>): Promise<T> {
+  const operation = (operations.get(state) ?? Promise.resolve()).catch(() => undefined).then(action);
+  operations.set(state, operation);
   return operation;
 }
-
-async function seedAgentDefaults(
-  globalState: Pick<vscode.Memento, "get" | "update">,
-  providers: DetectedProviders,
-  workspaceState: Pick<vscode.Memento, "get" | "update"> | undefined,
-  providerDefaults: ProviderDefaults,
-  random: () => number
-): Promise<void> {
-  const globalProvider = providers.codex ? "codex" : providers.claude ? "claude" : providers.antigravity ? "antigravity" : undefined;
-  const globalSeed = globalProvider ? providerDefaults[globalProvider] ?? providerDefaultSettings(globalProvider, {}) : undefined;
-  const model = globalSeed?.model;
-  const config = vscode.workspace.getConfiguration(section);
-  if (!globalState.get<boolean>(globalInitializationKey)) {
-    for (const role of REQUIRED_AGENT_ROLES) {
-      for (const field of initializedFields) {
-        const key = `${role}.${field}`;
-        const value = field === "model" ? model : globalSeed?.reasoningEffort ?? "medium";
-        if (value !== undefined && !validAgentValue(field, config.inspect<unknown>(key)?.globalValue)) {
-          await config.update(key, value, vscode.ConfigurationTarget.Global);
-        }
-      }
-    }
-    const migratedGlobal = readAgentDefaults(undefined, undefined, undefined, ["global"]).global;
-    if (migratedGlobal.fastByRoleModel) await config.update("fastByRoleModel", migratedGlobal.fastByRoleModel, vscode.ConfigurationTarget.Global);
-    if (model) await globalState.update(globalInitializationKey, true);
-  }
+function projectKey(): string | undefined {
   const uri = vscode.workspace.workspaceFolders?.[0]?.uri;
-  if (!uri || !workspaceState || workspaceState.get<boolean>(projectInitializationKey)) return;
-  const projectConfig = vscode.workspace.getConfiguration(section, uri);
-  const global = readAgentDefaults().global;
-  // Materialize the old effective settings once. Explicit project values win.
-  const existing = readAgentDefaults(undefined, undefined, undefined, ["project"]).project;
-  const hasExisting = AGENT_ROLES.some(role => Object.keys(existing[role] ?? {}).length > 0) || Boolean(existing.fastByRoleModel);
-  const pendingKey = projectInitializationKey + ".pending";
-  let snapshot = workspaceState.get<AgentDefaults>(pendingKey);
-  if (!snapshot) {
-    const available = (["codex", "claude", "antigravity"] as const).filter(id => providers[id]);
-    const provider = available.length ? available[Math.min(available.length - 1, Math.floor(random() * available.length))] : undefined;
-    const initial = provider ? providerDefaults[provider] ?? providerDefaultSettings(provider, {}) : {};
-    const seed = Object.fromEntries(AGENT_ROLES.map(role => [role, {...initial}]));
-    snapshot = hasExisting ? mergeAgentSettings(global, existing) : mergeAgentSettings(seed);
-    // Retain the same choice even if a later configuration write fails.
-    await workspaceState.update(pendingKey, snapshot);
-  }
-  for (const role of AGENT_ROLES) for (const field of initializedFields) {
-    const value = snapshot[role]?.[field];
-    if (validAgentValue(field, value)) {
-      await projectConfig.update(`${role}.${field}`, value, vscode.ConfigurationTarget.WorkspaceFolder);
-    }
-  }
-  // Store an empty map too: absence must never make later global preferences propagate.
-  await projectConfig.update("fastByRoleModel", snapshot.fastByRoleModel ?? {}, vscode.ConfigurationTarget.WorkspaceFolder);
-  await workspaceState.update(projectInitializationKey, true);
-  await workspaceState.update(pendingKey, undefined);
+  return uri ? uri.toString() === "[object Object]" ? uri.fsPath : uri.toString() : undefined;
 }
-
-export function readAgentDefaults(
-  globalState?: Pick<vscode.Memento, "get">,
-  workspaceState?: Pick<vscode.Memento, "get">,
-  chatId?: string,
-  legacyScopes: readonly ("global" | "project")[] = []
-): AgentDefaultsSnapshot {
+function readLibrary(state?: Pick<vscode.Memento, "get">): Library | undefined {
+  const library = state?.get<Library>(libraryKey);
+  return library ? structuredClone(library) : undefined;
+}
+/** Only migration reads the retired VS Code settings layers. Never write them again. */
+function readLegacyDefaults(): {global: AgentDefaults; project: AgentDefaults} {
   const uri = vscode.workspace.workspaceFolders?.[0]?.uri;
   const config = vscode.workspace.getConfiguration?.(section, uri);
   const global: AgentDefaults = {}, project: AgentDefaults = {};
@@ -111,12 +52,12 @@ export function readAgentDefaults(
   if (globalFast) global.fastByModel = globalFast;
   if (projectFast) project.fastByModel = projectFast;
   // Legacy model-wide and role-scoped values seed role-specific preferences in memory.
-  for (const [scope, settings, canonical] of [
+  for (const [, settings, canonical] of [
     ["global", global, globalRoleFast !== undefined],
     ["project", project, projectRoleFast !== undefined]
   ] as const) {
     // Once materialized, even an empty canonical map replaces the legacy Fast values.
-    if (canonical && !legacyScopes.includes(scope)) {
+    if (canonical) {
       for (const role of AGENT_ROLES) if (settings[role]) {
         const {fast, ...fields} = settings[role]!;
         settings[role] = fields;
@@ -134,230 +75,140 @@ export function readAgentDefaults(
     if (Object.keys(populated).length) settings.fastByRoleModel = populated;
     delete settings.fastByModel;
   }
-  const presets = readAgentPresets(globalState, workspaceState, chatId).map(preset =>
-    preset.isDefault && preset.scope !== "chat" ? {...preset, settings: mergeAgentSettings(preset.scope === "project" ? project : global)} : preset);
-  return { presets, global, project, projectAvailable: Boolean(uri) };
-}
-export async function saveAgentDefault(scope: "global" | "project", role: string, field: string, value: string | boolean): Promise<void> {
-  if (!(AGENT_ROLES as readonly string[]).includes(role) || !(AGENT_FIELDS as readonly string[]).includes(field) || !validAgentValue(field, value)) throw new Error("Invalid agent setting");
-  const uri = vscode.workspace.workspaceFolders?.[0]?.uri;
-  if (scope === "project" && !uri) throw new Error("Open a project before changing project settings");
-  if (field === "fast") {
-    const model = readAgentDefaults()[scope][role as typeof AGENT_ROLES[number]]?.model;
-    if (model) return saveModelFastMode(scope, role as typeof AGENT_ROLES[number], model, value as boolean);
-  }
-  const config = vscode.workspace.getConfiguration(section, uri);
-  await config.update(`${role}.${field}`, value, scope === "global" ? vscode.ConfigurationTarget.Global : vscode.ConfigurationTarget.WorkspaceFolder);
+  return {global, project};
 }
 
-export async function saveModelFastMode(scope: "global" | "project", role: typeof AGENT_ROLES[number], model: string, value: boolean): Promise<void> {
-  if (!AGENT_ROLES.includes(role) || !validAgentValue("model", model)) throw new Error("Invalid model Fast setting");
-  const uri = vscode.workspace.workspaceFolders?.[0]?.uri;
-  if (scope === "project" && !uri) throw new Error("Open a project before changing project settings");
-  const config = vscode.workspace.getConfiguration(section, uri);
-  const entry = config.inspect<unknown>("fastByRoleModel");
-  const current = parseAgentFastModes(scope === "global" ? entry?.globalValue : entry?.workspaceFolderValue ?? entry?.workspaceValue) ?? {};
-  await config.update("fastByRoleModel", {...current, [role]: {...current[role], [model]: value}}, scope === "global" ? vscode.ConfigurationTarget.Global : vscode.ConfigurationTarget.WorkspaceFolder);
+function importSet(library: Library, name: string, settings: AgentDefaults): StoredSet {
+  const normalized = mergeAgentSettings(settings);
+  const same = library.sets.find(set => set.name === name && JSON.stringify(set.settings) === JSON.stringify(normalized));
+  if (same) return same;
+  let unique = name, suffix = 2;
+  while (library.sets.some(set => set.name === unique)) unique = `${name} (${suffix++})`;
+  const set = {id: randomUUID(), name: unique, settings: normalized};
+  library.sets.push(set);
+  return set;
 }
+const hasValues = (settings: AgentDefaults) => AGENT_ROLES.some(role => Object.keys(settings[role] ?? {}).length > 0) || Boolean(settings.fastByRoleModel && Object.keys(settings.fastByRoleModel).length);
 
-interface StoredAgentPreset { name: string; settings: AgentDefaults; isDefault?: boolean }
-type PresetState = Pick<vscode.Memento, "get" | "update">;
-const legacyPresetKey = "agentFactory.agentPresets.v1";
-const globalPresetKey = "agentFactory.agentPresets.global.v2";
-const projectPresetKey = "agentFactory.agentPresets.project.v2";
-const chatPresetKey = "agentFactory.agentPresets.chat.v2";
-const presetOperations = new WeakMap<object, Promise<void>>();
-
-function scoped(presets: readonly StoredAgentPreset[], scope: AgentPresetScope): AgentPreset[] {
-  return presets.map(preset => ({...preset, scope, settings: mergeAgentSettings(preset.settings)}));
-}
-
-function chatPresetMap(state?: Pick<vscode.Memento, "get">): Record<string, StoredAgentPreset[]> {
-  return state?.get<Record<string, StoredAgentPreset[]>>(chatPresetKey, {}) ?? {};
-}
-
-function readAgentPresets(globalState?: Pick<vscode.Memento, "get">, workspaceState?: Pick<vscode.Memento, "get">, chatId?: string): AgentPreset[] {
-  return [
-    ...scoped(globalState?.get<StoredAgentPreset[]>(globalPresetKey, []) ?? [], "global"),
-    ...scoped(workspaceState?.get<StoredAgentPreset[]>(projectPresetKey, []) ?? [], "project"),
-    ...scoped(chatId ? chatPresetMap(workspaceState)[chatId] ?? [] : [], "chat")
-  ];
-}
-
-function defaultPreset(settings: AgentDefaults): StoredAgentPreset {
-  return {name: "Default", isDefault: true, settings: mergeAgentSettings(settings)};
-}
-
-function migratedPresets(legacy: readonly StoredAgentPreset[], settings: AgentDefaults): StoredAgentPreset[] {
-  const custom = legacy.filter(preset => !preset.isDefault && preset.name !== "Default")
-    .map(preset => ({name: preset.name, settings: mergeAgentSettings(preset.settings)}));
-  return [defaultPreset(settings), ...custom];
-}
-
-async function seedAgentPresets(globalState: PresetState, workspaceState?: PresetState, chatId?: string, chatSettings: AgentDefaults = {}): Promise<void> {
-  const defaults = readAgentDefaults();
-  const legacy = globalState.get<StoredAgentPreset[]>(legacyPresetKey, []);
-  if (!globalState.get<boolean>(globalPresetKey + ".initialized", false)) {
-    if (!globalState.get<StoredAgentPreset[]>(globalPresetKey)?.length) await globalState.update(globalPresetKey, migratedPresets(legacy, defaults.global));
-    await globalState.update(globalPresetKey + ".initialized", true);
-  }
-  if (workspaceState && !workspaceState.get<boolean>(projectPresetKey + ".initialized", false)) {
-    if (!workspaceState.get<StoredAgentPreset[]>(projectPresetKey)?.length) await workspaceState.update(projectPresetKey, globalState.get<StoredAgentPreset[]>(globalPresetKey, []).map(preset => preset.isDefault ? defaultPreset(defaults.project) : {...preset, settings: mergeAgentSettings(preset.settings)}));
-    await workspaceState.update(projectPresetKey + ".initialized", true);
-  }
-  // Keep old chat-owned custom sets available in the settings-only project library.
-  // Retain the original records and disambiguate differing same-named sets.
-  const importKey = projectPresetKey + ".chatImport.v1";
-  if (workspaceState && !workspaceState.get<boolean>(importKey, false)) {
-    const presets = [...workspaceState.get<StoredAgentPreset[]>(projectPresetKey, [])];
-    for (const sets of Object.values(chatPresetMap(workspaceState))) for (const preset of sets) {
-      if (preset.isDefault || preset.name === "Default") continue;
-      const settings = mergeAgentSettings(preset.settings);
-      const sameName = (name: string) => name === preset.name ||
-        (name.startsWith(`${preset.name} (`) && /^\d+\)$/.test(name.slice(preset.name.length + 2)));
-      if (presets.some(item => sameName(item.name) && JSON.stringify(mergeAgentSettings(item.settings)) === JSON.stringify(settings))) continue;
-      let name = preset.name, suffix = 2;
-      while (presets.some(item => item.name === name)) name = `${preset.name} (${suffix++})`;
-      presets.push({...preset, name, settings});
+async function initializeLibrary(globalState: PresetState, workspaceState?: PresetState, providers: DetectedProviders = {codex: false, claude: false}, random: () => number = Math.random): Promise<void> {
+  const saved = readLibrary(globalState);
+  const key = projectKey();
+  if (saved && (!key || saved.migratedProjects.includes(key))) return;
+  let library = pendingInitialization.get(globalState);
+  if (!library) {
+    library = saved ?? {sets: factoryAgentPresets(), projectDefaults: {}, migratedProjects: []};
+    const legacy = readLegacyDefaults();
+    type OldSet = {name: string; settings: AgentDefaults; isDefault?: boolean};
+    if (!saved) {
+      for (const storageKey of ["agentFactory.agentPresets.v1", "agentFactory.agentPresets.global.v2"]) {
+        for (const set of globalState.get<OldSet[]>(storageKey, [])) importSet(library, set.name, set.isDefault && hasValues(legacy.global) ? legacy.global : set.settings);
+      }
+      if (hasValues(legacy.global)) importSet(library, "Imported settings", legacy.global);
     }
-    await workspaceState.update(projectPresetKey, presets);
-    await workspaceState.update(importKey, true);
+    if (key) {
+      const oldProject = workspaceState?.get<OldSet[]>("agentFactory.agentPresets.project.v2", []) ?? [];
+      for (const set of oldProject) importSet(library, set.name, set.isDefault && hasValues(legacy.project) ? mergeAgentSettings(legacy.global, legacy.project) : set.settings);
+      const oldChats = workspaceState?.get<Record<string, OldSet[]>>("agentFactory.agentPresets.chat.v2", {}) ?? {};
+      for (const sets of Object.values(oldChats)) for (const set of sets) importSet(library, set.name, set.settings);
+      let initial: StoredSet | undefined;
+      if (hasValues(legacy.project)) initial = importSet(library, "Imported settings", mergeAgentSettings(legacy.global, legacy.project));
+      else if (oldProject.find(set => set.isDefault)) {
+        const old = oldProject.find(set => set.isDefault)!;
+        initial = importSet(library, old.name, old.settings);
+      } else if (hasValues(legacy.global) && (!saved || workspaceState?.get<boolean>("agentFactory.projectAgentDefaults.initialized.v3"))) initial = importSet(library, "Imported settings", legacy.global);
+      if (!initial) {
+        const available = (["codex", "claude", "antigravity"] as const).filter(id => providers[id]);
+        const provider = available.length ? available[Math.min(available.length - 1, Math.max(0, Math.floor(random() * available.length)))] : undefined;
+        initial = provider ? library.sets.find(set => set.id === `factory-${provider}`) : undefined;
+        // A deleted supplied set is recreated only when a new project needs it.
+        if (provider && !initial) { initial = factoryAgentPresets().find(set => set.id === `factory-${provider}`)!; library.sets.push(initial); }
+        if (!initial) initial = importSet(library, "Unconfigured", {});
+      }
+      library.projectDefaults[key] = initial.id;
+      library.migratedProjects.push(key);
+    }
+    pendingInitialization.set(globalState, library);
   }
-  if (workspaceState && chatId) {
-    const map = chatPresetMap(workspaceState);
-    if (!map[chatId]?.length) await workspaceState.update(chatPresetKey, {...map, [chatId]: (workspaceState.get<StoredAgentPreset[]>(projectPresetKey, [])).map(preset => preset.isDefault ? defaultPreset(chatSettings) : {...preset, settings: mergeAgentSettings(preset.settings)})});
-  }
+  // One atomic memento write keeps the library, migration marker and designation consistent.
+  await globalState.update(libraryKey, library);
+  pendingInitialization.delete(globalState);
 }
 
-export function ensureAgentPresets(globalState: PresetState, workspaceState?: PresetState, chatId?: string, chatSettings?: AgentDefaults): Promise<void> {
-  const operation = (presetOperations.get(globalState) ?? Promise.resolve()).catch(() => undefined)
-    .then(() => seedAgentPresets(globalState, workspaceState, chatId, chatSettings));
-  presetOperations.set(globalState, operation);
-  return operation;
+export function initializeAgentDefaults(globalState: PresetState, providers: DetectedProviders, workspaceState?: PresetState, random: () => number = Math.random): Promise<void> {
+  return serialized(globalState, () => initializeLibrary(globalState, workspaceState, providers, random));
+}
+export function ensureAgentPresets(globalState: PresetState, workspaceState?: PresetState, _chatId?: string, _chatSettings?: AgentDefaults): Promise<void> {
+  return serialized(globalState, () => initializeLibrary(globalState, workspaceState));
 }
 
-function readScopePresets(globalState: PresetState, workspaceState: PresetState | undefined, chatId: string | undefined, scope: AgentPresetScope): StoredAgentPreset[] {
-  if (scope === "global") return globalState.get<StoredAgentPreset[]>(globalPresetKey, []);
-  if (scope === "project") return workspaceState?.get<StoredAgentPreset[]>(projectPresetKey, []) ?? [];
-  return chatId && workspaceState ? chatPresetMap(workspaceState)[chatId] ?? [] : [];
+export function readAgentDefaults(globalState?: Pick<vscode.Memento, "get">, _workspaceState?: Pick<vscode.Memento, "get">, _chatId?: string): AgentDefaultsSnapshot {
+  const library = readLibrary(globalState);
+  const key = projectKey();
+  const defaultSetId = key ? library?.projectDefaults[key] : undefined;
+  const selected = library?.sets.find(set => set.id === defaultSetId);
+  return {
+    // These compatibility fields are derived snapshots, never independent settings layers.
+    global: {}, project: mergeAgentSettings(selected?.settings ?? {}), projectAvailable: Boolean(key), defaultSetId,
+    presets: (library?.sets ?? []).map(set => ({...set, scope: "global", isDefault: set.id === defaultSetId,
+      inUse: Object.values(library?.projectDefaults ?? {}).includes(set.id), settings: mergeAgentSettings(set.settings)}))
+  };
 }
 
-async function writeScopePresets(globalState: PresetState, workspaceState: PresetState | undefined, chatId: string | undefined, scope: AgentPresetScope, presets: StoredAgentPreset[]): Promise<void> {
-  if (scope === "global") { await globalState.update(globalPresetKey, presets); return; }
-  if (!workspaceState) throw new Error("Open a project before changing project or chat sets");
-  if (scope === "project") { await workspaceState.update(projectPresetKey, presets); return; }
-  if (!chatId) throw new Error("Open a chat before changing chat sets");
-  const map = chatPresetMap(workspaceState);
-  await workspaceState.update(chatPresetKey, {...map, [chatId]: presets});
-}
-
-/** Serialize preset updates across panels sharing this extension host. */
-export function useAgentPreset(globalState: PresetState, workspaceState: PresetState | undefined, chatId: string | undefined, action: "save" | "apply" | "copy" | "update" | "delete" | "rename", scope: AgentPresetScope, name: string, chatSettings?: AgentDefaults, newName?: string): Promise<AgentDefaults | undefined> {
-  const previous = presetOperations.get(globalState) ?? Promise.resolve();
-  const operation = previous.catch(() => undefined).then(async () => {
-    await seedAgentPresets(globalState, workspaceState, chatId, chatSettings);
-    const presets = readScopePresets(globalState, workspaceState, chatId, scope);
+export function useAgentPreset(globalState: PresetState, workspaceState: PresetState | undefined, _chatId: string | undefined, action: "save" | "apply" | "copy" | "update" | "delete" | "rename" | "default", _scope: AgentPresetScope, name: string, chatSettings?: AgentDefaults, newName?: string): Promise<AgentDefaults | undefined> {
+  return serialized(globalState, async () => {
+    await initializeLibrary(globalState, workspaceState);
+    const library = readLibrary(globalState)!;
     name = name.trim();
     if (!name) throw new Error(localize("preset.name.required"));
-    if (action === "rename") {
-      const preset = presets.find(item => item.name === name);
-      const replacementName = newName?.trim() ?? "";
-      if (!preset) throw new Error(localize("preset.missing"));
-      if (preset.isDefault) throw new Error(localize("preset.default.required"));
-      if (!replacementName) throw new Error(localize("preset.name.required"));
-      if (presets.some(item => item !== preset && item.name === replacementName)) throw new Error(localize("preset.duplicate"));
-      await writeScopePresets(globalState, workspaceState, chatId, scope, presets.map(item => item === preset ? {...item, name: replacementName} : item));
-      return;
-    }
-    if (action === "delete") {
-      const preset = presets.find(item => item.name === name);
-      if (!preset) throw new Error(localize("preset.missing"));
-      if (preset.isDefault) throw new Error(localize("preset.default.required"));
-      await writeScopePresets(globalState, workspaceState, chatId, scope, presets.filter(item => item.name !== name));
-      return;
-    }
-    if (scope === "project" && !vscode.workspace.workspaceFolders?.length) throw new Error("Open a project before changing project settings");
-    if (action === "save" || action === "update") {
-      if (action === "save" && presets.some(preset => preset.name === name)) throw new Error(localize("preset.duplicate"));
-      if (action === "update" && !presets.some(preset => preset.name === name)) throw new Error(localize("preset.missing"));
-      const settings = scope === "chat" ? mergeAgentSettings(chatSettings ?? {}) : readAgentDefaults()[scope];
-      if (!REQUIRED_AGENT_ROLES.every(role => ["model", "reasoningEffort"].every(field => validAgentValue(field, settings[role]?.[field as "model" | "reasoningEffort"])))) throw new Error(localize("preset.invalid"));
-      const replacement = {name, settings};
-      await writeScopePresets(globalState, workspaceState, chatId, scope, action === "save" ? [...presets, replacement] : presets.map(preset => preset.name === name ? {...preset, ...replacement} : preset));
-      return mergeAgentSettings(settings);
-    }
-    const preset = readAgentDefaults(globalState, workspaceState, chatId).presets?.find(preset => preset.scope === scope && preset.name === name);
-    if (!preset) throw new Error(localize("preset.missing"));
-    // Validate the complete stored set before writing any setting.
-    // Presets saved before the light Work profile omit it; applying them leaves unset optional fields unchanged.
-    const required = (role: string) => (REQUIRED_AGENT_ROLES as readonly string[]).includes(role);
-    const pairs = AGENT_ROLES.flatMap(role => AGENT_FIELDS.map(field => [role, field] as const))
-      .filter(([role, field]) => field !== "fast" && (required(role) || preset.settings[role]?.[field] !== undefined));
-    for (const [role, field] of pairs) {
-      if (!validAgentValue(field, preset.settings[role]?.[field])) throw new Error(localize("preset.invalid"));
-    }
-    if (scope === "chat" || action === "copy") return mergeAgentSettings(preset.settings);
-    const config = vscode.workspace.getConfiguration(section, vscode.workspace.workspaceFolders?.[0]?.uri);
-    const target = scope === "global" ? vscode.ConfigurationTarget.Global : vscode.ConfigurationTarget.WorkspaceFolder;
-    const before = new Map<string, string | boolean | undefined>();
-    const fastEntry = config.inspect<unknown>("fastByRoleModel");
-    const beforeFast = scope === "global" ? fastEntry?.globalValue : fastEntry?.workspaceFolderValue;
-    for (const [role, field] of pairs) {
-      const key = `${role}.${field}`;
-      const entry = config.inspect<string | boolean>(key);
-      before.set(key, scope === "global" ? entry?.globalValue : entry?.workspaceFolderValue);
-    }
-    const changed: [typeof AGENT_ROLES[number], typeof AGENT_FIELDS[number]][] = [];
-    let changedFast = false;
-    try {
-      for (const [role, field] of pairs) {
-        await saveAgentDefault(scope, role, field, preset.settings[role]![field]!);
-        changed.push([role, field]);
+    const set = library.sets.find(item => item.name === name);
+    if (action === "save") {
+      if (set) throw new Error(localize("preset.duplicate"));
+      importSet(library, name, chatSettings ?? readAgentDefaults(globalState).project);
+    } else {
+      if (!set) throw new Error(localize("preset.missing"));
+      if (action === "rename") {
+        const replacement = newName?.trim();
+        if (!replacement) throw new Error(localize("preset.name.required"));
+        if (library.sets.some(item => item !== set && item.name === replacement)) throw new Error(localize("preset.duplicate"));
+        set.name = replacement;
+      } else if (action === "delete") {
+        if (Object.values(library.projectDefaults).includes(set.id)) throw new Error(localize("preset.default.required"));
+        library.sets = library.sets.filter(item => item !== set);
+      } else if (action === "default") {
+        const key = projectKey();
+        if (!key) throw new Error("Open a project before choosing its default set");
+        library.projectDefaults[key] = set.id;
+      } else if (action === "update") {
+        set.settings = mergeAgentSettings(chatSettings ?? {});
+      } else {
+        if (!REQUIRED_AGENT_ROLES.every(role => ["model", "reasoningEffort"].every(field => validAgentValue(field, set.settings[role]?.[field as "model" | "reasoningEffort"])))) throw new Error(localize("preset.invalid"));
+        return mergeAgentSettings(set.settings);
       }
-      await config.update("fastByRoleModel", preset.settings.fastByRoleModel ?? {}, target);
-      changedFast = true;
-    } catch (error) {
-      // Restore earlier writes if a later configuration write fails.
-      const rollback = await Promise.allSettled([
-        ...changed.map(([role, field]) => config.update(`${role}.${field}`, before.get(`${role}.${field}`), target)),
-        ...(changedFast ? [config.update("fastByRoleModel", beforeFast, target)] : [])
-      ]);
-      if (rollback.some(result => result.status === "rejected")) throw new Error(localize("preset.rollback.failed"));
-      throw error;
     }
-    return mergeAgentSettings(preset.settings);
+    await globalState.update(libraryKey, library);
+    return undefined;
   });
-  presetOperations.set(globalState, operation.then(() => undefined, () => undefined));
-  return operation;
 }
 
-/** Patch only the edited field; serialize with save/delete to preserve concurrent edits. */
-export function updateAgentPresetField(globalState: PresetState, workspaceState: PresetState | undefined, chatId: string | undefined, scope: AgentPresetScope, name: string, role: typeof AGENT_ROLES[number], field: typeof AGENT_FIELDS[number], value: string | boolean): Promise<void> {
-  const operation = (presetOperations.get(globalState) ?? Promise.resolve()).catch(() => undefined).then(async () => {
+export function updateAgentPresetField(globalState: PresetState, workspaceState: PresetState | undefined, _chatId: string | undefined, _scope: AgentPresetScope, name: string, role: typeof AGENT_ROLES[number], field: typeof AGENT_FIELDS[number], value: string | boolean): Promise<void> {
+  return serialized(globalState, async () => {
     if (!AGENT_ROLES.includes(role) || !AGENT_FIELDS.includes(field) || !validAgentValue(field, value)) throw new Error(localize("preset.invalid"));
-    const presets = readScopePresets(globalState, workspaceState, chatId, scope);
-    const preset = presets.find(item => item.name === name);
-    if (!preset) throw new Error(localize("preset.missing"));
-    const fields = {...preset.settings[role]};
-    if (field === "model") fields.model = value as string;
-    else if (field === "reasoningEffort") fields.reasoningEffort = value as NonNullable<typeof fields.reasoningEffort>;
-    else fields.fast = value as boolean;
-    const replacement = {...preset, settings: {...preset.settings, [role]: fields}};
-    await writeScopePresets(globalState, workspaceState, chatId, scope, presets.map(item => item === preset ? replacement : item));
+    await initializeLibrary(globalState, workspaceState);
+    const library = readLibrary(globalState)!;
+    const set = library.sets.find(item => item.name === name);
+    if (!set) throw new Error(localize("preset.missing"));
+    set.settings = mergeAgentSettings(set.settings, {[role]: {[field]: value}});
+    await globalState.update(libraryKey, library);
   });
-  presetOperations.set(globalState, operation);
-  return operation;
 }
-
-export function updateAgentPresetFastMode(globalState: PresetState, workspaceState: PresetState | undefined, chatId: string | undefined, scope: AgentPresetScope, name: string, role: typeof AGENT_ROLES[number], model: string, value: boolean): Promise<void> {
-  const operation = (presetOperations.get(globalState) ?? Promise.resolve()).catch(() => undefined).then(async () => {
+export function updateAgentPresetFastMode(globalState: PresetState, workspaceState: PresetState | undefined, _chatId: string | undefined, _scope: AgentPresetScope, name: string, role: typeof AGENT_ROLES[number], model: string, value: boolean): Promise<void> {
+  return serialized(globalState, async () => {
     if (!AGENT_ROLES.includes(role) || !validAgentValue("model", model)) throw new Error(localize("preset.invalid"));
-    const presets = readScopePresets(globalState, workspaceState, chatId, scope);
-    const preset = presets.find(item => item.name === name);
-    if (!preset) throw new Error(localize("preset.missing"));
-    const replacement = {...preset, settings: {...preset.settings, fastByRoleModel: {...preset.settings.fastByRoleModel, [role]: {...preset.settings.fastByRoleModel?.[role], [model]: value}}}};
-    await writeScopePresets(globalState, workspaceState, chatId, scope, presets.map(item => item === preset ? replacement : item));
+    await initializeLibrary(globalState, workspaceState);
+    const library = readLibrary(globalState)!;
+    const set = library.sets.find(item => item.name === name);
+    if (!set) throw new Error(localize("preset.missing"));
+    set.settings.fastByRoleModel = {...set.settings.fastByRoleModel, [role]: {...set.settings.fastByRoleModel?.[role], [model]: value}};
+    await globalState.update(libraryKey, library);
   });
-  presetOperations.set(globalState, operation);
-  return operation;
 }

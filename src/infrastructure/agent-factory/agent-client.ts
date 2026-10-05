@@ -193,6 +193,7 @@ export interface AgentRuntimeClient {
   stopTask?(mainAgentId: string, target: TaskStopTarget): Promise<Record<string, unknown> | undefined>;
   closeWorkflow?(mainAgentId: string, workAgentId: string, loopId: string): Promise<Record<string, unknown>>;
   decideRevisionLimit?(mainAgentId: string, workAgentId: string, loopId: string, decision: RevisionLimitDecision): Promise<Record<string, unknown>>;
+  answerWorkflow?(mainAgentId: string, workAgentId: string, loopId: string, decisionId: string, questionHash: string, answer: string): Promise<Record<string, unknown>>;
   advanceWorkflows?(mainAgentId: string, agents: readonly ChildAgentSession[], drive?: boolean): Promise<readonly Record<string, unknown>[]>;
   listProjectTasks?(): Promise<readonly ProjectTaskEntry[]>;
 }
@@ -423,12 +424,14 @@ export class AgentFactoryClient implements AgentRuntimeClient {
   }
 
   public async send(agentId: string, message: string, execution: ExecutionOptions, images: readonly RuntimeImageInput[] = []): Promise<RunAcceptance> {
+    if (execution.deliveryId && !MANAGED_ID.test(execution.deliveryId)) throw new Error("Invalid engine delivery identity");
     const { document, preparationGuidance } = await this.inputCommand([
       "send",
       "--project-root",
       this.projectRoot,
       "--agent",
       agentId,
+      ...(execution.deliveryId ? ["--dispatch-id", execution.deliveryId] : []),
       ...executionPolicyArguments(execution.executionMode),
       ...await this.checkedExecution("send", execution, agentId, images.length > 0)
     ], message, images);
@@ -445,7 +448,7 @@ export class AgentFactoryClient implements AgentRuntimeClient {
       const directory = arguments_[0] === "send" && this.worktreeAgents.has(agent) ? await this.workingDirectory(agent) : this.projectRoot;
       preparationGuidance = await submissionContext(directory, this.execPath);
     }
-    const helper = sudoHandoffEnvironment().AGENT_FACTORY_SUDO_HELPER;
+    const helper = arguments_.includes("--dispatch-id") ? undefined : sudoHandoffEnvironment().AGENT_FACTORY_SUDO_HELPER;
     const sudoGuidance = helper ? `
 [Agent Factory administrator command handoff]
 When a command needs sudo and the Human has requested it, use python3 ${JSON.stringify(helper)} -- <executable> <arguments...>. This opens a protected password form in the current Main chat. Pass exact argument tokens, never a shell command string. Wait for the command result before reporting completion. Never ask for the password in a normal chat message.
@@ -957,8 +960,19 @@ When a command needs sudo and the Human has requested it, use python3 ${JSON.str
       : this.workflowDecision(mainAgentId, workAgentId, loopId, "close", [], "Human selected Stop at the revision limit", "Workflow close failed");
   }
 
+  public async answerWorkflow(mainAgentId: string, workAgentId: string, loopId: string, decisionId: string, questionHash: string, answer: string): Promise<Record<string, unknown>> {
+    const path = await this.managedPath(workAgentId, "loops", loopId, "state.json");
+    const state = readRecord(JSON.parse((await readManagedBytes(path, MAX_RESULT_BYTES)).toString("utf8")), "workflow");
+    const decisions = readRecord(state.decisions, "workflow decisions");
+    const decision = readRecord(decisions[decisionId], "workflow decision");
+    if (decision.questionHash !== questionHash || !answer.trim()) throw new Error("Decision question changed; reload it before answering");
+    const task = readRecord(decision.taskBinding, "decision task");
+    const response = { decisionId, questionHash, answer, projectRoot: this.projectRoot, loopId, taskId: task.taskId, runId: decision.runId };
+    return this.workflowDecision(mainAgentId, workAgentId, loopId, "answer", ["--response-json", JSON.stringify(response)], answer, "Workflow answer failed");
+  }
+
   /** Run a Human-only loop command bound to the Main run that started the workflow, with the click as decision evidence. */
-  private async workflowDecision(mainAgentId: string, workAgentId: string, loopId: string, command: "close" | "extend-revisions" | "stop-task",
+  private async workflowDecision(mainAgentId: string, workAgentId: string, loopId: string, command: "close" | "extend-revisions" | "stop-task" | "answer",
     extra: readonly string[], evidence: string, failure: string): Promise<Record<string, unknown>> {
     const location = await this.location();
     const path = await this.managedPath(workAgentId, "loops", loopId, "state.json");
@@ -1081,7 +1095,7 @@ When a command needs sudo and the Human has requested it, use python3 ${JSON.str
         // Bind both values to the same captured run. The runtime validates the
         // snapshot against that run and its session before advancing any work.
         const output = await runBoundedProcess(this.pythonCommand, [join(dirname(this.execPath), "loop.py"),
-          drive && state.status === "active" ? "reconcile" : "status", "--project-root", this.projectRoot,
+          "status", "--project-root", this.projectRoot,
           "--runtime-home", location.home, "--project-id", location.projectId,
           "--work-agent", agentId, "--loop-id", entry.name], COMMAND_TIMEOUT_MS, MAX_PROCESS_OUTPUT_BYTES,
           { ...pluginRuntimeEnvironment(this.developmentRoot),
@@ -1156,7 +1170,7 @@ When a command needs sudo and the Human has requested it, use python3 ${JSON.str
       catch (error) { if (isMissingFile(error)) return undefined; throw error; }
     }));
     const document = sessions.every(Boolean) ? { agents: sessions } : await this.listAgentsDocument();
-    if (!Array.isArray(document.agents) || document.agents.length > 1_000) {
+    if (!Array.isArray(document.agents)) {
       throw new Error(localize("ui.invalid.agent.factory.session.list.response"));
     }
     const agents: ChildAgentSession[] = [];
@@ -1215,8 +1229,7 @@ When a command needs sudo and the Human has requested it, use python3 ${JSON.str
     try {
       runs = (runId ? [{ name: runId, isDirectory: () => true }] : await this.managedDirectoryEntries(runsDirectory))
         .filter((entry) => entry.isDirectory() && MANAGED_ID.test(entry.name) && (runId === undefined || entry.name === runId))
-        .sort((left, right) => right.name.localeCompare(left.name))
-        .slice(0, 500);
+        .sort((left, right) => right.name.localeCompare(left.name));
     } catch (error) {
       if (isMissingFile(error)) return childIds;
       throw error;
@@ -1353,23 +1366,23 @@ When a command needs sudo and the Human has requested it, use python3 ${JSON.str
     return entries;
   }
 
-  private async cachedRunState(path: string): Promise<Record<string, unknown> | undefined> {
+  private async cachedRunState(path: string, maxBytes = 256 * 1024): Promise<Record<string, unknown> | undefined> {
     const before = await lstat(path);
-    if (!before.isFile() || before.size > 256 * 1024) {
+    if (!before.isFile() || before.size > maxBytes) {
       this.deleteRunStateSnapshot(path);
       return undefined;
     }
     const signature = `${before.dev}:${before.ino}:${before.size}:${before.mtimeMs}:${before.ctimeMs}`;
     const cached = this.runStateSnapshots.get(path);
     if (cached?.signature === signature) return cached.value;
-    const content = await readManagedBytes(path, 256 * 1024);
+    const content = await readManagedBytes(path, maxBytes);
     const value = readRecordOrUndefined(JSON.parse(content.toString("utf8")));
     const after = await lstat(path);
     this.deleteRunStateSnapshot(path);
     if (value && signature === `${after.dev}:${after.ino}:${after.size}:${after.mtimeMs}:${after.ctimeMs}`) {
       this.runStateSnapshots.set(path, { signature, value, bytes: content.length });
       this.runStateSnapshotBytes += content.length;
-      // A 500-run scan can use four records per run (reference, session,
+      // A history scan can use four records per run (reference, session,
       // child state, parent state). Bound source bytes separately so larger
       // records cannot consume the old entry-only budget of up to 256 MiB.
       while (this.runStateSnapshots.size > 2_048 || this.runStateSnapshotBytes > 8 * 1024 * 1024) {
@@ -1394,9 +1407,9 @@ When a command needs sudo and the Human has requested it, use python3 ${JSON.str
       for (const run of runs.slice(0, 100)) {
         const statePath = await this.managedPath(agentId, "runs", run.name, "state.json");
         try {
-          // cachedRunState already checks file type, size and freshness before
-          // returning a value. Avoid a second metadata read for every child.
-          const state = await this.cachedRunState(statePath);
+          // Task descriptions can exceed the ordinary metadata budget. Keep the
+          // cache bounded, but preserve full task data for indexing and detail UI.
+          const state = await this.cachedRunState(statePath, Infinity);
           if (typeof state?.status === "string" && state.status) {
             const executionOptions = readRecordOrUndefined(state.executionOptions);
             return {

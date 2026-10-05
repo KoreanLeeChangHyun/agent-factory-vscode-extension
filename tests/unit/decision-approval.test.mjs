@@ -15,7 +15,7 @@ test("approval target is the response's last decision request, quoted verbatim",
 
 test("irreversible operations are detected from clear command shapes", () => {
   const detected = text => irreversibleOperations(text);
-  assert.deepEqual(detected("`git checkout -- docs/artifact/cli-comparison` 로 되돌리기를 권합니다."), ["git checkout -- docs/artifact/cli-comparison"]);
+  assert.deepEqual(detected("`git checkout -- docs/artifact/evidence/cli-comparison` 로 되돌리기를 권합니다."), ["git checkout -- docs/artifact/evidence/cli-comparison"]);
   assert.deepEqual(detected("```sh\ngit checkout .\ngit reset --hard HEAD\ngit clean -fd\n```"), ["git checkout .", "git reset --hard HEAD", "git clean -fd"]);
   assert.deepEqual(detected("Run `git restore src/a.ts` then `git push --force origin main`."), ["git restore src/a.ts", "git push --force origin main"]);
   assert.deepEqual(detected("`rm -rf build` 후 `git stash drop` 하고 `git branch -D old`"), ["git stash drop", "git branch -D old", "rm -rf build"]);
@@ -95,12 +95,12 @@ test("controller sends the approval target and refuses one-click approval of irr
     onBound() {}, onRunningChanged() {}, onProgress() {}, onActivity() {}, onUsage() {}, onAssistantText() {}, onError() {},
     onDecision(...args) { decisions.push(args); }, onHumanDecision(text) { human.push(text); }
   };
-  resultText = "아티팩트 44개를 `git checkout -- docs/artifact/cli-comparison` 로 되돌릴까요?";
+  resultText = "아티팩트 44개를 `git checkout -- docs/artifact/evidence/cli-comparison` 로 되돌릴까요?";
   const blocked = new ChatSessionController(runtime, events, undefined, { pollIntervalMs: 0, maxPolls: 1 });
   await blocked.send("task", [], {});
   assert.deepEqual(JSON.parse(JSON.stringify(decisions.at(-1))), ["proposal-run", false, {
-    request: "아티팩트 44개를 `git checkout -- docs/artifact/cli-comparison` 로 되돌릴까요?",
-    irreversible: ["git checkout -- docs/artifact/cli-comparison"]
+    request: "아티팩트 44개를 `git checkout -- docs/artifact/evidence/cli-comparison` 로 되돌릴까요?",
+    irreversible: ["git checkout -- docs/artifact/evidence/cli-comparison"]
   }]);
   assert.equal(blocked.approveDecision("proposal-run", {}), false);
   assert.equal(sent.length, 0);

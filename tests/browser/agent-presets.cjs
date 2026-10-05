@@ -1,7 +1,7 @@
 const assert = require('node:assert/strict');
 async function checkAgentPresets(page) {
   const fs=require('node:fs'),path=require('node:path');
-  const artifactDir=process.env.AF_PRESETS_ARTIFACT_DIR || path.resolve(__dirname,'../../../docs/artifact/agent-settings-sets');
+  const artifactDir=process.env.AF_PRESETS_ARTIFACT_DIR || path.resolve(__dirname,'../../../docs/artifact/evidence/agent-settings-sets');
   fs.mkdirSync(artifactDir,{recursive:true});
   const errors=[];page.on('pageerror',error=>errors.push(error.message));
   const emit=async data=>{await page.evaluate(data=>window.postMessage(data,'*'),data);await page.evaluate(()=>new Promise(requestAnimationFrame));};
@@ -17,26 +17,25 @@ async function checkAgentPresets(page) {
   const settingsFor=model=>Object.fromEntries(['main','work','workLight','verification'].map(role=>[role,{model,reasoningEffort:'medium'}]));
   const projectSet=settingsFor('gpt-6-sol'), quality=settingsFor('gpt-6-astra'), globalSet=settingsFor('claude-opus-5-5');
   const capabilities={submit:{model:true,reasoning:true,fast:true},send:{model:true,reasoning:true,fast:true}};
-  const initialize=async(panelId,model='gpt-6-sol',extra={})=>emit({type:'host.initialize',panelId,role:'main',projectName:'project',runtimeAvailable:true,running:false,statusItems:[],queueCount:0,agentSettingsVersion:1,agentSettingsScope:'chat',agentSettingsSet:'Default',model,reasoning:'medium',agentModels:{work:projectSet.work,workLight:projectSet.workLight,verification:projectSet.verification},capabilities,...extra});
+  const initialize=async(panelId,model='gpt-6-sol',extra={})=>emit({type:'host.initialize',panelId,role:'main',projectName:'project',runtimeAvailable:true,running:false,statusItems:[],queueCount:0,agentSettingsVersion:1,agentSettingsScope:'chat',agentSettingsSet:'Agent Factory · Codex',model,reasoning:'medium',agentModels:{work:projectSet.work,workLight:projectSet.workLight,verification:projectSet.verification},capabilities,...extra});
   await initialize('preset-check');
   await emit({type:'models.list',models:['gpt-6-astra','gpt-6-sol','claude-opus-5-5']});
-  const settings={global:globalSet,project:projectSet,projectAvailable:true,presets:[
-    {scope:'global',name:'Default',isDefault:true,settings:globalSet},
-    {scope:'project',name:'Default',isDefault:true,settings:projectSet},
-    {scope:'project',name:'Quality',settings:quality},
-    {scope:'chat',name:'Legacy',settings:globalSet}
+  const settings={global:{},project:projectSet,projectAvailable:true,defaultSetId:'codex',presets:[
+    {id:'codex',scope:'global',name:'Agent Factory · Codex',isDefault:true,inUse:true,settings:projectSet},
+    {id:'quality',scope:'global',name:'Quality',settings:quality},
+    {id:'claude',scope:'global',name:'Agent Factory · Claude',settings:globalSet}
   ]};
   await emit({type:'agent.defaults',settings});
   await page.locator('#model-button').click();
   assert.equal(await page.locator('#model-menu #agent-default-scope').count(),0,'Chat has no scope selector');
-  for(const id of ['create','rename','delete']) assert.equal(await page.locator('#model-menu #agent-preset-'+id).count(),0,'Set management is settings-only');
-  assert.deepEqual(await page.locator('#agent-preset-select option').evaluateAll(options=>options.map(o=>o.value)),['','Default','Quality']);
+  for(const id of ['create','rename','delete','default']) assert.equal(await page.locator('#model-menu #agent-preset-'+id).count(),0,'Set management is settings-only');
+  assert.deepEqual(await page.locator('#agent-preset-select option').evaluateAll(options=>options.map(o=>o.value)),['','Agent Factory · Codex','Quality','Agent Factory · Claude']);
   const beforeFields=(await messages('agent.preset.field')).length;
   await chooseModel(page.locator('#model-menu [data-agent-role="main"]'),'gpt-6-astra');
   assert.equal((await messages('agent.preset.field')).length,beforeFields,'Chat edits never write to a stored set');
   assert.equal((await messages('composer.settings')).at(-1).model,'gpt-6-astra');
   await page.locator('#agent-preset-select').selectOption('Quality');
-  assert.deepEqual((await messages('agent.preset')).at(-1),{type:'agent.preset',action:'copy',scope:'project',name:'Quality'});
+  assert.deepEqual((await messages('agent.preset')).at(-1),{type:'agent.preset',action:'copy',scope:'global',name:'Quality'});
   await emit({type:'agent.preset.result',scope:'chat',name:'Quality',settings:quality});
   assert.equal(await page.evaluate(()=>window.saved.model),'gpt-6-astra');
   await emit({type:'agent.defaults',settings:{...settings,project:globalSet}});
@@ -45,40 +44,52 @@ async function checkAgentPresets(page) {
   await page.keyboard.press('Escape');
   await page.locator('#status-settings-button').evaluate(el=>el.click());
   await page.locator('#settings-tab-agents').click();
-  assert.equal(await page.locator('#agent-default-scope').inputValue(),'project');
-  assert.equal(await page.locator('#agent-preset-select').inputValue(),'Default');
+  assert.equal(await page.locator('#global-agent-settings #agent-default-scope').count(),0,'Settings has no scope selector');
+  assert.equal(await page.locator('#agent-preset-select').inputValue(),'Agent Factory · Codex');
   const beforeDefaults=(await messages('agent.defaults.save')).length;
   const beforeActions=(await messages('agent.preset')).length;
   await page.locator('#agent-preset-select').selectOption('Quality');
   assert.equal((await messages('agent.preset')).length,beforeActions,'Opening a set in settings does not apply it to project or chat');
   await chooseModel(page.locator('#agent-default-fields [data-agent-role="work"]'),'claude-opus-5-5');
-  assert.deepEqual((await messages('agent.preset.field')).at(-1),{type:'agent.preset.field',scope:'project',name:'Quality',role:'work',field:'model',value:'claude-opus-5-5'});
+  assert.deepEqual((await messages('agent.preset.field')).at(-1),{type:'agent.preset.field',scope:'global',name:'Quality',role:'work',field:'model',value:'claude-opus-5-5'});
   assert.equal((await messages('agent.defaults.save')).length,beforeDefaults,'Editing a custom set leaves project defaults alone');
   assert.equal(await page.evaluate(()=>window.saved.agentModels.work.model),'gpt-6-astra','Editing a source set leaves the copied chat alone');
-  await page.locator('#agent-preset-select').selectOption('Default');
+  await page.locator('#agent-preset-default').click();
+  assert.deepEqual((await messages('agent.preset')).at(-1),{type:'agent.preset',action:'default',scope:'global',name:'Quality'});
+  settings.defaultSetId='quality';
+  settings.presets.forEach(set=>{set.isDefault=set.id==='quality';set.inUse=set.isDefault;});
+  await emit({type:'agent.defaults',settings});await emit({type:'agent.preset.result',scope:'global',name:'Quality'});
+  assert.equal(await page.locator('#agent-preset-default').getAttribute('aria-pressed'),'true');
+  assert.equal(await page.locator('#agent-preset-default').isDisabled(),true);
+  assert.equal(await page.evaluate(()=>window.saved.model),'gpt-6-astra','Default designation leaves this chat unchanged');
+  assert.equal(await page.locator('#agent-preset-rename summary').getAttribute('aria-disabled'),'false','Default sets may be renamed');
+  settings.defaultSetId='codex';settings.presets.forEach(set=>{set.isDefault=set.id==='codex';set.inUse=set.isDefault;});
+  await emit({type:'agent.defaults',settings});
+  await page.locator('#agent-preset-select').selectOption('Agent Factory · Codex');
   await chooseModel(page.locator('#agent-default-fields [data-agent-role="main"]'),'claude-opus-5-5');
-  assert.deepEqual((await messages('agent.defaults.save')).at(-1),{type:'agent.defaults.save',scope:'project',role:'main',field:'model',value:'claude-opus-5-5'});
+  assert.deepEqual((await messages('agent.preset.field')).at(-1),{type:'agent.preset.field',scope:'global',name:'Agent Factory · Codex',role:'main',field:'model',value:'claude-opus-5-5'});
+  assert.equal((await messages('agent.defaults.save')).length,beforeDefaults,'Even the designated set is edited as a normal set');
   assert.equal(await page.evaluate(()=>window.saved.model),'gpt-6-astra');
   assert.equal(await page.locator('#agent-preset-delete').isDisabled(),true);
   await page.locator('#agent-preset-create summary').click();
   await page.locator('#agent-preset-name').fill('New set');await page.locator('#agent-preset-save').click();
-  assert.deepEqual((await messages('agent.preset')).at(-1),{type:'agent.preset',action:'save',scope:'project',name:'New set'});
+  assert.deepEqual((await messages('agent.preset')).at(-1),{type:'agent.preset',action:'save',scope:'global',name:'New set',sourceName:'Agent Factory · Codex'});
   await emit({type:'agent.preset.result',error:'Save failed'});
   assert.equal(await page.locator('#agent-preset-name').inputValue(),'New set');
   assert.equal(await page.locator('#agent-preset-status').textContent(),'Save failed');
   await page.locator('#agent-preset-save').click();
-  settings.presets.push({scope:'project',name:'New set',settings:projectSet});
-  await emit({type:'agent.defaults',settings});await emit({type:'agent.preset.result',scope:'project',name:'New set'});
+  settings.presets.push({scope:'global',name:'New set',settings:projectSet});
+  await emit({type:'agent.defaults',settings});await emit({type:'agent.preset.result',scope:'global',name:'New set'});
   assert.equal(await page.locator('#agent-preset-create').getAttribute('open'),null);
   await page.locator('#agent-preset-rename summary').click();
   await page.locator('#agent-preset-rename-name').fill('Renamed');await page.locator('#agent-preset-rename-save').click();
-  assert.deepEqual((await messages('agent.preset')).at(-1),{type:'agent.preset',action:'rename',scope:'project',name:'New set',newName:'Renamed'});
+  assert.deepEqual((await messages('agent.preset')).at(-1),{type:'agent.preset',action:'rename',scope:'global',name:'New set',newName:'Renamed'});
   settings.presets.find(p=>p.name==='New set').name='Renamed';
-  await emit({type:'agent.defaults',settings});await emit({type:'agent.preset.result',scope:'project',name:'Renamed'});
+  await emit({type:'agent.defaults',settings});await emit({type:'agent.preset.result',scope:'global',name:'Renamed'});
   await page.locator('#agent-preset-delete').click();
-  assert.deepEqual((await messages('agent.preset')).at(-1),{type:'agent.preset',action:'delete',scope:'project',name:'Renamed'});
+  assert.deepEqual((await messages('agent.preset')).at(-1),{type:'agent.preset',action:'delete',scope:'global',name:'Renamed'});
   settings.presets=settings.presets.filter(p=>p.name!=='Renamed');
-  await emit({type:'agent.defaults',settings});await emit({type:'agent.preset.result',scope:'project',name:'Renamed'});
+  await emit({type:'agent.defaults',settings});await emit({type:'agent.preset.result',scope:'global',name:'Renamed'});
   await page.locator('#settings-tab-general').click();await page.locator('#ui-language').selectOption('ko');
   await page.locator('#settings-tab-agents').click();
   for(const theme of ['vscode-dark','vscode-light','vscode-high-contrast']) {
@@ -100,7 +111,7 @@ async function checkAgentPresets(page) {
   await initialize('fresh-chat');await emit({type:'agent.defaults',settings});
   assert.equal(await page.evaluate(()=>window.saved.model),'gpt-6-sol','New host snapshots always start from project defaults');
   await page.locator('#model-button').click();
-  assert.equal(await page.locator('#agent-preset-select').inputValue(),'Default');
+  assert.equal(await page.locator('#agent-preset-select').inputValue(),'Agent Factory · Codex');
   await chooseModel(page.locator('#model-menu [data-agent-role="main"]'),'claude-opus-5-5');
   await page.evaluate(()=>sessionStorage.setItem('submission-restoration-fixture',JSON.stringify(window.saved)));
   await page.reload();await initialize('fresh-chat','claude-opus-5-5');await emit({type:'agent.defaults',settings});
@@ -113,7 +124,7 @@ async function checkAgentPresets(page) {
   assert.equal(await page.locator('#agent-preset-select').isDisabled(),true,'Existing provider-bound session protection remains');
   await page.keyboard.press('Escape');
   await initialize('unconfigured',undefined,{model:undefined,reasoning:undefined,agentModels:{}});
-  await emit({type:'agent.defaults',settings:{global:{},project:{},projectAvailable:true,presets:[{scope:'project',name:'Default',isDefault:true,settings:{}}]}});
+  await emit({type:'agent.defaults',settings:{global:{},project:{},projectAvailable:true,presets:[{scope:'global',name:'Default',isDefault:true,settings:{}}]}});
   await page.locator('#model-button').click();
   assert.ok(!await page.evaluate(()=>window.saved.model),'Opening settings does not invent a model for an unconfigured project');
   await page.evaluate(()=>sessionStorage.removeItem('submission-restoration-fixture'));
@@ -125,7 +136,7 @@ module.exports={checkAgentPresets};
 // Compare the real global editor and chat popover with identical values and content width.
 async function checkAgentSettingsConsistency(page) {
   const fs = require('node:fs'), path = require('node:path');
-  const artifactDir = process.env.AF_PRESETS_ARTIFACT_DIR || path.resolve(__dirname, '../../../docs/artifact/agent-settings-consistency');
+  const artifactDir = process.env.AF_PRESETS_ARTIFACT_DIR || path.resolve(__dirname, '../../../docs/artifact/evidence/agent-settings-consistency');
   fs.mkdirSync(artifactDir, {recursive: true});
   const emit = async data => { await page.evaluate(data => window.postMessage(data, '*'), data); await page.evaluate(() => new Promise(requestAnimationFrame)); };
   const settings = {main:{model:'gpt-6-astra',reasoningEffort:'medium'}, work:{model:'claude-opus-5-5',reasoningEffort:'low'}, workLight:{model:'claude-opus-5-5',reasoningEffort:'none'}, verification:{model:'gpt-6-sol',reasoningEffort:'high'}, fastByRoleModel:{main:{'gpt-6-astra':true}, verification:{'gpt-6-sol':false}}};

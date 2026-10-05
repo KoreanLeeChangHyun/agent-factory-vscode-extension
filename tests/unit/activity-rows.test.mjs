@@ -65,6 +65,19 @@ test("host details take precedence and failures carry an exit code and one error
   assert.equal(describe({ type: "activity", category: "tool", phase: "completed", text: "Reasoning", kind: "think" })[0].detail, undefined);
 });
 
+test("failure summaries prefer diagnostics to trailing file contents and punctuation", () => {
+  const error = "cat: AGENTS.md: No such file or directory";
+  const event = { category: "command", phase: "failed", text: "cat AGENTS.md package.json", exitCode: 1 };
+  assert.equal(rows.errorLine({ ...event, output: error + '\n{\n  "name": "example"\n}\n' }), error);
+  assert.equal(rows.errorLine({ ...event, output: '\x1b[31m' + error + '\x1b[0m\n}\n' }), error);
+  for (const output of ['}\n', ');\n', '{\n  "name": "example"\n}', '"name": "example",']) {
+    assert.equal(rows.errorLine({ ...event, output }), "");
+  }
+  assert.equal(rows.errorLine({ ...event, output: "No matching entries" }), "No matching entries");
+  assert.equal(rows.errorLine({ ...event, error: "Exit code 1\nExplicit error", output: error }), "Explicit error");
+  assert.equal(rows.errorLine({ ...event, output: JSON.stringify({ kind: "error", error: { code: "E_TEST", message: "Structured failure" } }) }), "E_TEST: Structured failure");
+});
+
 test("saved history without row fields still renders with a classified target", () => {
   const legacy = [
     { type: "activity", id: "a", category: "command", phase: "completed", text: "sed -n 1,193p static/js/chat/terminal.js", output: "x" },

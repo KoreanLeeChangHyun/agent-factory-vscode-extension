@@ -45,7 +45,7 @@ const vscode = {
 const module = { exports: {} };
 const diagnostics = [];
 runInNewContext(output.outputFiles[0].text, {
-  module, exports: module.exports, Buffer, URL,
+  module, exports: module.exports, Buffer, URL, structuredClone,
   console: { ...console, warn: (...args) => diagnostics.push(args), error: (...args) => diagnostics.push(args) },
   process, setTimeout, clearTimeout,
   global: { Date },
@@ -319,7 +319,7 @@ test("image and other file links use the registered editor while line links reta
   const managed = { panel: { webview: { async postMessage(message) { notices.push(message); return true; } } } };
   const before = textOpens.length;
   for (const [href, expected] of [
-    ['/home/deus/workspace/agent-factory/docs/artifact/extension-out/astra-stars/stars-795-0.png', '/home/deus/workspace/agent-factory/docs/artifact/extension-out/astra-stars/stars-795-0.png'],
+    ['/home/deus/workspace/agent-factory/docs/artifact/evidence/extension-out/astra-stars/stars-795-0.png', '/home/deus/workspace/agent-factory/docs/artifact/evidence/extension-out/astra-stars/stars-795-0.png'],
     ['file:///tmp/star%20preview.PNG', '/tmp/star preview.PNG'],
     ['./out/preview.webp', '/workspace/out/preview.webp'],
     ['/tmp/report.pdf', '/tmp/report.pdf'],
@@ -859,6 +859,7 @@ test("concurrent panels claim each terminal workflow delivery once and retry rec
   } };
   const workflow = { loopId: 'loop-terminal', status: 'completed', workAgentId: 'work-terminal' };
   const client = { async listChildSessions() { await new Promise(resolve => setImmediate(resolve)); return []; },
+    async result() { return { status: "completed", text: "Delivered report" }; },
     async advanceWorkflows() { return [workflow]; } };
   const manager = new module.exports.ChatPanelManager(context, {}, () => [], async () => ({ available: true, client }));
   manager.scheduleAgentList = () => {};
@@ -866,7 +867,7 @@ test("concurrent panels claim each terminal workflow delivery once and retry rec
   let fail = true;
   const panels = [1, 2].map(index => ({ state: { agentId: 'main-terminal' }, panel: { webview: {
     async postMessage() { return true; }
-  } }, controller: { async send(_text, _attachments, _execution, accepted) {
+  } }, controller: { runId: "report-run", async send(_text, _attachments, _execution, accepted) {
     sends.push(index);
     if (fail) throw new Error('delivery failed');
     accepted();
@@ -874,13 +875,16 @@ test("concurrent panels claim each terminal workflow delivery once and retry rec
   await Promise.all(panels.map(panel => manager.sendAgentList(panel)));
   await new Promise(resolve => setImmediate(resolve));
   assert.equal(sends.length, 1, 'Concurrent panels must make one terminal workflow delivery attempt');
-  assert.equal(storage.get('agentFactory.workflowResults.main-terminal')['loop-terminal'], 'delivery-error:completed');
+  assert.equal(storage.get('agentFactory.workflowResults.main-terminal')['loop-terminal'].state, 'prepared');
+  const identity = storage.get('agentFactory.workflowResults.main-terminal')['loop-terminal'].dispatchId;
 
   fail = false;
   await manager.sendAgentList(panels[1]);
   await new Promise(resolve => setImmediate(resolve));
   assert.equal(sends.length, 2, 'A recorded delivery error must remain retryable');
-  assert.equal(storage.get('agentFactory.workflowResults.main-terminal')['loop-terminal'], 'completed');
+  assert.equal(storage.get('agentFactory.workflowResults.main-terminal')['loop-terminal'].state, 'completed');
+  assert.equal(storage.get('agentFactory.workflowResults.main-terminal')['loop-terminal'].dispatchId, identity,
+    'Lost acknowledgement reuses its recorded dispatch identity');
 });
 
 test("concurrent panels claim a legacy terminal child delivery once", async () => {
@@ -938,8 +942,10 @@ test("engine terminal notification reports the bound outcome once without re-exe
     const storage = new Map(), calls = [];
     const manager = new module.exports.ChatPanelManager({ workspaceState: {
       get: key => storage.get(key), async update(key, value) { storage.set(key, structuredClone(value)); }
-    } }, {}, () => [], async () => ({ available: false }));
-    const managed = { state: { agentId: "main-report" }, controller: {
+    } }, {}, () => [], async () => ({ available: true, client: {
+      async result() { return { status: code === "failed" ? "failed" : "completed", text: "The exact outcome was reported" }; }
+    } }));
+    const managed = { state: { agentId: "main-report" }, controller: { runId: "report-run",
       async send(text, attachments, execution, accepted) { calls.push({ text, execution }); accepted(); }
     } };
     const flow = { loopId: "bound-loop", status, terminalReason: { code }, latestWorkRunId: "exact-work" };
@@ -1213,7 +1219,7 @@ test('restoring an existing child tab rereads its historical run and rejects sta
 });
 
 
-test("new chats copy the current project once and restore without global or project propagation", async () => {
+test("new chats copy the designated set once and restore without source or default-selection propagation", async () => {
   const originalConfiguration = vscode.workspace.getConfiguration;
   const originalFolders = vscode.workspace.workspaceFolders;
   const originalCreate = vscode.window.createWebviewPanel;
@@ -1223,7 +1229,10 @@ test("new chats copy the current project once and restore without global or proj
     entries[`${role}.reasoningEffort`] = {globalValue: 'high', workspaceFolderValue: 'medium'};
   }
   entries.fastByRoleModel = {globalValue: {main: {'global-main': true}}, workspaceFolderValue: {work: {'project-work': true}}};
-  const context = {globalState: {get: (key, fallback) => key === 'agentFactory.mainChat.composerPreferences' ? {fastMode:true, agentFastModes:{main:{'old-main':true}}} : fallback}};
+  const sourceSettings=Object.fromEntries(['main','work','workLight','verification'].map(role=>[role,{model:`project-${role}`,reasoningEffort:'medium'}]));
+  sourceSettings.fastByRoleModel={work:{'project-work':true}};
+  const library={sets:[{id:'chosen',name:'Chosen',settings:sourceSettings},{id:'second',name:'Second',settings:{...structuredClone(sourceSettings),main:{model:'other-main',reasoningEffort:'high'}}}],projectDefaults:{'/project':'chosen'},migratedProjects:['/project']};
+  const context = {globalState: {get: (key, fallback) => key === 'agentFactory.agentSets.v3' ? library : key === 'agentFactory.mainChat.composerPreferences' ? {fastMode:true, agentFastModes:{main:{'old-main':true}}} : fallback}};
   const manager = new module.exports.ChatPanelManager(context, {}, () => [], async () => ({available:false}));
   const attached = [];
   manager.webviewOptions = () => ({});
@@ -1238,12 +1247,15 @@ test("new chats copy the current project once and restore without global or proj
     assert.deepEqual(first.agentFastModes,{work:{'project-work':true}});
     entries['main.model'].globalValue = 'changed-global';
     assert.equal(manager.newChatPreferences().model,'project-main');
-    entries['main.model'].workspaceFolderValue = 'changed-project';
-    entries['work.model'].workspaceFolderValue = 'changed-worker';
-    entries.fastByRoleModel.workspaceFolderValue.work['project-work'] = false;
+    library.sets[0].settings.main.model = 'changed-project';
+    library.sets[0].settings.work.model = 'changed-worker';
+    library.sets[0].settings.fastByRoleModel.work['project-work'] = false;
     await manager.openDraft();
     assert.equal(attached[1].model,'changed-project'); assert.equal(attached[1].agentModels.work.model,'changed-worker');
     assert.equal(first.agentModels.work.model,'project-work'); assert.equal(first.agentFastModes.work['project-work'],true);
+    library.projectDefaults['/project']='second';
+    assert.equal(manager.newChatPreferences().model,'other-main');
+    assert.equal(manager.newChatPreferences().agentSettingsSet,'Second');
     await manager.revive({},first);
     assert.equal(attached[2].model,'project-main'); assert.equal(attached[2].agentModels.work.model,'project-work');
     assert.equal(attached[2].agentFastModes.work['project-work'],true);

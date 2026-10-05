@@ -11,7 +11,6 @@ import {
   type ProviderId, type ProviderPaths, type ProviderStatus, type PluginUpdateMode
 } from "../agent-factory/provider-detection";
 import { initializeAgentDefaults } from "./agent-settings-store";
-import { readProviderDefaults } from "../agent-factory/provider-defaults";
 
 const SECTION = "agentFactory.mainChat";
 
@@ -97,7 +96,7 @@ export async function redetectProviders(context: vscode.ExtensionContext): Promi
   const errors = pluginUpdateMode() === "auto" && changed.length ? await installPlugins(context, changed) : {};
   const detected = (id: ProviderId) => providers.some(status => status.id === id && status.detected);
   const selection = {codex: detected("codex"), claude: detected("claude"), antigravity: detected("antigravity")};
-  await initializeAgentDefaults(context.globalState, selection, context.workspaceState, await readProviderDefaults(selection));
+  await initializeAgentDefaults(context.globalState, selection, context.workspaceState);
   return { providers, errors };
 }
 

@@ -165,7 +165,7 @@ async function checkGeneralSettings(page) {
   await page.locator('#settings-tab-agents').click();
   assert.equal(await page.locator('#global-agent-settings .agent-model-row').count(),4);
   const fs=require('node:fs'),path=require('node:path');
-  const artifactDir=path.resolve(__dirname,'../../../docs/artifact/model-settings-copy-20261004');
+  const artifactDir=path.resolve(__dirname,'../../../docs/artifact/evidence/model-settings-copy-20261004');
   fs.mkdirSync(artifactDir,{recursive:true});
   for(const size of [{width:465,height:556},{width:721,height:402}]) {
     await page.setViewportSize(size);

@@ -445,7 +445,7 @@ async function main() {
       assert.deepEqual(await page.evaluate(() => window.sentMessages.at(-1)), { type: 'message.copy', text });
       assert.deepEqual(errors, []);
       await page.locator('#question-button').click();
-      const artifact = path.join(root, '../docs/artifact/question-menu'); fs.mkdirSync(artifact, { recursive: true });
+      const artifact = path.join(root, '../docs/artifact/evidence/question-menu'); fs.mkdirSync(artifact, { recursive: true });
       for (const width of [795, 494, 320]) {
         await page.setViewportSize({ width, height: 600 });
         await page.evaluate(() => new Promise(requestAnimationFrame));
@@ -1037,7 +1037,7 @@ async function main() {
     await emit({ type: 'agents.list', agents: [{ agentId: 'work-card', role: 'work', status: 'completed', runId: 'run-card' }, { agentId: 'verification-card', role: 'verification', status: 'running', runId: 'verify-run' }] });
     assert.equal(await page.locator('[data-id="managed-verify"] strong').textContent(), 'Verification agent');
     await managedCard.scrollIntoViewIfNeeded();
-    const managedArtifactDir = process.env.AF_RENDERING_ARTIFACT_DIR || path.join(root, '../docs/artifact/managed-agents');
+    const managedArtifactDir = process.env.AF_RENDERING_ARTIFACT_DIR || path.join(root, '../docs/artifact/evidence/managed-agents');
     fs.mkdirSync(managedArtifactDir, { recursive: true });
     const cardBox = await managedCard.boundingBox();
     const verifyBox = await page.locator('[data-id="managed-verify"] .managed-agent-card').boundingBox();
@@ -1162,7 +1162,7 @@ async function main() {
     assert.ok(luminance(gradientColors[1]) > luminance(statusStyle.labelColor));
     assert.ok(gradientColors.every(color => contrast(color) >= 4.5));
     assert.ok(contrast(statusStyle.metaColor) >= 4.5);
-    const artifactDir = process.env.AF_RENDERING_ARTIFACT_DIR || path.join(root, '../docs/artifact/cli-comparison');
+    const artifactDir = process.env.AF_RENDERING_ARTIFACT_DIR || path.join(root, '../docs/artifact/evidence/cli-comparison');
     fs.mkdirSync(artifactDir, { recursive: true });
     const positions = [];
     for (const time of [0, 600, 1200, 1800]) {

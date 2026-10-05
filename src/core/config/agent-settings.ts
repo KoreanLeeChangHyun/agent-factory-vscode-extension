@@ -12,12 +12,15 @@ export interface AgentDefaults extends Partial<Record<typeof AGENT_ROLES[number]
 }
 export type AgentPresetScope = "global" | "project" | "chat";
 export interface AgentPreset {
+  id?: string;
+  inUse?: boolean;
   scope: AgentPresetScope;
   name: string;
   settings: AgentDefaults;
   isDefault?: boolean;
 }
 export interface AgentDefaultsSnapshot {
+  defaultSetId?: string;
   presets?: AgentPreset[];
   global: AgentDefaults;
   project: AgentDefaults;

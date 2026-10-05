@@ -177,6 +177,27 @@ async function checkActivityRows(page) {
   await emit({ type: 'run.activity', id: 'rows-running', category: 'command', phase: 'completed', text: 'node tests/browser/chat-rendering.cjs' });
   await emit({ type: 'run.state', running: false });
   assert.equal(await page.locator('#timeline .act-mark.is-running').count(), 0);
+
+  // A failed read followed by JSON used to render only its closing brace in red.
+  const readError = 'cat: AGENTS.md: No such file or directory';
+  const mixedOutput = readError + '\n{\n  "name": "example"\n}\n';
+  await emit({ type: 'run.activity', id: 'rows-mixed-failure', category: 'command', phase: 'failed',
+    text: 'cat AGENTS.md package.json', exitCode: 1, durationMs: 0, output: mixedOutput });
+  const mixed = page.locator('[data-id="rows-mixed-failure"]');
+  assert.equal(await mixed.locator('.act-error').textContent(), readError);
+  for (const width of [733, 420]) {
+    await page.setViewportSize({ width, height: 900 });
+    await settle();
+    await assertAligned(['rows-mixed-failure'], 'mixed read failure at ' + width + 'px');
+    assert.ok((await row('rows-mixed-failure').boundingBox()).height <= lineHeight + 1);
+  }
+  await row('rows-mixed-failure').click();
+  assert.equal(await mixed.locator('.terminal-output-preview').textContent(), mixedOutput);
+  await row('rows-mixed-failure').click();
+  await emit({ type: 'run.activity', id: 'rows-brace-failure', category: 'command', phase: 'failed',
+    text: 'cat package.json', exitCode: 1, output: '{\n  "name": "example"\n}' });
+  assert.equal(await page.locator('[data-id="rows-brace-failure"] .act-error').count(), 0);
+  assert.match(await row('rows-brace-failure').locator('.act-meta').textContent(), /exit (?:code )?1/);
 }
 
 module.exports = { checkActivityRows };

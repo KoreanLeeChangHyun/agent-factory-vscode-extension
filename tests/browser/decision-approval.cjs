@@ -25,7 +25,7 @@ async function checkDecisionApproval(page) {
   await approve.click();
   assert.deepEqual(await page.evaluate(() => window.sentMessages.filter(message => message.type === 'decision.approve').at(-1)), { type: 'decision.approve', runId: 'scoped-run', language: 'en' }, 'The English UI requests an English approval message');
 
-  const command = 'git checkout -- docs/artifact/cli-comparison';
+  const command = 'git checkout -- docs/artifact/evidence/cli-comparison';
   const revert = `아티팩트 44개를 \`${command}\` 로 되돌릴까요?`;
   await emit({ type: 'chat.assistant', text: revert, phase: 'final', runId: 'revert-run' });
   await emit({ type: 'decision.pending', runId: 'revert-run', canApprove: false, approval: { request: revert, irreversible: [command] } });

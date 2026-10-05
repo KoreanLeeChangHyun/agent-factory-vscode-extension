@@ -42,7 +42,7 @@ async function checkFastSetting(page) {
   assert.equal(await reopenedFast.getAttribute('aria-pressed'), 'false', 'Closing and reopening settings preserves Fast');
   const fs = require('node:fs');
   const path = require('node:path');
-  const artifactDir = process.env.AF_MODEL_SETTINGS_ARTIFACT_DIR || path.resolve(__dirname, '../../../docs/artifact/model-settings-copy-20261004');
+  const artifactDir = process.env.AF_MODEL_SETTINGS_ARTIFACT_DIR || path.resolve(__dirname, '../../../docs/artifact/evidence/model-settings-copy-20261004');
   fs.mkdirSync(artifactDir, { recursive: true });
   for (const size of [{ width: 465, height: 556 }, { width: 721, height: 402 }]) {
     await page.setViewportSize(size);
@@ -160,7 +160,7 @@ async function checkAgentModels(page) {
 
   const fs = require('node:fs');
   const path = require('node:path');
-  const artifactDir = process.env.AF_MODEL_SETTINGS_ARTIFACT_DIR || path.resolve(__dirname, '../../../docs/artifact/model-settings-copy-20261004');
+  const artifactDir = process.env.AF_MODEL_SETTINGS_ARTIFACT_DIR || path.resolve(__dirname, '../../../docs/artifact/evidence/model-settings-copy-20261004');
   fs.mkdirSync(artifactDir, { recursive: true });
   for (const width of [795, 320]) {
     await page.setViewportSize({ width, height: 740 });
@@ -385,7 +385,7 @@ async function checkModelVendorTabs(page, emit) {
   await page.locator('#model-button').click();
   const fs = require('node:fs');
   const path = require('node:path');
-  const artifactDir = process.env.AF_MODEL_SETTINGS_ARTIFACT_DIR || path.resolve(__dirname, '../../../docs/artifact/model-settings-copy-20261004');
+  const artifactDir = process.env.AF_MODEL_SETTINGS_ARTIFACT_DIR || path.resolve(__dirname, '../../../docs/artifact/evidence/model-settings-copy-20261004');
   fs.mkdirSync(artifactDir, { recursive: true });
   for (const width of [795, 320]) {
     await page.setViewportSize({ width, height: 740 });

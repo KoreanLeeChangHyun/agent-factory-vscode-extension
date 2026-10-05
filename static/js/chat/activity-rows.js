@@ -177,14 +177,20 @@
     return stripAnsi(text).split("\n").map(line => line.trim()).filter(Boolean);
   }
 
-  /** One line explaining a failure: the reported error, else the last line of output. */
+  /** Prefer diagnostics over file contents printed after a command failed. */
   function errorLine(event) {
     const reported = meaningfulLines(event.error).filter(line => !/^Exit code \d+$/.test(line));
     if (reported.length) return reported[0];
     const outcome = globalThis.agentFactoryExecutionReferences?.commandOutcome?.(event);
     if (outcome?.detail) return outcome.detail;
     const output = meaningfulLines(event.output);
-    return output.length ? output[output.length - 1] : "";
+    // Mixed output can contain a shell error followed by a successfully read JSON
+    // file. Its closing brace (or a property) is not an explanation of the failure.
+    const isContent = line => /[\p{L}\p{N}]/u.test(line) && !/^["'].*["']\s*:/.test(line);
+    const diagnostic = output.filter(line => isContent(line) && /(?:\b[\w.]*Error\s*:|\b(?:error|exception|fatal|failed|failure)\b|\b(?:no such file or directory|permission denied|command not found|cannot (?:open|access))\b)/i.test(line));
+    if (diagnostic.length) return diagnostic[diagnostic.length - 1];
+    const last = output[output.length - 1];
+    return last && isContent(last) ? last : "";
   }
 
   function outputResult(kind, event) {

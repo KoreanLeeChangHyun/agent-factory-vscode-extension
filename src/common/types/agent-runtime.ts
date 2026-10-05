@@ -40,6 +40,8 @@ export type TaskMode = typeof TASK_MODES[number];
 export type ExecutionMode = "cli-default" | "workspace-write" | "danger-full-access" | "bypass";
 
 export interface ExecutionOptions {
+  /** Host-owned idempotency identity for a durable engine-result delivery. */
+  readonly deliveryId?: string;
   readonly inspectionOnly?: boolean;
   readonly businessMode?: BusinessMode;
   readonly taskMode?: TaskMode;

@@ -68,7 +68,7 @@ export type ClientMessage =
   | { readonly type: "contract.open"; readonly id: string }
   | { readonly type: "contracts.request" }
   | { readonly type: "project.tasks.request" }
-  | { readonly type: "agent.preset"; readonly action: "save" | "apply" | "copy" | "update" | "delete" | "rename"; readonly scope: "global" | "project" | "chat"; readonly name: string; readonly newName?: string }
+  | { readonly type: "agent.preset"; readonly action: "save" | "apply" | "copy" | "update" | "delete" | "rename" | "default"; readonly scope: "global" | "project" | "chat"; readonly name: string; readonly newName?: string; readonly sourceName?: string }
   | { readonly type: "agent.defaults.save"; readonly scope: "global" | "project"; readonly role: "main" | "work" | "workLight" | "verification"; readonly field: "model" | "reasoningEffort" | "fast"; readonly value: string | boolean }
   | { readonly type: "agent.defaults.fast"; readonly scope: "global" | "project"; readonly role: "main" | "work" | "workLight" | "verification"; readonly model: string; readonly value: boolean }
   | { readonly type: "worktree.create"; readonly repository: string; readonly name: string; readonly base: string }
@@ -130,6 +130,7 @@ export type ClientMessage =
   | ({ readonly type: "task.stop" } & import("../common/types/agent-runtime").TaskStopTarget)
   | { readonly type: "workflow.close"; readonly workAgentId: string; readonly loopId: string }
   | { readonly type: "workflow.decision"; readonly workAgentId: string; readonly loopId: string; readonly decision: "continue" | "stop" }
+  | { readonly type: "workflow.answer"; readonly workAgentId: string; readonly loopId: string; readonly decisionId: string; readonly questionHash: string; readonly answer: string }
   | { readonly type: "conversations.request" }
   | { readonly type: "conversation.read"; readonly conversationId: string | null; readonly before?: string; readonly requestId: string }
   | { readonly type: "history.request"; readonly before: string }

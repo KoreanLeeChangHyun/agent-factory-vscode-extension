@@ -20,7 +20,7 @@ async function checkAstraStars(page) {
   assert.equal(await page.locator('.astra-stars').isVisible(), true);
   assert.equal(await page.locator('.astra-stars').getAttribute('aria-hidden'), 'true');
   assert.equal(await page.locator('.astra-stars').evaluate(node => getComputedStyle(node).pointerEvents), 'none');
-  const artifacts = path.resolve(__dirname, '../../../docs/artifact/astra-stars');
+  const artifacts = path.resolve(__dirname, '../../../docs/artifact/evidence/astra-stars');
   fs.mkdirSync(artifacts, { recursive: true });
   for (const width of [795, 320]) {
     await page.setViewportSize({ width, height: 740 });
