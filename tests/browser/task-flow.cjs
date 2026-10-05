@@ -438,7 +438,8 @@ async function checkTaskFlow(page, { panelOnly = false } = {}) {
     { id: 'engine-flow', title: 'Duplicate of a local flow', status: 'completed', mainAgentId: 'main-other', tasks: [] }] }, '*'));
   const projectEntry = page.locator('#task-history-panel .project-history-entry[data-history-id="brief-other"]');
   await projectEntry.waitFor();
-  assert.match(await projectEntry.locator('.task-history-count').textContent(), /^WC-9 v2 · /);
+  assert.equal(await projectEntry.locator('.task-history-count').textContent(), 'WC-9 v2');
+  assert.equal(await projectEntry.locator('.task-history-state').getAttribute('data-status'), 'completed', 'Status uses the panel\'s dot, not the label');
   assert.equal(await page.locator('#task-history-panel .project-history-entry').count(), 1, 'A local flow is not repeated from project records');
   assert.equal(await historyEntry.count(), 1);
   assert.equal(await historyEntry.locator('.task-history-disclosure').count(), 0, 'Individual stages are not history entries');
@@ -446,7 +447,7 @@ async function checkTaskFlow(page, { panelOnly = false } = {}) {
   await historyEntry.locator(':scope > summary').focus();
   await page.keyboard.press('Enter');
   assert.equal(await historyEntry.locator('.task-flow').isVisible(), true);
-  assert.equal(await historyEntry.locator('.task-flow-list').evaluate(el => getComputedStyle(el).gridAutoFlow), 'column', 'Expanded history keeps the task flow layout');
+  assert.equal(await historyEntry.locator('.task-flow-list').evaluate(el => getComputedStyle(el).gridAutoFlow), 'row', 'Expanded history uses the task panel row list');
   await page.locator('#task-history-list [data-flow-id="engine-flow"] .task-flow-disclosure').first().locator(':scope > summary').click();
   await page.locator('#task-history-list [data-flow-id="engine-flow"] .task-flow-open').first().click();
   assert.deepEqual(await page.evaluate(() => window.sentMessages.at(-1)), { type: 'agent.open', agentId: 'engine-worker', runId: 'work-first' });

@@ -753,22 +753,47 @@ globalThis.AgentFactoryChat.taskFlow = function (host) {
     delete runStageList.dataset.flowSignature;
     renderWorkLoopPanel();
   }
+  // History rows share the task panel's row: a single task is that very row; a group or another
+  // conversation's brief gets a heading with the same chevron, title, meta and status-dot columns.
   function createTaskHistoryEntry(flow) {
     const item = document.createElement("li");
+    const totals = summarizeTaskFlow(flow, true);
+    if (totals.total === 1) {
+      const section = createTaskFlow(flow, true);
+      const card = section.querySelector(".task-flow-single");
+      if (card) card.dataset.historyId = flow.id;
+      item.append(section);
+      return item;
+    }
     const disclosure = document.createElement("details");
     disclosure.className = "task-history-disclosure";
     disclosure.dataset.historyId = flow.id;
-    const heading = document.createElement("summary");
-    const name = document.createElement("span");
-    name.className = "task-history-name";
-    name.textContent = flow.title;
-    const count = document.createElement("span");
-    count.className = "task-history-count";
-    count.textContent = t("flow.task.count", summarizeTaskFlow(flow, true).total);
-    heading.append(name, count);
-    disclosure.append(heading, createTaskFlow(flow, true));
+    const status = flowHistoryStatus(totals.counts);
+    disclosure.dataset.status = status;
+    disclosure.append(historyRowHeading(flow.title, t("flow.task.count", totals.total), status), createTaskFlow(flow, true));
     item.append(disclosure);
     return item;
+  }
+  function flowHistoryStatus(counts) {
+    for (const status of ["running", "verifying", "blocked", "failed", "pending"]) if (counts[status]) return status;
+    return counts.completed ? "completed" : counts.cancelled ? "cancelled" : "pending";
+  }
+  function historyRowHeading(title, meta, status) {
+    const heading = document.createElement("summary");
+    const name = document.createElement("strong");
+    name.className = "task-history-name";
+    name.textContent = title;
+    name.title = title;
+    const count = document.createElement("span");
+    count.className = "task-history-count";
+    count.textContent = meta;
+    count.title = meta;
+    const state = document.createElement("span");
+    state.className = "task-history-state";
+    state.dataset.status = status;
+    state.textContent = t("flow.status." + status);
+    heading.append(name, count, state);
+    return heading;
   }
   // A brief from another conversation of this project: its tasks, statuses and request, without run controls.
   function createProjectHistoryEntry(entry) {
@@ -778,17 +803,9 @@ globalThis.AgentFactoryChat.taskFlow = function (host) {
     disclosure.dataset.historyId = entry.id;
     const status = projectTaskStatus(entry.status);
     disclosure.dataset.status = status;
-    const heading = document.createElement("summary");
-    const name = document.createElement("span");
-    name.className = "task-history-name";
-    name.textContent = entry.title;
-    name.title = entry.title;
-    const count = document.createElement("span");
-    count.className = "task-history-count";
-    count.textContent = [entry.contract ? entry.contract.id + (entry.contract.version ? " v" + entry.contract.version : "") : "",
-      t("flow.status." + status), t("flow.task.count", entry.tasks.length)].filter(Boolean).join(" · ");
-    count.title = count.textContent;
-    heading.append(name, count);
+    const meta = [entry.contract ? entry.contract.id + (entry.contract.version ? " v" + entry.contract.version : "") : "",
+      entry.tasks.length > 1 ? t("flow.task.count", entry.tasks.length) : ""].filter(Boolean).join(" · ");
+    const heading = historyRowHeading(entry.title, meta, status);
     const body = document.createElement("div");
     body.className = "task-flow-detail project-history-detail";
     for (const task of entry.tasks) {
@@ -858,7 +875,7 @@ globalThis.AgentFactoryChat.taskFlow = function (host) {
     const historySignature = JSON.stringify([history, state.childAgents, projectHistory, t("flow.status.pending")]);
     if (historyList.dataset.signature !== historySignature) {
       historyList.dataset.signature = historySignature;
-      const expanded = new Set(Array.from(historyList.querySelectorAll(".task-history-disclosure[open]"), item => item.dataset.historyId));
+      const expanded = new Set(Array.from(historyList.querySelectorAll("details[data-history-id][open]"), item => item.dataset.historyId));
       const list = document.createElement("ul");
       list.className = "task-history-entries";
       list.append(...history.map(createTaskHistoryEntry), ...legacyHistory.map(agent => {
@@ -866,7 +883,7 @@ globalThis.AgentFactoryChat.taskFlow = function (host) {
         item.append(createRunStage(agent));
         return item;
       }), ...projectHistory.map(createProjectHistoryEntry));
-      for (const item of list.querySelectorAll(".task-history-disclosure")) item.open = expanded.has(item.dataset.historyId);
+      for (const item of list.querySelectorAll("details[data-history-id]")) item.open = expanded.has(item.dataset.historyId);
       historyList.replaceChildren(history.length || legacyHistory.length || projectHistory.length ? list : historyEmpty("ui.task.history.empty"));
     }
     const hasActive = active.length > 0;

@@ -196,14 +196,14 @@
 
 /* Retained tasks scroll within the panel so the composer stays visible. */
 
-#run-stage-list,
-#run-stage-list .task-flow { width: 100%; min-width: 0; }
-#run-stage-list .task-flow { margin: 0; padding: 8px; }
-#run-stage-list .task-flow > strong { margin-bottom: 6px; }
-#run-stage-list .task-flow-summary { margin-bottom: 6px; }
-#run-stage-list .task-flow-current { margin-bottom: 6px; }
-#run-stage-list .task-flow-step { font-size: 12px; line-height: 1.35; }
-#run-stage-list .task-flow-single-container { padding: 0; border: 0; background: transparent; }
+:is(#run-stage-list, #task-history-panel),
+:is(#run-stage-list, #task-history-panel) .task-flow { width: 100%; min-width: 0; }
+:is(#run-stage-list, #task-history-panel) .task-flow { margin: 0; padding: 8px; }
+:is(#run-stage-list, #task-history-panel) .task-flow > strong { margin-bottom: 6px; }
+:is(#run-stage-list, #task-history-panel) .task-flow-summary { margin-bottom: 6px; }
+:is(#run-stage-list, #task-history-panel) .task-flow-current { margin-bottom: 6px; }
+:is(#run-stage-list, #task-history-panel) .task-flow-step { font-size: 12px; line-height: 1.35; }
+:is(#run-stage-list, #task-history-panel) .task-flow-single-container { padding: 0; border: 0; background: transparent; }
 
 .run-details[hidden] {
   display: none;
@@ -348,7 +348,7 @@
 .task-flow-current { margin: 0 0 12px; overflow-wrap: anywhere; font-size: 12px; }
 .task-flow-list { list-style: none; margin: 0; padding: 2px 2px 8px; display: grid; grid-auto-flow: column; grid-auto-columns: minmax(150px, 1fr); gap: 22px; overflow-x: auto; }
 /* The live panel uses the available width as a compact, vertically stacked task list. */
-#run-stage-list .task-flow-list {
+:is(#run-stage-list, #task-history-panel) .task-flow-list {
   grid-auto-flow: row;
   grid-auto-columns: auto;
   grid-template-columns: minmax(0, 1fr);
@@ -377,17 +377,17 @@
 .task-flow-number { display: grid; place-items: center; width: 24px; height: 24px; border: 1px solid var(--vscode-widget-border, #666); border-radius: 50%; font-size: 11px; }
 .task-flow-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .task-flow-state { grid-column: 3; color: var(--vscode-descriptionForeground); font-size: 11px; white-space: nowrap; }
-#run-stage-list .task-flow-step + .task-flow-step::before,
-#run-stage-list .task-flow-step + .task-flow-step::after { display: none; }
+:is(#run-stage-list, #task-history-panel) .task-flow-step + .task-flow-step::before,
+:is(#run-stage-list, #task-history-panel) .task-flow-step + .task-flow-step::after { display: none; }
 .task-flow-step:is([data-status="running"], [data-status="verifying"]) { outline: 1px solid var(--vscode-focusBorder, #007acc); }
-#run-stage-list :is(.task-flow-step, .task-flow-single):is([data-status="running"], [data-status="verifying"]) {
+:is(#run-stage-list, #task-history-panel) :is(.task-flow-step, .task-flow-single):is([data-status="running"], [data-status="verifying"]) {
   --task-flow-active-color: var(--vscode-progressBar-background, var(--vscode-focusBorder, var(--af-color-accent)));
 }
 /* Progress is carried by the status dot; titles keep the readable foreground. */
-#run-stage-list :is(.task-flow-step, .task-flow-single):is([data-status="running"], [data-status="verifying"]) :is(.task-flow-name, .task-flow-single-title) {
+:is(#run-stage-list, #task-history-panel) :is(.task-flow-step, .task-flow-single):is([data-status="running"], [data-status="verifying"]) :is(.task-flow-name, .task-flow-single-title) {
   color: var(--vscode-foreground);
 }
-#run-stage-list .task-flow-step:is([data-status="running"], [data-status="verifying"]) .task-flow-number { border-color: var(--task-flow-active-color); background: color-mix(in srgb, var(--task-flow-active-color) 20%, transparent); color: var(--vscode-foreground); }
+:is(#run-stage-list, #task-history-panel) .task-flow-step:is([data-status="running"], [data-status="verifying"]) .task-flow-number { border-color: var(--task-flow-active-color); background: color-mix(in srgb, var(--task-flow-active-color) 20%, transparent); color: var(--vscode-foreground); }
 .run-stage-list .task-flow-step[data-worker-active="true"]:is([data-status="running"], [data-status="verifying"])::before { opacity: 1; background: linear-gradient(to right, transparent, var(--vscode-focusBorder, #007acc), transparent); background-size: 12px 100%; animation: task-flow-forward 900ms linear infinite; }
 .task-flow-step[data-status="failed"] .task-flow-state { color: var(--vscode-errorForeground); }
 .task-flow-step[data-status="completed"] .task-flow-number { border-color: var(--vscode-testing-iconPassed, #73c991); }
@@ -414,15 +414,39 @@
 .task-history-entries { list-style: none; margin: 0; padding: 0; }
 .task-history-entries > li { min-width: 0; }
 .task-history-entries > li + li { border-top: 1px solid var(--vscode-menu-separatorBackground, var(--vscode-panel-border)); }
-.task-history-disclosure { min-width: 0; }
-.task-history-disclosure > summary { display: grid; grid-template-columns: minmax(0, 1fr) auto 12px; gap: 8px; align-items: center; cursor: pointer; list-style: none; border-radius: 4px; padding: 10px 8px; }
+/* History rows reuse the task panel's grid: one list, same chevron, title, meta and status-dot columns. */
+#task-history-panel { align-content: start; }
+#task-history-panel[hidden] { display: none; }
+#task-history-panel > .task-history-entries { display: contents; }
+#task-history-panel .task-history-entries > li,
+#task-history-panel .task-history-disclosure { display: grid; grid-template-columns: subgrid; grid-column: 1 / -1; min-width: 0; }
+#task-history-panel .task-history-disclosure::details-content { display: grid; grid-template-columns: subgrid; grid-column: 1 / -1; min-width: 0; }
+#task-history-panel .task-history-disclosure > :not(summary) { grid-column: 1 / -1; min-width: 0; }
+#task-history-panel .task-history-entries > li > * { grid-column: 1 / -1; }
+#task-history-panel .task-history-disclosure[open] { background-color: color-mix(in srgb, var(--vscode-list-hoverBackground, rgba(128, 128, 128, .12)) 60%, transparent); }
+.task-history-disclosure > summary {
+  display: grid; grid-template-columns: subgrid; grid-column: 1 / -1; align-items: center; min-height: 40px; padding: 8px;
+  cursor: pointer; list-style: none; line-height: 16px;
+}
 .task-history-disclosure > summary::-webkit-details-marker { display: none; }
-.task-history-disclosure > summary::after { content: "›"; justify-self: center; }
-.task-history-disclosure[open] > summary::after { transform: rotate(90deg); }
-.task-history-disclosure > summary:hover { background: var(--vscode-list-hoverBackground); }
-.task-history-disclosure > summary:focus-visible { outline: 1px solid var(--vscode-focusBorder); }
-.task-history-name { min-width: 0; overflow-wrap: anywhere; }
-.task-history-count { font-size: 11px; color: var(--vscode-descriptionForeground); }
+.task-history-disclosure > summary::before { content: "›"; grid-column: 1; justify-self: center; color: var(--vscode-descriptionForeground); transition: transform .12s ease; }
+.task-history-disclosure[open] > summary::before { transform: rotate(90deg); }
+@media (prefers-reduced-motion: reduce) { .task-history-disclosure > summary::before { transition: none; } }
+.task-history-disclosure > summary:is(:hover, :focus-within) { background: var(--vscode-list-hoverBackground, rgba(128, 128, 128, .12)); }
+.task-history-disclosure > summary:focus-visible { outline: 1px solid var(--vscode-focusBorder); outline-offset: -1px; }
+.task-history-name { grid-column: 2; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
+.task-history-count { grid-column: 3 / 5; justify-self: end; min-width: 0; max-width: 22ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; color: var(--vscode-descriptionForeground); }
+.task-history-count:empty { display: none; }
+.task-history-state { --task-status-color: var(--vscode-descriptionForeground); grid-column: 5 / -1; display: inline-flex; align-items: center; gap: 6px; font-size: 11px; white-space: nowrap; color: var(--vscode-foreground); }
+.task-history-state::before { content: ""; flex: 0 0 auto; width: 7px; height: 7px; border-radius: 50%; background: var(--task-status-color); }
+.task-history-state[data-status="running"] { --task-status-color: var(--vscode-textLink-foreground, var(--vscode-focusBorder, #007acc)); }
+.task-history-state[data-status="verifying"] { --task-status-color: var(--vscode-debugIcon-breakpointForeground, #8957e5); }
+.task-history-state[data-status="completed"] { --task-status-color: var(--vscode-testing-iconPassed, #388a34); }
+.task-history-state[data-status="failed"] { --task-status-color: var(--vscode-errorForeground, #d13438); }
+.task-history-state[data-status="blocked"] { --task-status-color: var(--vscode-editorWarning-foreground, #bf8803); }
+@media (forced-colors: active) { .task-history-state::before { forced-color-adjust: none; background: CanvasText; } }
+#task-history-panel .task-history-entries > li + li { border-top: 1px solid var(--vscode-menu-separatorBackground, var(--vscode-panel-border, #454545)); }
+#task-history-panel .task-flow { padding: 0; }
 .task-history-list.is-flyout {
   position: fixed;
   z-index: 14;
@@ -444,11 +468,7 @@
 .history-tabs button:focus-visible { outline: 1px solid var(--vscode-focusBorder); outline-offset: -2px; }
 .history-tab-panel { flex: 1 1 auto; min-height: 0; overflow-x: hidden; overflow-y: auto; padding-top: 4px; }
 .history-tab-panel[hidden] { display: none; }
-.project-history-detail { padding: 0 8px 10px; }
-/* Titles keep one line; the contract/status label truncates first and both carry their full text as a tooltip. */
-.project-history-entry .task-history-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; overflow-wrap: normal; }
-.project-history-entry .task-history-count { max-width: 22ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.project-history-entry[data-status="failed"] .task-history-count { color: var(--vscode-errorForeground); }
+.project-history-detail { padding: 2px 8px 10px 30px; }
 
 .task-flow-detail { display: grid; gap: 8px; padding: 0 8px 10px 40px; min-width: 0; }
 .task-flow-description { font-size: 11px; min-width: 0; }
@@ -524,7 +544,7 @@ html[data-af-hidden="true"] *::after {
 .task-flow-stop-error { color: var(--vscode-errorForeground); font-size: 11px; overflow-wrap: anywhere; min-width: 0; }
 
 /* Readable text carries the meaning; a small theme-coloured dot marks the state. */
-#run-stage-list .task-flow-state {
+:is(#run-stage-list, #task-history-panel) .task-flow-state {
   --task-status-color: var(--vscode-descriptionForeground);
   display: inline-flex;
   align-items: center;
@@ -535,7 +555,7 @@ html[data-af-hidden="true"] *::after {
   line-height: 16px;
   white-space: nowrap;
 }
-#run-stage-list .task-flow-state::before {
+:is(#run-stage-list, #task-history-panel) .task-flow-state::before {
   content: "";
   flex: 0 0 auto;
   width: 7px;
@@ -543,63 +563,65 @@ html[data-af-hidden="true"] *::after {
   border-radius: 50%;
   background: var(--task-status-color);
 }
-#run-stage-list .task-flow-state:is([data-observed-status="accepted"], [data-observed-status="queued"], [data-observed-status="starting"], [data-observed-status="running"]) {
+:is(#run-stage-list, #task-history-panel) .task-flow-state:is([data-observed-status="accepted"], [data-observed-status="queued"], [data-observed-status="starting"], [data-observed-status="running"]) {
   --task-status-color: var(--vscode-textLink-foreground, var(--vscode-focusBorder, #007acc));
 }
-#run-stage-list .task-flow-state[data-observed-status="verifying"] { --task-status-color: var(--vscode-debugIcon-breakpointForeground, #8957e5); }
-#run-stage-list .task-flow-state[data-observed-status="completed"] { --task-status-color: var(--vscode-testing-iconPassed, #388a34); }
-#run-stage-list .task-flow-state[data-observed-status="failed"] { --task-status-color: var(--vscode-errorForeground, #d13438); }
-#run-stage-list .task-flow-state:is([data-observed-status="blocked"], [data-observed-status="needs-human-decision"]) {
+:is(#run-stage-list, #task-history-panel) .task-flow-state[data-observed-status="verifying"] { --task-status-color: var(--vscode-debugIcon-breakpointForeground, #8957e5); }
+:is(#run-stage-list, #task-history-panel) .task-flow-state[data-observed-status="completed"] { --task-status-color: var(--vscode-testing-iconPassed, #388a34); }
+:is(#run-stage-list, #task-history-panel) .task-flow-state[data-observed-status="failed"] { --task-status-color: var(--vscode-errorForeground, #d13438); }
+:is(#run-stage-list, #task-history-panel) .task-flow-state:is([data-observed-status="blocked"], [data-observed-status="needs-human-decision"]) {
   --task-status-color: var(--vscode-editorWarning-foreground, #bf8803);
 }
-#run-stage-list .task-flow-state[data-observed-status="cancelling"] { --task-status-color: var(--vscode-editorWarning-foreground, #bf8803); }
+:is(#run-stage-list, #task-history-panel) .task-flow-state[data-observed-status="cancelling"] { --task-status-color: var(--vscode-editorWarning-foreground, #bf8803); }
 /* Override the old accent text: status text keeps the theme's readable foreground. */
-#run-stage-list :is(.task-flow-step, .task-flow-single) .task-flow-state { color: var(--vscode-foreground); }
+:is(#run-stage-list, #task-history-panel) :is(.task-flow-step, .task-flow-single) .task-flow-state { color: var(--vscode-foreground); }
 @media (forced-colors: active) {
-  #run-stage-list .task-flow-state::before { forced-color-adjust: none; background: CanvasText; }
+  :is(#run-stage-list, #task-history-panel) .task-flow-state::before { forced-color-adjust: none; background: CanvasText; }
 }
 
 /* One shared grid: content-sized identity columns align across every live task row. */
-#run-details { container-type: inline-size; }
-#run-stage-list {
+#run-details { container: task-rows / inline-size; }
+/* The history list is a narrower flyout; it keeps one-line rows until it is genuinely narrow. */
+#task-history-panel { container: task-history / inline-size; }
+:is(#run-stage-list, #task-history-panel) {
   display: grid;
   grid-template-columns: 12px minmax(0, 1fr) auto auto auto auto;
   column-gap: 10px;
 }
-#run-stage-list > *,
-#run-stage-list :is(.task-flow, .task-flow-list, .task-flow-step, .task-flow-disclosure, .task-flow-single) > * { grid-column: 1 / -1; min-width: 0; }
-#run-stage-list :is(.task-flow, .task-flow-list, .task-flow-step, .task-flow-disclosure, .task-flow-single),
-#run-stage-list summary.task-flow-row {
+:is(#run-stage-list, #task-history-panel) > *,
+:is(#run-stage-list, #task-history-panel) :is(.task-flow, .task-flow-list, .task-flow-step, .task-flow-disclosure, .task-flow-single) > * { grid-column: 1 / -1; min-width: 0; }
+:is(#run-stage-list, #task-history-panel) :is(.task-flow, .task-flow-list, .task-flow-step, .task-flow-disclosure, .task-flow-single),
+:is(#run-stage-list, #task-history-panel) summary.task-flow-row {
   display: grid;
   grid-template-columns: subgrid;
   grid-column: 1 / -1;
   row-gap: 0;
 }
-#run-stage-list .task-flow { padding-inline: 0; border: 0; border-radius: 0; }
+:is(#run-stage-list, #task-history-panel) .task-flow { padding-inline: 0; border: 0; border-radius: 0; }
 /* Expanded details occupy their own full-width line below the row. */
-#run-stage-list :is(.task-flow-disclosure, .task-flow-single)::details-content { display: grid; grid-template-columns: subgrid; grid-column: 1 / -1; min-width: 0; }
-#run-stage-list .task-flow + .task-flow { border-top: 1px solid var(--vscode-menu-separatorBackground, var(--vscode-panel-border, #454545)); }
-#run-stage-list .task-flow-list { gap: 0; }
-#run-stage-list .task-flow-single-container { padding-block: 0; }
-#run-stage-list .task-flow-detail { padding: 2px 8px 10px 30px; }
+:is(#run-stage-list, #task-history-panel) :is(.task-flow-disclosure, .task-flow-single)::details-content { display: grid; grid-template-columns: subgrid; grid-column: 1 / -1; min-width: 0; }
+:is(#run-stage-list, #task-history-panel) .task-flow + .task-flow { border-top: 1px solid var(--vscode-menu-separatorBackground, var(--vscode-panel-border, #454545)); }
+:is(#run-stage-list, #task-history-panel) .task-flow-list { gap: 0; }
+:is(#run-stage-list, #task-history-panel) .task-flow-single-container { padding-block: 0; }
+:is(#run-stage-list, #task-history-panel) .task-flow-detail { padding: 2px 8px 10px 30px; }
 
 /* Divided rows, no cards: only hover, focus and expansion tint the background. */
-#run-stage-list :is(.task-flow-single, .task-flow-step) { border: 0; border-radius: 0; outline: 0; background-color: transparent; overflow: visible; }
-#run-stage-list .task-flow-step + .task-flow-step { border-top: 1px solid var(--vscode-menu-separatorBackground, var(--vscode-panel-border, #454545)); }
-#run-stage-list :is(.task-flow-single, .task-flow-disclosure)[open] { background-color: color-mix(in srgb, var(--vscode-list-hoverBackground, rgba(128, 128, 128, .12)) 60%, transparent); }
-#run-stage-list summary.task-flow-row {
+:is(#run-stage-list, #task-history-panel) :is(.task-flow-single, .task-flow-step) { border: 0; border-radius: 0; outline: 0; background-color: transparent; overflow: visible; }
+:is(#run-stage-list, #task-history-panel) .task-flow-step + .task-flow-step { border-top: 1px solid var(--vscode-menu-separatorBackground, var(--vscode-panel-border, #454545)); }
+:is(#run-stage-list, #task-history-panel) :is(.task-flow-single, .task-flow-disclosure)[open] { background-color: color-mix(in srgb, var(--vscode-list-hoverBackground, rgba(128, 128, 128, .12)) 60%, transparent); }
+:is(#run-stage-list, #task-history-panel) summary.task-flow-row {
   align-items: center;
   min-height: 0;
   padding: 2px 8px;
   border-radius: 4px;
   cursor: pointer;
 }
-#run-stage-list summary.task-flow-row:is(:hover, :focus-within) { background-color: var(--vscode-list-hoverBackground, rgba(128, 128, 128, .12)); }
-#run-stage-list summary.task-flow-row:focus-visible { outline: 1px solid var(--vscode-focusBorder, #007acc); outline-offset: -1px; }
+:is(#run-stage-list, #task-history-panel) summary.task-flow-row:is(:hover, :focus-within) { background-color: var(--vscode-list-hoverBackground, rgba(128, 128, 128, .12)); }
+:is(#run-stage-list, #task-history-panel) summary.task-flow-row:focus-visible { outline: 1px solid var(--vscode-focusBorder, #007acc); outline-offset: -1px; }
 
 /* The disclosure chevron leads the row. */
-#run-stage-list summary.task-flow-row::after { content: none; }
-#run-stage-list summary.task-flow-row::before {
+:is(#run-stage-list, #task-history-panel) summary.task-flow-row::after { content: none; }
+:is(#run-stage-list, #task-history-panel) summary.task-flow-row::before {
   content: "›";
   grid-column: 1;
   grid-row: 1;
@@ -609,9 +631,9 @@ html[data-af-hidden="true"] *::after {
   line-height: 1;
   transition: transform 120ms ease;
 }
-#run-stage-list :is(.task-flow-single, .task-flow-disclosure)[open] > summary.task-flow-row::before { transform: rotate(90deg); }
+:is(#run-stage-list, #task-history-panel) :is(.task-flow-single, .task-flow-disclosure)[open] > summary.task-flow-row::before { transform: rotate(90deg); }
 @media (prefers-reduced-motion: reduce) {
-  #run-stage-list summary.task-flow-row::before { transition: none; }
+  :is(#run-stage-list, #task-history-panel) summary.task-flow-row::before { transition: none; }
 }
 
 /* Title leads; role and model recede to supporting tones. */
@@ -626,17 +648,17 @@ html[data-af-hidden="true"] *::after {
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: default;
   color: var(--vscode-descriptionForeground); font-size: 10px; line-height: 14px;
 }
-#run-stage-list .task-flow-row > .task-flow-agent[data-assigned="true"] { border-color: color-mix(in srgb, var(--vscode-widget-border, #666) 70%, transparent); color: var(--vscode-descriptionForeground); }
+:is(#run-stage-list, #task-history-panel) .task-flow-row > .task-flow-agent[data-assigned="true"] { border-color: color-mix(in srgb, var(--vscode-widget-border, #666) 70%, transparent); color: var(--vscode-descriptionForeground); }
 /* Role tint: text only, kept clear of the blue/green/red status colours; the border stays neutral. */
 /* Each recorded role has its own hue (purple, cyan, orange), kept clear of the blue/green/red status colours. */
-#run-stage-list .task-flow-row > .task-flow-agent[data-agent-role="expert"] { --task-flow-role-color: var(--vscode-charts-purple, #b180d7); }
-#run-stage-list .task-flow-row > .task-flow-agent[data-agent-role="worker"] { --task-flow-role-color: var(--vscode-terminal-ansiCyan, #29b8db); }
-#run-stage-list .task-flow-row > .task-flow-agent[data-agent-role="verifier"] { --task-flow-role-color: var(--vscode-charts-orange, #d18616); }
-#run-stage-list .task-flow-row > .task-flow-agent[data-agent-role] {
+:is(#run-stage-list, #task-history-panel) .task-flow-row > .task-flow-agent[data-agent-role="expert"] { --task-flow-role-color: var(--vscode-charts-purple, #b180d7); }
+:is(#run-stage-list, #task-history-panel) .task-flow-row > .task-flow-agent[data-agent-role="worker"] { --task-flow-role-color: var(--vscode-terminal-ansiCyan, #29b8db); }
+:is(#run-stage-list, #task-history-panel) .task-flow-row > .task-flow-agent[data-agent-role="verifier"] { --task-flow-role-color: var(--vscode-charts-orange, #d18616); }
+:is(#run-stage-list, #task-history-panel) .task-flow-row > .task-flow-agent[data-agent-role] {
   color: color-mix(in srgb, var(--task-flow-role-color) 90%, var(--vscode-foreground));
   border-color: color-mix(in srgb, var(--task-flow-role-color) 45%, transparent);
 }
-@media (forced-colors: active) { #run-stage-list .task-flow-row > .task-flow-agent[data-agent-role] { color: CanvasText; } }
+@media (forced-colors: active) { :is(#run-stage-list, #task-history-panel) .task-flow-row > .task-flow-agent[data-agent-role] { color: CanvasText; } }
 .task-flow-row > button.task-flow-agent { cursor: pointer; background: transparent; font-family: inherit; }
 .task-flow-row > button.task-flow-agent:focus-visible { outline: 2px solid var(--vscode-focusBorder, #007acc); outline-offset: 1px; }
 .task-flow-row > .task-flow-model {
@@ -647,7 +669,7 @@ html[data-af-hidden="true"] *::after {
 .task-flow-row > .task-flow-state { grid-column: 5; grid-row: 1; }
 
 /* Two lines per task: title | worker | verifier | status | action, then activity | worker model | verifier model | steps. */
-#run-stage-list summary.task-flow-row { row-gap: 0; line-height: 16px; }
+:is(#run-stage-list, #task-history-panel) summary.task-flow-row { row-gap: 0; line-height: 16px; }
 .task-flow-row > .task-flow-agent[data-stage="verification"] { grid-column: 4; }
 .task-flow-row > .task-flow-model[data-stage="verification"] { grid-column: 4; }
 .task-flow-row > :is(.task-flow-agent, .task-flow-model)[data-waiting="true"] { opacity: .55; }
@@ -662,7 +684,7 @@ html[data-af-hidden="true"] *::after {
   color: var(--vscode-descriptionForeground); font-size: 11px; font-variant-numeric: tabular-nums; white-space: nowrap;
 }
 /* A running stage's model carries Main's working text scan. */
-#run-stage-list .task-flow-row > .task-flow-model[data-running="true"] {
+:is(#run-stage-list, #task-history-panel) .task-flow-row > .task-flow-model[data-running="true"] {
   --task-flow-model-color: var(--vscode-textLink-foreground, var(--af-color-accent));
   color: var(--task-flow-model-color);
   background-image: linear-gradient(90deg, var(--task-flow-model-color) 45%,
@@ -676,10 +698,10 @@ html[data-af-hidden="true"] *::after {
   animation: run-status-text-scan 2.4s linear infinite;
 }
 @media (prefers-reduced-motion: reduce) {
-  #run-stage-list .task-flow-row > .task-flow-model[data-running="true"] { animation: none; background-image: none; -webkit-text-fill-color: currentColor; }
+  :is(#run-stage-list, #task-history-panel) .task-flow-row > .task-flow-model[data-running="true"] { animation: none; background-image: none; -webkit-text-fill-color: currentColor; }
 }
 @media (forced-colors: active) {
-  #run-stage-list .task-flow-row > .task-flow-model[data-running="true"] { background-image: none; -webkit-text-fill-color: currentColor; color: CanvasText; }
+  :is(#run-stage-list, #task-history-panel) .task-flow-row > .task-flow-model[data-running="true"] { background-image: none; -webkit-text-fill-color: currentColor; color: CanvasText; }
 }
 
 /* One action slot: stop while the task is active, then delete; whichever applies stays visible. */
@@ -714,9 +736,9 @@ html[data-af-hidden="true"] *::after {
 .task-flow-row .task-flow-dismiss:focus-visible { outline: 1px solid var(--vscode-focusBorder, #007acc); outline-offset: -1px; }
 
 /* Narrow panels: title and action, the activity line, then status | worker | verifier over steps | models. */
-@container (max-width: 520px) {
+@container task-rows (max-width: 520px), task-history (max-width: 360px) {
   /* Status, worker and verifier take their content width; a flexible gap precedes the action slot. */
-  #run-stage-list { grid-template-columns: 12px auto auto auto minmax(0, 1fr) auto; column-gap: 8px; --task-flow-sweep-strength: 6%; }
+  :is(#run-stage-list, #task-history-panel) { grid-template-columns: 12px auto auto auto minmax(0, 1fr) auto; column-gap: 8px; --task-flow-sweep-strength: 6%; }
   .task-flow-row > :is(.task-flow-single-title, .task-flow-name) { grid-column: 2 / 6; }
   .task-flow-row > .task-flow-stop-controls { grid-column: 6; grid-row: 1; }
   .task-flow-row > .task-flow-session { grid-column: 6; grid-row: 2; }
@@ -728,7 +750,12 @@ html[data-af-hidden="true"] *::after {
   .task-flow-row > .task-flow-agent { max-width: 10ch; }
   .task-flow-row > .task-flow-stop-error { grid-row: 5; }
   .task-flow-row > :is(.task-flow-agent, .task-flow-model)[data-stage="verification"] { grid-column: 4; }
-  #run-stage-list summary.task-flow-row { row-gap: 3px; }
+  :is(#run-stage-list, #task-history-panel) summary.task-flow-row { row-gap: 3px; }
+  /* History group rows follow the same stacking: title, then status and its meta. */
+  .task-history-disclosure > summary { row-gap: 3px; }
+  .task-history-disclosure > summary > .task-history-name { grid-column: 2 / 6; }
+  .task-history-disclosure > summary > .task-history-state { grid-column: 2; grid-row: 2; justify-self: start; }
+  .task-history-disclosure > summary > .task-history-count { grid-column: 3 / 6; grid-row: 2; justify-self: start; }
 }
 
 .agent-progress:not(.is-progressing) .run-status-label { animation: none; }
