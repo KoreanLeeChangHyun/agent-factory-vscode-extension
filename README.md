@@ -15,6 +15,11 @@ results in VS Code.
 
 - The extension installs or updates the matching Agent Factory companion plugin for each
   available runtime: Codex, Claude Code (`claude`) and Antigravity (`agy`).
+- `agentFactory.mainChat.pluginUpdateMode` chooses `auto` (the default: install or
+  update when a CLI is newly detected or its path changes) or `manual` (only when you
+  click **Update now** in **Settings → General**).
+- Set `agentFactory.mainChat.codexPath`, `claudePath` or `antigravityPath` when a CLI is
+  not found automatically.
 
 ## 2. Core features
 
@@ -52,9 +57,28 @@ results in VS Code.
 - Verification findings return to Work for correction, and revised work returns
   to Verification for another check. A passing result completes the verification
   stage; unresolved findings remain visible.
-- Choose the execution mode for the task. Direct Main work and Work-only execution
-  are also available; a separate Verification agent runs only when the selected
-  route calls for it.
+- Each new message defaults to **orchestrator mode**: Main converses, plans and routes,
+  and delegates every change and research task to Work, using the light Work model for
+  bounded, already-decided changes and the heavy one otherwise. In **worker mode** Main
+  implements directly.
+
+  ```mermaid
+  flowchart LR
+    accTitle: Orchestrator mode routing
+    accDescr: Main answers conversation and light lookups itself and delegates changes and research to Work. Work reports its own checks. Verification runs only when requested; its findings return to Work until it passes.
+    U["Your message"] --> M{"Main"}
+    M -->|"conversation, interview,<br/>light lookup"| A["Main answers"]
+    M -->|"change or research"| W["Work agent"]
+    W --> C["Own checks and receipt"]
+    C -->|"Verification not requested"| R["Main reports"]
+    C -->|"Verification requested"| V["Verification agent"]
+    V -->|"findings"| W
+    V -->|"pass"| R
+  ```
+
+- Choose another execution mode for a message when needed, such as Work-only
+  execution or a route with separate Verification. A separate Verification agent
+  runs only when the selected route calls for it.
 
 ### 2.3. Interviews
 
