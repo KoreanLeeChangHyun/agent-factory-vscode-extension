@@ -256,7 +256,7 @@ test("running state appears above the composer as an expandable work loop panel"
   assert.match(chatStyles, /@keyframes run-status-text-scan\s*\{[\s\S]*?from\s*\{\s*background-position: 100% 0;[\s\S]*?to\s*\{\s*background-position: 0% 0;/);
   assert.match(chatStyles, /\.run-status-label\s*\{[^}]*background-size: 300% 100%;[^}]*background-repeat: no-repeat;/);
   assert.match(template, /class="run-status-copy"[\s\S]*run-status-label[\s\S]*run-status-meta/);
-  assert.match(chatStyles, /\.run-status\.is-running\s*\{[^}]*--run-status-active-color: var\(--vscode-progressBar-background, var\(--vscode-focusBorder, var\(--af-color-accent\)\)\)[^}]*--run-status-text-color: var\(--run-status-active-color\)/);
+  assert.match(chatStyles, /\.run-status\.is-running\s*\{[^}]*--run-status-active-color: var\(--vscode-textLink-foreground, var\(--vscode-progressBar-background, var\(--vscode-focusBorder, var\(--af-color-accent\)\)\)\)[^}]*--run-status-text-color: var\(--run-status-active-color\)/);
   assert.match(chatStyles, /\.run-status-label\s*\{[^}]*color: var\(--run-status-text-color\)[^}]*background-clip: text/);
   // The shimmer runs only while Main is observed running; the base label stays still.
   assert.doesNotMatch(chatStyles.match(/\.run-status-label\s*\{[^}]*\}/)[0], /animation/);

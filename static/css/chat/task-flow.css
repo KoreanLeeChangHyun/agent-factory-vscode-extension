@@ -9,8 +9,9 @@
   line-height: 1.4;
 }
 
+/* Same blue as the task rows' running dot and Main's loading dot; some themes paint the progress bar grey. */
 .run-status.is-running {
-  --run-status-active-color: var(--vscode-progressBar-background, var(--vscode-focusBorder, var(--af-color-accent)));
+  --run-status-active-color: var(--vscode-textLink-foreground, var(--vscode-progressBar-background, var(--vscode-focusBorder, var(--af-color-accent))));
   --run-status-text-color: var(--run-status-active-color);
 }
 
@@ -59,13 +60,14 @@
 }
 
 /* Running dot: a soft breathing core with two staggered rings radiating outward; transforms only, so the row never shifts. */
-.run-status.is-running > .run-status-toggle .run-status-pulse, .agent-progress.is-progressing .run-status-pulse {
+.run-status.is-running > .run-status-toggle .run-status-pulse, .agent-progress.is-progressing .run-status-pulse, .task-flow-state[data-pulse="true"] > .run-status-pulse {
   background: var(--run-status-active-color);
   animation: run-status-dot-breathe 1.8s ease-in-out infinite;
 }
 
 .run-status.is-running > .run-status-toggle .run-status-pulse::before, .run-status.is-running > .run-status-toggle .run-status-pulse::after,
-.agent-progress.is-progressing .run-status-pulse::before, .agent-progress.is-progressing .run-status-pulse::after {
+.agent-progress.is-progressing .run-status-pulse::before, .agent-progress.is-progressing .run-status-pulse::after,
+.task-flow-state[data-pulse="true"] > .run-status-pulse::before, .task-flow-state[data-pulse="true"] > .run-status-pulse::after {
   content: "";
   position: absolute;
   inset: 0;
@@ -77,7 +79,7 @@
   animation: run-status-dot-ripple 1.8s ease-out infinite;
 }
 
-.run-status.is-running > .run-status-toggle .run-status-pulse::after, .agent-progress.is-progressing .run-status-pulse::after {
+.run-status.is-running > .run-status-toggle .run-status-pulse::after, .agent-progress.is-progressing .run-status-pulse::after, .task-flow-state[data-pulse="true"] > .run-status-pulse::after {
   animation-delay: .9s;
 }
 
@@ -93,7 +95,7 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .run-status.is-running > .run-status-toggle .run-status-pulse, .agent-progress.is-progressing .run-status-pulse { animation: none; }
+  .run-status.is-running > .run-status-toggle .run-status-pulse, .agent-progress.is-progressing .run-status-pulse, .task-flow-state[data-pulse="true"] > .run-status-pulse { animation: none; }
   .run-status-pulse::before, .run-status-pulse::after { content: none !important; animation: none !important; }
 }
 
@@ -437,7 +439,7 @@
 .task-history-name { grid-column: 2; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
 .task-history-count { grid-column: 3 / 5; justify-self: end; min-width: 0; max-width: 22ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; color: var(--vscode-descriptionForeground); }
 .task-history-count:empty { display: none; }
-.task-history-state { --task-status-color: var(--vscode-descriptionForeground); grid-column: 5 / -1; display: inline-flex; align-items: center; gap: 6px; font-size: 11px; white-space: nowrap; color: var(--vscode-foreground); }
+.task-history-state { --task-status-color: var(--vscode-descriptionForeground); grid-column: 5; display: inline-flex; align-items: center; gap: 6px; font-size: 11px; white-space: nowrap; color: var(--vscode-foreground); }
 .task-history-state::before { content: ""; flex: 0 0 auto; width: 7px; height: 7px; border-radius: 50%; background: var(--task-status-color); }
 .task-history-state[data-status="running"] { --task-status-color: var(--vscode-textLink-foreground, var(--vscode-focusBorder, #007acc)); }
 .task-history-state[data-status="verifying"] { --task-status-color: var(--vscode-debugIcon-breakpointForeground, #8957e5); }
@@ -445,6 +447,11 @@
 .task-history-state[data-status="failed"] { --task-status-color: var(--vscode-errorForeground, #d13438); }
 .task-history-state[data-status="blocked"] { --task-status-color: var(--vscode-editorWarning-foreground, #bf8803); }
 @media (forced-colors: active) { .task-history-state::before { forced-color-adjust: none; background: CanvasText; } }
+/* History delete sits in the task rows' action column. */
+.task-history-disclosure > summary > .task-flow-dismiss { grid-column: 6; justify-self: end; }
+#task-history-panel .task-history-entries > li.task-history-legacy { align-items: center; }
+#task-history-panel .task-history-entries > li.task-history-legacy > .run-stage { grid-column: 1 / 6; }
+#task-history-panel .task-history-entries > li.task-history-legacy > .task-flow-dismiss { grid-column: 6; justify-self: end; margin-right: 8px; }
 #task-history-panel .task-history-entries > li + li { border-top: 1px solid var(--vscode-menu-separatorBackground, var(--vscode-panel-border, #454545)); }
 #task-history-panel .task-flow { padding: 0; }
 .task-history-list.is-flyout {
@@ -575,8 +582,12 @@ html[data-af-hidden="true"] *::after {
 :is(#run-stage-list, #task-history-panel) .task-flow-state[data-observed-status="cancelling"] { --task-status-color: var(--vscode-editorWarning-foreground, #bf8803); }
 /* Override the old accent text: status text keeps the theme's readable foreground. */
 :is(#run-stage-list, #task-history-panel) :is(.task-flow-step, .task-flow-single) .task-flow-state { color: var(--vscode-foreground); }
+/* While its run executes, the row's dot is the header's pulse element in the row's status colour. */
+:is(#run-stage-list, #task-history-panel) .task-flow-state[data-pulse="true"] { --run-status-active-color: var(--task-status-color); }
+:is(#run-stage-list, #task-history-panel) .task-flow-state[data-pulse="true"]::before { display: none; }
 @media (forced-colors: active) {
   :is(#run-stage-list, #task-history-panel) .task-flow-state::before { forced-color-adjust: none; background: CanvasText; }
+  :is(#run-stage-list, #task-history-panel) .task-flow-state[data-pulse="true"] > .run-status-pulse { forced-color-adjust: none; background: CanvasText; }
 }
 
 /* One shared grid: content-sized identity columns align across every live task row. */
@@ -721,7 +732,7 @@ html[data-af-hidden="true"] *::after {
 .task-flow-row > button.task-flow-session:hover { color: var(--vscode-icon-foreground, var(--vscode-foreground)); background: var(--vscode-toolbar-hoverBackground, rgba(128, 128, 128, .2)); }
 .task-flow-row > button.task-flow-session:focus-visible { outline: 1px solid var(--vscode-focusBorder, #007acc); outline-offset: -1px; }
 .task-flow-row > .task-flow-stop-error { grid-column: 2 / -1; grid-row: 3; contain: inline-size; }
-.task-flow-row :is(.task-flow-dismiss, .task-flow-stop) {
+:is(.task-flow-row, .task-history-disclosure > summary, .task-history-legacy) :is(.task-flow-dismiss, .task-flow-stop) {
   display: inline-grid; place-items: center; width: 22px; height: 16px; padding: 0;
   border: 0; border-radius: 4px; background: transparent; color: var(--vscode-icon-foreground, var(--vscode-foreground));
   cursor: pointer;
@@ -730,10 +741,10 @@ html[data-af-hidden="true"] *::after {
 .task-flow-row .task-flow-stop:disabled { opacity: .45; cursor: default; }
 .task-flow-row .task-flow-stop:not(:disabled):hover { background: var(--vscode-toolbar-hoverBackground, rgba(128, 128, 128, .2)); }
 .task-flow-row .task-flow-stop:focus-visible { outline: 1px solid var(--vscode-focusBorder, #007acc); outline-offset: -1px; }
-.task-flow-row .task-flow-dismiss svg { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 1.3; stroke-linecap: round; stroke-linejoin: round; }
-.task-flow-row .task-flow-dismiss { color: var(--vscode-descriptionForeground); }
-.task-flow-row .task-flow-dismiss:hover { color: var(--vscode-icon-foreground, var(--vscode-foreground)); background: var(--vscode-toolbar-hoverBackground, rgba(128, 128, 128, .2)); }
-.task-flow-row .task-flow-dismiss:focus-visible { outline: 1px solid var(--vscode-focusBorder, #007acc); outline-offset: -1px; }
+:is(.task-flow-row, .task-history-disclosure > summary, .task-history-legacy) .task-flow-dismiss svg { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 1.3; stroke-linecap: round; stroke-linejoin: round; }
+:is(.task-flow-row, .task-history-disclosure > summary, .task-history-legacy) .task-flow-dismiss { color: var(--vscode-descriptionForeground); }
+:is(.task-flow-row, .task-history-disclosure > summary, .task-history-legacy) .task-flow-dismiss:hover { color: var(--vscode-icon-foreground, var(--vscode-foreground)); background: var(--vscode-toolbar-hoverBackground, rgba(128, 128, 128, .2)); }
+:is(.task-flow-row, .task-history-disclosure > summary, .task-history-legacy) .task-flow-dismiss:focus-visible { outline: 1px solid var(--vscode-focusBorder, #007acc); outline-offset: -1px; }
 
 /* Narrow panels: title and action, the activity line, then status | worker | verifier over steps | models. */
 @container task-rows (max-width: 520px), task-history (max-width: 360px) {
