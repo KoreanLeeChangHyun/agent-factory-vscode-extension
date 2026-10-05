@@ -307,12 +307,15 @@ globalThis.AgentFactoryChat.taskFlow = function (host) {
     });
   }
   function createTaskDismiss(flow, stages) {
-    const key = taskDismissKey(flow, stages);
+    return createDismissButton(stages[0].title, [taskDismissKey(flow, stages)]);
+  }
+  // Delete only hides entries from this conversation's lists; runs, snapshots and Agent history are kept.
+  function createDismissButton(title, keys) {
     const button = document.createElement("button");
     button.type = "button";
     button.className = "task-flow-dismiss";
     button.title = t("flow.dismiss.detail");
-    button.setAttribute("aria-label", stages[0].title + " · " + t("flow.dismiss"));
+    button.setAttribute("aria-label", title + " · " + t("flow.dismiss"));
     const icon = document.createElementNS("http://www.w3.org/2000/svg", "svg");
     icon.setAttribute("viewBox", "0 0 16 16");
     icon.setAttribute("aria-hidden", "true");
@@ -323,7 +326,7 @@ globalThis.AgentFactoryChat.taskFlow = function (host) {
     button.append(icon);
     button.addEventListener("click", event => {
       event.preventDefault(); event.stopPropagation();
-      state.dismissedTasks = [...new Set([...(state.dismissedTasks || []), key])];
+      state.dismissedTasks = [...new Set([...(state.dismissedTasks || []), ...keys])];
       renderWorkLoopPanel();
       persist();
     });
@@ -455,6 +458,14 @@ globalThis.AgentFactoryChat.taskFlow = function (host) {
     label.textContent = t(observed === "completed" && verification ? "flow.display.verification.completed"
       : ["accepted", "queued", "starting", "cancelling", "needs-human-decision"].includes(observed)
         ? "flow.display." + observed : "flow.status." + observed);
+    // A row whose run is actually executing uses the workflow header's pulse: breathing core and staggered rings.
+    if (["running", "verifying"].includes(observed) && taskStageRunning(task, flow)) {
+      const pulse = document.createElement("span");
+      pulse.className = "run-status-pulse";
+      pulse.setAttribute("aria-hidden", "true");
+      label.dataset.pulse = "true";
+      label.prepend(pulse);
+    }
     const detail = t(observed === "completed" ? "flow.status.detail." + (verification ? "verification.completed" : "completed")
       : "flow.status.detail." + observed);
     label.title = detail;
@@ -770,7 +781,9 @@ globalThis.AgentFactoryChat.taskFlow = function (host) {
     disclosure.dataset.historyId = flow.id;
     const status = flowHistoryStatus(totals.counts);
     disclosure.dataset.status = status;
-    disclosure.append(historyRowHeading(flow.title, t("flow.task.count", totals.total), status), createTaskFlow(flow, true));
+    const heading = historyRowHeading(flow.title, t("flow.task.count", totals.total), status);
+    if (state.role === "main") heading.append(createDismissButton(flow.title, taskGroups(flow).map(stages => taskDismissKey(flow, stages))));
+    disclosure.append(heading, createTaskFlow(flow, true));
     item.append(disclosure);
     return item;
   }
@@ -818,10 +831,12 @@ globalThis.AgentFactoryChat.taskFlow = function (host) {
       description.append(title, text);
       body.append(description);
     }
+    if (state.role === "main") heading.append(createDismissButton(entry.title, [projectHistoryDismissKey(entry)]));
     disclosure.append(heading, body);
     item.append(disclosure);
     return item;
   }
+  function projectHistoryDismissKey(entry) { return JSON.stringify(["project", entry.id]); }
   function projectTaskStatus(status) {
     return { active: "running", running: "running", verifying: "verifying", completed: "completed", cancelled: "cancelled",
       failed: "failed", "runtime-error": "failed", "needs-human-decision": "blocked", blocked: "blocked" }[status] || "pending";
@@ -847,20 +862,43 @@ globalThis.AgentFactoryChat.taskFlow = function (host) {
 
     return flows;
   }
+  // A logical task has ended once its shown stage is terminal and no stop for it is still unanswered.
+  function taskGroupEnded(flow, stages) {
+    const { selected, key } = taskStopTarget(flow, stages);
+    return !flow.stopPending && !taskStopsPending.has(key) && ["completed", "failed", "cancelled"].includes(liveTaskStatus(selected));
+  }
+  function taskGroups(flow) {
+    const groups = new Map();
+    for (const task of flow.tasks) {
+      const id = task.taskId || task.id;
+      if (!groups.has(id)) groups.set(id, []);
+      groups.get(id).push(task);
+    }
+    return [...groups.values()];
+  }
+  // The same flow restricted to the logical tasks `keep` accepts; undefined when none remain.
+  function flowWithTaskGroups(flow, keep) {
+    const tasks = taskGroups(flow).filter(keep).flat();
+    return tasks.length ? { ...flow, tasks,
+      ...(flow.pause && !tasks.some(task => (task.taskId || task.id) === flow.pause.taskId) ? { pause: undefined } : {}) } : undefined;
+  }
   function unfinishedFlow(flow) {
     return flow.stopPending || flow.tasks.some(task => ["pending", "running", "verifying", "blocked"].includes(liveTaskStatus(task)));
   }
   function renderWorkLoopPanel() {
     const allFlows = displayTaskFlows();
     const flows = visibleTaskFlows(allFlows);
-    const active = flows.filter(unfinishedFlow);
-    const history = flows.filter(flow => !unfinishedFlow(flow));
+    // The task panel lists only work still in progress; ended tasks move to Task history, even while siblings run.
+    const active = flows.filter(unfinishedFlow).map(flow => flowWithTaskGroups(flow, stages => !taskGroupEnded(flow, stages))).filter(Boolean);
+    const history = flows.map(flow => unfinishedFlow(flow) ? flowWithTaskGroups(flow, stages => taskGroupEnded(flow, stages)) : flow).filter(Boolean);
     const boundRuns = new Set(allFlows.flatMap(flow => flow.tasks.map(task => (task.sessionAgentId || task.agentId) + "/" + (task.sessionRunId || task.runId))));
     const legacyHistory = state.childAgents.filter(agent => acceptedTaskAgent(agent) &&
       ["completed", "failed", "cancelled"].includes(agent.status) &&
       !(state.dismissedTasks || []).includes(taskDismissKey({ id: agent.taskBinding?.workflowId },
         [{ id: agent.taskBinding?.taskId, agentId: agent.agentId, runId: agent.runId }])) && !boundRuns.has(agent.agentId + "/" + agent.runId) &&
       !(state.workflows || []).some(snapshot => snapshot.workflow?.id === agent.taskBinding?.workflowId));
+    const legacyDismissKey = agent => taskDismissKey({ id: agent.taskBinding?.workflowId },
+      [{ id: agent.taskBinding?.taskId, agentId: agent.agentId, runId: agent.runId }]);
     const historyPanel = document.getElementById("task-history");
     const historyList = document.getElementById("task-history-panel");
     historyPanel.hidden = state.role !== "main";
@@ -871,8 +909,9 @@ globalThis.AgentFactoryChat.taskFlow = function (host) {
     if (historyPanel.hidden) historyPanel.open = false;
     const ownFlowIds = new Set(allFlows.map(flow => flow.id));
     // This conversation's records come from its own panel state (with dismissals); others are read-only briefs.
-    const projectHistory = (state.projectTasks || []).filter(entry => entry && !(state.agentId && entry.mainAgentId === state.agentId) && !ownFlowIds.has(entry.id));
-    const historySignature = JSON.stringify([history, state.childAgents, projectHistory, t("flow.status.pending")]);
+    const projectHistory = (state.projectTasks || []).filter(entry => entry && !(state.agentId && entry.mainAgentId === state.agentId) && !ownFlowIds.has(entry.id) &&
+      !(state.dismissedTasks || []).includes(projectHistoryDismissKey(entry)));
+    const historySignature = JSON.stringify([history, state.childAgents, projectHistory, state.dismissedTasks, t("flow.status.pending")]);
     if (historyList.dataset.signature !== historySignature) {
       historyList.dataset.signature = historySignature;
       const expanded = new Set(Array.from(historyList.querySelectorAll("details[data-history-id][open]"), item => item.dataset.historyId));
@@ -880,7 +919,9 @@ globalThis.AgentFactoryChat.taskFlow = function (host) {
       list.className = "task-history-entries";
       list.append(...history.map(createTaskHistoryEntry), ...legacyHistory.map(agent => {
         const item = document.createElement("li");
+        item.className = "task-history-legacy";
         item.append(createRunStage(agent));
+        if (state.role === "main") item.append(createDismissButton(childTaskName(agent), [legacyDismissKey(agent)]));
         return item;
       }), ...projectHistory.map(createProjectHistoryEntry));
       for (const item of list.querySelectorAll("details[data-history-id]")) item.open = expanded.has(item.dataset.historyId);
@@ -892,7 +933,7 @@ globalThis.AgentFactoryChat.taskFlow = function (host) {
     const expandable = state.role === "main";
     runStatus.hidden = !expandable;
     const expanded = expandable && state.runPanelExpanded;
-    document.getElementById("run-status-title").textContent = t(flows.length ? "ui.task.workflow" : "flow.empty");
+    document.getElementById("run-status-title").textContent = t(active.length ? "ui.task.workflow" : "flow.empty");
     runStatusToggle.disabled = !expandable;
     runStatusToggle.setAttribute("aria-expanded", String(expanded));
     runStatus.classList.toggle("is-expanded", expanded);
@@ -907,13 +948,13 @@ globalThis.AgentFactoryChat.taskFlow = function (host) {
     runDetails.hidden = !expanded;
     // Header: in-progress roles from durable run status, then the visible task total; zero roles are omitted.
     const headerParts = runningRoleCounts().filter(([, count]) => count > 0).map(([key, count]) => t(key, count));
-    if (flows.length) headerParts.push(t("flow.task.count", flows.reduce((sum, flow) => sum + summarizeTaskFlow(flow, true).total, 0)));
+    if (active.length) headerParts.push(t("flow.task.count", active.reduce((sum, flow) => sum + summarizeTaskFlow(flow, true).total, 0)));
     runStatusAgents.hidden = state.role !== "main" || !headerParts.length;
     runStatusAgents.textContent = headerParts.length ? "· " + headerParts.join(" · ") : "";
     runStatusAgents.title = headerParts.join(" · ");
     runStatusToggle.setAttribute("aria-label", [document.getElementById("run-status-title").textContent, ...headerParts].join(" · "));
     if (!expanded) return;
-    const signature = JSON.stringify([flows, state.childAgents, [...taskStopsPending], [...taskStopErrors], t("flow.status.pending"), t("flow.empty")]);
+    const signature = JSON.stringify([active, state.childAgents, [...taskStopsPending], [...taskStopErrors], t("flow.status.pending"), t("flow.empty")]);
     if (runStageList.dataset.flowSignature === signature) return;
     const expandedTasks = new Set(Array.from(runStageList.querySelectorAll(".task-flow-disclosure[open], .task-flow-single[open]"), item => {
       const task = item.closest("[data-task-id]");
@@ -921,7 +962,7 @@ globalThis.AgentFactoryChat.taskFlow = function (host) {
       return flow?.dataset.flowId + "/" + task?.dataset.taskId;
     }));
     runStageList.dataset.flowSignature = signature;
-    runStageList.replaceChildren(...(flows.length ? flows.map(flow => createTaskFlow(flow, true)) : [historyEmpty("flow.empty")]));
+    runStageList.replaceChildren(...(active.length ? active.map(flow => createTaskFlow(flow, true)) : [historyEmpty("flow.empty")]));
     for (const item of runStageList.querySelectorAll(".task-flow-disclosure, .task-flow-single")) {
       const task = item.closest("[data-task-id]");
       const flow = item.closest(".task-flow");

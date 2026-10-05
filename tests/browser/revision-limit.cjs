@@ -112,9 +112,11 @@ async function checkRevisionLimit(page) {
   assert.equal(await listedView.locator('.task-flow-decision-findings li').count(), 1);
   await post([], [{ ...limited, status: 'cancelled', pause: null, workflow: { ...limited.workflow, tasks: [{ ...limited.workflow.tasks[0], verificationStatus: 'cancelled' }] } },
     { ...listed, status: 'cancelled', pause: null, workflow: { ...listed.workflow, tasks: listed.workflow.tasks.map(task => ({ ...task, verificationStatus: task.verificationStatus === 'blocked' ? 'cancelled' : task.verificationStatus })) } }]);
-  await page.waitForFunction(() => document.querySelector('#run-stage-list [data-flow-id="brief-limit"] .task-flow-state')?.textContent === '취소');
-  assert.equal(await flow.locator('.task-flow-decision').count(), 0, 'Cancelled workflow no longer asks for a decision');
-  assert.equal(await page.locator('#run-stage-list [data-flow-id="listed-flow"]').count(), 1, 'Cancelled rows remain in the list');
+  // Cancelled tasks leave the in-progress list and remain in Task history.
+  await page.waitForFunction(() => document.querySelector('#task-history-list [data-flow-id="brief-limit"] .task-flow-state')?.textContent === '취소');
+  assert.equal(await flow.count(), 0, 'Cancelled workflow no longer asks for a decision');
+  assert.equal(await page.locator('#run-stage-list [data-flow-id="listed-flow"]').count(), 0, 'Cancelled rows leave the task list');
+  assert.equal(await page.locator('#task-history-list [data-flow-id="listed-flow"]').count(), 1, 'Cancelled rows remain in Task history');
   // Dispatch ordering is a separate fixture, isolated from retained cancellation history.
   await page.evaluate(() => sessionStorage.setItem('submission-restoration-fixture', JSON.stringify({ botVisible: false })));
   await page.reload();

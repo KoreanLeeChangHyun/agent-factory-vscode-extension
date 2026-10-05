@@ -43,8 +43,9 @@ async function checkTaskFlow(page, { panelOnly = false } = {}) {
           probe.remove();
           return colors;
         });
-        assert.equal(colors.pulse, running ? expected : colors.neutral, theme + ' dot reflects execution state');
         const textColor = link === null ? 'rgb(0, 128, 232)' : theme.includes("light") ? 'rgb(0, 95, 184)' : 'rgb(55, 148, 255)';
+        // The header dot shares the link blue of the rows' running dot; the progress bar colour is only a fallback.
+        assert.equal(colors.pulse, running ? (link === null ? expected : textColor) : colors.neutral, theme + ' dot reflects execution state');
         assert.deepEqual([colors.loadingPulse, colors.copy, colors.label, colors.meta],
           [textColor, textColor, textColor, textColor], theme + ' loading dot, text and elapsed time stay blue');
       } finally {
@@ -79,7 +80,7 @@ async function checkTaskFlow(page, { panelOnly = false } = {}) {
   assert.equal(await page.locator('#run-details').isVisible(), false, 'Runtime sessions alone cannot fabricate a task list');
   assert.equal(await page.locator('#run-stage-list .task-flow').count(), 0);
   const flow = { id: 'flow-one', title: '화면 개선 작업', tasks: [
-    { id: 'layout', title: '화면 수정', status: 'completed' },
+    { id: 'layout', title: '화면 수정', status: 'pending' },
     { id: 'behavior', title: '동작 연결', description: '클릭 시 작업을 요청하고 결과를 표시합니다.', status: 'running', agentId: 'work-one', runId: 'run-one' },
     { id: 'test', title: '테스트', status: 'pending' }
   ] };
@@ -136,10 +137,20 @@ async function checkTaskFlow(page, { panelOnly = false } = {}) {
   assert.equal(await active.getAttribute('aria-current'), 'step');
   assert.equal(await active.getAttribute('data-worker-active'), 'true');
   const [activeColor, stationaryColor] = await Promise.all([
-    active.locator('.task-flow-state').evaluate(el => getComputedStyle(el, '::before').backgroundColor),
+    active.locator('.task-flow-state > .run-status-pulse').evaluate(el => getComputedStyle(el).backgroundColor),
     stationary.locator('.task-flow-state').evaluate(el => getComputedStyle(el, '::before').backgroundColor)
   ]);
   assert.notEqual(activeColor, stationaryColor, 'Active workflow state uses the theme accent');
+  // The running row's dot animates exactly like the header's dot; a stationary row keeps its plain dot.
+  assert.deepEqual(await active.locator('.task-flow-state > .run-status-pulse').evaluate(el => [getComputedStyle(el).animationName,
+    getComputedStyle(el, '::before').animationName, getComputedStyle(el, '::after').animationName, el.getAttribute('aria-hidden'),
+    getComputedStyle(el.parentElement, '::before').display]),
+    ['run-status-dot-breathe', 'run-status-dot-ripple', 'run-status-dot-ripple', 'true', 'none'], 'Running row dot breathes and radiates rings');
+  assert.equal(await stationary.locator('.task-flow-state > .run-status-pulse').count(), 0, 'Stationary row dot does not animate');
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  assert.deepEqual(await active.locator('.task-flow-state > .run-status-pulse').evaluate(el => [getComputedStyle(el).animationName,
+    getComputedStyle(el, '::before').content]), ['none', 'none'], 'Reduced motion stills the running row dot');
+  await page.emulateMedia({ reducedMotion: 'no-preference' });
   assert.equal(await page.locator('#timeline [data-task-id="behavior"] .task-flow-state').evaluate(el => {
     const probe = document.createElement('span'); probe.style.color = 'var(--vscode-descriptionForeground)'; el.append(probe);
     const neutral = getComputedStyle(probe).color; probe.remove(); return getComputedStyle(el).color === neutral;
@@ -165,10 +176,13 @@ async function checkTaskFlow(page, { panelOnly = false } = {}) {
   await page.evaluate(() => window.postMessage({ type: 'run.state', running: false }, '*'));
   await page.waitForFunction(() => !document.querySelector('#run-status').classList.contains('is-running'));
   await checkHeaderPulse(false);
+  flow.tasks[0].status = 'completed';
   flow.tasks[1].status = 'completed';
   flow.tasks[2].status = 'verifying';
   await send(flow, 'main-two');
   await page.waitForFunction(() => document.querySelector('#run-stage-list [data-task-id="test"]').dataset.status === 'verifying');
+  assert.equal(await page.locator('#run-stage-list :is([data-task-id="layout"], [data-task-id="behavior"])').count(), 0, 'Completed tasks leave the in-progress list');
+  assert.equal(await page.locator('#task-history-list [data-flow-id="flow-one"] :is([data-task-id="layout"], [data-task-id="behavior"])').count(), 2, 'Completed tasks are kept in Task history');
   assert.equal(await page.locator('#run-stage-list .task-flow').count(), 1, 'Update the same workflow instead of appending a duplicate');
   assert.equal(await page.locator('#timeline .task-flow').count(), 2, 'Conversation retains the earlier snapshot');
   assert.ok(await page.evaluate(() => window.saved.timeline.some(entry => entry.text?.includes('flow-one'))));
@@ -179,7 +193,8 @@ async function checkTaskFlow(page, { panelOnly = false } = {}) {
     await page.waitForFunction(({ container, status }) => document.querySelector(container + ' [data-task-id="test"]')?.dataset.status === status, { container, status });
     assert.equal(await page.locator(container + ' [data-task-id="test"]').evaluate(el => getComputedStyle(el).animationName), 'none');
     await checkHeaderPulse(false);
-    assert.equal(await page.locator('#run-stage-list [data-flow-id="flow-one"]').count(), 1);
+    assert.equal(await page.locator('#run-stage-list [data-flow-id="flow-one"]').count(), status === 'blocked' ? 1 : 0,
+      'Only an unfinished task keeps its workflow in the task list');
   }
   const malicious = { ...flow, id: 'unsafe-title', title: '<img src=x onerror=alert(1)>', tasks: [{ id: 'one', title: '<script>bad()</script>', status: 'pending', agentId: 'work-one', runId: 'run-one' }] };
   await send(malicious, 'main-safe');
@@ -248,8 +263,8 @@ async function checkTaskFlow(page, { panelOnly = false } = {}) {
   } }], workflows: [] }, '*'));
   await page.waitForFunction(() => !document.querySelector('#run-status').hidden);
   assert.equal(await page.locator('#run-status-toggle').getAttribute('aria-expanded'), 'true');
-  await page.waitForFunction(() => document.querySelector('#run-stage-list [data-flow-id="runtime-contract"] .task-flow-single')?.dataset.status === 'completed');
-  assert.equal(await page.locator('#run-stage-list [data-flow-id="runtime-contract"] .task-flow-single').getAttribute('data-status'), 'completed');
+  await page.waitForFunction(() => document.querySelector('#task-history-list [data-flow-id="runtime-contract"] .task-flow-single')?.dataset.status === 'completed');
+  assert.equal(await page.locator('#run-stage-list [data-flow-id="runtime-contract"]').count(), 0, 'A completed task leaves the task list');
   assert.equal(await page.locator('#task-history-list [data-flow-id="runtime-contract"] .task-flow-single-title').textContent(), '하단 스크롤 수정');
   await page.evaluate(() => { window.dispatchEvent(new Event('pagehide')); sessionStorage.setItem('submission-restoration-fixture', JSON.stringify(window.saved)); });
   await page.reload();
@@ -313,7 +328,8 @@ async function checkTaskFlow(page, { panelOnly = false } = {}) {
   await page.evaluate(single => window.postMessage({ type: 'agents.list', agents: [
     { agentId: 'single-expert', runId: 'single-run', role: 'work', status: 'completed', model: 'gpt-worker', reasoningEffort: 'low' }
   ], workflows: [single] }, '*'), single);
-  await page.waitForFunction(() => document.querySelector('#run-stage-list [data-flow-id="single-flow"] .task-flow-single')?.dataset.status === 'completed');
+  await page.waitForFunction(() => document.querySelector('#task-history-list [data-flow-id="single-flow"] .task-flow-single')?.dataset.status === 'completed');
+  assert.equal(await page.locator('#run-stage-list [data-flow-id="single-flow"]').count(), 0, 'A completed single task leaves the task list');
   const engine = { kind: 'work-verification-loop', loopId: 'loop-engine', workAgentId: 'engine-worker', verificationAgentId: 'engine-verifier', workProfile: 'work', taskMode: 'work-verification', status: 'active',
     workflow: { id: 'engine-flow', title: '전체 작업 흐름', tasks: [
       { id: 'first', workRunId: 'work-first', title: '첫 번째 수정', description: '첫 요청', completionCriteria: '검사 통과', workStatus: 'running', verificationStatus: 'pending' },
@@ -329,8 +345,8 @@ async function checkTaskFlow(page, { panelOnly = false } = {}) {
   assert.equal(await graph.locator('.task-flow-total').textContent(), '작업 2개', 'Verification stages do not increase the task count');
   // The header carries the title and counts, so the panel has no separate heading row.
   assert.equal(await page.locator('#run-details .run-details-heading, #run-details-summary').count(), 0, 'The panel has no separate heading row');
-  assert.match(await page.locator('#run-status-agents').textContent(), /작업 3개$/, 'Header includes the retained completed single task');
-  assert.match(await page.locator('#run-status-toggle').getAttribute('aria-label'), /^작업 흐름 · .*작업 3개$/, 'Header accessible name carries the counts');
+  assert.match(await page.locator('#run-status-agents').textContent(), /작업 2개$/, 'Header counts only in-progress tasks, not the completed single task');
+  assert.match(await page.locator('#run-status-toggle').getAttribute('aria-label'), /^작업 흐름 · .*작업 2개$/, 'Header accessible name carries the counts');
   assert.deepEqual(await graph.locator('.task-flow-summary-assignments .task-flow-assignment').allTextContents(), ['작업자 미배정', '전문가 1명'],
     'The recorded Expert profile labels the multi-task card without counting Verification');
   assert.equal(await graph.locator('[data-summary-status="running"]').textContent(), '진행 중 1개');
@@ -395,7 +411,7 @@ async function checkTaskFlow(page, { panelOnly = false } = {}) {
   for (const task of engine.workflow.tasks) { task.workStatus = 'completed'; task.verificationStatus = 'completed'; }
   await page.evaluate(engine => window.postMessage({ type: 'agents.list', agents: [], workflows: [engine] }, '*'), engine);
   await page.waitForFunction(() => document.querySelector('#task-history-list [data-flow-id="engine-flow"]'));
-  assert.equal(await graph.count(), 1, 'Completed graph remains available in the expandable panel');
+  assert.equal(await graph.count(), 0, 'A completed graph leaves the in-progress panel for Task history');
   await page.setViewportSize({ width: 900, height: 800 });
   const sentBeforeHistory = await page.evaluate(() => window.sentMessages.filter(message => message.type === 'chat.send').length);
   assert.equal(await page.locator('#submission-menu #task-history').count(), 0);
@@ -493,61 +509,64 @@ async function checkTaskFlow(page, { panelOnly = false } = {}) {
         workStatus: index === 0 ? 'completed' : index === 1 ? 'running' : 'pending',
         ...(index < 2 ? { workRunId: 'shared-run-' + (index + 1) } : {}) })) } };
   await page.evaluate(six => window.postMessage({ type: 'agents.list', agents: [], workflows: [six] }, '*'), six);
-  const sixSteps = page.locator('[data-flow-id="six-flow"] .task-flow-step');
-  await page.waitForFunction(() => document.querySelectorAll('[data-flow-id="six-flow"] .task-flow-step').length === 6);
+  // The task panel keeps the five unfinished tasks; the completed first task is kept in Task history.
+  const sixSteps = page.locator('#run-stage-list [data-flow-id="six-flow"] .task-flow-step');
+  const sixHistory = page.locator('#task-history-list [data-flow-id="six-flow"]');
+  await page.waitForFunction(() => document.querySelectorAll('#run-stage-list [data-flow-id="six-flow"] .task-flow-step').length === 5);
   assert.deepEqual(await sixSteps.evaluateAll(items => items.map(item => item.dataset.taskId)),
-    ['task-1', 'task-2', 'task-3', 'task-4', 'task-5', 'task-6']);
+    ['task-2', 'task-3', 'task-4', 'task-5', 'task-6']);
   assert.deepEqual(await sixSteps.evaluateAll(items => items.map(item => item.dataset.runId || null)),
-    ['shared-run-1', 'shared-run-2', null, null, null, null]);
+    ['shared-run-2', null, null, null, null]);
+  assert.equal(await sixHistory.locator('[data-task-id="task-1"]').getAttribute('data-status'), 'completed', 'The completed task moves to Task history');
   assert.equal(await page.locator('[data-flow-id="six-flow"] [aria-current="step"]').count(), 1);
-  const sixFlow = page.locator('[data-flow-id="six-flow"]');
+  const sixFlow = page.locator('#run-stage-list [data-flow-id="six-flow"]');
   assert.equal(await sixFlow.locator('.task-flow-disclosure[open]').count(), 0, 'Multiple tasks remain compact by default');
   assert.equal(await sixFlow.locator('.task-flow-list').evaluate(el => getComputedStyle(el).gridAutoFlow), 'row');
-  assert.equal(await sixFlow.locator('.task-flow-total').textContent(), '작업 6개');
+  assert.equal(await sixFlow.locator('.task-flow-total').textContent(), '작업 5개');
   assert.deepEqual(await sixFlow.locator('.task-flow-summary-assignments .task-flow-assignment').allTextContents(),
     ['작업자 미배정', '전문가 미배정', '기록 없음 1명']);
   assert.equal(await sixFlow.locator('[data-summary-status="pending"]').textContent(), '대기 4개');
-  assert.equal(await sixFlow.locator('[data-summary-status="completed"]').textContent(), '완료 1개');
+  assert.equal(await sixFlow.locator('[data-summary-status="completed"]').count(), 0, 'The task panel counts no completed task');
   assert.equal(await sixFlow.locator('.task-flow-current').textContent(), '현재 수행 작업: 작업 2 (진행 중)');
   assert.equal(await sixFlow.locator('.task-flow-current').getAttribute('aria-live'), 'polite');
   six.status = 'runtime-error';
   six.workflow.tasks[1].workStatus = 'failed';
   await page.evaluate(six => window.postMessage({ type: 'agents.list', agents: [], workflows: [six] }, '*'), six);
-  await page.waitForFunction(() => document.querySelector('[data-flow-id="six-flow"] [data-task-id="task-2"]').dataset.status === 'failed');
-  await page.locator('[data-flow-id="six-flow"]').getByRole('button', { name: '실패한 작업 흐름 종료', exact: true }).click();
+  await page.waitForFunction(() => document.querySelector('#task-history-list [data-flow-id="six-flow"] [data-task-id="task-2"]')?.dataset.status === 'failed');
+  await sixFlow.getByRole('button', { name: '실패한 작업 흐름 종료', exact: true }).click();
   assert.deepEqual(await page.evaluate(() => window.sentMessages.at(-1)), {
     type: 'workflow.close', workAgentId: 'shared-worker', loopId: 'loop-six'
   });
   await page.evaluate(() => window.postMessage({ type: 'agents.list', agents: [], workflows: [] }, '*'));
   await page.evaluate(() => { window.dispatchEvent(new Event('pagehide')); sessionStorage.setItem('submission-restoration-fixture', JSON.stringify(window.saved)); });
   await page.reload();
-  await page.waitForFunction(() => document.querySelectorAll('[data-flow-id="six-flow"] .task-flow-step').length === 6);
-  assert.deepEqual(await sixSteps.evaluateAll(items => items.map(item => item.dataset.status)),
-    ['completed', 'failed', 'pending', 'pending', 'pending', 'pending']);
+  await page.waitForFunction(() => document.querySelectorAll('#run-stage-list [data-flow-id="six-flow"] .task-flow-step').length === 4);
+  assert.deepEqual(await sixSteps.evaluateAll(items => items.map(item => item.dataset.status)), ['pending', 'pending', 'pending', 'pending']);
+  assert.deepEqual(await sixHistory.locator('.task-flow-step').evaluateAll(items => items.map(item => item.dataset.status)), ['completed', 'failed']);
   assert.equal(await page.locator('[data-flow-id="six-flow"] [aria-current="step"]').count(), 0);
-  assert.equal(await sixFlow.locator('[data-summary-status="failed"]').textContent(), '실패 1개');
+  assert.equal(await sixHistory.locator('[data-summary-status="failed"]').textContent(), '실패 1개');
   assert.equal(await sixFlow.locator('.task-flow-current').textContent(), '현재 수행 중인 작업 없음');
   assert.equal(await page.locator('#task-history-list [data-flow-id="engine-flow"]').count(), 1,
     'Accepted completed history survives empty discovery and reload');
-  assert.deepEqual(await sixSteps.evaluateAll(items => items.map(item => item.dataset.runId || null)),
-    ['shared-run-1', 'shared-run-2', null, null, null, null]);
+  assert.deepEqual(await sixSteps.evaluateAll(items => items.map(item => item.dataset.runId || null)), [null, null, null, null]);
+  assert.deepEqual(await sixHistory.locator('.task-flow-step').evaluateAll(items => items.map(item => item.dataset.runId)), ['shared-run-1', 'shared-run-2']);
   await page.locator('#status-settings-button').click();
   await page.locator('#settings-tab-general').click();
   await page.locator('#ui-language').selectOption('en');
-  assert.equal(await sixFlow.locator('.task-flow-total').textContent(), '6 tasks');
+  assert.equal(await sixFlow.locator('.task-flow-total').textContent(), '4 tasks');
   assert.deepEqual(await sixFlow.locator('.task-flow-summary-assignments .task-flow-assignment').allTextContents(),
     ['Worker unassigned', 'Expert unassigned', 'No record: 1']);
-  assert.equal(await sixFlow.locator('[data-summary-status="failed"]').textContent(), 'Failed: 1');
+  assert.equal(await sixHistory.locator('[data-summary-status="failed"]').textContent(), 'Failed: 1');
   assert.equal(await sixFlow.locator('.task-flow-current').textContent(), 'No task currently running');
   six.workflow.tasks[1].workStatus = 'blocked';
   await page.evaluate(six => window.postMessage({ type: 'agents.list', agents: [], workflows: [six] }, '*'), six);
-  await page.waitForFunction(() => document.querySelector('[data-flow-id="six-flow"] [data-summary-status="blocked"]').textContent === 'Blocked: 1');
+  await page.waitForFunction(() => document.querySelector('#run-stage-list [data-flow-id="six-flow"] [data-summary-status="blocked"]')?.textContent === 'Blocked: 1');
   assert.equal(await sixFlow.locator('[data-summary-status="failed"]').count(), 0);
   const viewport = page.viewportSize();
   await page.setViewportSize({ width: 360, height: 800 });
   await page.emulateMedia({ reducedMotion: 'reduce' });
   assert.equal(await sixFlow.locator('.task-flow-summary').evaluate(el => el.scrollWidth <= el.clientWidth), true);
-  assert.equal(await sixSteps.count(), 6);
+  assert.equal(await sixSteps.count(), 5, 'The blocked task returns to the task panel with the pending ones');
   await page.setViewportSize(viewport);
   await page.emulateMedia({ reducedMotion: 'no-preference' });
   six.status = 'completed';
@@ -573,8 +592,8 @@ async function checkTaskFlow(page, { panelOnly = false } = {}) {
   assert.equal(await completedSix.locator('.task-flow-open').count(), 6);
   assert.deepEqual(await completedSix.locator('.task-flow-step').evaluateAll(items => items.map(item => item.dataset.runId)),
     Array.from({ length: 6 }, (_, index) => 'shared-run-' + (index + 1)));
-  assert.equal(await page.locator('#run-stage-list [data-flow-id="six-flow"]').count(), 1,
-    'Restored completed tasks remain visible without resuming execution');
+  assert.equal(await page.locator('#run-stage-list [data-flow-id="six-flow"]').count(), 0,
+    'Restored completed tasks stay in Task history only, without resuming execution');
   six.status = 'cancelled';
   six.workflow.tasks[1].workStatus = 'failed';
   six.workflow.tasks.slice(2).forEach(task => { task.workStatus = 'cancelled'; });
@@ -666,7 +685,9 @@ async function checkTaskStop(page) {
   for (const status of ['completed', 'failed', 'cancelled']) {
     one.status = status; one.workflow.tasks[0].workStatus = status; one.workflow.tasks[0].verificationStatus = status;
     await publish([one]);
-    await page.waitForFunction(status => document.querySelector('#run-stage-list [data-flow-id="flow-one"] .task-flow-single')?.dataset.status === status, status);
+    // An ended task leaves the in-progress list and is kept in Task history.
+    await page.waitForFunction(status => document.querySelector('#task-history-list [data-flow-id="flow-one"] .task-flow-single')?.dataset.status === status, status);
+    assert.equal(await card('one').count(), 0, status + ' task leaves the task list');
     assert.equal(await page.locator('#task-history-list [data-flow-id="flow-one"] .task-flow-stop').count(), 0);
   }
   assert.equal(await stop('two').isEnabled(), true);
@@ -701,16 +722,24 @@ async function checkTaskDismiss(page) {
   await selected.locator('.task-flow-stop').waitFor();
   assert.equal(await selected.locator('.task-flow-stop').isDisabled(), true);
   assert.equal(await selected.locator('.task-flow-dismiss').count(), 0, 'A running task offers stop, never delete');
-  // Once stopped, delete takes the same slot.
+  // Once stopped, the task leaves the in-progress list for Task history, where delete takes the stop slot.
+  const ended = page.locator('#task-history-list [data-flow-id="dismiss-flow"] [data-task-id="same-task"]');
+  const endedOther = page.locator('#task-history-list [data-flow-id="dismiss-flow"] [data-task-id="other-task"]');
   snapshot = make('fixture-loop', 'cancelled');
   await publish([snapshot]);
-  await selected.locator('.task-flow-dismiss').waitFor();
-  assert.equal(await selected.locator('.task-flow-stop').count(), 0, 'An ended task offers delete in place of stop');
+  await ended.waitFor({ state: 'attached' });
+  if (await page.locator('#workflow-history').evaluate(el => el.classList.contains('is-compact'))) await page.locator('#workflow-history-toggle').click();
+  await page.locator('#task-history > summary').click();
+  await ended.locator('.task-flow-dismiss').waitFor();
+  assert.equal(await selected.count(), 0, 'An ended task leaves the task list while its sibling still runs');
+  assert.equal(await other.isVisible(), true, 'The running sibling stays in the task list');
+  assert.match(await page.locator('#run-status-agents').textContent(), /(?:작업 1개|\b1 tasks)$/, 'The header counts only in-progress tasks');
+  assert.equal(await ended.locator('.task-flow-stop').count(), 0, 'An ended task offers delete in place of stop');
   assert.equal(await other.locator('.task-flow-dismiss').count(), 0);
   const timelineBefore = await page.locator('#timeline').innerText();
   const before = await page.evaluate(() => window.sentMessages.length);
-  await selected.locator('.task-flow-dismiss').click();
-  await selected.waitFor({ state: 'detached' });
+  await ended.locator('.task-flow-dismiss').click();
+  await ended.waitFor({ state: 'detached' });
   assert.equal(await other.isVisible(), true);
   assert.equal(await page.locator('#timeline').innerText(), timelineBefore, 'Main chat is retained');
   assert.equal(await other.locator('.task-flow-stop').isDisabled(), true, 'partial dismissal does not expand Loop stop authority');
@@ -722,20 +751,23 @@ async function checkTaskDismiss(page) {
   snapshot.workflow.tasks[0].workStatus = 'completed';
   await publish([snapshot]);
   await other.waitFor();
-  assert.equal(await selected.count(), 0, 'status and revision refresh do not resurrect the item');
+  assert.equal(await selected.count() + await ended.count(), 0, 'status and revision refresh do not resurrect the item');
   const saved = await page.evaluate(() => window.saved);
   await page.evaluate(saved => sessionStorage.setItem('submission-restoration-fixture', JSON.stringify(saved)), saved);
   await page.reload();
   await other.waitFor();
-  assert.equal(await selected.count(), 0, 'tab restoration retains dismissal');
+  assert.equal(await selected.count() + await ended.count(), 0, 'tab restoration retains dismissal');
   const separate = make('separate-loop', 'cancelled');
   await publish([separate]);
-  await selected.locator('.task-flow-dismiss').waitFor();
+  await ended.waitFor({ state: 'attached' });
+  if (await page.locator('#workflow-history').evaluate(el => el.classList.contains('is-compact'))) await page.locator('#workflow-history-toggle').click();
+  if (!await page.locator('#task-history').evaluate(el => el.open)) await page.locator('#task-history > summary').click();
+  await ended.locator('.task-flow-dismiss').waitFor();
   assert.equal(await other.isVisible(), true, 'separate execution with the same task ID remains visible');
-  await selected.locator('.task-flow-dismiss').click();
+  await ended.locator('.task-flow-dismiss').click();
   separate.workflow.tasks[1].workStatus = 'cancelled';
   await publish([separate]);
-  await other.locator('.task-flow-dismiss').click();
+  await endedOther.locator('.task-flow-dismiss').click();
   await page.waitForFunction(() => !document.querySelector('#run-stage-list .task-flow'));
   assert.equal(await page.locator('#run-status').evaluate(el => el.classList.contains('is-running')), false,
     'empty status does not pulse even while dismissed execution continues');
@@ -748,6 +780,37 @@ async function checkTaskDismiss(page) {
   await page.waitForFunction(() => window.saved.workflows.some(flow => flow.loopId === 'separate-loop' && flow.status === 'completed'));
   assert.equal(await page.locator('#task-history-list [data-flow-id="dismiss-flow"]').count(), 0, 'completion does not resurrect dismissed rows');
   assert.equal(await page.evaluate(() => window.saved.workflows.find(flow => flow.loopId === 'separate-loop').workflow.tasks.length), 2);
+  // Task history rows can be deleted too: a whole multi-task row and another conversation's brief.
+  const group = { kind: 'work-verification-loop', loopId: 'group-loop', workAgentId: 'mock-worker', taskMode: 'work', status: 'completed',
+    workflow: { id: 'group-flow', title: 'Group fixture', index: 1, tasks: [
+      { id: 'group-a', title: 'Group A', workRunId: 'group-run-a', workStatus: 'completed', verificationStatus: 'pending' },
+      { id: 'group-b', title: 'Group B', workRunId: 'group-run-b', workStatus: 'failed', verificationStatus: 'pending' }] } };
+  await publish([terminal, group]);
+  await page.evaluate(() => window.postMessage({ type: 'project.tasks', entries: [{ id: 'brief-other', title: 'Other conversation brief',
+    status: 'completed', mainAgentId: 'main-other', tasks: [{ id: 'other-t', title: 'Other T', workStatus: 'completed' }] }] }, '*'));
+  const groupRow = page.locator('#task-history-panel [data-history-id="group-flow"]');
+  const projectRow = page.locator('#task-history-panel [data-history-id="brief-other"]');
+  await groupRow.waitFor({ state: 'attached' });
+  await projectRow.waitFor({ state: 'attached' });
+  if (await page.locator('#workflow-history').evaluate(el => el.classList.contains('is-compact'))) await page.locator('#workflow-history-toggle').click();
+  if (!await page.locator('#task-history').evaluate(el => el.open)) await page.locator('#task-history > summary').click();
+  const groupDelete = groupRow.locator(':scope > summary > .task-flow-dismiss');
+  assert.match(await groupDelete.getAttribute('aria-label'), /^Group fixture · (?:Delete|삭제)$/, 'The history delete keeps its accessible name');
+  const sentBeforeHistoryDelete = await page.evaluate(() => window.sentMessages.length);
+  await groupDelete.click();
+  await groupRow.waitFor({ state: 'detached' });
+  await projectRow.locator(':scope > summary > .task-flow-dismiss').click();
+  await projectRow.waitFor({ state: 'detached' });
+  assert.equal(await page.evaluate(() => window.sentMessages.length), sentBeforeHistoryDelete, 'History delete only hides rows');
+  await page.waitForFunction(() => window.saved.dismissedTasks?.some(key => key.includes('brief-other')));
+  const savedAfterHistoryDelete = await page.evaluate(() => window.saved);
+  assert.ok(savedAfterHistoryDelete.workflows.some(flow => flow.loopId === 'group-loop' && flow.workflow.tasks.length === 2), 'The deleted row keeps its snapshot');
+  await page.evaluate(saved => sessionStorage.setItem('submission-restoration-fixture', JSON.stringify(saved)), savedAfterHistoryDelete);
+  await page.reload();
+  await page.evaluate(() => window.postMessage({ type: 'project.tasks', entries: [{ id: 'brief-other', title: 'Other conversation brief',
+    status: 'completed', mainAgentId: 'main-other', tasks: [{ id: 'other-t', title: 'Other T', workStatus: 'completed' }] }] }, '*'));
+  await page.evaluate(() => new Promise(resolve => setTimeout(resolve, 200)));
+  assert.equal(await groupRow.count() + await projectRow.count(), 0, 'Deleted history rows stay deleted after restoration');
 }
 module.exports.checkTaskDismiss = checkTaskDismiss;
 
@@ -765,7 +828,8 @@ async function checkTaskRows(page) {
     { ...make('done', 'work', 'short'), status: 'completed' }];
   const publish = async (workflows = []) => page.evaluate(({ agents, workflows }) => window.postMessage({ type: 'agents.list', agents, workflows }, '*'), { agents, workflows });
   await publish();
-  const row = id => page.locator('#run-stage-list [data-flow-id="row-' + id + '"] .task-flow-single');
+  // Ended rows live in Task history; the others stay in the task panel.
+  const row = id => page.locator(':is(#run-stage-list, #task-history-list) [data-flow-id="row-' + id + '"] .task-flow-single');
   const worker = row('worker'), expert = row('expert');
   await worker.waitFor();
   assert.equal(await worker.locator('.task-flow-agent').textContent(), 'Worker');
@@ -802,6 +866,7 @@ async function checkTaskRows(page) {
   assert.equal(await expert.locator('.task-flow-activity').textContent(), 'Full request', 'The request line under the title skips a line repeating the title');
   assert.equal(await expert.locator('.task-flow-progress').textContent(), '0/1', 'A running task without a to-do list shows 0/1');
   assert.equal(await row('done').locator('.task-flow-progress').textContent(), '1/1', 'A completed task without a to-do list shows 1/1');
+  assert.equal(await page.locator('#run-stage-list [data-flow-id="row-done"]').count(), 0, 'The completed row is listed in Task history only');
   const lines = await worker.locator(':scope > summary').evaluate(el => {
     const box = selector => el.querySelector(selector).getBoundingClientRect();
     const title = box('.task-flow-single-title'), activity = box('.task-flow-activity'), state = box('.task-flow-state'), steps = box('.task-flow-progress');
@@ -1190,7 +1255,8 @@ module.exports.checkTaskStatusBadges = async function (page) {
   agents.push({ agentId: 'badge-verifier', runId: 'badge-verify-run', role: 'verification', model: 'verify-model', status: 'running' });
   const publish = () => post({ type: 'agents.list', agents, workflows });
   await publish();
-  const badge = i => page.locator('#run-stage-list [data-flow-id="badge-flow-' + i + '"] .task-flow-state');
+  // Ended children (completed, failed, cancelled) are listed in Task history; the others in the task panel.
+  const badge = i => page.locator(':is(#run-stage-list, #task-history-list) [data-flow-id="badge-flow-' + i + '"] .task-flow-state');
   await badge(0).waitFor();
   const waiting = page.locator('#run-stage-list [data-flow-id="badge-wait"]');
   const verification = page.locator('#run-stage-list [data-flow-id="badge-verify"]');
