@@ -124,14 +124,39 @@ test('Factory utility calls and batched runs retain a dedicated classification w
   assert.equal(scripts(exec + ' capabilities --project-root /repo')[0].action, 'capabilities');
   assert.equal(scripts('python3 skills/agent/scripts/loop.py status --loop-id loop-1')[0].script, 'loop.py');
   assert.equal(scripts(exec + ' status --agent work-1; ' + exec + ' status --agent work-2').length, 2);
-  const root = scripts('python3 "/installed plugin/scripts/exec.py" status --agent work-1')[0];
+  const root = scripts('python3 "/installed plugin/agent-factory/scripts/exec.py" status --agent work-1')[0];
   assert.deepEqual([root.skill, root.script, root.action], ['agent', 'exec.py', 'status']);
-  assert.equal(scripts('python3 /p/scripts/loop.py status --loop-id loop-1')[0].script, 'loop.py');
-  assert.equal(scripts('python3 /p/scripts/lessons.py --project-root /r record')[0].skill, 'document');
+  assert.equal(scripts('python3 /p/agent-factory/scripts/loop.py status --loop-id loop-1')[0].script, 'loop.py');
+  assert.equal(scripts('python3 /p/agent-factory/scripts/lessons.py --project-root /r record')[0].skill, 'document');
   assert.deepEqual(scripts('python3 scripts/build.py'), []);
   for (const command of ['echo "' + exec + ' status --agent work-1"', 'python3 -c "' + exec + '"', 'cat <<EOF\n' + exec + '\nEOF', 'python3 other/exec.py status']) {
     assert.deepEqual(scripts(command), [], command);
   }
+});
+
+test('Factory labels read actions after global options without consuming option values as verbs', () => {
+  const scripts = command => JSON.parse(JSON.stringify(context.agentFactoryExecutionReferences.scriptInvocations(command)));
+  const prefix = 'python3 "/home/test/.codex/plugins/cache/personal/agent-factory/local/scripts/lessons.py"';
+  for (const args of ['--project-root "/repo with spaces" record --input input.json', '--project-root="/repo with spaces" record --input=input.json', 'record --project-root "/repo with spaces" --input input.json']) {
+    const [script] = scripts(prefix + ' ' + args);
+    assert.equal(script.action, 'record');
+    assert.equal(script.target, '/repo with spaces');
+  }
+  assert.equal(scripts(prefix + ' --project-root status audit')[0].action, 'audit');
+  assert.equal(scripts(prefix + ' --project-root /repo --documents-root /docs --input /tmp/record.json record')[0].action, 'record');
+  assert.equal(scripts(prefix + ' --unknown record')[0].action, '');
+  assert.equal(scripts(prefix + ' --project-root --input record')[0].action, '');
+  assert.equal(scripts('python3 /home/test/.gemini/config/plugins/agent-factory/scripts/exec.py doctor')[0].action, 'doctor');
+  assert.equal(scripts('python3 /repo/agent-factory/plugin/scripts/loop.py status')[0].action, 'status');
+  for (const path of ['scripts/exec.py', '/other/scripts/exec.py', '/tmp/scripts/lessons.py', '/other/agent-factory-copy/scripts/loop.py']) {
+    assert.deepEqual(scripts('python3 ' + path + ' status --agent ordinary'), []);
+  }
+});
+
+test('mixed Factory calls do not borrow another command result or override nonzero exit status', () => {
+  const command = exec + ' status --agent work-1; python3 skills/agent/scripts/exec.py doctor';
+  assert.equal(managed(command, '{"agentId":"work-1","runId":"run-1","status":"completed"}'), undefined);
+  assert.equal(context.agentFactoryExecutionReferences.commandOutcome({ phase: 'completed', exitCode: 2, output: 'usage error' }).status, 'failed');
 });
 
 test('wrapped Skill reads include local canonical docs and owned prompts', () => {

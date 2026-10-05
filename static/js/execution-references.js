@@ -94,7 +94,35 @@
 
   function rootScript(path) {
     const match = /(?:^|\/)scripts\/([^/]+\.py)$/.exec(path);
-    return match && ROOT_SCRIPTS[match[1]] ? [match[0], ROOT_SCRIPTS[match[1]], match[1]] : null;
+    // A common filename alone is not evidence of an Agent Factory installation.
+    // Relocated installations can still identify themselves through operation JSON.
+    const owned = /(?:^|\/)agent-factory\/(?:plugin\/)?scripts\//.test(path)
+      || /(?:^|\/)plugins\/cache\/[^/]+\/agent-factory\/[^/]+\/scripts\//.test(path);
+    return owned && match && Object.hasOwn(ROOT_SCRIPTS, match[1]) ? [match[0], ROOT_SCRIPTS[match[1]], match[1]] : null;
+  }
+
+  function scriptAction(args) {
+    let index = 0;
+    // Global CLI options may precede the verb (notably lessons.py). Consume
+    // only known option arities so option values cannot masquerade as actions.
+    while (["--project-root", "--runtime-home", "--project-id", "--documents-root", "--input"].some(option => args[index] === option || args[index]?.startsWith(option + "="))) {
+      if (args[index].includes("=")) index += 1;
+      else {
+        if (!args[index + 1] || args[index + 1].startsWith("-")) return "";
+        index += 2;
+      }
+    }
+    return args[index] && !args[index].startsWith("-") ? args[index] : "";
+  }
+
+  function scriptTarget(args) {
+    for (const option of ["--work-agent", "--agent", "--project-root"]) {
+      const index = args.findIndex(arg => arg === option || arg.startsWith(option + "="));
+      if (index < 0) continue;
+      const value = args[index].includes("=") ? args[index].slice(option.length + 1) : args[index + 1];
+      if (value && !value.startsWith("-") && !/[\n\r$`]/.test(value)) return value;
+    }
+    return "";
   }
 
   function scriptInvocations(command) {
@@ -109,7 +137,8 @@
       const script = /(?:^|\/)skills\/(agent|convention|document)\/scripts\/([^/]+\.py)$/.exec(path)
         || rootScript(path);
       if (!script) continue;
-      invocations.push({ skill: script[1], script: script[2], path, action: words[index + 1] || "", args: words.slice(index + 2) });
+      const args = words.slice(index + 1);
+      invocations.push({ skill: script[1], script: script[2], path, action: scriptAction(args), args, target: scriptTarget(args) });
     }
     return invocations;
   }
@@ -117,6 +146,9 @@
   function managedCommand(command, output, children) {
     const candidates = [];
     let invocations = scriptInvocations(command);
+    // A batch has no single command/result identity, even if only one member
+    // happens to carry an agent ID. Keep every invocation in the generic card.
+    if (invocations.length > 1) return undefined;
     const structured = runtimeScripts(output);
     if (structured.length && !invocations.length) {
       const data = JSON.parse(output);
@@ -187,7 +219,7 @@
     let data;
     try { data = JSON.parse(event.output); } catch { /* Keep raw/mixed output intact. */ }
     const error = data?.kind === "error" && typeof data.error?.message === "string" ? data.error : undefined;
-    if (event.phase === "failed" || error) return {
+    if (event.phase === "failed" || (Number.isInteger(event.exitCode) && event.exitCode !== 0) || error) return {
       status: "failed", label: "Failed",
       detail: error ? (typeof error.code === "string" ? error.code + ": " : "") + error.message : undefined
     };

@@ -226,7 +226,7 @@ export function parseClientMessage(value: unknown): ClientMessage | undefined {
       if ((value.scope !== "global" && value.scope !== "project" && value.scope !== "chat") || typeof value.name !== "string" || !value.name.trim() || !AGENT_ROLES.includes(value.role as typeof AGENT_ROLES[number]) || !validAgentValue("model", value.model) || typeof value.value !== "boolean") return undefined;
       return {type: value.type, scope: value.scope, name: value.name.trim(), role: value.role as typeof AGENT_ROLES[number], model: value.model as string, value: value.value};
     case "agent.preset":
-      if ((value.action !== "save" && value.action !== "apply" && value.action !== "update" && value.action !== "delete" && value.action !== "rename") || (value.scope !== "global" && value.scope !== "project" && value.scope !== "chat") || typeof value.name !== "string" || !value.name.trim() || (value.action === "rename" && (typeof value.newName !== "string" || !value.newName.trim()))) return undefined;
+      if ((value.action !== "save" && value.action !== "apply" && value.action !== "copy" && value.action !== "update" && value.action !== "delete" && value.action !== "rename") || (value.scope !== "global" && value.scope !== "project" && value.scope !== "chat") || typeof value.name !== "string" || !value.name.trim() || (value.action === "rename" && (typeof value.newName !== "string" || !value.newName.trim()))) return undefined;
       return {type: value.type, action: value.action, scope: value.scope, name: value.name.trim(), ...(value.action === "rename" ? {newName: (value.newName as string).trim()} : {})};
     case "agent.defaults.save":
       if ((value.scope !== "global" && value.scope !== "project") ||

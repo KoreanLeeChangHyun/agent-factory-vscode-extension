@@ -862,6 +862,11 @@ globalThis.AgentFactoryChat.taskFlow = function (host) {
 
     return flows;
   }
+  // Loops can retain pending stage snapshots after their driver has reached a
+  // terminal state. That driver state wins: this panel is only for live workflows.
+  function workflowEnded(flow) {
+    return Boolean(flow.engine && ["completed", "failed", "cancelled", "runtime-error"].includes(flow.engineStatus));
+  }
   // A logical task has ended once its shown stage is terminal and no stop for it is still unanswered.
   function taskGroupEnded(flow, stages) {
     const { selected, key } = taskStopTarget(flow, stages);
@@ -888,9 +893,10 @@ globalThis.AgentFactoryChat.taskFlow = function (host) {
   function renderWorkLoopPanel() {
     const allFlows = displayTaskFlows();
     const flows = visibleTaskFlows(allFlows);
-    // The task panel lists only work still in progress; ended tasks move to Task history, even while siblings run.
-    const active = flows.filter(unfinishedFlow).map(flow => flowWithTaskGroups(flow, stages => !taskGroupEnded(flow, stages))).filter(Boolean);
-    const history = flows.map(flow => unfinishedFlow(flow) ? flowWithTaskGroups(flow, stages => taskGroupEnded(flow, stages)) : flow).filter(Boolean);
+    // The task panel lists only live workflows. Keep their completed stages in place:
+    // later queued, decision-required, or verification stages still make the whole workflow active.
+    const active = flows.filter(flow => !workflowEnded(flow) && unfinishedFlow(flow));
+    const history = flows.map(flow => !workflowEnded(flow) && unfinishedFlow(flow) ? flowWithTaskGroups(flow, stages => taskGroupEnded(flow, stages)) : flow).filter(Boolean);
     const boundRuns = new Set(allFlows.flatMap(flow => flow.tasks.map(task => (task.sessionAgentId || task.agentId) + "/" + (task.sessionRunId || task.runId))));
     const legacyHistory = state.childAgents.filter(agent => acceptedTaskAgent(agent) &&
       ["completed", "failed", "cancelled"].includes(agent.status) &&

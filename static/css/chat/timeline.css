@@ -796,6 +796,10 @@ button.act-row { cursor: pointer; }
 .managed-agent-open:hover { background: var(--vscode-button-secondaryHoverBackground, var(--vscode-toolbar-hoverBackground)); }
 .managed-agent-open:focus-visible { outline: 1px solid var(--vscode-focusBorder); outline-offset: 1px; }
 .managed-agent-details { margin-top: 8px; }
+.factory-command-context { display: flex; flex-wrap: wrap; gap: 2px 10px; margin-top: 5px; min-width: 0; color: var(--vscode-descriptionForeground); font-size: 11px; }
+.factory-command-source { overflow-wrap: anywhere; }
+.factory-command-target { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.factory-command-details > summary:focus-visible { outline: 1px solid var(--vscode-focusBorder); outline-offset: 2px; }
 .managed-agent-details > summary,
 .managed-agent-card .skill-read-details > summary { cursor: pointer; color: var(--vscode-descriptionForeground); font-size: 12px; }
 .managed-agent-details > summary:hover,

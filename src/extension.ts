@@ -11,6 +11,7 @@ import { detectProviders } from "./infrastructure/agent-factory/provider-detecti
 import { configuredDevelopmentPluginRoot, configuredProviderPaths } from "./infrastructure/vscode/provider-settings";
 import { openWslWorkspace } from "./infrastructure/vscode/wsl-workspace";
 import { initializeAgentDefaults } from "./infrastructure/vscode/agent-settings-store";
+import { readProviderDefaults } from "./infrastructure/agent-factory/provider-defaults";
 
 export interface ProviderAvailability {
   readonly codex: boolean;
@@ -19,7 +20,7 @@ export interface ProviderAvailability {
 }
 
 export interface ActivationServices {
-  readonly initializeDefaults?: (context: vscode.ExtensionContext, providers: { codex: boolean; claude: boolean }) => Promise<void>;
+  readonly initializeDefaults?: (context: vscode.ExtensionContext, providers: { codex: boolean; claude: boolean; antigravity: boolean }) => Promise<void>;
   /** Resolves every provider CLI; a missing one is reported, never thrown. Without it Codex is assumed. */
   readonly detectProviders?: () => Promise<ProviderAvailability>;
   /** Opens the workspace in WSL when no provider CLI exists on this host; true when handed off. */
@@ -148,7 +149,7 @@ async function start(context: vscode.ExtensionContext, services: ActivationServi
         void services.ensureAntigravityPlugin(requiredVersion).catch(error =>
           services.showWarningMessage?.(localize("antigravity.plugin.warning", error instanceof Error ? error.message : String(error))));
       }
-      await services.initializeDefaults?.(context, { codex: codexAvailable, claude: claudeAvailable });
+      await services.initializeDefaults?.(context, { codex: codexAvailable, claude: claudeAvailable, antigravity: antigravityAvailable });
     } catch (error) {
       const detail = error instanceof Error ? error.message : localize("ui.an.unknown.error.occurred");
       const action = await services.showErrorMessage(
@@ -197,7 +198,7 @@ function createStartupView(): StartupView {
 
 function defaultActivationServices(): ActivationServices {
   return {
-    initializeDefaults: (context, providers) => initializeAgentDefaults(context.globalState, providers, context.workspaceState),
+    initializeDefaults: async (context, providers) => initializeAgentDefaults(context.globalState, providers, context.workspaceState, await readProviderDefaults(providers)),
     detectProviders: async () => {
       const statuses = await detectProviders(configuredProviderPaths());
       const detected = (id: string) => statuses.some(status => status.id === id && status.detected);

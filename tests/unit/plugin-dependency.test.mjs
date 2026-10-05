@@ -610,7 +610,7 @@ test("Claude-only hosts activate with an installed plugin and never redirect or 
     requireInstalledPlugin: async version => { calls.push(`installed:${version}`); },
     initializeDefaults: async (actualContext, providers) => {
       assert.equal(actualContext, context);
-      assert.deepEqual(providers, { codex: false, claude: true });
+      assert.deepEqual(providers, { codex: false, claude: true, antigravity: false });
       calls.push("defaults");
     },
     bootstrap: () => { calls.push("bootstrap"); },

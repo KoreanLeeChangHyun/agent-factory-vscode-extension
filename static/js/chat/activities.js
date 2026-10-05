@@ -95,9 +95,11 @@ globalThis.AgentFactoryChat.activities = function (host) {
     const row = document.createElement("div");
     row.className = "managed-agent-heading";
     const heading = document.createElement("strong");
-    const labels = { doctor: t("ui.check.execution.environment"), capabilities: t("ui.check.supported.features"), submit: t("ui.submit.task"), send: t("ui.send.follow.up"), status: t("ui.check.task.status"), result: t("ui.read.task.result"), start: t("ui.start.task") };
+    const labels = { doctor: t("ui.check.execution.environment"), capabilities: t("ui.check.supported.features"), submit: t("ui.submit.task"), send: t("ui.send.follow.up"), status: t("ui.check.task.status"), result: t("ui.read.task.result"), start: t("ui.start.task"), cancel: t("ui.cancel"), reconcile: t("ui.reconcile.work"), "recover-receipt": t("ui.recover.run") };
+    const lessonLabels = { retrieve: "retrieve", record: "record", resolve: "resolve", audit: "audit", apply: "apply" };
     heading.textContent = scripts.map(function (script) {
-      if (script.skill === "agent" && ["exec.py", "loop.py"].includes(script.script) && labels[script.action]) return labels[script.action];
+      if (script.skill === "agent" && ["exec.py", "loop.py"].includes(script.script) && Object.hasOwn(labels, script.action)) return labels[script.action];
+      if (script.script === "lessons.py" && Object.hasOwn(lessonLabels, script.action)) return t("activity.factory.lessons." + lessonLabels[script.action]);
       return script.script + (script.action ? " · " + script.action : "");
     }).join(" / ");
     const badge = document.createElement("span");
@@ -105,11 +107,39 @@ globalThis.AgentFactoryChat.activities = function (host) {
     badge.textContent = outcome.status === "completed" ? t(scripts.some(script => ["start", "submit", "send"].includes(script.action)) ? "activity.request.command.completed" : "activity.command.completed") : activityPhaseAccessibleLabel(outcome.status === "running" ? "started" : outcome.status);
     row.append(heading, badge);
     container.append(row);
+    for (const script of scripts) {
+      const context = document.createElement("div");
+      context.className = "factory-command-context";
+      const source = document.createElement("span");
+      source.className = "factory-command-source";
+      source.textContent = "Agent Factory · " + script.script + (script.action ? " · " + script.action : "");
+      context.append(source);
+      if (script.target) {
+        const target = document.createElement("span");
+        target.className = "factory-command-target";
+        target.textContent = script.target.replace(/\\/g, "/").replace(/\/$/, "").split("/").pop() || script.target;
+        target.title = script.target;
+        target.setAttribute("aria-label", script.target);
+        context.append(target);
+      }
+      container.append(context);
+    }
     renderCommandError(container, outcome);
     // Keep mixed commands and failures intact, including their non-Factory output.
-    renderSkillDocuments(container, documents.length ? documents : scripts.map(function (script) {
-      return { skill: "agent-factory:" + script.skill, document: script.script, path: script.path };
-    }), event);
+    const details = document.createElement("details");
+    details.className = "managed-agent-details factory-command-details";
+    const summary = document.createElement("summary");
+    summary.textContent = t("activity.factory.details");
+    details.append(summary);
+    for (const item of documents) {
+      const path = document.createElement("div");
+      path.className = "managed-agent-identity";
+      path.textContent = item.path;
+      details.append(path);
+    }
+    chatTerminal.renderTerminalCommand(details, event.text, event.phase);
+    chatTerminal.renderCommandOutput(details, event.output, false);
+    container.append(details);
   }
 
   function renderManagedAgent(container, managed, events) {

@@ -766,16 +766,17 @@ export class ChatPanelManager implements vscode.Disposable {
       case "agent.preset": {
         let error: string | undefined;
         let settings: AgentDefaults | undefined;
+        const copyToChat = message.action === "copy" || (message.action === "apply" && message.scope === "chat");
         try {
-          if (message.action === "apply" && message.scope === "chat") {
+          if (copyToChat) {
             await this.assertPresetSelectionAvailable(managed);
             const preset = (readAgentDefaults(this.context.globalState, this.context.workspaceState, managed.state.panelId).presets ?? [])
               .find(item => item.scope === message.scope && item.name === message.name);
             if (preset) await this.assertAgentSettingsCompatible(managed, preset.settings);
           }
           settings = await useAgentPreset(this.context.globalState, this.context.workspaceState, managed.state.panelId, message.action, message.scope, message.name, this.agentSettingsFromState(managed.state), message.newName);
-          if (settings && message.scope === "chat") {
-            managed.state = this.applyAgentSettings(managed.state, settings, message.scope, message.name);
+          if (settings && copyToChat) {
+            managed.state = this.applyAgentSettings(managed.state, settings, "chat", message.name);
             await this.rememberAgent(managed.state);
           } else if (message.action === "rename" && managed.state.agentSettingsScope === message.scope && managed.state.agentSettingsSet === message.name) {
             managed.state = {...managed.state, agentSettingsSet: message.newName};
@@ -783,7 +784,7 @@ export class ChatPanelManager implements vscode.Disposable {
           }
         } catch (cause) { error = cause instanceof Error ? cause.message : String(cause); }
         finally {
-          await this.post(managed.panel, {type: "agent.preset.result", scope: message.scope, name: message.action === "rename" && message.newName ? message.newName : message.name, ...(settings && message.scope === "chat" && !error ? {settings} : {}), ...(error ? {error} : {})});
+          await this.post(managed.panel, {type: "agent.preset.result", scope: copyToChat ? "chat" : message.scope, name: message.action === "rename" && message.newName ? message.newName : message.name, ...(settings && copyToChat && !error ? {settings} : {}), ...(error ? {error} : {})});
           for (const panel of this.panels.values()) await this.refreshAgentDefaults(panel);
         }
         return;
@@ -2123,7 +2124,7 @@ Read the exact stored child result/receipt and existing workflow status for repo
               return text ? `${localize(m.type === "user" ? "unit.summary.request" : "unit.summary.result")}: ${text}` : "";
             }).filter(Boolean).join("\n\n");
         }
-        const state = { ...createDraftChatState(this.newChatPreferences()), role: "main" as const, title: name.trim(), ...(managed.state.model ? { model: managed.state.model } : {}) };
+        const state = { ...createDraftChatState(this.newChatPreferences()), role: "main" as const, title: name.trim() };
         const panel = vscode.window.createWebviewPanel(this.viewType, state.title, vscode.ViewColumn.Active, this.webviewOptions(state.panelId));
         await this.attach(panel, state);
         targetPanel = this.panels.get(state.panelId)!;

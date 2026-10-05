@@ -181,7 +181,8 @@ async function checkTaskFlow(page, { panelOnly = false } = {}) {
   flow.tasks[2].status = 'verifying';
   await send(flow, 'main-two');
   await page.waitForFunction(() => document.querySelector('#run-stage-list [data-task-id="test"]').dataset.status === 'verifying');
-  assert.equal(await page.locator('#run-stage-list :is([data-task-id="layout"], [data-task-id="behavior"])').count(), 0, 'Completed tasks leave the in-progress list');
+  assert.equal(await page.locator('#run-stage-list :is([data-task-id="layout"], [data-task-id="behavior"])').count(), 2,
+    'Completed stages remain in their active workflow while Verification is still running');
   assert.equal(await page.locator('#task-history-list [data-flow-id="flow-one"] :is([data-task-id="layout"], [data-task-id="behavior"])').count(), 2, 'Completed tasks are kept in Task history');
   assert.equal(await page.locator('#run-stage-list .task-flow').count(), 1, 'Update the same workflow instead of appending a duplicate');
   assert.equal(await page.locator('#timeline .task-flow').count(), 2, 'Conversation retains the earlier snapshot');
@@ -401,6 +402,27 @@ async function checkTaskFlow(page, { panelOnly = false } = {}) {
   assert.deepEqual(await firstStage.locator('.task-flow-model').evaluateAll(models => models.map(model => [model.dataset.stage, model.dataset.running])),
     [['work', 'false'], ['verification', 'true']], 'Completed stage stops animating');
 
+  assert.equal(await graph.locator('.task-flow-step').count(), 2);
+  engine.workflow.tasks[0].verificationStatus = 'completed';
+  await page.evaluate(engine => window.postMessage({ type: 'agents.list', agents: [], workflows: [engine] }, '*'), engine);
+  await page.waitForFunction(() => document.querySelector('[data-flow-id="engine-flow"] [data-task-id="first"]')?.dataset.status === 'completed');
+  assert.equal(await graph.locator('.task-flow-step').count(), 2,
+    'A completed stage remains detailed while a later stage keeps its workflow active');
+  assert.equal(await graph.locator('[data-summary-status="completed"]').textContent(), '완료 1개');
+  assert.match(await page.locator('#run-status-agents').textContent(), /작업 2개$/,
+    'The active-workflow header counts all logical tasks, including completed stages');
+  for (const status of ['completed', 'failed', 'cancelled', 'runtime-error']) {
+    const ended = { ...engine, status };
+    await page.evaluate(snapshot => window.postMessage({ type: 'agents.list', agents: [], workflows: [snapshot] }, '*'), ended);
+    await page.waitForFunction(() => !document.querySelector('#run-stage-list [data-flow-id="engine-flow"]'));
+    assert.equal(await page.locator('#task-history-list [data-flow-id="engine-flow"] .task-flow-step').count(), 2,
+      `${status} workflows retain their pending stage snapshots in Task history`);
+    assert.doesNotMatch(await page.locator('#run-status-agents').textContent(), /작업 2개/,
+      'Terminal workflows are excluded from the active task count');
+  }
+  // A reconnect with an active snapshot restores the whole workflow, including its completed stage.
+  await page.evaluate(snapshot => window.postMessage({ type: 'agents.list', agents: [], workflows: [snapshot] }, '*'), engine);
+  await graph.waitFor();
   assert.equal(await graph.locator('.task-flow-step').count(), 2);
   if (panelOnly) return;
   engine.workflow.tasks[1].workAgentId = 'second-worker';

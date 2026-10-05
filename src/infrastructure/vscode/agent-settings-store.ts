@@ -1,25 +1,46 @@
 import * as vscode from "vscode";
 import { localize } from "../../common/localization";
 import { parseAgentFastModes, parseModelFastModes } from "../../common/types/agent-models";
+import { providerDefaultSettings } from "../agent-factory/provider-defaults";
 import { AGENT_ROLES, AGENT_FIELDS, REQUIRED_AGENT_ROLES, mergeAgentSettings, type AgentDefaultsSnapshot, type AgentDefaults, type AgentPreset, type AgentPresetScope, validAgentValue } from "../../core/config/agent-settings";
 const section = "agentFactory.agents";
 const globalInitializationKey = "agentFactory.agentDefaults.initialized.v4";
 const projectInitializationKey = "agentFactory.projectAgentDefaults.initialized.v3";
 const initializedFields = ["model", "reasoningEffort"] as const;
+const defaultInitializations = new WeakMap<object, Promise<void>>();
+type DetectedProviders = { codex: boolean; claude: boolean; antigravity?: boolean };
+type ProviderDefaults = Partial<Record<keyof DetectedProviders, AgentDefaults["main"]>>;
 
-/** Seed a complete global set, then copy it once into a newly opened project. */
-export async function initializeAgentDefaults(
+/** Serialize initialization so concurrent panels cannot select different project defaults. */
+export function initializeAgentDefaults(
   globalState: Pick<vscode.Memento, "get" | "update">,
-  providers: { codex: boolean; claude: boolean },
-  workspaceState?: Pick<vscode.Memento, "get" | "update">
+  providers: DetectedProviders,
+  workspaceState?: Pick<vscode.Memento, "get" | "update">,
+  providerDefaults: ProviderDefaults = {},
+  random: () => number = Math.random
 ): Promise<void> {
-  const model = providers.codex ? "gpt-6-astra" : providers.claude ? "claude-opus-5-5" : undefined;
+  const operation = (defaultInitializations.get(globalState) ?? Promise.resolve()).catch(() => undefined)
+    .then(() => seedAgentDefaults(globalState, providers, workspaceState, providerDefaults, random));
+  defaultInitializations.set(globalState, operation);
+  return operation;
+}
+
+async function seedAgentDefaults(
+  globalState: Pick<vscode.Memento, "get" | "update">,
+  providers: DetectedProviders,
+  workspaceState: Pick<vscode.Memento, "get" | "update"> | undefined,
+  providerDefaults: ProviderDefaults,
+  random: () => number
+): Promise<void> {
+  const globalProvider = providers.codex ? "codex" : providers.claude ? "claude" : providers.antigravity ? "antigravity" : undefined;
+  const globalSeed = globalProvider ? providerDefaults[globalProvider] ?? providerDefaultSettings(globalProvider, {}) : undefined;
+  const model = globalSeed?.model;
   const config = vscode.workspace.getConfiguration(section);
   if (!globalState.get<boolean>(globalInitializationKey)) {
     for (const role of REQUIRED_AGENT_ROLES) {
       for (const field of initializedFields) {
         const key = `${role}.${field}`;
-        const value = field === "model" ? model : "medium";
+        const value = field === "model" ? model : globalSeed?.reasoningEffort ?? "medium";
         if (value !== undefined && !validAgentValue(field, config.inspect<unknown>(key)?.globalValue)) {
           await config.update(key, value, vscode.ConfigurationTarget.Global);
         }
@@ -33,10 +54,20 @@ export async function initializeAgentDefaults(
   if (!uri || !workspaceState || workspaceState.get<boolean>(projectInitializationKey)) return;
   const projectConfig = vscode.workspace.getConfiguration(section, uri);
   const global = readAgentDefaults().global;
-  if (!REQUIRED_AGENT_ROLES.every(role => ["model", "reasoningEffort"].every(field => validAgentValue(field, global[role]?.[field as "model" | "reasoningEffort"])))) return;
   // Materialize the old effective settings once. Explicit project values win.
   const existing = readAgentDefaults(undefined, undefined, undefined, ["project"]).project;
-  const snapshot = mergeAgentSettings(global, existing);
+  const hasExisting = AGENT_ROLES.some(role => Object.keys(existing[role] ?? {}).length > 0) || Boolean(existing.fastByRoleModel);
+  const pendingKey = projectInitializationKey + ".pending";
+  let snapshot = workspaceState.get<AgentDefaults>(pendingKey);
+  if (!snapshot) {
+    const available = (["codex", "claude", "antigravity"] as const).filter(id => providers[id]);
+    const provider = available.length ? available[Math.min(available.length - 1, Math.floor(random() * available.length))] : undefined;
+    const initial = provider ? providerDefaults[provider] ?? providerDefaultSettings(provider, {}) : {};
+    const seed = Object.fromEntries(AGENT_ROLES.map(role => [role, {...initial}]));
+    snapshot = hasExisting ? mergeAgentSettings(global, existing) : mergeAgentSettings(seed);
+    // Retain the same choice even if a later configuration write fails.
+    await workspaceState.update(pendingKey, snapshot);
+  }
   for (const role of AGENT_ROLES) for (const field of initializedFields) {
     const value = snapshot[role]?.[field];
     if (validAgentValue(field, value)) {
@@ -46,6 +77,7 @@ export async function initializeAgentDefaults(
   // Store an empty map too: absence must never make later global preferences propagate.
   await projectConfig.update("fastByRoleModel", snapshot.fastByRoleModel ?? {}, vscode.ConfigurationTarget.WorkspaceFolder);
   await workspaceState.update(projectInitializationKey, true);
+  await workspaceState.update(pendingKey, undefined);
 }
 
 export function readAgentDefaults(
@@ -102,7 +134,9 @@ export function readAgentDefaults(
     if (Object.keys(populated).length) settings.fastByRoleModel = populated;
     delete settings.fastByModel;
   }
-  return { presets: readAgentPresets(globalState, workspaceState, chatId), global, project, projectAvailable: Boolean(uri) };
+  const presets = readAgentPresets(globalState, workspaceState, chatId).map(preset =>
+    preset.isDefault && preset.scope !== "chat" ? {...preset, settings: mergeAgentSettings(preset.scope === "project" ? project : global)} : preset);
+  return { presets, global, project, projectAvailable: Boolean(uri) };
 }
 export async function saveAgentDefault(scope: "global" | "project", role: string, field: string, value: string | boolean): Promise<void> {
   if (!(AGENT_ROLES as readonly string[]).includes(role) || !(AGENT_FIELDS as readonly string[]).includes(field) || !validAgentValue(field, value)) throw new Error("Invalid agent setting");
@@ -171,6 +205,24 @@ async function seedAgentPresets(globalState: PresetState, workspaceState?: Prese
     if (!workspaceState.get<StoredAgentPreset[]>(projectPresetKey)?.length) await workspaceState.update(projectPresetKey, globalState.get<StoredAgentPreset[]>(globalPresetKey, []).map(preset => preset.isDefault ? defaultPreset(defaults.project) : {...preset, settings: mergeAgentSettings(preset.settings)}));
     await workspaceState.update(projectPresetKey + ".initialized", true);
   }
+  // Keep old chat-owned custom sets available in the settings-only project library.
+  // Retain the original records and disambiguate differing same-named sets.
+  const importKey = projectPresetKey + ".chatImport.v1";
+  if (workspaceState && !workspaceState.get<boolean>(importKey, false)) {
+    const presets = [...workspaceState.get<StoredAgentPreset[]>(projectPresetKey, [])];
+    for (const sets of Object.values(chatPresetMap(workspaceState))) for (const preset of sets) {
+      if (preset.isDefault || preset.name === "Default") continue;
+      const settings = mergeAgentSettings(preset.settings);
+      const sameName = (name: string) => name === preset.name ||
+        (name.startsWith(`${preset.name} (`) && /^\d+\)$/.test(name.slice(preset.name.length + 2)));
+      if (presets.some(item => sameName(item.name) && JSON.stringify(mergeAgentSettings(item.settings)) === JSON.stringify(settings))) continue;
+      let name = preset.name, suffix = 2;
+      while (presets.some(item => item.name === name)) name = `${preset.name} (${suffix++})`;
+      presets.push({...preset, name, settings});
+    }
+    await workspaceState.update(projectPresetKey, presets);
+    await workspaceState.update(importKey, true);
+  }
   if (workspaceState && chatId) {
     const map = chatPresetMap(workspaceState);
     if (!map[chatId]?.length) await workspaceState.update(chatPresetKey, {...map, [chatId]: (workspaceState.get<StoredAgentPreset[]>(projectPresetKey, [])).map(preset => preset.isDefault ? defaultPreset(chatSettings) : {...preset, settings: mergeAgentSettings(preset.settings)})});
@@ -200,7 +252,7 @@ async function writeScopePresets(globalState: PresetState, workspaceState: Prese
 }
 
 /** Serialize preset updates across panels sharing this extension host. */
-export function useAgentPreset(globalState: PresetState, workspaceState: PresetState | undefined, chatId: string | undefined, action: "save" | "apply" | "update" | "delete" | "rename", scope: AgentPresetScope, name: string, chatSettings?: AgentDefaults, newName?: string): Promise<AgentDefaults | undefined> {
+export function useAgentPreset(globalState: PresetState, workspaceState: PresetState | undefined, chatId: string | undefined, action: "save" | "apply" | "copy" | "update" | "delete" | "rename", scope: AgentPresetScope, name: string, chatSettings?: AgentDefaults, newName?: string): Promise<AgentDefaults | undefined> {
   const previous = presetOperations.get(globalState) ?? Promise.resolve();
   const operation = previous.catch(() => undefined).then(async () => {
     await seedAgentPresets(globalState, workspaceState, chatId, chatSettings);
@@ -234,7 +286,7 @@ export function useAgentPreset(globalState: PresetState, workspaceState: PresetS
       await writeScopePresets(globalState, workspaceState, chatId, scope, action === "save" ? [...presets, replacement] : presets.map(preset => preset.name === name ? {...preset, ...replacement} : preset));
       return mergeAgentSettings(settings);
     }
-    const preset = presets.find(preset => preset.name === name);
+    const preset = readAgentDefaults(globalState, workspaceState, chatId).presets?.find(preset => preset.scope === scope && preset.name === name);
     if (!preset) throw new Error(localize("preset.missing"));
     // Validate the complete stored set before writing any setting.
     // Presets saved before the light Work profile omit it; applying them leaves unset optional fields unchanged.
@@ -244,7 +296,7 @@ export function useAgentPreset(globalState: PresetState, workspaceState: PresetS
     for (const [role, field] of pairs) {
       if (!validAgentValue(field, preset.settings[role]?.[field])) throw new Error(localize("preset.invalid"));
     }
-    if (scope === "chat") return mergeAgentSettings(preset.settings);
+    if (scope === "chat" || action === "copy") return mergeAgentSettings(preset.settings);
     const config = vscode.workspace.getConfiguration(section, vscode.workspace.workspaceFolders?.[0]?.uri);
     const target = scope === "global" ? vscode.ConfigurationTarget.Global : vscode.ConfigurationTarget.WorkspaceFolder;
     const before = new Map<string, string | boolean | undefined>();

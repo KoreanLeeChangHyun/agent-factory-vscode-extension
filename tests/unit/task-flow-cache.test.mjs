@@ -32,6 +32,24 @@ test('task-flow aggregation reuses unchanged histories and invalidates all input
   assert.equal(context.getFlows().length, 0);
 });
 
+const activeSelection = source.slice(source.indexOf('  function displayTaskFlows()'), source.indexOf('  // A logical task has ended'));
+test('only terminal workflow states leave the active workflow panel', () => {
+  const context = { state: { childAgents: [] }, currentTaskFlows: () => [], acceptedTaskAgent: () => true };
+  runInNewContext(activeSelection + '\nglobalThis.display = displayTaskFlows; globalThis.ended = workflowEnded;', context);
+  for (const status of ['completed', 'failed', 'cancelled', 'runtime-error']) {
+    assert.equal(context.ended({ engine: true, engineStatus: status }), true, status);
+  }
+  for (const status of ['active', 'needs-human-decision', undefined]) {
+    assert.equal(context.ended({ engine: true, engineStatus: status }), false, String(status));
+  }
+  assert.equal(context.ended({ engine: false, engineStatus: 'completed' }), false, 'direct cards follow their exact run state');
+  context.currentTaskFlows = () => [{ id: 'accepted', tasks: [{ agentId: 'work', runId: 'run', status: 'pending' }] },
+    { id: 'draft', tasks: [{ agentId: 'draft-work', runId: 'draft-run', status: 'pending' }] }];
+  context.state.childAgents = [{ agentId: 'work', runId: 'run', status: 'accepted' }];
+  assert.deepEqual(Array.from(context.display(), flow => flow.id), ['accepted'],
+    'a restored accepted workflow is shown, while identifiers alone do not activate a draft');
+});
+
 const dismissal = source.slice(source.indexOf('  function taskDismissKey('), source.indexOf('  function taskStopKey('));
 const stage = (id, run = 'run-one', extra = {}) => ({ id, title: id, agentId: 'worker', runId: run, status: 'running', ...extra });
 const flow = (id, tasks, extra = {}) => ({ id, tasks, ...extra });
