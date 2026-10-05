@@ -219,14 +219,17 @@
 .settings-panel { flex: 1; min-height: 0; overflow: auto; overscroll-behavior: contain; scrollbar-width: none; scrollbar-gutter: auto; }
 .settings-panel::-webkit-scrollbar { width: 0; height: 0; }
 
-/* These compact tabs need only their content height. Keep the
-   viewport cap and flex shrinking so long content remains reachable by scroll. */
-.status-settings:has(> :is(#settings-panel-agents, #settings-panel-providers, #settings-panel-usage):not([hidden])) {
-  height: auto;
-  max-height: min(600px, calc(100% - 38px));
-}
-:is(#settings-panel-agents, #settings-panel-providers, #settings-panel-usage) { flex: 0 1 auto; }
-#settings-panel-agents { padding-bottom: 4px; }
+/* Keep the shared window height; distribute spare space inside each editor.
+   Content minimums still overflow into the panel's scroll area on short screens. */
+#global-agent-settings { display: flex; flex-direction: column; min-height: 100%; }
+#global-agent-settings .agent-settings-heading,
+#global-agent-settings .agent-settings-columns { flex-shrink: 0; }
+#global-agent-settings .agent-model-row { flex: 1 0 auto; }
+#settings-panel-providers #provider-settings { min-height: 100%; display: flex; }
+#settings-panel-providers .provider-settings { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+#settings-panel-providers .provider-row { flex: 1 0 auto; align-content: center; }
+#settings-panel-usage #account-usage { box-sizing: border-box; min-height: 100%; align-items: stretch; }
+#settings-panel-usage .usage-group { display: flex; flex-direction: column; justify-content: center; }
 
 /* Fit the compact settings tabs by arranging content, retaining scrolling as an
    accessibility fallback for unusually small windows or enlarged text. */
