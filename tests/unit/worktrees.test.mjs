@@ -56,7 +56,6 @@ test('failed creation retains an accepted session for status and retry', async (
 });
 
 test('worktree toolbar reflects queue, connection and unsupported state', async () => {
-  const { readFile } = await import('node:fs/promises');
   const script = await readChatSource();
   const nodes = new Map();
   const node = id => {

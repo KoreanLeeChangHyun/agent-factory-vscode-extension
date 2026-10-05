@@ -1,5 +1,4 @@
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
 import { runUiInNewContext as runInNewContext } from "../support/ui-localization.mjs";
 import test from "node:test";
 import { readChatSource } from "../support/chat-source.mjs";

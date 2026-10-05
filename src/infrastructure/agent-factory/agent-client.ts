@@ -556,7 +556,6 @@ When a command needs sudo and the Human has requested it, use python3 ${JSON.str
         return await this.command([...arguments_, "--request-file", requestPath]);
       }
       const contractImages: { path: string; mediaType: string }[] = [];
-      let total = 0;
       for (const [index, image] of images.entries()) {
         const suffix = imageSuffix(image.mediaType);
         const source = await openFile(image.path, fsConstants.O_RDONLY | fsConstants.O_NOFOLLOW);
@@ -568,7 +567,6 @@ When a command needs sudo and the Human has requested it, use python3 ${JSON.str
           const after = await source.stat();
           if (before.dev !== after.dev || before.ino !== after.ino || before.size !== after.size || before.mtimeMs !== after.mtimeMs) throw new Error(localize("ui.the.image.file.changed.while.being.read"));
         } finally { await source.close(); }
-        total += content.byteLength;
 
         const name = `${String(index).padStart(2, "0")}${suffix}`;
         await writeFile(join(directory, name), content, { mode: 0o600, flag: "wx" });
@@ -699,7 +697,6 @@ When a command needs sudo and the Human has requested it, use python3 ${JSON.str
       throw error;
     });
     const messages: ConversationHistory["messages"][number][] = [];
-    let bytes = 0;
     const ordered = entries.filter(entry => entry.isDirectory() && !entry.isSymbolicLink() && MANAGED_ID.test(entry.name) &&
       (!options?.before || entry.name < options.before)).sort((a, b) => a.name.localeCompare(b.name));
     // Archived pagination counts only runs from the selected conversation.
@@ -727,7 +724,6 @@ When a command needs sudo and the Human has requested it, use python3 ${JSON.str
       if (!["completed", "failed", "cancelled", "needs-human-decision"].includes(String(state.status))) continue;
       const requestPath = await this.managedPath(agentId, "runs", entry.name, "request.md");
       const request = (await readManagedBytes(requestPath, 8 * 1024 * 1024)).toString("utf8");
-      bytes += Buffer.byteLength(request);
 
       const taskMode = TASK_MODES.includes(state.taskMode as TaskMode) ? state.taskMode as TaskMode : "direct";
       const options = readRecordOrUndefined(state.executionOptions);
@@ -737,7 +733,6 @@ When a command needs sudo and the Human has requested it, use python3 ${JSON.str
         const eventsPath = await this.managedPath(agentId, "runs", entry.name, "events.jsonl");
         try {
           const rawEvents = (await readManagedBytes(eventsPath, MAX_EVENTS_BYTES)).toString("utf8");
-          bytes += Buffer.byteLength(rawEvents);
           for (const [index, line] of rawEvents.split("\n").entries()) {
             if (!line.trim()) continue;
             const event = readRecordOrUndefined(JSON.parse(line));
@@ -750,7 +745,6 @@ When a command needs sudo and the Human has requested it, use python3 ${JSON.str
         let response = "";
         try { response = await this.readManagedResult(resultPath, agentId, entry.name); }
         catch (error) { if (!isMissingFile(error)) throw error; }
-        bytes += Buffer.byteLength(response);
 
         if (response) messages.push({ type: "assistant", id: `history-assistant-${entry.name}`, runId: entry.name, text: response, phase: "final" });
       }

@@ -26,7 +26,7 @@ export async function readChatSource() {
 }
 
 const featureInstances = [...readFileSync(new URL("chat.js", directory), "utf8")
-  .matchAll(/^  const (chat[A-Z]\w*) = globalThis\.AgentFactoryChat\./gm)].map(match => match[1]);
+  .matchAll(/^ {2}const (chat[A-Z]\w*) = globalThis\.AgentFactoryChat\./gm)].map(match => match[1]);
 
 /**
  * chat.js reaches an extracted feature through its instance (`chatNotes.receiveNotes`),

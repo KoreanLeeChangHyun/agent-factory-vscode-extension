@@ -4,7 +4,6 @@ import { importTypeScript, createTypeScriptImporter } from '../support/import-ty
 import { readFileSync } from 'node:fs';
 import { readChatSourceSync, runChatInNewContext as runInNewContext } from "../support/chat-source.mjs";
 const { createDraftChatState, restoreChatState } = await importTypeScript('src/modules/chat/chat-state.ts');
-const { mergeAgentSettings } = await importTypeScript('src/core/config/agent-settings.ts');
 const { parseClientMessage } = await importTypeScript('src/protocol/validator.ts');
 const source = readChatSourceSync();
 const section = (start,end) => source.slice(source.indexOf(start),source.indexOf(end,source.indexOf(start)));

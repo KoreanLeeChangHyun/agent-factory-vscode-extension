@@ -196,7 +196,7 @@ test("Goal snapshots the current composer, replaces an existing objective and re
 test("blank Goal drafts are preserved with an actionable error even with an existing goal", () => {
   for (const text of ["", "   "]) {
     for (const attachments of [[], [{ id: "image", kind: "image", name: "image.png" }]]) {
-      const { context, sent, notices, run } = harness({ goalMode: true, attachments }, text);
+      const { context, sent, run } = harness({ goalMode: true, attachments }, text);
       context.nativeGoal = { objective: "Stale goal" };
       run('submit("direct", "normal", true)');
       assert.equal(sent.length, 0);

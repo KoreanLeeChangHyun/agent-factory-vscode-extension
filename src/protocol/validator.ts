@@ -375,7 +375,6 @@ export function parseClientMessage(value: unknown): ClientMessage | undefined {
       if (attachments.length !== value.attachments.length) {
         return undefined;
       }
-      const images = attachments.filter((attachment) => attachment.kind === "image");
 
       return {
         type: value.type,
@@ -413,6 +412,7 @@ export function parseClientMessage(value: unknown): ClientMessage | undefined {
       return { type: value.type, items };
     }
   }
+  return undefined;
 }
 
 function parseAttachment(value: unknown): AttachmentReference | undefined {

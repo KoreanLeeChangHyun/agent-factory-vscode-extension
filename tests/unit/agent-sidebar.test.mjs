@@ -244,7 +244,7 @@ test("dragging directories reorders them, preserves members, and persists the or
     h.inputs.push(name);
     await h.run("newGroup");
   }
-  const [one, two, three] = h.sidebar.getChildren();
+  const [one, , three] = h.sidebar.getChildren();
   const transfer = new Map(), token = { isCancellationRequested: false };
   h.sidebar.handleDrag([h.sidebar.getChildren()[3]], transfer, token);
   await h.sidebar.handleDrop(one, transfer, token);

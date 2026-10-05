@@ -240,15 +240,12 @@ globalThis.AgentFactoryChat.attachments = function (host) {
     const accepted = ["image/png", "image/jpeg", "image/gif", "image/webp"];
     if (accepted.includes(file.type)) return file.type;
     if (file.type) return undefined;
-    return ({ png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg", gif: "image/gif", webp: "image/webp" })
-      [String(file.name || "").split(".").pop().toLowerCase()];
+    return ({ png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg", gif: "image/gif", webp: "image/webp" })[
+      String(file.name || "").split(".").pop().toLowerCase()];
   }
   async function addBrowserImages(files) {
     for (const file of files) {
       const mediaType = browserImageMediaType(file);
-      const imageCount = state.attachments.filter(function (item) { return item.kind === "image"; }).length;
-      const imageBytes = state.attachments.filter(function (item) { return item.kind === "image"; })
-        .reduce(function (total, item) { return total + (item.size || 0); }, 0);
       if (!mediaType || file.size < 1) {
         appendNotice("error", t("ui.attach.up.to.8.png.jpeg.gif.or.webp.images.with.a.maximum.of.10.mib.each.and.20.mib.total"));
         continue;
@@ -258,7 +255,7 @@ globalThis.AgentFactoryChat.attachments = function (host) {
       try {
         const dataUrl = await readDataUrl(file);
         vscode.postMessage({ type: "attachments.createImage", id, name: file.name || "image", mediaType, size: file.size, data: dataUrl.slice(dataUrl.indexOf(",") + 1) });
-      } catch (error) {
+      } catch {
         state.attachments = state.attachments.filter(function (item) { return item.id !== id; });
         appendNotice("error", t("ui.unable.to.read.the.image"));
         renderAttachments();

@@ -481,7 +481,8 @@
     "build": "node scripts/build.mjs",
     "release": "node scripts/release.mjs",
     "watch": "node scripts/build.mjs --watch",
-    "check": "npm run typecheck && npm run check:static && npm run test && npm run build",
+    "check": "npm run typecheck && npm run lint && npm run check:static && npm run test && npm run build",
+    "lint": "eslint src static/js scripts tests",
     "check:static": "node scripts/check-static.mjs",
     "typecheck": "tsc --noEmit",
     "test": "node scripts/test.mjs",
@@ -490,14 +491,18 @@
     "vscode:prepublish": "node scripts/build.mjs --release"
   },
   "devDependencies": {
+    "@eslint/js": "^10.0.1",
     "@types/node": "^22.10.5",
     "@types/plist": "^3.0.5",
     "@types/vscode": "^1.96.0",
     "@vscode/vsce": "2.32.0",
     "esbuild": "^0.24.2",
+    "eslint": "^10.12.0",
+    "globals": "^17.13.0",
     "katex": "^0.16.47",
     "mermaid": "^11.17.2",
-    "typescript": "^5.7.2"
+    "typescript": "^5.7.2",
+    "typescript-eslint": "^8.71.0"
   },
   "dependencies": {
     "@iarna/toml": "^2.2.5",

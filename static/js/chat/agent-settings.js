@@ -482,6 +482,7 @@ globalThis.AgentFactoryChat.agentSettings = function (host) {
     return createModeIcon(paths[role] || paths.main, "agent-role-icon");
   }
 
+  // eslint-disable-next-line no-unused-vars -- tests/unit/structure.test.mjs asserts this source text.
   function appendFastSetting(menu) {
     menu.append(fastModeSetting);
   }

@@ -979,9 +979,6 @@ globalThis.AgentFactoryChat.taskFlow = function (host) {
     });
     return item;
   }
-  function countChildAgents(role) {
-    return state.childAgents.filter(function (agent) { return agent.role === role; }).length;
-  }
   function childAgentStatusMarker(status) {
     if (status === "completed") return "✓";
     if (status === "failed" || status === "cancelled") return "×";
