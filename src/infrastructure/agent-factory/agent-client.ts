@@ -343,9 +343,14 @@ export class AgentFactoryClient implements AgentRuntimeClient {
         typeof document.startedAt !== "string" || document.historyRetained !== true) {
       throw new Error(localize("ui.the.agent.factory.runtime.returned.an.invalid.conversation.reset.response"));
     }
+    this.invalidateCapabilities(agentId);
     this.contextUsageSnapshots.clear();
     this.eventSnapshots.clear();
     return { conversationId: document.conversationId, startedAt: document.startedAt };
+  }
+
+  private invalidateCapabilities(agentId: string): void {
+    this.capabilityCache.deleteWhere((key) => (JSON.parse(key) as unknown[])[1] === agentId);
   }
 
   private async checkedExecution(command: "submit" | "send", execution: ExecutionOptions, agentId?: string, hasImages = false): Promise<string[]> {
@@ -413,6 +418,7 @@ export class AgentFactoryClient implements AgentRuntimeClient {
       ...executionPolicyArguments(execution.executionMode),
       ...await this.checkedExecution("submit", execution, undefined, images.length > 0)
     ], message, images);
+    this.invalidateCapabilities(agentId);
     return { ...readAcceptance(document, agentId), ...(preparationGuidance ? { preparationGuidance } : {}) };
   }
 
@@ -426,6 +432,7 @@ export class AgentFactoryClient implements AgentRuntimeClient {
       ...executionPolicyArguments(execution.executionMode),
       ...await this.checkedExecution("send", execution, agentId, images.length > 0)
     ], message, images);
+    this.invalidateCapabilities(agentId);
     return { ...readAcceptance(document, agentId), ...(preparationGuidance ? { preparationGuidance } : {}) };
   }
 
