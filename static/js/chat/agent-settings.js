@@ -12,18 +12,30 @@ globalThis.AgentFactoryChat.agentSettings = function (host) {
   function agentSettingRole(role) {
     return role === "main" ? state.role || "main" : role;
   }
+  // Optional Work profiles start from another role's settings until they have their own.
+  const ROLE_FALLBACK = { workLight: "work", explore: "workLight", scribe: "workLight" };
+  const DELEGATED_ROLES = ["work", "workLight", "verification", "explore", "scribe"];
+  function inheritedAgentValue(role, field) {
+    for (let current = ROLE_FALLBACK[role]; current; current = ROLE_FALLBACK[current]) {
+      const value = state.agentModels?.[current]?.[field];
+      if (value) return value;
+    }
+    return "";
+  }
   function effectiveAgentValue(role, field) {
     const own = role === "main" ? (field === "model" ? state.model : field === "reasoningEffort" ? state.reasoning : state.fastMode) : state.agentModels?.[role]?.[field];
     if (field !== "fast") return own || "";
-    const model = role === "main" ? state.model : state.agentModels?.[role]?.model || (role === "workLight" ? state.agentModels?.work?.model : "");
+    const model = role === "main" ? state.model : state.agentModels?.[role]?.model || inheritedAgentValue(role, "model");
     return agentFastMode(role, model, own);
   }
   function effectiveDelegatedModels() {
-    return Object.fromEntries(["work", "workLight", "verification"].map(role => {
-      const model = effectiveAgentValue(role, "model");
+    return Object.fromEntries(DELEGATED_ROLES.map(role => {
+      // Explorer and Scribe send the Worker's settings until they have their own.
+      const inherit = role === "explore" || role === "scribe";
+      const model = effectiveAgentValue(role, "model") || (inherit ? inheritedAgentValue(role, "model") : "");
       return [role, {
         model: model || undefined,
-        reasoningEffort: effectiveAgentValue(role, "reasoningEffort") || undefined,
+        reasoningEffort: effectiveAgentValue(role, "reasoningEffort") || (inherit ? inheritedAgentValue(role, "reasoningEffort") : "") || undefined,
         ...(model && modelRoute(model) === "codex" ? { fast: effectiveAgentValue(role, "fast") } : {})
       }];
     }));
@@ -310,7 +322,11 @@ globalThis.AgentFactoryChat.agentSettings = function (host) {
       ...state.agentModels,
       ...(values.work ? {work: {...values.work, fast: agentFastMode("work", values.work.model, values.work.fast)}} : {}),
       ...(values.workLight || values.work ? {workLight: {...(values.work || {}), ...(values.workLight || {}), fast: agentFastMode("workLight", values.workLight?.model || values.work?.model, values.workLight?.fast ?? values.work?.fast)}} : {}),
-      ...(values.verification ? {verification: {...values.verification, fast: agentFastMode("verification", values.verification.model, values.verification.fast)}} : {})
+      ...(values.verification ? {verification: {...values.verification, fast: agentFastMode("verification", values.verification.model, values.verification.fast)}} : {}),
+      ...Object.fromEntries(["explore", "scribe"].filter(role => values[role] || values.workLight || values.work).map(role => {
+        const merged = {...(values.work || {}), ...(values.workLight || {}), ...(values[role] || {})};
+        return [role, {...merged, fast: agentFastMode(role, merged.model, merged.fast)}];
+      }))
     };
     state.agentSettingsScope = scope;
     state.agentSettingsSet = name;
@@ -344,15 +360,17 @@ globalThis.AgentFactoryChat.agentSettings = function (host) {
       const column = document.createElement("span"); column.textContent = t(key); columns.append(column);
     }
     container.append(columns);
-    for (const role of ["main", "work", "workLight", "verification"]) {
+    for (const role of ["main", "work", "workLight", "explore", "scribe", "verification"]) {
       const row = document.createElement("div"); row.className = "agent-model-row";
       row.dataset.agentRole = role;
       row.setAttribute("role", "group");
       row.setAttribute("aria-label", t("ui.role." + role));
       const heading = document.createElement("strong"); heading.textContent = t("ui.role." + role); heading.className = "agent-model-name"; heading.prepend(createAgentRoleIcon(role)); row.append(heading);
       for (const field of ["model", "reasoningEffort", "fast"]) {
-        const selectedModel = values?.[role]?.model || "";
-        const current = field === "fast" ? modelFastModeFromSettings(values, role, selectedModel, values?.[role]?.fast) : values?.[role]?.[field] || "";
+        // Unset optional profiles show the value they inherit (Worker from Expert, Explorer/Scribe from Worker).
+        const inherited = name => { for (let r = role; r; r = ROLE_FALLBACK[r]) if (values?.[r]?.[name]) return values[r][name]; return ""; };
+        const selectedModel = inherited("model");
+        const current = field === "fast" ? modelFastModeFromSettings(values, role, selectedModel, values?.[role]?.fast) : inherited(field);
         if (field === "fast" && (!selectedModel || modelRoute(selectedModel) !== "codex")) { row.append(createFastPlaceholder()); continue; }
         row.append(createAgentSettingControl(role, t("ui.role." + role), field, current, value => {
           const nextSettings = field === "fast"
@@ -368,7 +386,7 @@ globalThis.AgentFactoryChat.agentSettings = function (host) {
       }
       container.append(row);
     }
-    if (agentPresetBusy) for (const control of container.querySelectorAll("input, select, button")) control.disabled = true;
+    if (agentPresetBusy || !selected || selected.builtIn) for (const control of container.querySelectorAll("input, select, button")) control.disabled = true;
   }
 
   function autoSavePresetField(role, field, value) {
@@ -400,46 +418,54 @@ globalThis.AgentFactoryChat.agentSettings = function (host) {
     const select = document.getElementById("agent-preset-select");
     const scope = "global"; // Single set library; scope is retained only for wire compatibility.
     const presets = (state.agentDefaults?.presets || []).filter(preset => preset.scope === scope);
-    const desired = pendingPresetName || (!settingsEditor ? state.agentSettingsSet : select.value);
-    const selected = presets.some(preset => preset.name === desired) ? desired : settingsEditor ? presets.find(preset => preset.isDefault)?.name || presets[0]?.name || "" : "";
+    const desired = pendingPresetName || (!settingsEditor ? (state.agentSettingsScope === "global" ? state.agentSettingsSet : "") : select.value);
+    const selected = presets.some(preset => preset.name === desired) ? desired : settingsEditor ? (presets.some(preset => preset.name === select.value) ? select.value : presets.find(preset => preset.isDefault)?.name || presets[0]?.name || "") : "";
     select.replaceChildren();
-    const placeholder = document.createElement("option"); placeholder.value = ""; placeholder.textContent = t("preset.choose"); select.append(placeholder);
+    const placeholder = document.createElement("option"); placeholder.value = ""; placeholder.textContent = t(settingsEditor ? "preset.choose" : "preset.chat"); select.append(placeholder);
     for (const preset of presets) {
       const option = document.createElement("option"); option.value = preset.name; option.textContent = preset.name + (preset.isDefault ? " · " + t("preset.project.default") : "");
-      const error = !settingsEditor ? agentSettingsApplyError(preset.settings || {}) : "";
+      const error = !settingsEditor ? (currentCapabilities().sessionProvider ? t("preset.selection.bound") : agentSettingsApplyError(preset.settings || {})) : "";
       option.disabled = Boolean(error);
       if (error) option.title = error;
       select.append(option);
     }
     select.value = Array.from(select.options).some(option => option.value === selected) ? selected : "";
     if (select.value === pendingPresetName) pendingPresetName = "";
-    const providerBound = !settingsEditor && Boolean(currentCapabilities().sessionProvider);
-    select.disabled = agentPresetBusy || providerBound;
+    select.disabled = agentPresetBusy;
     const selectedPreset = presets.find(preset => preset.name === select.value);
-    document.getElementById("agent-preset-delete").disabled = agentPresetBusy || !select.value || selectedPreset?.inUse === true;
+    document.getElementById("agent-preset-delete").disabled = agentPresetBusy || !select.value || selectedPreset?.inUse === true || selectedPreset?.builtIn === true;
     const defaultButton = document.getElementById("agent-preset-default");
     defaultButton.disabled = agentPresetBusy || !select.value || !state.agentDefaults?.projectAvailable || selectedPreset?.isDefault === true;
     defaultButton.setAttribute("aria-pressed", String(selectedPreset?.isDefault === true));
     const rename = document.getElementById("agent-preset-rename");
-    rename.querySelector("summary").setAttribute("aria-disabled", String(agentPresetBusy || !select.value));
-    document.getElementById("agent-preset-rename-name").disabled = agentPresetBusy || !select.value;
-    document.getElementById("agent-preset-rename-save").disabled = agentPresetBusy || !select.value || !document.getElementById("agent-preset-rename-name").value.trim();
-    document.getElementById("agent-preset-save").disabled = agentPresetBusy || !document.getElementById("agent-preset-name").value.trim();
+    rename.querySelector("summary").setAttribute("aria-disabled", String(agentPresetBusy || !select.value || selectedPreset?.builtIn === true));
+    document.getElementById("agent-preset-rename-name").disabled = agentPresetBusy || !select.value || selectedPreset?.builtIn === true;
+    document.getElementById("agent-preset-rename-save").disabled = agentPresetBusy || !select.value || selectedPreset?.builtIn === true || !document.getElementById("agent-preset-rename-name").value.trim();
+    document.getElementById("agent-preset-save").disabled = agentPresetBusy || !select.value || !document.getElementById("agent-preset-name").value.trim();
     document.getElementById("agent-preset-name").disabled = agentPresetBusy;
     document.getElementById("agent-default-scope").disabled = agentPresetBusy;
   }
   function performPresetAction(action) {
     if (agentPresetBusy) return;
     if (!settingsEditor && action !== "apply") return;
-    if (action === "apply" && document.getElementById("agent-default-scope").value === "chat" && currentCapabilities().sessionProvider) return;
     const name = document.getElementById(action === "save" ? "agent-preset-name" : "agent-preset-select").value.trim();
+    if (!name && !settingsEditor && action === "apply") {
+      state.agentSettingsScope = "chat";
+      state.agentSettingsSet = "Chat";
+      persist(); saveComposerSettings(); updateModeControls();
+      renderModelSettings(modelMenu, true);
+      return;
+    }
     if (!name) return;
+    const sourceName = document.getElementById("agent-preset-select").value;
+    const selectedPreset = state.agentDefaults?.presets?.find(item => item.name === sourceName);
+    if (settingsEditor && ["rename", "delete", "update"].includes(action) && selectedPreset?.builtIn) return;
     const scope = "global"; // Single set library; scope is retained only for wire compatibility.
     if (settingsEditor && action === "apply") { renderAgentDefaults(); return; }
     if (action === "apply") {
       const preset = state.agentDefaults?.presets?.find(item => item.scope === scope && item.name === name);
       if (!preset) return;
-      const error = !settingsEditor ? agentSettingsApplyError(preset.settings || {}) : "";
+      const error = !settingsEditor ? (currentCapabilities().sessionProvider ? t("preset.selection.bound") : agentSettingsApplyError(preset.settings || {})) : "";
       if (error) {
         const status = document.getElementById("agent-preset-status"); status.hidden = false; status.textContent = error;
         return;
@@ -454,7 +480,7 @@ globalThis.AgentFactoryChat.agentSettings = function (host) {
     renderAgentDefaults();
     renderAgentPresets();
     if (!settingsEditor) saveComposerSettings();
-    vscode.postMessage({type: "agent.preset", action: settingsEditor ? action : "copy", scope, name, ...(newName ? {newName} : {}), ...(action === "save" ? {sourceName: document.getElementById("agent-preset-select").value} : {})});
+    vscode.postMessage({type: "agent.preset", action: settingsEditor ? action : "copy", scope, name, ...(newName ? {newName} : {}), ...(action === "save" ? {sourceName} : {})});
   }
   for (const action of ["save", "delete", "default"]) document.getElementById("agent-preset-" + action).addEventListener("click", () => performPresetAction(action));
   document.getElementById("agent-preset-name").addEventListener("input", renderAgentPresets);
@@ -463,7 +489,7 @@ globalThis.AgentFactoryChat.agentSettings = function (host) {
     if (!event.currentTarget.open) return;
     const select = document.getElementById("agent-preset-select");
     const preset = (state.agentDefaults?.presets || []).find(item => item.scope === document.getElementById("agent-default-scope").value && item.name === select.value);
-    if (!preset || agentPresetBusy) { event.currentTarget.open = false; return; }
+    if (!preset || preset.builtIn || agentPresetBusy) { event.currentTarget.open = false; return; }
     if (!document.getElementById("agent-preset-rename-name").value.trim()) document.getElementById("agent-preset-rename-name").value = preset.name;
     renderAgentPresets();
   });
@@ -482,6 +508,8 @@ globalThis.AgentFactoryChat.agentSettings = function (host) {
       main: "M4 5h16v11H9l-5 4V5Zm4 4h8m-8 3h5",
       work: "M9 7V4h6v3M3 7h18v13H3V7Zm0 5h18m-11 0v3h4v-3",
       workLight: "M9 7V4h6v3M3 7h18v13H3V7Zm5 7h8",
+      explore: "M10.5 4a6.5 6.5 0 1 1 0 13 6.5 6.5 0 0 1 0-13Zm4.7 11.2L20 20",
+      scribe: "M6 3h9l4 4v14H6V3Zm9 0v4h4M9 12h7m-7 4h5",
       verification: "M12 3 3 7v5c0 5 9 9 9 9s9-4 9-9V7l-9-4Zm-4 9 3 3 5-6"
     };
     return createModeIcon(paths[role] || paths.main, "agent-role-icon");
@@ -544,7 +572,7 @@ globalThis.AgentFactoryChat.agentSettings = function (host) {
       columns.append(column);
     }
     menu.append(columns);
-    const roles = state.role === "main" ? [["main", t("ui.role.main")], ["work", t("ui.role.work")], ["workLight", t("ui.role.workLight")], ["verification", t("ui.role.verification")]] : [["main", state.role === "work" ? t("ui.work") : t("ui.verification")]];
+    const roles = state.role === "main" ? [["main", t("ui.role.main")], ["work", t("ui.role.work")], ["workLight", t("ui.role.workLight")], ["explore", t("ui.role.explore")], ["scribe", t("ui.role.scribe")], ["verification", t("ui.role.verification")]] : [["main", state.role === "work" ? t("ui.work") : t("ui.verification")]];
     for (const [role, label] of roles) {
       const row = document.createElement("div");
       row.className = "agent-model-row";
@@ -558,13 +586,13 @@ globalThis.AgentFactoryChat.agentSettings = function (host) {
       row.append(legend);
       for (const field of ["model", "reasoningEffort", "fast"]) {
         const own = role === "main" ? (field === "model" ? state.model : field === "reasoningEffort" ? state.reasoning : state.fastMode) : state.agentModels?.[role]?.[field];
-        // The light Work profile starts from the Work profile, never from Main's model.
-        const current = field === "fast" ? effectiveAgentValue(role, field) : own || effectiveAgentValue(role, field) || (role === "workLight" ? effectiveAgentValue("work", field) : "");
-        const selectedModel = field === "model" ? current : effectiveAgentValue(role, "model") || (role === "workLight" ? effectiveAgentValue("work", "model") : "");
+        // Optional Work profiles start from their fallback role (Worker from Expert, Explorer/Scribe from Worker), never from Main's model.
+        const current = field === "fast" ? effectiveAgentValue(role, field) : own || effectiveAgentValue(role, field) || inheritedAgentValue(role, field);
+        const selectedModel = field === "model" ? current : effectiveAgentValue(role, "model") || inheritedAgentValue(role, "model");
         if (field === "fast" && (!selectedModel || modelRoute(selectedModel) !== "codex")) { row.append(createFastPlaceholder()); continue; }
         row.append(createAgentSettingControl(role, label, field, current, value => {
           state.agentSettingsScope = "chat";
-          state.agentSettingsSet = document.getElementById("agent-preset-select").value || "Default";
+          state.agentSettingsSet = "Chat";
           if (field === "fast") setAgentFastMode(role, selectedModel, value === true);
           else if (role === "main") {
             state[field === "reasoningEffort" ? "reasoning" : "model"] = value;
@@ -579,9 +607,43 @@ globalThis.AgentFactoryChat.agentSettings = function (host) {
           if ((field === "model" || field === "fast") && host.openSettingId === "model") renderModelSettings(modelMenu, true);
         }));
       }
+      if (state.agentSettingsScope === "global" && state.agentSettingsSet) {
+        for (const control of row.querySelectorAll("input, button, select")) control.disabled = true;
+      }
       menu.append(row);
     }
     menu.append(document.getElementById("agent-preset-content"));
+  }
+
+  // The Human's per-project periodic documents check; each check is a read-only Explorer report.
+  function createDocsAuditSetting() {
+    const row = document.createElement("div");
+    row.className = "agent-permissions-row";
+    const legend = document.createElement("div");
+    legend.className = "agent-permissions-heading";
+    const name = document.createElement("strong");
+    name.textContent = t("ui.docs.audit");
+    legend.append(name);
+    const select = document.createElement("select");
+    select.dataset.setting = "docs-audit";
+    select.setAttribute("aria-label", t("ui.docs.audit"));
+    for (const value of ["off", "daily", "weekly"]) {
+      const option = document.createElement("option");
+      option.value = value;
+      option.textContent = t("ui.docs.audit." + value);
+      option.selected = value === (state.docsAuditInterval || "off");
+      select.append(option);
+    }
+    const help = document.createElement("p");
+    help.id = "docs-audit-description";
+    help.textContent = t("ui.docs.audit.description");
+    select.setAttribute("aria-describedby", help.id);
+    select.addEventListener("change", function () {
+      state.docsAuditInterval = select.value;
+      vscode.postMessage({ type: "docsAudit.set", interval: select.value });
+    });
+    row.append(legend, select, help);
+    return row;
   }
 
   function renderGeneralSettings() {
@@ -619,6 +681,7 @@ globalThis.AgentFactoryChat.agentSettings = function (host) {
       });
       row.append(legend, select, help);
       menu.append(row);
+      menu.append(createDocsAuditSetting());
     }
     if (state.role === "main") renderModelSettings(document.getElementById("global-agent-settings"), true, true);
     host.chatProviders.renderProviderSettings();

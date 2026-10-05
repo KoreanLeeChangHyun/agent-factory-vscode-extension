@@ -5,6 +5,9 @@ globalThis.AgentFactoryChat.attachments = function (host) {
   const {
     vscode, attachmentList, state, t, updateSendButton, persist, appendNotice, createId
   } = host;
+  // Keep cancellation through the Host acknowledgement, including remote/WSL latency.
+  const imageUploads = new Map();
+  function finishImageUpload(id) { imageUploads.delete(id); }
 
   function bindAttachmentConversion(element, attachment) {
     if (attachment.kind !== "image" || attachment.pending || !attachment.uri) return;
@@ -42,6 +45,7 @@ globalThis.AgentFactoryChat.attachments = function (host) {
         const reader = new FileReader();
         reader.onload = () => resolve(reader.result);
         reader.onerror = reject;
+        reader.onabort = reject;
         reader.readAsDataURL(blob);
       });
       vscode.postMessage({ type: "attachment.converted", id: message.id, name: message.name,
@@ -93,6 +97,8 @@ globalThis.AgentFactoryChat.attachments = function (host) {
       remove.textContent = "×";
       remove.setAttribute("aria-label", t("attachment.remove", attachment.name));
       remove.addEventListener("click", function () {
+        const upload = imageUploads.get(attachment.id);
+        if (upload) upload.cancelled = true;
         if (attachment.previewUri?.startsWith("blob:")) {
           URL.revokeObjectURL(attachment.previewUri);
         }
@@ -146,10 +152,18 @@ globalThis.AgentFactoryChat.attachments = function (host) {
   }
   function addAttachments(attachments) {
     const existing = new Set(state.attachments.map(function (item) {
-      return item.uri || item.name + ":" + item.size;
+      return item.uri || item.id;
     }));
     for (const attachment of attachments) {
-      const key = attachment.uri || attachment.name + ":" + attachment.size;
+      const upload = imageUploads.get(attachment.id);
+      if (!attachment.pending && upload) {
+        imageUploads.delete(attachment.id);
+        if (upload.cancelled || !state.attachments.some(item => item.id === attachment.id)) {
+          vscode.postMessage({ type: "attachment.remove", id: attachment.id });
+          continue;
+        }
+      }
+      const key = attachment.uri || attachment.id;
       const sameId = state.attachments.findIndex(function (item) { return item.id === attachment.id; });
       if (sameId >= 0) {
         const previous = state.attachments[sameId];
@@ -232,6 +246,7 @@ globalThis.AgentFactoryChat.attachments = function (host) {
         state.attachments = state.attachments.filter(item => item.id !== id);
         appendNotice("error", t("ui.local.file.read.failed"));
         renderAttachments();
+        updateSendButton();
         persist();
       }
     }
@@ -243,23 +258,104 @@ globalThis.AgentFactoryChat.attachments = function (host) {
     return ({ png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg", gif: "image/gif", webp: "image/webp" })[
       String(file.name || "").split(".").pop().toLowerCase()];
   }
-  async function addBrowserImages(files) {
-    for (const file of files) {
-      const mediaType = browserImageMediaType(file);
-      if (!mediaType || file.size < 1) {
-        appendNotice("error", t("ui.attach.up.to.8.png.jpeg.gif.or.webp.images.with.a.maximum.of.10.mib.each.and.20.mib.total"));
-        continue;
+
+  function clipboardImages(transfer) {
+    const entries = [];
+    const seen = new Map();
+    const key = file => JSON.stringify([file.name, file.size, file.type]);
+    for (const item of Array.from(transfer.items || [])) {
+      if (item.kind !== "file") continue;
+      const file = item.getAsFile();
+      if (!file) continue;
+      entries.push({ file, hint: item.type });
+      seen.set(key(file), (seen.get(key(file)) || 0) + 1);
+    }
+    for (const file of Array.from(transfer.files || [])) {
+      const count = seen.get(key(file)) || 0;
+      if (count) seen.set(key(file), count - 1);
+      else entries.push({ file });
+    }
+    return entries.filter(({ file, hint }) => {
+      const type = (hint || file.type || "").toLowerCase();
+      return type.startsWith("image/") || browserImageMediaType(file) ||
+        ((!type || type === "application/octet-stream") &&
+          (!String(file.name || "").includes(".") || /\.(png|jpe?g|gif|webp|bmp|tiff?|avif)$/i.test(file.name)));
+    }).map(({ file }) => file);
+  }
+
+  async function prepareBrowserImage(file) {
+    // Clipboard MIME/filename metadata differs between screenshot tools. Inspect
+    // the actual bytes; the Host independently validates them again before saving.
+    const bytes = new Uint8Array(await file.slice(0, 12).arrayBuffer());
+    const starts = signature => signature.every((byte, index) => bytes[index] === byte);
+    let mediaType = starts([137, 80, 78, 71, 13, 10, 26, 10]) ? "image/png"
+      : starts([255, 216, 255]) ? "image/jpeg"
+      : starts([71, 73, 70, 56, 55, 97]) || starts([71, 73, 70, 56, 57, 97]) ? "image/gif"
+      : starts([82, 73, 70, 70]) && [87, 69, 66, 80].every((byte, index) => bytes[index + 8] === byte) ? "image/webp" : undefined;
+    let blob = file;
+    if (!mediaType) {
+      // BMP screenshots (and other browser-decodable raster formats) become PNG.
+      // Never fetch HTML clipboard URLs or local UI-machine paths on a remote Host.
+      const type = String(file.type || "").toLowerCase();
+      if (!starts([66, 77]) && !["image/bmp", "image/x-ms-bmp", "image/tiff", "image/avif"].includes(type)) {
+        throw new Error(t("ui.clipboard.image.format.unsupported"));
       }
-      const id = createId();
-      addAttachments([{ id, name: file.name || "image", kind: "image", previewUri: URL.createObjectURL(file), mediaType, size: file.size, pending: true }]);
+      const source = URL.createObjectURL(file);
+      const canvas = document.createElement("canvas");
       try {
-        const dataUrl = await readDataUrl(file);
-        vscode.postMessage({ type: "attachments.createImage", id, name: file.name || "image", mediaType, size: file.size, data: dataUrl.slice(dataUrl.indexOf(",") + 1) });
+        const image = new Image(); image.src = source; await image.decode();
+        canvas.width = image.naturalWidth; canvas.height = image.naturalHeight;
+        const context = canvas.getContext("2d");
+        if (!context || !canvas.width || !canvas.height) throw new Error("Invalid image");
+        context.drawImage(image, 0, 0);
+        blob = await new Promise(resolve => canvas.toBlob(resolve, "image/png"));
+        if (!blob || blob.type !== "image/png") throw new Error("Unsupported encoder");
+        mediaType = "image/png";
+      } finally {
+        URL.revokeObjectURL(source); canvas.width = 0; canvas.height = 0;
+      }
+    }
+    const suffix = { "image/png": "png", "image/jpeg": "jpg", "image/gif": "gif", "image/webp": "webp" }[mediaType];
+    const originalName = file.name || "image";
+    const name = browserImageMediaType({ type: "", name: originalName }) === mediaType ? originalName
+      : originalName.replace(/\.[^.]+$/, "") + "." + suffix;
+    return { blob, mediaType, name };
+  }
+  async function addBrowserImages(files) {
+    // Stage the entire batch before starting asynchronous reads so Send cannot
+    // race ahead of the second clipboard image.
+    const uploads = files.map(file => {
+      const id = createId();
+      const upload = { id, file, cancelled: false, sent: false };
+      imageUploads.set(id, upload);
+      addAttachments([{ id, name: file.name || "image", kind: "image", previewUri: URL.createObjectURL(file), size: file.size, pending: true }]);
+      if (!state.attachments.some(item => item.id === id)) {
+        upload.cancelled = true;
+        appendNotice("error", t("ui.image.attachment.limit.exceeded"));
+      }
+      return upload;
+    });
+    for (const upload of uploads) {
+      const { id, file } = upload;
+      const cancelled = () => upload.cancelled || !state.attachments.some(item => item.id === id);
+      try {
+        if (cancelled()) continue;
+        const { blob, mediaType, name } = await prepareBrowserImage(file);
+        if (cancelled()) continue;
+        const dataUrl = await readDataUrl(blob);
+        if (cancelled()) continue;
+        upload.sent = true;
+        vscode.postMessage({ type: "attachments.createImage", id, name, mediaType, size: blob.size, data: dataUrl.slice(dataUrl.indexOf(",") + 1) });
       } catch {
+        const attachment = state.attachments.find(item => item.id === id);
+        if (attachment?.previewUri?.startsWith("blob:")) URL.revokeObjectURL(attachment.previewUri);
         state.attachments = state.attachments.filter(function (item) { return item.id !== id; });
-        appendNotice("error", t("ui.unable.to.read.the.image"));
+        if (!upload.cancelled) appendNotice("error", t("ui.clipboard.image.format.unsupported"));
         renderAttachments();
+        updateSendButton();
         persist();
+      } finally {
+        if (!upload.sent) imageUploads.delete(id);
       }
     }
   }
@@ -268,12 +364,13 @@ globalThis.AgentFactoryChat.attachments = function (host) {
       const reader = new FileReader();
       reader.addEventListener("load", function () { typeof reader.result === "string" ? resolvePromise(reader.result) : rejectPromise(new Error(t("ui.invalid.image"))); });
       reader.addEventListener("error", function () { rejectPromise(reader.error || new Error(t("ui.image.read.failed"))); });
+      reader.addEventListener("abort", function () { rejectPromise(new Error(t("ui.image.read.failed"))); });
       reader.readAsDataURL(file);
     });
   }
 
   return {
-    addBrowserFiles, browserImageMediaType, addBrowserImages, hasAttachmentData, addDroppedData,
+    addBrowserFiles, browserImageMediaType, clipboardImages, addBrowserImages, finishImageUpload, hasAttachmentData, addDroppedData,
     encodeAttachmentImage, addAttachments, renderAttachments, renderHistoryAttachments
   };
 };

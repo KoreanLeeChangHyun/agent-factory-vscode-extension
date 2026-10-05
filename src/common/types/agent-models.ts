@@ -5,28 +5,30 @@ export interface AgentModelSetting {
   /** Codex service tier. Independent from reasoning effort; omitted for non-Codex routes. */
   readonly fast?: boolean;
 }
-export type AgentModels = Partial<Record<"work" | "workLight" | "verification", AgentModelSetting>>;
+/** Delegated roles with their own model settings; explore and scribe fall back to workLight. */
+export const DELEGATED_MODEL_ROLES = ["work", "workLight", "verification", "explore", "scribe"] as const;
+export type AgentModels = Partial<Record<typeof DELEGATED_MODEL_ROLES[number], AgentModelSetting>>;
 export type ModelFastModes = Readonly<Record<string, boolean>>;
-export type AgentFastModes = Partial<Record<"main" | "work" | "workLight" | "verification", ModelFastModes>>;
-/** Work profile Main recorded at dispatch: `work` is Expert, `workLight` is Worker. */
-export type WorkProfile = "work" | "workLight";
+export type AgentFastModes = Partial<Record<"main" | typeof DELEGATED_MODEL_ROLES[number], ModelFastModes>>;
+/** Work profile Main recorded at dispatch: `work` is Expert, `workLight` Worker, `explore` Explorer and `scribe` Scribe. */
+export type WorkProfile = "work" | "workLight" | "explore" | "scribe";
 
 export function parseWorkProfile(value: unknown): WorkProfile | undefined {
-  return value === "work" || value === "workLight" ? value : undefined;
+  return value === "work" || value === "workLight" || value === "explore" || value === "scribe" ? value : undefined;
 }
 
 export function parseAgentModels(value: unknown): AgentModels | undefined {
   if (typeof value !== "object" || value === null || Array.isArray(value)) return undefined;
   const result: AgentModels = {};
   for (const [role, setting] of Object.entries(value)) {
-    if (role !== "work" && role !== "workLight" && role !== "verification") return undefined;
+    if (!(DELEGATED_MODEL_ROLES as readonly string[]).includes(role)) return undefined;
     if (typeof setting !== "object" || setting === null || Array.isArray(setting)) return undefined;
     const fields = setting as Record<string, unknown>;
     if (Object.keys(fields).some(key => key !== "model" && key !== "reasoningEffort" && key !== "fast")) return undefined;
     if (fields.model !== undefined && (typeof fields.model !== "string" || !/^[A-Za-z0-9][A-Za-z0-9._:/-]{0,99}$/.test(fields.model))) return undefined;
     if (fields.reasoningEffort !== undefined && (typeof fields.reasoningEffort !== "string" || !["none", "low", "medium", "high", "xhigh", "max"].includes(fields.reasoningEffort))) return undefined;
     if (fields.fast !== undefined && typeof fields.fast !== "boolean") return undefined;
-    result[role] = { ...(fields.model ? { model: fields.model as string } : {}), ...(fields.reasoningEffort ? { reasoningEffort: fields.reasoningEffort as AgentModelSetting["reasoningEffort"] } : {}), ...(typeof fields.fast === "boolean" ? { fast: fields.fast } : {}) };
+    result[role as keyof AgentModels] = { ...(fields.model ? { model: fields.model as string } : {}), ...(fields.reasoningEffort ? { reasoningEffort: fields.reasoningEffort as AgentModelSetting["reasoningEffort"] } : {}), ...(typeof fields.fast === "boolean" ? { fast: fields.fast } : {}) };
   }
   return result;
 }
@@ -45,10 +47,10 @@ export function parseAgentFastModes(value: unknown): AgentFastModes | undefined 
   if (typeof value !== "object" || value === null || Array.isArray(value)) return undefined;
   const result: AgentFastModes = {};
   for (const [role, modes] of Object.entries(value)) {
-    if (role !== "main" && role !== "work" && role !== "workLight" && role !== "verification") return undefined;
+    if (role !== "main" && !(DELEGATED_MODEL_ROLES as readonly string[]).includes(role)) return undefined;
     const parsed = parseModelFastModes(modes);
     if (!parsed) return undefined;
-    result[role] = parsed;
+    result[role as keyof AgentFastModes] = parsed;
   }
   return result;
 }

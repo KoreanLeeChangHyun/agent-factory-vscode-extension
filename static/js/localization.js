@@ -6,6 +6,7 @@
 })(globalThis, function () {
   "use strict";
   const messages = {
+  "workflow.report.invalid.dispatch": {"en": "The report request ID is invalid. Automatic delivery is paused; the work result is preserved.", "ko": "보고 요청 ID가 올바르지 않아 자동 전달을 보류했습니다. 작업 결과는 보존되어 있습니다."},
   "ui.shortcuts.none": {"en": "Disabled", "ko": "사용 안 함"},
   "ui.shortcuts.reset": {"en": "Restore default shortcuts", "ko": "단축키 기본값 복원"},
   "ui.shortcuts.scope": {"en": "Saved for this chat.", "ko": "이 채팅에 저장됩니다."},
@@ -35,7 +36,9 @@
   "ui.agent.defaults": {"en": "Agent defaults", "ko": "에이전트 기본값"},
   "ui.global.agent.settings.tab": {"en": "Agents", "ko": "에이전트"},
   "ui.global.agent.settings": {"en": "Global agent settings", "ko": "글로벌 에이전트 설정"},
-  "preset.project.default": {"en": "Project default", "ko": "프로젝트 기본"},
+  "preset.builtin.readonly": {"en": "Built-in sets cannot be changed or deleted. Duplicate the set to customize it.", "ko": "기본 제공 세트는 수정하거나 삭제할 수 없습니다. 복제하여 커스텀 세트를 만들어 주세요."},
+  "preset.chat": {"en": "Chat", "ko": "채팅"},
+  "preset.project.default": {"en": "Default", "ko": "Default"},
   "preset.make.default": {"en": "Use as project default", "ko": "프로젝트 기본으로 지정"},
   "preset.scope.retired": {"en": "Manage agent settings through sets in Settings.", "ko": "설정 화면에서 세트를 편집해 주세요."},
   "preset.unconfigured": {"en": "Not configured", "ko": "미설정"},
@@ -269,6 +272,12 @@
   "bot.busy": {"en":"Available when the bot is idle.", "ko":"봇이 쉬고 있을 때 선택할 수 있습니다."},
   "flow.request.details": {"en":"Requested work", "ko":"요청 내용"},
   "activity.request.command.completed": {"en":"Request command completed", "ko":"요청 명령 완료"},
+  "activity.factory.help.title": {"en":"Check command help", "ko":"명령 도움말 확인"},
+  "activity.factory.help.start": {"en":"Check task start command help", "ko":"작업 시작 명령 도움말 확인"},
+  "activity.factory.help.running": {"en":"Reading help", "ko":"도움말 조회 중"},
+  "activity.factory.help.completed": {"en":"Help lookup completed", "ko":"도움말 조회 완료"},
+  "activity.factory.help.failed": {"en":"Help lookup failed", "ko":"도움말 조회 실패"},
+  "activity.factory.help.unknown": {"en":"Help lookup status unknown", "ko":"도움말 조회 상태 미확인"},
   "activity.request.accepted": {"en":"Request accepted", "ko":"작업 요청 접수됨"},
   "activity.request.pending": {"en":"Submitting request", "ko":"작업 요청 중"},
   "activity.request.unconfirmed": {"en":"Request acceptance unconfirmed", "ko":"작업 요청 접수 확인 전"},
@@ -321,6 +330,18 @@
   "flow.status.running": {"en": "In progress", "ko": "진행 중"},
   "flow.status.verifying": {"en": "Verifying", "ko": "검증 중"},
   "flow.status.completed": {"en": "Completed", "ko": "완료"},
+  "flow.review.pending": {"en": "Review pending", "ko": "검토 대기"},
+  "ui.docs.audit": {"en": "Periodic documents check", "ko": "정기 문서 점검"},
+  "ui.docs.audit.off": {"en": "Off", "ko": "끔"},
+  "ui.docs.audit.daily": {"en": "Daily", "ko": "매일"},
+  "ui.docs.audit.weekly": {"en": "Weekly", "ko": "매주"},
+  "ui.docs.audit.description": {"en": "When due, an idle Main chat asks the read-only Explorer to check docs/ and report; nothing is changed.", "ko": "주기가 되면 대기 중인 조율자가 읽기 전용 탐색자에게 docs/ 점검을 맡겨 결과만 보고합니다. 아무것도 바꾸지 않습니다."},
+  "docs.audit.request": {"en": "[Periodic documents check] Sent automatically at the interval set in General settings. Dispatch the explore profile (read-only) to check docs/ and report only: broken links, the same content in more than one place (single-source violations), documents that no longer match the code, and recurring docs/lessons-learned records worth consolidating into Skill rules. Change no files. List the items to fix so I can approve which ones the Scribe should draft.",
+    "ko": "[정기 문서 점검] 일반 설정의 주기에 따라 자동으로 보낸 요청입니다. 탐색자(explore, 읽기 전용)에게 docs/ 점검을 맡겨 결과만 보고해 주세요. 깨진 링크, 같은 내용이 여러 곳에 있는 문서(단일 출처 위반), 코드와 맞지 않게 된 문서, 스킬 규칙으로 정리할 만한 반복 교훈(docs/lessons-learned)을 확인합니다. 파일은 바꾸지 말고, 고칠 항목을 목록으로 정리해 주시면 서기관에게 맡길 항목을 제가 승인하겠습니다."},
+  "flow.review.changes-requested": {"en": "Changes requested", "ko": "수정 요청"},
+  "flow.review.accepted": {"en": "Accepted", "ko": "반영 승인"},
+  "flow.review.discarded": {"en": "Discarded", "ko": "폐기"},
+  "flow.review.detail": {"en": "Scribe draft, uncommitted until you decide: {0}", "ko": "서기관 초안이며 결정 전까지 커밋되지 않습니다: {0}"},
   "flow.status.failed": {"en": "Failed", "ko": "실패"},
   "flow.status.blocked": {"en": "Blocked", "ko": "막힘"},
   "flow.status.cancelled": {"en": "Cancelled", "ko": "취소"},
@@ -336,6 +357,8 @@
   "flow.stop": {"en":"Stop", "ko":"중지"},
   "flow.header.expert": {"en":"Expert {0}", "ko":"전문가 {0}"},
   "flow.header.worker": {"en":"Worker {0}", "ko":"작업자 {0}"},
+  "flow.header.explorer": {"en":"Explorer {0}", "ko":"탐색자 {0}"},
+  "flow.header.scribe": {"en":"Scribe {0}", "ko":"서기관 {0}"},
   "flow.header.verifier": {"en":"Verifier {0}", "ko":"검증자 {0}"},
   "flow.header.unrecorded": {"en":"No record {0}", "ko":"기록 없음 {0}"},
   "flow.stop.pending": {"en":"Stopping…", "ko":"중지 중…"},
@@ -360,11 +383,18 @@
   "flow.summary.label": {"en":"Task summary", "ko":"업무 항목 요약"},
   "flow.role.worker": {"en":"Worker", "ko":"작업자"},
   "flow.role.expert": {"en":"Expert", "ko":"전문가"},
+  "flow.role.explorer": {"en":"Explorer", "ko":"탐색자"},
+  "flow.role.scribe": {"en":"Scribe", "ko":"서기관"},
   "flow.role.unassigned": {"en":"Unassigned", "ko":"미배정"},
   "flow.role.unavailable": {"en":"Role unavailable", "ko":"역할 미제공"},
   "ui.captured.run.model": {"en":"Captured run model", "ko":"실행에 기록된 모델"},
   "ui.next.message.model": {"en":"Next message", "ko":"다음 전송"},
   "flow.model.unavailable": {"en":"Model unavailable", "ko":"모델 미제공"},
+  "flow.duration.minutes": {"en":"{0}m", "ko":"{0}분"},
+  "flow.duration.hours": {"en":"{0}h", "ko":"{0}시간"},
+  "flow.duration.missing": {"en":"Time not recorded", "ko":"시간 미기록"},
+  "flow.duration.elapsed": {"en":"Elapsed: {0}s\nStarted: {1}", "ko":"경과: {0}초\n시작: {1}"},
+  "flow.duration.finished": {"en":"Duration: {0}s\nStarted: {1}\nFinished: {2}", "ko":"소요: {0}초\n시작: {1}\n종료: {2}"},
   "flow.progress": {"en":"{0} of {1} steps done", "ko":"단계 {1}개 중 {0}개 완료"},
   "flow.activity.label": {"en":"Current activity: {0}", "ko":"현재 작업: {0}"},
   "flow.assignment.worker.assigned": {"en":"Worker assigned", "ko":"작업자 배정"},
@@ -373,6 +403,8 @@
   "flow.assignment.expert.assigned": {"en":"Expert assigned", "ko":"전문가 배정"},
   "flow.assignment.expert.count": {"en":"Experts: {0}", "ko":"전문가 {0}명"},
   "flow.assignment.expert.unassigned": {"en":"Expert unassigned", "ko":"전문가 미배정"},
+  "flow.assignment.explorer.count": {"en":"Explorers: {0}", "ko":"탐색자 {0}명"},
+  "flow.assignment.scribe.count": {"en":"Scribes: {0}", "ko":"서기관 {0}명"},
   "flow.assignment.unrecorded": {"en":"No record", "ko":"기록 없음"},
   "flow.assignment.unrecorded.count": {"en":"No record: {0}", "ko":"기록 없음 {0}명"},
   "flow.summary.count": {"en":"{0}: {1}", "ko":"{0} {1}개"},
@@ -564,6 +596,8 @@
   },
   "flow.open.work.session": { "en": "Open worker session", "ko": "작업자 세션 열기" },
   "flow.open.expert.session": { "en": "Open expert session", "ko": "전문가 세션 열기" },
+  "flow.open.explorer.session": { "en": "Open explorer session", "ko": "탐색자 세션 열기" },
+  "flow.open.scribe.session": { "en": "Open scribe session", "ko": "서기관 세션 열기" },
   "flow.open.verification.session": { "en": "Open verifier session", "ko": "검증자 세션 열기" },
   "ui.work": {
     "en": "Work",
@@ -580,6 +614,14 @@
   "ui.role.workLight": {
     "en": "Worker",
     "ko": "작업자"
+  },
+  "ui.role.explore": {
+    "en": "Explorer",
+    "ko": "탐색자"
+  },
+  "ui.role.scribe": {
+    "en": "Scribe",
+    "ko": "서기관"
   },
   "ui.role.verification": {
     "en": "Validator",
@@ -970,12 +1012,12 @@
   "preset.selection.bound": {"en":"Set selection is unavailable while this conversation is bound to a model provider.","ko":"이 대화가 모델 공급자에 바인딩된 동안에는 세트를 선택할 수 없습니다."},
   "preset.update": {"en": "Save set", "ko": "변경 저장"},
   "preset.default": {"en": "Default", "ko": "기본"},
-  "preset.new": {"en": "+ New set", "ko": "+ 새 세트"},
+  "preset.new": {"en": "Duplicate set", "ko": "세트 복제"},
   "preset.save.short": {"en": "Save", "ko": "저장"},
   "preset.saved": {"en": "Saved sets", "ko": "저장된 세트"},
   "preset.apply": {"en": "Apply set", "ko": "세트 적용"},
   "preset.name": {"en": "New set name", "ko": "새 세트 이름"},
-  "preset.save": {"en": "Save current scope", "ko": "현재 범위 저장"},
+  "preset.save": {"en": "Duplicate selected set", "ko": "선택한 세트 복제"},
   "preset.choose": {"en": "Choose a set", "ko": "세트 선택"},
   "preset.busy": {"en": "Saving settings…", "ko": "설정을 저장하고 있습니다…"},
   "preset.done": {"en": "Settings updated.", "ko": "설정을 반영했습니다."},
@@ -2661,6 +2703,18 @@
   "ui.the.current.agent.factory.runtime.has.an.incompatible.0.image.transfer.contract": {
     "en": "The current Agent Factory runtime has an incompatible {0} image transfer contract. ",
     "ko": "현재 Agent Factory 런타임의 {0} 이미지 전송 계약이 호환되지 않습니다. "
+  },
+  "ui.provider.does.not.support.image.input": {
+    "en": "The selected execution provider does not support image input. To send these images, start a new chat with a provider that supports images.",
+    "ko": "선택한 실행 공급자는 이미지 입력을 지원하지 않습니다. 이미지를 전송하려면 이미지 입력을 지원하는 공급자로 새 채팅을 시작하세요."
+  },
+  "ui.image.input.unavailable.0": {
+    "en": "Image input is unavailable: {0}",
+    "ko": "이미지 입력을 사용할 수 없습니다: {0}"
+  },
+  "ui.clipboard.image.format.unsupported": {
+    "en": "Unable to read this image. Copy it again or attach a PNG, JPEG, GIF, or WebP file.",
+    "ko": "이미지를 읽을 수 없습니다. 다시 복사하거나 PNG·JPEG·GIF·WebP 파일로 첨부하세요."
   },
   "ui.install.or.update.the.agent.factory.plugin.to.a.version.compatible.with.this.extension.then": {
     "en": "Install or update the Agent Factory plugin to a version compatible with this extension, then ",

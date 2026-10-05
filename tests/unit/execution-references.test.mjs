@@ -85,6 +85,30 @@ test('ordinary commands, quoted examples and ambiguous multiple invocations stay
   }
 });
 
+test('help flags retain command context without creating a managed task reference', () => {
+  const scripts = command => context.agentFactoryExecutionReferences.scriptInvocations(command);
+  for (const command of [
+    'python3 /home/deus/workspace/agent-factory/plugin/scripts/loop.py start --help',
+    'python3 "/installed plugin/agent-factory/scripts/loop.py" start -h --work-agent work-1',
+    exec + ' submit --agent work-1 --help',
+    exec + ' --help',
+    exec + ' -h',
+    'bash -lc "' + exec + ' status --agent work-1 -h"'
+  ]) {
+    assert.equal(scripts(command)[0].help, true, command);
+    assert.equal(managed(command, '{"agentId":"work-1","runId":"run-1","status":"completed"}'), undefined, command);
+  }
+  assert.equal(scripts(exec + ' submit --message "explain --help"')[0].help, undefined);
+  assert.equal(scripts(exec + ' submit --message=--help')[0].help, undefined);
+  assert.equal(scripts(exec + ' submit -- --help')[0].help, undefined);
+  assert.equal(scripts(exec + ' submit --helpful')[0].help, undefined);
+  assert.equal(managed(exec + ' submit --agent work-1').action, 'submit');
+  assert.equal(scripts('python3 /ordinary/scripts/loop.py start --help').length, 0);
+  const batch = scripts(exec + ' submit --help; ' + exec + ' status --agent work-1');
+  assert.equal(batch[0].help, true);
+  assert.equal(batch[1].help, undefined);
+});
+
 test("skill reads identify entrypoint and reference ownership without labeling quoted examples", () => {
   const docs = command => JSON.parse(JSON.stringify(context.agentFactoryExecutionReferences.skillDocuments(command)));
   const prefix = '/home/test/.codex/plugins/cache/agent-factory/agent-factory/1.0.0/skills/';

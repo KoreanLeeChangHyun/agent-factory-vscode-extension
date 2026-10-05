@@ -1,4 +1,5 @@
 import type { AgentDefaults } from "../../core/config/agent-settings";
+import { DOCS_AUDIT_INTERVALS, docsAuditDue, type DocsAuditInterval } from "../../common/types/docs-audit";
 import { BOT_DEFAULT_PROMPTS, resolveBotPrompt } from "../../modules/chat/bot-prompts";
 import { isBotModel } from "../../modules/chat/bot-model";
 import { localCompanionAvailable } from "../../modules/chat/bot-build-policy";
@@ -35,6 +36,7 @@ import {
   type ComposerPreferences
 } from "../../modules/chat/chat-state";
 import type { AccountUsage, HostMessage } from "../../protocol/messages";
+import { DISPATCH_ID } from "../../common/types/agent-runtime";
 import { parseClientMessage } from "../../protocol/validator";
 import type { ChatTemplateRenderer } from "./chat-template-renderer";
 import type { AccountLimits, AgentRuntimeClient } from "../agent-factory/agent-client";
@@ -102,6 +104,9 @@ interface ManagedPanel {
 const COMPOSER_PREFERENCES_KEY = "agentFactory.mainChat.composerPreferences";
 // Per project (workspaceState): the Human's Work isolation toggle, off by default.
 const WORK_ISOLATION_KEY = "agentFactory.mainChat.workIsolation";
+/** Per-project periodic documents check: the Human's interval and the last time a Main chat started one. */
+const DOCS_AUDIT_KEY = "agentFactory.mainChat.docsAudit";
+const DOCS_AUDIT_CHECK_MS = 30 * 60 * 1000;
 const ACCOUNT_USAGE_KEY = "agentFactory.accountUsage.v1";
 // agy answers /usage locally without a model turn; refresh it at most this often across panels.
 const ANTIGRAVITY_USAGE_REFRESH_MS = 60_000;
@@ -117,6 +122,8 @@ export interface SidebarAgent {
 
 export class ChatPanelManager implements vscode.Disposable {
   private readonly taskStopsPending = new Set<string>();
+  private docsAuditTimer: ReturnType<typeof setInterval> | undefined;
+  private docsAuditOfferedAt = 0;
   public readonly viewType = "agentFactory.mainChat";
   private noteStore?: NoteStore;
   private readonly disposedPanels = new WeakSet<vscode.WebviewPanel>();
@@ -320,6 +327,7 @@ export class ChatPanelManager implements vscode.Disposable {
   }
 
   public dispose(): void {
+    if (this.docsAuditTimer) clearInterval(this.docsAuditTimer);
     this.sudoBroker.dispose();
     for (const managed of this.panels.values()) {
       managed.disposed = true;
@@ -560,6 +568,7 @@ export class ChatPanelManager implements vscode.Disposable {
       runtimeAvailable: connection.available,
       capabilities,
       workIsolation: this.workIsolation(),
+      docsAuditInterval: this.docsAudit().interval ?? "off",
       running: managed.controller?.running ?? Boolean(managed.state.agentId && connection.available),
       statusItems: this.statusItems(),
       botsEnabled: this.botsEnabled(),
@@ -590,6 +599,10 @@ export class ChatPanelManager implements vscode.Disposable {
       conversationId: runtimeConversationId,
       resetConversation
     });
+    if ((managed.state.role ?? "main") === "main" && connection.available) {
+      this.ensureDocsAuditTimer();
+      await guard(() => this.offerDocsAudit());
+    }
     if (!connection.available) {
       await this.post(managed.panel, {
         type: "host.notice",
@@ -776,9 +789,12 @@ export class ChatPanelManager implements vscode.Disposable {
               .find(item => item.scope === message.scope && item.name === message.name);
             if (preset) await this.assertAgentSettingsCompatible(managed, preset.settings);
           }
-          settings = await useAgentPreset(this.context.globalState, this.context.workspaceState, managed.state.panelId, message.action, message.scope, message.name, message.action === "save" ? readAgentDefaults(this.context.globalState, this.context.workspaceState).presets?.find(set => set.name === message.sourceName)?.settings ?? {} : this.agentSettingsFromState(managed.state), message.newName);
+          if (message.action === "save" && !readAgentDefaults(this.context.globalState).presets?.some(set => set.name === message.sourceName)) {
+            throw new Error(localize("preset.missing"));
+          }
+          settings = await useAgentPreset(this.context.globalState, this.context.workspaceState, managed.state.panelId, message.action, message.scope, message.name, this.agentSettingsFromState(managed.state), message.newName, message.action === "save" ? message.sourceName : undefined);
           if (settings && copyToChat) {
-            managed.state = this.applyAgentSettings(managed.state, settings, "chat", message.name);
+            managed.state = this.applyAgentSettings(managed.state, settings, "global", message.name);
             await this.rememberAgent(managed.state);
           } else if (message.action === "rename" && managed.state.agentSettingsScope === message.scope && managed.state.agentSettingsSet === message.name) {
             managed.state = {...managed.state, agentSettingsSet: message.newName};
@@ -786,7 +802,7 @@ export class ChatPanelManager implements vscode.Disposable {
           }
         } catch (cause) { error = cause instanceof Error ? cause.message : String(cause); }
         finally {
-          await this.post(managed.panel, {type: "agent.preset.result", scope: copyToChat ? "chat" : message.scope, name: message.action === "rename" && message.newName ? message.newName : message.name, ...(settings && copyToChat && !error ? {settings} : {}), ...(error ? {error} : {})});
+          await this.post(managed.panel, {type: "agent.preset.result", scope: copyToChat ? "global" : message.scope, name: message.action === "rename" && message.newName ? message.newName : message.name, ...(settings && copyToChat && !error ? {settings} : {}), ...(error ? {error} : {})});
           for (const panel of this.panels.values()) await this.refreshAgentDefaults(panel);
         }
         return;
@@ -796,13 +812,25 @@ export class ChatPanelManager implements vscode.Disposable {
         // Retired scope editors must not mutate the single set library.
         await this.refreshAgentDefaults(managed);
         throw new Error(localize("preset.scope.retired"));
+      case "docsAudit.set": {
+        // Enabling starts the first period now, so a check never fires the moment it is switched on.
+        await this.context.workspaceState?.update(DOCS_AUDIT_KEY, { interval: message.interval, ...(message.interval === "off" ? {} : { lastRunAt: Date.now() }) });
+        for (const panel of this.panels.values()) {
+          if (panel !== managed && !panel.disposed) await this.post(panel.panel, { type: "docsAudit.updated", interval: message.interval });
+        }
+        return;
+      }
+      case "docsAudit.started":
+        await this.context.workspaceState?.update(DOCS_AUDIT_KEY, { ...this.docsAudit(), lastRunAt: Date.now() });
+        return;
       case "workIsolation.set":
         await this.context.workspaceState?.update(WORK_ISOLATION_KEY, message.value);
         for (const panel of this.panels.values()) {
           if (panel !== managed && !panel.disposed) await this.post(panel.panel, { type: "workIsolation.updated", value: message.value });
         }
         return;
-      case "composer.settings":
+      case "composer.settings": {
+        const locked = managed.state.agentSettingsScope === "global" && message.agentSettingsScope === "global";
         try {
           await this.assertAgentSettingsCompatible(managed, {
             [managed.state.role ?? "main"]: { model: message.model, reasoningEffort: message.reasoning }
@@ -815,14 +843,14 @@ export class ChatPanelManager implements vscode.Disposable {
           ...managed.state,
           businessMode: "normal",
           taskMode: "direct",
-          model: message.model,
-          agentModels: message.agentModels,
-          agentFastModes: message.agentFastModes,
+          model: locked ? managed.state.model : message.model,
+          agentModels: locked ? managed.state.agentModels : message.agentModels,
+          agentFastModes: locked ? managed.state.agentFastModes : message.agentFastModes,
           agentPermissions: message.agentPermissions,
-          reasoning: message.reasoning,
-          agentSettingsScope: message.agentSettingsScope,
-          agentSettingsSet: message.agentSettingsSet,
-          fastMode: message.fastMode,
+          reasoning: locked ? managed.state.reasoning : message.reasoning,
+          agentSettingsScope: locked ? "global" : "chat",
+          agentSettingsSet: locked ? managed.state.agentSettingsSet : "Chat",
+          fastMode: locked ? managed.state.fastMode : message.fastMode,
           goalMode: false,
           workLoopMode: false
         };
@@ -839,6 +867,7 @@ export class ChatPanelManager implements vscode.Disposable {
           }
         }
         return;
+      }
       case "goal.control":
         if ((managed.state.role ?? "main") !== "main") return;
         await this.ensureController(managed);
@@ -1476,8 +1505,8 @@ export class ChatPanelManager implements vscode.Disposable {
 
   private async reportWorkflowResults(managed: ManagedPanel, workflows: readonly Record<string, unknown>[], owner: object = this): Promise<void> {
     const key = `agentFactory.workflowResults.${managed.state.agentId}`;
-    type Delivery = { identity: string; state: "prepared" | "accepted" | "completed" | "failed";
-      dispatchId: string; message: string; attempt: number; runId?: string };
+    type Delivery = { identity: string; state: "prepared" | "accepted" | "completed" | "failed" | "blocked";
+      dispatchId: string; message: string; attempt: number; runId?: string; error?: string };
     for (const flow of workflows) {
       if (typeof flow.loopId !== "string" || typeof flow.status !== "string" || flow.status === "active") continue;
       const identity = JSON.stringify([flow.loopId, flow.status, flow.latestWorkRunId, flow.latestVerificationRunId,
@@ -1485,7 +1514,14 @@ export class ChatPanelManager implements vscode.Disposable {
       const states = { ...this.context.workspaceState?.get<Record<string, Delivery | string>>(key) };
       const stored = states[flow.loopId];
       let previous = typeof stored === "object" && stored.identity === identity ? stored : undefined;
-      if (previous?.state === "completed") continue;
+      if (previous?.state === "completed" || previous?.state === "blocked") continue;
+      const persistDelivery = async (value: Delivery): Promise<void> => {
+        // Other loops may complete while this report is being submitted.
+        await this.context.workspaceState?.update(key, {
+          ...this.context.workspaceState.get<Record<string, Delivery | string>>(key),
+          [flow.loopId as string]: value
+        });
+      };
       if (previous?.runId && previous.state !== "failed" && managed.state.agentId) {
         const connection = await this.connectRuntime();
         if (!connection.available) continue;
@@ -1497,8 +1533,7 @@ export class ChatPanelManager implements vscode.Disposable {
           const delivered = ["completed", "failed", "needs-human-decision"].includes(report.status)
             && !report.error && !report.goalError && Boolean(report.text.trim());
           previous = { ...previous, state: delivered ? "completed" : "failed" };
-          states[flow.loopId] = previous;
-          await this.context.workspaceState?.update(key, states);
+          await persistDelivery(previous);
           if (delivered) continue;
         } catch { continue; } // Observation loss never establishes submission failure.
       }
@@ -1509,30 +1544,44 @@ export class ChatPanelManager implements vscode.Disposable {
       const attempt = previous?.state === "failed" ? previous.attempt + 1 : previous?.attempt ?? 1;
       const message = previous?.message ?? `[Engine workflow result — not a new Human request]
 ${JSON.stringify(flow)}
-The engine owns execution. Read and acknowledge the exact stored result/receipt identity and report the result or exception. Distinguish Work completion, checks, integration, preservation, cleanup and required input. Do not review implementation or rerun tests. Goal completion alone is not a pass. Do not redispatch Work or grant missing approval.`;
+The engine owns execution. Read and acknowledge the exact stored result/receipt identity and report the result or exception. Distinguish Work completion, checks, integration, preservation, cleanup and required input. Do not review implementation or rerun tests. Goal completion alone is not a pass. Do not redispatch Work or grant missing approval.${flow.pendingDecision ? "\nTreat pendingDecision.question as internal worker context. In the Main conversation, summarize the blocker and ask only the concrete question that requires the Human's input. Do not paste the internal report or ask the Human to resolve routine internal bookkeeping. If no Human-owned choice or missing input is identified, report the execution exception without inventing an approval request. Preserve the loop and decision identity; relay an actual Human answer through the existing loop answer command only after it is received." : ""}`;
       let delivery: Delivery = previous && previous.state !== "failed" ? previous : {
         identity, state: "prepared", attempt, message,
-        dispatchId: "report-" + createHash("sha256").update(identity).digest("hex").slice(0, 32) + "-" + attempt
+        dispatchId: "dispatch-report-" + createHash("sha256").update(identity).digest("hex").slice(0, 32) + "-" + attempt
       };
+      // Old report-* keys were rejected before dispatch acceptance. Only migrate
+      // the exact legacy key without acceptance evidence; keep text and attempt.
+      const legacyId = "report-" + createHash("sha256").update(identity).digest("hex").slice(0, 32) + "-" + attempt;
+      if (delivery.state === "prepared" && !delivery.runId && delivery.dispatchId === legacyId) {
+        delivery = { ...delivery, dispatchId: "dispatch-" + legacyId };
+      }
+      if (!DISPATCH_ID.test(delivery.dispatchId)) {
+        const error = localize("workflow.report.invalid.dispatch");
+        try {
+          await persistDelivery({ ...delivery, state: "blocked", error });
+          await this.post(managed.panel, { type: "host.notice", level: "error", text: error });
+        } finally { releaseClaim(); }
+        continue;
+      }
       managed.backgroundContinuation = true;
       try {
         // Persist intent before sending. A lost ACK reuses both text and dispatch
         // identity, so the runtime adopts the accepted run instead of duplicating it.
-        states[flow.loopId] = delivery;
-        await this.context.workspaceState?.update(key, states);
+        await persistDelivery(delivery);
       } catch (error) {
         managed.backgroundContinuation = false;
         releaseClaim();
         throw error;
       }
       let persisted: PromiseLike<void> | undefined;
+      let failure: { error: unknown } | undefined;
       void managed.controller.send(delivery.message, [], { taskMode: "direct", deliveryId: delivery.dispatchId }, () => {
         const runId = managed.controller?.runId;
         delivery = { ...delivery, state: "accepted", ...(runId ? { runId } : {}) };
-        states[flow.loopId as string] = delivery;
-        persisted = this.context.workspaceState?.update(key, states);
-      }).then(async () => {
+        persisted = persistDelivery(delivery);
+      }, error => { failure = { error }; }).then(async () => {
         await persisted;
+        if (failure) throw failure.error;
         if (!delivery.runId || !managed.state.agentId) return;
         const connection = await this.connectRuntime();
         if (!connection.available) return;
@@ -1540,12 +1589,16 @@ The engine owns execution. Read and acknowledge the exact stored result/receipt 
         if (!["completed", "failed", "cancelled", "needs-human-decision"].includes(report.status)) return;
         const delivered = ["completed", "failed", "needs-human-decision"].includes(report.status)
           && !report.error && !report.goalError && Boolean(report.text.trim());
-        states[flow.loopId as string] = { ...delivery, state: delivered ? "completed" : "failed" };
-        await this.context.workspaceState?.update(key, states);
+        await persistDelivery({ ...delivery, state: delivered ? "completed" : "failed" });
       }).catch(async error => {
-        // Keep the intent/accepted identity. Only a confirmed terminal run may
-        // allocate a new attempt; network errors alone cannot authorize one.
-        await this.post(managed.panel, { type: "host.notice", level: "error", text: String(error) });
+        const code = error && typeof error === "object" && "code" in error ? error.code : undefined;
+        const text = String(error);
+        const rejected = !delivery.runId && (["invalid_dispatch_id", "dispatch_id_collision", "request_invalid"].includes(String(code))
+          || /^Error: dispatch id must match dispatch-/.test(text));
+        // Permanent request errors cannot recover by replaying the same request.
+        // Ambiguous failures retain the exact key for runtime deduplication.
+        await persistDelivery({ ...delivery, ...(rejected ? { state: "blocked" as const } : {}), error: text });
+        if (delivery.error !== text) await this.post(managed.panel, { type: "host.notice", level: "error", text });
       }).finally(() => { managed.backgroundContinuation = false; releaseClaim(); });
     }
   }
@@ -1748,11 +1801,12 @@ Read the exact stored child result/receipt and existing workflow status for repo
       fastMode: (own.model ? source.fastByRoleModel?.[role]?.[own.model] : undefined) ?? own.fast ?? false,
       agentFastModes: JSON.parse(JSON.stringify(source.fastByRoleModel ?? {})),
       agentSettingsScope: "chat",
-      agentSettingsSet: defaults.presets?.find(set => set.id === defaults.defaultSetId)?.name,
+      agentSettingsSet: "Chat",
       ...(role === "main" ? { agentModels: {
         ...(source.work ? { work: { ...source.work } } : {}),
         ...(source.workLight || source.work ? { workLight: { ...(source.work ?? {}), ...(source.workLight ?? {}) } } : {}),
-        ...(source.verification ? { verification: { ...source.verification } } : {})
+        ...(source.verification ? { verification: { ...source.verification } } : {}),
+        ...restrictedProfileModels(source)
       } } : {})
     };
   }
@@ -1764,6 +1818,8 @@ Read the exact stored child result/receipt and existing workflow status for repo
       work: { ...state.agentModels?.work },
       workLight: { ...state.agentModels?.workLight },
       verification: { ...state.agentModels?.verification },
+      explore: { ...state.agentModels?.explore },
+      scribe: { ...state.agentModels?.scribe },
       ...(state.agentFastModes ? {fastByRoleModel: state.agentFastModes} : {})
     };
   }
@@ -1780,11 +1836,35 @@ Read the exact stored child result/receipt and existing workflow status for repo
       ...(role === "main" ? {agentModels: {
         ...(settings.work ? {work: {...settings.work}} : {}),
         ...(settings.workLight || settings.work ? {workLight: {...(settings.work ?? {}), ...(settings.workLight ?? {})}} : {}),
-        ...(settings.verification ? {verification: {...settings.verification}} : {})
+        ...(settings.verification ? {verification: {...settings.verification}} : {}),
+        ...restrictedProfileModels(settings)
       }} : {}),
       agentSettingsScope: scope,
       agentSettingsSet: name
     };
+  }
+
+  private docsAudit(): { readonly interval?: DocsAuditInterval; readonly lastRunAt?: number } {
+    const value = this.context.workspaceState?.get<{ interval?: string; lastRunAt?: number }>(DOCS_AUDIT_KEY);
+    const interval = value?.interval && Object.hasOwn(DOCS_AUDIT_INTERVALS, value.interval) ? value.interval as DocsAuditInterval : undefined;
+    return { ...(interval ? { interval } : {}), ...(typeof value?.lastRunAt === "number" ? { lastRunAt: value.lastRunAt } : {}) };
+  }
+
+  /** Offer a due periodic check to one open Main chat; the webview sends it when the chat is idle. */
+  private async offerDocsAudit(): Promise<void> {
+    const now = Date.now();
+    if (!docsAuditDue(this.docsAudit(), now) || now - this.docsAuditOfferedAt < DOCS_AUDIT_CHECK_MS) return;
+    const panels = [...this.panels.values()].filter(panel => !panel.disposed && (panel.state.role ?? "main") === "main" && panel.state.agentId);
+    const target = panels.find(panel => panel.state.panelId === this.activePanelId) ?? panels[0];
+    if (!target) return;
+    this.docsAuditOfferedAt = now;
+    await this.post(target.panel, { type: "docsAudit.due" });
+  }
+
+  private ensureDocsAuditTimer(): void {
+    if (this.docsAuditTimer) return;
+    this.docsAuditTimer = setInterval(() => { void this.offerDocsAudit().catch(() => undefined); }, DOCS_AUDIT_CHECK_MS);
+    (this.docsAuditTimer as { unref?: () => void }).unref?.();
   }
 
   private workIsolation(): boolean {
@@ -2973,4 +3053,11 @@ function fallbackHtml(error: unknown): string {
 /** The isolated chat branch first (its newer versions), then the project root; each root once. */
 function contractRoots(worktree: string | undefined): string[] {
   return [...new Set([worktree, vscode.workspace.workspaceFolders?.[0]?.uri.fsPath].filter((root): root is string => Boolean(root)))];
+}
+
+/** Explorer and Scribe settings: their own fields over the Worker's (workLight, else work). */
+function restrictedProfileModels(settings: AgentDefaults): Pick<AgentDefaults, "explore" | "scribe"> {
+  const light = { ...(settings.work ?? {}), ...(settings.workLight ?? {}) };
+  if (!settings.explore && !settings.scribe && !Object.keys(light).length) return {};
+  return { explore: { ...light, ...(settings.explore ?? {}) }, scribe: { ...light, ...(settings.scribe ?? {}) } };
 }

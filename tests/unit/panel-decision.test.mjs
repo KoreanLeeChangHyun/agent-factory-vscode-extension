@@ -7,6 +7,8 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { execFileSync } from "node:child_process";
+import { createHash } from "node:crypto";
+import { importTypeScript } from "../support/import-typescript.mjs";
 
 const require = createRequire(import.meta.url);
 const output = await build({
@@ -887,6 +889,121 @@ test("concurrent panels claim each terminal workflow delivery once and retry rec
     'Lost acknowledgement reuses its recorded dispatch identity');
 });
 
+function reportFixture() {
+  const storage = new Map(), calls = [], notices = [];
+  const context = { workspaceState: {
+    get: key => storage.get(key), async update(key, value) { storage.set(key, structuredClone(value)); }
+  } };
+  const flow = { loopId: "loop-report-recovery", status: "completed", latestWorkRunId: "work-original" };
+  const connect = async () => ({ available: true, client: {
+    async result() { return { status: "completed", text: "Reported exact result" }; }
+  } });
+  const manager = new module.exports.ChatPanelManager(context, {}, () => [], connect);
+  const managed = { state: { agentId: "main-report-recovery" }, panel: { webview: {
+    async postMessage(message) { notices.push(message); return true; }
+  } }, controller: { runId: "run-report", async send(text, _attachments, execution, accepted) {
+    calls.push({ text, id: execution.deliveryId }); accepted();
+  } } };
+  const key = "agentFactory.workflowResults.main-report-recovery";
+  const identity = JSON.stringify([flow.loopId, flow.status, flow.latestWorkRunId, undefined, undefined, undefined, undefined]);
+  const legacyId = "report-" + createHash("sha256").update(identity).digest("hex").slice(0, 32) + "-1";
+  const seed = (state, extra = {}) => storage.set(key, { [flow.loopId]: {
+    identity, state, dispatchId: legacyId, message: "Preserve the original report bytes", attempt: 1, ...extra
+  } });
+  const deliver = async () => {
+    await manager.reportWorkflowResults(managed, [flow]);
+    await new Promise(resolve => setImmediate(resolve));
+  };
+  return { storage, calls, notices, context, connect, flow, manager, managed, key, legacyId, seed, deliver };
+}
+
+test("worker questions reach Main once with their identity and conversation-only clarification guidance", async () => {
+  const f = reportFixture();
+  f.flow.status = "needs-human-decision";
+  f.flow.pendingDecision = { id: "decision-one", questionHash: "captured-question", status: "pending",
+    question: "Internal bookkeeping failed; a concrete choice must be identified before asking." };
+  await f.deliver();
+  await f.deliver();
+  assert.equal(f.calls.length, 1, "Polling must not repeat a delivered question");
+  const payload = JSON.parse(f.calls[0].text.split("\n")[1]);
+  assert.deepEqual(payload.pendingDecision, f.flow.pendingDecision);
+  assert.equal(payload.loopId, f.flow.loopId);
+  assert.match(f.calls[0].text, /In the Main conversation, summarize the blocker/);
+  assert.match(f.calls[0].text, /without inventing an approval request/);
+  assert.match(f.calls[0].text, /only after it is received/);
+  assert.equal(f.notices.length, 0, "The internal question is not emitted as a raw host notice");
+});
+
+test("generated report IDs satisfy the real plugin CLI validator, including boundary characters", async () => {
+  const f = reportFixture();
+  await f.deliver();
+  const { DISPATCH_ID } = await importTypeScript("src/common/types/agent-runtime.ts");
+  const ids = [f.calls[0].id, f.legacyId, "dispatch-a:b", "dispatch-" + "a".repeat(128),
+    "dispatch-" + "a".repeat(129), "dispatch-", "dispatch-a/", "dispatch-a\n"];
+  const plugin = new URL("../../../plugin/scripts/exec.py", import.meta.url).pathname;
+  const actual = JSON.parse(execFileSync("python3", ["-B", "-c",
+    "import json,runpy,sys; cli=runpy.run_path(sys.argv[1]); print(json.dumps([bool(cli['DISPATCH_ID'].fullmatch(v)) for v in json.loads(sys.argv[2])]))",
+    plugin, JSON.stringify(ids)], { encoding: "utf8" }));
+  assert.deepEqual(actual, [true, false, true, true, false, false, false, false]);
+  assert.deepEqual(ids.map(id => DISPATCH_ID.test(id)), actual);
+});
+
+test("unaccepted legacy reports migrate once without replacing their message, attempt or Work", async () => {
+  const f = reportFixture(); f.seed("prepared");
+  await f.deliver(); await f.deliver();
+  assert.deepEqual(f.calls, [{ text: "Preserve the original report bytes", id: "dispatch-" + f.legacyId }]);
+  const saved = f.storage.get(f.key)[f.flow.loopId];
+  assert.equal(saved.state, "completed"); assert.equal(saved.attempt, 1);
+  assert.equal(JSON.parse(saved.identity)[2], "work-original");
+});
+
+test("accepted legacy reports are observed without rewriting their dispatch identity", async () => {
+  const f = reportFixture(); f.seed("accepted", { runId: "run-existing" });
+  await f.deliver();
+  assert.equal(f.calls.length, 0);
+  assert.equal(f.storage.get(f.key)[f.flow.loopId].dispatchId, f.legacyId);
+  assert.equal(f.storage.get(f.key)[f.flow.loopId].state, "completed");
+});
+
+test("unrecognized malformed reports are blocked once across restored panels", async () => {
+  const f = reportFixture(); f.seed("prepared", { dispatchId: "report-unrecognized" });
+  await f.deliver(); await f.deliver();
+  const restored = new module.exports.ChatPanelManager(f.context, {}, () => [], f.connect);
+  await restored.reportWorkflowResults(f.managed, [f.flow]);
+  assert.equal(f.calls.length, 0); assert.equal(f.notices.length, 1);
+  assert.equal(f.storage.get(f.key)[f.flow.loopId].state, "blocked");
+});
+
+test("real controller routes structured permanent rejection to durable report state exactly once", async () => {
+  const f = reportFixture();
+  const { ChatSessionController } = await importTypeScript("src/modules/chat/session-controller.ts");
+  const rejection = Object.assign(new Error("dispatch identifier was used with a different immutable tuple"), { code: "dispatch_id_collision" });
+  const rawErrors = [];
+  f.managed.controller = new ChatSessionController({
+    async send(_agent, _message, execution) { f.calls.push(execution.deliveryId); throw rejection; }
+  }, { onBound() {}, onRunningChanged() {}, onProgress() {}, onActivity() {}, onAssistantText() {},
+    onError(message) { rawErrors.push(message); }
+  }, f.managed.state.agentId);
+  await f.deliver(); await f.deliver();
+  const restored = new module.exports.ChatPanelManager(f.context, {}, () => [], f.connect);
+  await restored.reportWorkflowResults(f.managed, [f.flow]);
+  assert.equal(f.calls.length, 1); assert.equal(f.notices.length, 1);
+  assert.deepEqual(rawErrors, []);
+  assert.equal(f.managed.controller.running, false);
+  assert.equal(f.storage.get(f.key)[f.flow.loopId].state, "blocked");
+});
+
+test("ambiguous report failures retain the key and suppress duplicate error notices", async () => {
+  const f = reportFixture();
+  f.managed.controller.send = async (_text, _images, execution) => {
+    f.calls.push(execution.deliveryId); throw new Error("Connection lost before acknowledgement");
+  };
+  await f.deliver(); await f.deliver();
+  assert.equal(f.calls.length, 2); assert.equal(f.calls[0], f.calls[1]);
+  assert.equal(f.notices.length, 1);
+  assert.equal(f.storage.get(f.key)[f.flow.loopId].state, "prepared");
+});
+
 test("concurrent panels claim a legacy terminal child delivery once", async () => {
   const storage = new Map([['agentFactory.background.main-child', { 'work-child/run-child': 'running' }]]), sends = [];
   const context = { workspaceState: {
@@ -1255,7 +1372,7 @@ test("new chats copy the designated set once and restore without source or defau
     assert.equal(first.agentModels.work.model,'project-work'); assert.equal(first.agentFastModes.work['project-work'],true);
     library.projectDefaults['/project']='second';
     assert.equal(manager.newChatPreferences().model,'other-main');
-    assert.equal(manager.newChatPreferences().agentSettingsSet,'Second');
+    assert.equal(manager.newChatPreferences().agentSettingsSet,'Chat');
     await manager.revive({},first);
     assert.equal(attached[2].model,'project-main'); assert.equal(attached[2].agentModels.work.model,'project-work');
     assert.equal(attached[2].agentFastModes.work['project-work'],true);
@@ -1358,4 +1475,18 @@ test("accepted identities remain recoverable beyond the old replay window", asyn
   posted.length = 0;
   await manager.handleMessage(managed, { type: "chat.status", ids: ["request-0", "request-200"] });
   assert.deepEqual(posted.map(event => [event.type, event.id]), [["chat.started", "request-0"], ["chat.started", "request-200"]]);
+});
+
+
+test("named-set snapshots reject composer edits until explicitly detached to Chat", async () => {
+  const manager = new module.exports.ChatPanelManager({globalState:{get(_key,fallback){return fallback;},async update(){}}}, {}, () => [], async () => ({available:false}));
+  manager.rememberAgent = async () => {};
+  const managed = {state:{panelId:'named-snapshot',role:'main',model:'gpt-6-astra',reasoning:'high',agentSettingsScope:'global',agentSettingsSet:'Super Factory',agentModels:{work:{model:'claude-fable-5-1',reasoningEffort:'high'}},fastMode:false},panel:{webview:{async postMessage(){return true;}}}};
+  const message={type:'composer.settings',goalMode:false,model:'gpt-6-luna',reasoning:'low',agentModels:{work:{model:'gpt-6-luna'}},fastMode:true,agentSettingsScope:'global',agentSettingsSet:'Super Factory'};
+  await manager.handleMessage(managed,message);
+  assert.equal(managed.state.model,'gpt-6-astra');assert.equal(managed.state.reasoning,'high');
+  assert.equal(managed.state.agentModels.work.model,'claude-fable-5-1');assert.equal(managed.state.fastMode,false);
+  await manager.handleMessage(managed,{...message,agentSettingsScope:'chat',agentSettingsSet:'Chat'});
+  assert.equal(managed.state.model,'gpt-6-luna');assert.equal(managed.state.agentSettingsScope,'chat');
+  assert.equal(managed.state.agentSettingsSet,'Chat');assert.equal(managed.state.fastMode,true);
 });

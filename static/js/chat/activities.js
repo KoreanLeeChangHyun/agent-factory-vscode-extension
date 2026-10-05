@@ -98,17 +98,27 @@ globalThis.AgentFactoryChat.activities = function (host) {
     const labels = { doctor: t("ui.check.execution.environment"), capabilities: t("ui.check.supported.features"), submit: t("ui.submit.task"), send: t("ui.send.follow.up"), status: t("ui.check.task.status"), result: t("ui.read.task.result"), start: t("ui.start.task"), cancel: t("ui.cancel"), reconcile: t("ui.reconcile.work"), "recover-receipt": t("ui.recover.run") };
     const lessonLabels = { retrieve: "retrieve", record: "record", resolve: "resolve", audit: "audit", apply: "apply" };
     heading.textContent = scripts.map(function (script) {
+      if (script.help) return t(script.script === "loop.py" && script.action === "start" ? "activity.factory.help.start" : "activity.factory.help.title");
       if (script.skill === "agent" && ["exec.py", "loop.py"].includes(script.script) && Object.hasOwn(labels, script.action)) return labels[script.action];
       if (script.script === "lessons.py" && Object.hasOwn(lessonLabels, script.action)) return t("activity.factory.lessons." + lessonLabels[script.action]);
       return script.script + (script.action ? " · " + script.action : "");
     }).join(" / ");
     const badge = document.createElement("span");
     badge.className = "managed-agent-status";
-    badge.textContent = outcome.status === "completed" ? t(scripts.some(script => ["start", "submit", "send"].includes(script.action)) ? "activity.request.command.completed" : "activity.command.completed") : activityPhaseAccessibleLabel(outcome.status === "running" ? "started" : outcome.status);
+    badge.textContent = scripts.every(script => script.help)
+      ? t("activity.factory.help." + outcome.status)
+      : outcome.status === "completed" ? t(scripts.some(script => !script.help && ["start", "submit", "send"].includes(script.action)) ? "activity.request.command.completed" : "activity.command.completed") : activityPhaseAccessibleLabel(outcome.status === "running" ? "started" : outcome.status);
     row.append(heading, badge);
     container.append(row);
+    const details = document.createElement("details");
+    details.className = "managed-agent-details factory-command-details";
+    const summary = document.createElement("summary");
+    const disclosure = document.createElement("span");
+    disclosure.className = "managed-agent-disclosure";
+    disclosure.textContent = t("activity.factory.details");
+    summary.append(disclosure);
     for (const script of scripts) {
-      const context = document.createElement("div");
+      const context = document.createElement("span");
       context.className = "factory-command-context";
       const source = document.createElement("span");
       source.className = "factory-command-source";
@@ -122,14 +132,10 @@ globalThis.AgentFactoryChat.activities = function (host) {
         target.setAttribute("aria-label", script.target);
         context.append(target);
       }
-      container.append(context);
+      summary.append(context);
     }
     renderCommandError(container, outcome);
     // Keep mixed commands and failures intact, including their non-Factory output.
-    const details = document.createElement("details");
-    details.className = "managed-agent-details factory-command-details";
-    const summary = document.createElement("summary");
-    summary.textContent = t("activity.factory.details");
     details.append(summary);
     for (const item of documents) {
       const path = document.createElement("div");
@@ -164,7 +170,7 @@ globalThis.AgentFactoryChat.activities = function (host) {
     const identity = document.createElement("div");
     identity.className = "managed-agent-identity";
     identity.textContent = managed.agentId + (managed.runId ? " · " + managed.runId : "");
-    const progress = document.createElement("div");
+    const progress = document.createElement("span");
     progress.className = "managed-agent-progress";
     const actions = { submit: t("ui.submit.run"), start: t("ui.start.work"), send: t("ui.send.follow.up"), status: t("ui.check.status"), result: t("ui.get.result"), updates: t("ui.get.updates"), cancel: t("ui.cancel"), resume: t("ui.resume"), reconcile: t("ui.reconcile.work"), "recover-receipt": t("ui.recover.run"), skip: t("ui.skip.verification") };
     progress.textContent = (actions[managed.action] || t("ui.check.run")) + (outcome.status === "failed" ? t("ui.failed") : outcome.status === "running" ? t("ui.in.progress.3d921e") : pendingRequest ? t("ui.acceptance.unconfirmed") : t("ui.processed"));
@@ -173,7 +179,7 @@ globalThis.AgentFactoryChat.activities = function (host) {
         outcome.status === "running" ? t("activity.request.pending") :
         managed.runId && (matchesRun || ["accepted", "queued", "starting", "running", "active", "completed", "failed", "cancelled", "needs-human-decision"].includes(managed.observedStatus)) ? t("activity.request.accepted") : t("activity.request.unconfirmed");
     }
-    container.append(heading, identity, progress);
+    container.append(heading);
     renderCommandError(container, outcome);
     if (child && state.role === "main") {
       const open = document.createElement("button");
@@ -183,13 +189,16 @@ globalThis.AgentFactoryChat.activities = function (host) {
       open.addEventListener("click", function () {
         if (state.childAgents.some(function (agent) { return agent.agentId === managed.agentId; })) vscode.postMessage({ type: "agent.open", agentId: managed.agentId });
       });
-      container.append(open);
+      heading.append(open);
     }
     const details = document.createElement("details");
     details.className = "managed-agent-details";
     const summary = document.createElement("summary");
-    summary.textContent = t("ui.command.and.run.history") + events.length;
-    details.append(summary);
+    const disclosure = document.createElement("span");
+    disclosure.className = "managed-agent-disclosure";
+    disclosure.textContent = t("ui.command.and.run.history") + events.length;
+    summary.append(progress, disclosure);
+    details.append(summary, identity);
     for (const event of events) {
       const raw = document.createElement("div");
       chatTerminal.renderTerminalCommand(raw, event.text, event.phase, event.title);

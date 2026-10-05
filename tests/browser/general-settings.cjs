@@ -24,7 +24,11 @@ async function checkGeneralSettings(page) {
   assert.equal(await page.locator('#settings-tab-general').textContent(), '일반');
   assert.equal(await page.locator('#settings-tab-providers').textContent(), '공급자');
   assert.equal(await page.locator('#settings-tab-status').textContent(), '상태바');
-  assert.equal(await page.locator('#general-permissions .agent-permissions-heading strong').textContent(), '실행 권한');
+  assert.deepEqual(await page.locator('#general-permissions .agent-permissions-heading strong').allTextContents(), ['실행 권한', '정기 문서 점검']);
+  // The periodic documents check is off by default and stores each change per project.
+  assert.equal(await page.locator('[data-setting="docs-audit"]').inputValue(), 'off');
+  await page.locator('[data-setting="docs-audit"]').selectOption('weekly');
+  assert.deepEqual(await page.evaluate(() => window.sentMessages.filter(m => m.type === 'docsAudit.set').at(-1)), { type: 'docsAudit.set', interval: 'weekly' });
   await page.locator('[data-setting="permissions"]').selectOption('workspace-write');
   assert.match(await page.locator('#agent-permissions-description').textContent(), /작업 공간/);
   assert.equal(await page.evaluate(() => window.sentMessages.filter(m => m.type === 'execution.select').at(-1).mode), 'workspace-write');
@@ -141,7 +145,7 @@ async function checkGeneralSettings(page) {
     await page.setViewportSize({ width, height: 640 });
     assert.equal(await page.locator('#status-settings').evaluate(e => e.scrollWidth > e.clientWidth), false);
     assert.equal(await page.locator('#settings-panel-general').evaluate(e => e.scrollWidth > e.clientWidth), false);
-    const permissionBox = await page.locator('#general-permissions select').boundingBox();
+    const permissionBox = await page.locator('#general-permissions [data-setting="permissions"]').boundingBox();
     const languageBox = await language.boundingBox();
     assert.ok(Math.abs(permissionBox.x - languageBox.x) < 1);
     assert.ok(Math.abs(permissionBox.width - languageBox.width) < 1);
@@ -163,7 +167,8 @@ async function checkGeneralSettings(page) {
   const global = Object.fromEntries(['main','work','workLight','verification'].map(role => [role,{model:'gpt-6-astra',reasoningEffort:'medium'}]));
   await page.evaluate(global => window.postMessage({type:'agent.defaults',settings:{global,project:{},projectAvailable:true}},'*'),global);
   await page.locator('#settings-tab-agents').click();
-  assert.equal(await page.locator('#global-agent-settings .agent-model-row').count(),4);
+  assert.deepEqual(await page.locator('#global-agent-settings .agent-model-row').evaluateAll(rows => rows.map(row => row.dataset.agentRole)),
+    ['main', 'work', 'workLight', 'explore', 'scribe', 'verification']);
   const fs=require('node:fs'),path=require('node:path');
   const artifactDir=path.resolve(__dirname,'../../../docs/artifact/evidence/model-settings-copy-20261004');
   fs.mkdirSync(artifactDir,{recursive:true});
@@ -172,7 +177,8 @@ async function checkGeneralSettings(page) {
     assert.equal(await page.locator('#status-settings').evaluate(e=>e.scrollWidth>e.clientWidth),false);
     const layout=await page.locator('#settings-panel-agents').evaluate(e=>({height:e.clientHeight,content:e.scrollHeight}));
     console.log('Global settings layout',size,layout);
-    assert.ok(layout.content <= layout.height + 1, JSON.stringify({size,layout}));
+    // Six agent rows fit without scrolling from 500px tall; shorter windows scroll.
+    if (size.height >= 500) assert.ok(layout.content <= layout.height + 1, JSON.stringify({size,layout}));
     for(const row of await page.locator('#global-agent-settings .agent-model-row').all()) {
       const model = row.locator('button[data-field="model"]');
       assert.equal(await model.evaluate(e => e.scrollWidth > e.clientWidth + 1),false);

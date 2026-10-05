@@ -302,10 +302,13 @@ async function main() {
       }
       const orchestrator = '\n\n[Orchestrator mode]\nRecorded orchestrator instructions.\n[End orchestrator mode]';
       const attachedText = '원문\n\n첨부 참조:\n- [image] image.png: file:///fixture/image.png (image/png, 9371 bytes)';
-      const captured = orchestrator + guidance;
+      const client = fs.readFileSync(path.join(root, 'src/infrastructure/agent-factory/agent-client.ts'), 'utf8');
+      const handoff = client.match(/const sudoGuidance = helper \? `([\s\S]*?)` : "";/)[1]
+        .replace('${JSON.stringify(helper)}', JSON.stringify('/fixture/extension/static/sudo-request.py'));
+      const captured = orchestrator + guidance + handoff;
       const orchestrated = { type: 'user', id: 'history-user-orchestrator', runId: 'orchestrator', ...historyPresentation(attachedText + captured, 'orchestrate', false) };
       const cached = [[], [{ ...orchestrated, text: attachedText + captured, submission: undefined }],
-        [{ ...orchestrated, text: attachedText + orchestrator, submission: { ...orchestrated.submission, guidance } }], [orchestrated]];
+        [{ ...orchestrated, text: attachedText + orchestrator, submission: { ...orchestrated.submission, guidance: guidance + handoff } }], [orchestrated]];
       const saveAndReload = async () => {
         await page.evaluate(() => sessionStorage.setItem('submission-restoration-fixture', JSON.stringify(window.saved)));
         await page.reload();
@@ -320,6 +323,7 @@ async function main() {
         assert.equal(await details.evaluate(el => el.open), false);
         assert.ok((await row.innerText()).includes(attachedText));
         assert.ok(!(await row.innerText()).includes('[Orchestrator mode]'));
+        assert.ok(!(await row.innerText()).includes('[Agent Factory administrator command handoff]'));
         assert.equal(await details.locator('pre').textContent(), captured);
         await details.locator('summary').focus();
         await page.keyboard.press('Enter');
@@ -484,8 +488,8 @@ async function main() {
       console.log('Task status badge own checks passed');
       return;
     }
-    if (process.argv.includes('--task-row-only')) {
-      await require('./task-flow.cjs').checkTaskRows(page);
+    if (process.argv.includes('--task-row-only') || process.argv.includes('--task-duration-only')) {
+      await require('./task-flow.cjs').checkTaskRows(page, { durationOnly: process.argv.includes('--task-duration-only') });
       assert.deepEqual(errors, []);
       console.log('Task row identity, full width and independent controls checks passed');
       return;
@@ -500,6 +504,12 @@ async function main() {
       await checkTaskStop(page);
       assert.deepEqual(errors, []);
       console.log('Per-task stop controls, exact bindings, failures and state checks passed');
+      return;
+    }
+    if (process.argv.includes('--work-decision-only')) {
+      await require('./task-flow.cjs').checkWorkDecisionPlacement(page);
+      assert.deepEqual(errors, []);
+      console.log('Worker questions remain outside task cards across updates and restoration');
       return;
     }
     if (process.argv.includes('--task-flow-only') || process.argv.includes('--task-panel-only')) {
@@ -551,6 +561,18 @@ async function main() {
     if (process.argv.includes('--agent-presets-only')) {
       await require('./agent-presets.cjs').checkAgentPresets(page);
       assert.deepEqual(errors, []);
+      return;
+    }
+    if (process.argv.includes('--scrollbars-only')) {
+      await require('./scrollbars.cjs').checkScrollbars(page);
+      assert.deepEqual(errors, []);
+      console.log('Auxiliary scrollbar visibility, wheel, keyboard and timeline checks passed.');
+      return;
+    }
+    if (process.argv.includes('--settings-fit-only')) {
+      await require('./settings-fit.cjs').checkSettingsFit(page);
+      assert.deepEqual(errors, []);
+      console.log('Settings panel layout checks passed.');
       return;
     }
     if (process.argv.includes('--general-settings-only')) {

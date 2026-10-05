@@ -197,7 +197,8 @@ test("a saved agent preset is not reported as failed when the follow-up capabili
   };
   const host = await fixture(t, async () => ({ available: true, client }));
   await host.ready();
-  await host.receive({ type: "agent.preset.field", scope: "global", name: "Agent Factory · Codex", role: "main", field: "reasoningEffort", value: "high" });
+  await host.receive({ type: "agent.preset", action: "save", scope: "global", name: "Custom", sourceName: "Codex" });
+  await host.receive({ type: "agent.preset.field", scope: "global", name: "Custom", role: "main", field: "reasoningEffort", value: "high" });
   const result = host.messages.filter(message => message.type === "agent.preset.field.result").at(-1);
   assert.ok(result, "the preset field save is answered");
   assert.equal(result.error, undefined);

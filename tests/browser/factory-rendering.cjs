@@ -59,6 +59,7 @@ async function checkFactoryRendering(page) {
 
   const activity = async event => {
     await page.evaluate(event => window.postMessage({ type: 'run.activity', category: 'command', ...event }, '*'), event);
+    await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
   };
   const lessonCommand = 'python3 "/home/test/.codex/plugins/cache/personal/agent-factory/local/scripts/lessons.py" --project-root "/work/repository with spaces" record --input "/tmp/lesson.json"';
   await activity({ id: 'lesson-record', phase: 'started', text: lessonCommand });
@@ -84,6 +85,23 @@ async function checkFactoryRendering(page) {
   await activity({ id: 'relocated-factory', phase: 'completed', text: 'python3 /custom/location/scripts/exec.py doctor', output: JSON.stringify({ operation: { schemaVersion: 1, provider: 'agent-factory', script: 'exec.py', action: 'doctor' } }) });
   assert.match(await page.locator('[data-id="relocated-factory"] .managed-agent-heading').textContent(), /Check execution environment/);
   const command = 'python3 skills/agent/scripts/exec.py';
+  const helpCommand = 'python3 /home/deus/workspace/agent-factory/plugin/scripts/loop.py start --help';
+  const helpCard = page.locator('[data-id="factory-help"]');
+  await activity({ id: 'factory-help', phase: 'started', text: helpCommand });
+  assert.match(await helpCard.locator('.managed-agent-heading').textContent(), /Check task start command help.*Reading help/);
+  await activity({ id: 'factory-help', phase: 'completed', text: helpCommand, output: 'usage: loop.py start [-h]\n  --help show this help message and exit' });
+  assert.match(await helpCard.locator('.managed-agent-status').textContent(), /Help lookup completed/);
+  await helpCard.locator('.factory-command-details > summary').focus();
+  await page.keyboard.press('Enter');
+  assert.equal(await helpCard.locator('.syntax-code').textContent(), helpCommand);
+  assert.match(await helpCard.locator('.factory-command-details').textContent(), /usage: loop.py start/);
+  await activity({ id: 'factory-help-short', phase: 'completed', text: command + ' submit -h --agent help-only', output: 'usage: exec.py submit [-h]' });
+  assert.match(await page.locator('[data-id="factory-help-short"] .managed-agent-heading').textContent(), /Check command help.*Help lookup completed/);
+  assert.equal(await page.locator('[data-id="factory-help-short"] .managed-agent-open').count(), 0);
+  await activity({ id: 'factory-help-failed', phase: 'failed', exitCode: 2, text: command + ' --help', output: 'help unavailable' });
+  assert.match(await page.locator('[data-id="factory-help-failed"] .managed-agent-status').textContent(), /Help lookup failed/);
+  await activity({ id: 'factory-real-start', phase: 'completed', text: helpCommand.replace(' --help', ''), output: '{}' });
+  assert.match(await page.locator('[data-id="factory-real-start"] .managed-agent-heading').textContent(), /Request task.*Request command completed/);
   await activity({ id: 'previous-run', phase: 'completed', text: command + ' status --agent repeat-agent --run-id run-old', output: JSON.stringify({ agentId: 'repeat-agent', runId: 'run-old', status: 'completed' }) });
   await activity({ id: 'next-send', phase: 'started', text: command + ' send --agent repeat-agent --message next' });
   await page.waitForSelector('[data-id="next-send"] .managed-agent-card', { timeout: 2000 });
@@ -109,7 +127,7 @@ async function checkFactoryRendering(page) {
   assert.deepEqual(overflowing, [], 'Card headings must fit narrow panels');
   const fs = require('node:fs');
   const path = require('node:path');
-  const artifactDir = path.resolve(__dirname, '../../../docs/artifact/evidence/agent-factory-command-rendering');
+  const artifactDir = process.env.AF_RENDERING_ARTIFACT_DIR || path.resolve(__dirname, '../../../docs/artifact/evidence/agent-factory-command-rendering');
   fs.mkdirSync(artifactDir, { recursive: true });
   await page.locator('[data-id="long-loop-heading"]').screenshot({ path: path.join(artifactDir, 'narrow-card.png') });
   await lessonCard.screenshot({ path: path.join(artifactDir, 'lesson-narrow.png') });
@@ -120,14 +138,89 @@ async function checkFactoryRendering(page) {
   await page.locator('#ui-language').selectOption('ko');
   await page.locator('#status-settings-close').click();
   assert.match(await lessonCard.locator('.managed-agent-heading').textContent(), /교훈 기록.*명령 완료/);
+  assert.match(await helpCard.locator('.managed-agent-heading').textContent(), /작업 시작 명령 도움말 확인.*도움말 조회 완료/);
+  await helpCard.screenshot({ path: path.join(artifactDir, 'help-korean.png') });
   assert.equal(await lessonDetails.getAttribute('open'), '', 'Language changes preserve disclosure');
   assert.equal(await lessonDetails.locator('.syntax-code').textContent(), lessonCommand);
   await lessonDetails.locator(':scope > summary').click();
   await lessonCard.screenshot({ path: path.join(artifactDir, 'lesson-korean.png') });
+  // Reproduce the two running task cards and utility card shown in the report.
+  await page.evaluate(() => {
+    document.documentElement.style.setProperty('--vscode-progressBar-background', '#888888');
+    window.postMessage({ type: 'agents.list', agents: [
+      { agentId: 'compact-explore', role: 'work', status: 'running', runId: 'run-explore' },
+      { agentId: 'compact-scribe', role: 'work', status: 'running', runId: 'run-scribe' }
+    ] }, '*');
+  });
+  for (const name of ['explore', 'scribe']) {
+    await activity({ id: 'compact-' + name, phase: 'completed', text: 'python3 skills/agent/scripts/loop.py start --work-agent compact-' + name + ' --task-mode work',
+      output: JSON.stringify({ workAgentId: 'compact-' + name, loopId: 'loop-' + name, taskMode: 'work', status: 'active' }) });
+  }
+  await activity({ id: 'compact-utility', phase: 'completed', text: 'python3 /repo/agent-factory/plugin/scripts/lessons.py retrieve --project-root sandbox', output: '{}' });
+  await page.waitForSelector('[data-id="compact-explore"] .managed-agent-open');
+  const geometry = [];
+  for (const width of [795, 320]) {
+    await page.setViewportSize({ width, height: 740 });
+    for (const id of ['compact-explore', 'compact-scribe', 'compact-utility']) {
+      const card = page.locator(`[data-id="${id}"] .managed-agent-card`);
+      const measured = await card.evaluate((node, info) => {
+        const badge = node.querySelector('.managed-agent-status');
+        return { ...info, height: node.getBoundingClientRect().height, overflow: node.scrollWidth > node.clientWidth + 1,
+          dot: getComputedStyle(badge, '::before').backgroundColor, text: getComputedStyle(badge).color };
+      }, { id, width });
+      geometry.push(measured);
+      assert.equal(measured.overflow, false, id + ' fits at ' + width);
+      if (id !== 'compact-utility') {
+        assert.ok(measured.height <= 70, 'Collapsed tasks keep two rows at ' + width);
+        assert.equal(measured.dot, 'rgb(55, 148, 255)', 'Running uses blue even with a grey progress bar');
+        assert.equal(await card.locator('.managed-agent-identity').isVisible(), false, 'Identifiers stay in details');
+        assert.equal(await card.locator('.managed-agent-open').evaluate(node => node.parentElement.className), 'managed-agent-heading');
+      } else if (width === 795) assert.ok(measured.height <= 65, 'Utility metadata and disclosure share a row');
+      await card.screenshot({ path: path.join(artifactDir, id + '-' + width + '.png') });
+    }
+  }
+  fs.writeFileSync(path.join(artifactDir, 'compact-metrics.json'), JSON.stringify(geometry, null, 2));
+  await page.setViewportSize({ width: 795, height: 900 });
+  const compact = page.locator('[data-id="compact-explore"] .managed-agent-card');
+  await compact.locator('.managed-agent-open').focus();
+  await page.keyboard.press('Enter');
+  assert.deepEqual(await page.evaluate(() => window.sentMessages.at(-1)), { type: 'agent.open', agentId: 'compact-explore' });
+  await compact.locator('.managed-agent-details > summary').focus();
+  await page.keyboard.press('Enter');
+  assert.equal(await compact.locator('.managed-agent-identity').isVisible(), true);
+  assert.equal(await compact.locator('.managed-agent-identity').textContent(), 'compact-explore · loop-explore');
+  assert.match(await compact.locator('.syntax-code').textContent(), /--work-agent compact-explore/);
+  await page.keyboard.press('Space');
+  assert.equal(await compact.locator('.managed-agent-identity').isVisible(), false);
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  assert.equal(await compact.locator('.managed-agent-status').evaluate(node => getComputedStyle(node, '::before').animationName), 'none');
+  await page.emulateMedia({ reducedMotion: 'no-preference' });
+  // Link colors follow light and high-contrast themes; the grey progress token
+  // must never take precedence. Keep status words and neutral card backgrounds.
+  for (const [themeClass, color, expected] of [
+    ['vscode-light', '#005fb8', 'rgb(0, 95, 184)'],
+    ['vscode-high-contrast', '#40a6ff', 'rgb(64, 166, 255)']
+  ]) {
+    await page.evaluate(({ themeClass, color }) => {
+      document.body.className = themeClass;
+      document.documentElement.style.setProperty('--vscode-textLink-foreground', color);
+    }, { themeClass, color });
+    assert.equal(await compact.locator('.managed-agent-status').evaluate(node => getComputedStyle(node, '::before').backgroundColor), expected);
+    assert.match(await compact.locator('.managed-agent-status').textContent(), /진행 중/);
+  }
+  await page.evaluate(() => {
+    document.body.className = 'vscode-dark';
+    document.documentElement.style.removeProperty('--vscode-textLink-foreground');
+  });
   await page.evaluate(() => sessionStorage.setItem('submission-restoration-fixture', JSON.stringify(window.saved)));
   await page.reload();
   await page.waitForSelector('[data-id="lesson-record"] .factory-command-context');
   assert.equal(await lessonCard.locator('.factory-command-target').getAttribute('title'), '/work/repository with spaces');
   assert.equal(await page.locator('[data-id="ordinary-exec"] .managed-agent-card').count(), 0);
+  assert.match(await helpCard.locator('.managed-agent-heading').textContent(), /작업 시작 명령 도움말 확인.*도움말 조회 완료/);
+  assert.equal(await helpCard.locator('.syntax-code').textContent(), helpCommand);
+  assert.equal(await compact.locator('.managed-agent-identity').isVisible(), false);
+  await compact.locator('.managed-agent-details > summary').click();
+  assert.equal(await compact.locator('.managed-agent-identity').textContent(), 'compact-explore · loop-explore');
 }
 module.exports = { checkFactoryRendering };

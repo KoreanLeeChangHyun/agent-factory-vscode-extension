@@ -1,6 +1,10 @@
 import { parseAgentFastModes, parseModelFastModes, type AgentFastModes, type AgentModelSetting, type ModelFastModes } from "../../common/types/agent-models";
 // workLight is the optional light Work profile Main uses for bounded, already-decided changes.
-export const AGENT_ROLES = ["main", "work", "workLight", "verification"] as const;
+// explore (Explorer) and scribe (Scribe) are optional restricted Work profiles; unset fields fall back to workLight.
+export const AGENT_ROLES = ["main", "work", "workLight", "verification", "explore", "scribe"] as const;
+/** Each optional Work profile's fallback when its own setting is empty. */
+export const AGENT_ROLE_FALLBACK: Partial<Record<typeof AGENT_ROLES[number], typeof AGENT_ROLES[number]>> = { workLight: "work", explore: "workLight", scribe: "workLight" };
+export type AgentRole = typeof AGENT_ROLES[number];
 /** Roles every complete settings set and preset must contain; older sets omit workLight. */
 export const REQUIRED_AGENT_ROLES = ["main", "work", "verification"] as const;
 export const AGENT_FIELDS = ["model", "reasoningEffort", "fast"] as const;
@@ -12,6 +16,7 @@ export interface AgentDefaults extends Partial<Record<typeof AGENT_ROLES[number]
 }
 export type AgentPresetScope = "global" | "project" | "chat";
 export interface AgentPreset {
+  builtIn?: boolean;
   id?: string;
   inUse?: boolean;
   scope: AgentPresetScope;

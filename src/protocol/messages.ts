@@ -62,15 +62,15 @@ export interface MessageSubmission {
 }
 
 export type ClientMessage =
-  | { readonly type: "agent.preset.field"; readonly scope: import("../core/config/agent-settings").AgentPresetScope; readonly name: string; readonly role: "main" | "work" | "workLight" | "verification"; readonly field: "model" | "reasoningEffort" | "fast"; readonly value: string | boolean }
-  | { readonly type: "agent.preset.fast"; readonly scope: import("../core/config/agent-settings").AgentPresetScope; readonly name: string; readonly role: "main" | "work" | "workLight" | "verification"; readonly model: string; readonly value: boolean }
+  | { readonly type: "agent.preset.field"; readonly scope: import("../core/config/agent-settings").AgentPresetScope; readonly name: string; readonly role: import("../core/config/agent-settings").AgentRole; readonly field: "model" | "reasoningEffort" | "fast"; readonly value: string | boolean }
+  | { readonly type: "agent.preset.fast"; readonly scope: import("../core/config/agent-settings").AgentPresetScope; readonly name: string; readonly role: import("../core/config/agent-settings").AgentRole; readonly model: string; readonly value: boolean }
   | { readonly type: "bot.interact"; readonly action: import("../modules/chat/companion").CompanionAction }
   | { readonly type: "contract.open"; readonly id: string }
   | { readonly type: "contracts.request" }
   | { readonly type: "project.tasks.request" }
   | { readonly type: "agent.preset"; readonly action: "save" | "apply" | "copy" | "update" | "delete" | "rename" | "default"; readonly scope: "global" | "project" | "chat"; readonly name: string; readonly newName?: string; readonly sourceName?: string }
-  | { readonly type: "agent.defaults.save"; readonly scope: "global" | "project"; readonly role: "main" | "work" | "workLight" | "verification"; readonly field: "model" | "reasoningEffort" | "fast"; readonly value: string | boolean }
-  | { readonly type: "agent.defaults.fast"; readonly scope: "global" | "project"; readonly role: "main" | "work" | "workLight" | "verification"; readonly model: string; readonly value: boolean }
+  | { readonly type: "agent.defaults.save"; readonly scope: "global" | "project"; readonly role: import("../core/config/agent-settings").AgentRole; readonly field: "model" | "reasoningEffort" | "fast"; readonly value: string | boolean }
+  | { readonly type: "agent.defaults.fast"; readonly scope: "global" | "project"; readonly role: import("../core/config/agent-settings").AgentRole; readonly model: string; readonly value: boolean }
   | { readonly type: "worktree.create"; readonly repository: string; readonly name: string; readonly base: string }
   | { readonly type: "worktree.merge" | "worktree.refresh" | "worktree.repositories" }
   | { readonly type: "deploy.detect" }
@@ -114,6 +114,8 @@ export type ClientMessage =
   | { readonly type: "decision.approve"; readonly runId: string; readonly language?: "ko" | "en" }
   | { readonly type: "goal.control"; readonly action: import("../common/types/agent-runtime").GoalAction }
   | { readonly type: "workIsolation.set"; readonly value: boolean }
+  | { readonly type: "docsAudit.set"; readonly interval: import("../common/types/docs-audit").DocsAuditInterval }
+  | { readonly type: "docsAudit.started" }
   | { readonly type: "queue.resume" }
   | { readonly type: "run.cancel" }
   | { readonly type: "conversation.clear" }
@@ -196,6 +198,8 @@ export type HostMessage =
   | { readonly type: "branch.updated"; readonly branch?: string }
   | { readonly type: "goal.updated"; readonly goal: import("../common/types/agent-runtime").NativeGoal | null; readonly error?: string }
   | { readonly type: "workIsolation.updated"; readonly value: boolean }
+  | { readonly type: "docsAudit.updated"; readonly interval: string }
+  | { readonly type: "docsAudit.due" }
   | { readonly type: "capabilities.updated"; readonly capabilities: { readonly submit: import("../common/types/agent-runtime").ExecutionCapabilities; readonly send: import("../common/types/agent-runtime").ExecutionCapabilities } }
   | { readonly type: "models.list"; readonly models: readonly string[] }
   | {
@@ -222,6 +226,8 @@ export type HostMessage =
       readonly capabilities?: { readonly submit: import("../common/types/agent-runtime").ExecutionCapabilities; readonly send: import("../common/types/agent-runtime").ExecutionCapabilities };
       /** Per-project Work isolation toggle; off unless the Human turned it on. */
       readonly workIsolation?: boolean;
+      /** Per-project periodic documents check interval; off unless the Human turned it on. */
+      readonly docsAuditInterval?: import("../common/types/docs-audit").DocsAuditInterval;
       readonly running: boolean;
       readonly botsEnabled?: boolean;
       readonly botsAvailable?: boolean;
@@ -294,6 +300,8 @@ export type HostMessage =
         readonly workProfile?: import("../common/types/agent-models").WorkProfile;
         readonly updatedAt?: string;
         readonly dispatchedAt?: string;
+        readonly startedAt?: string;
+        readonly finishedAt?: string;
         readonly planProgress?: { readonly completed: number; readonly total: number };
         readonly activity?: string;
       }[];

@@ -138,7 +138,11 @@
         || rootScript(path);
       if (!script) continue;
       const args = words.slice(index + 1);
-      invocations.push({ skill: script[1], script: script[2], path, action: scriptAction(args), args, target: scriptTarget(args) });
+      // Only standalone flags before the option terminator request help; quoted
+      // prose and values such as --message=--help are not help options.
+      const optionEnd = args.indexOf("--");
+      const help = args.slice(0, optionEnd < 0 ? args.length : optionEnd).some(arg => arg === "--help" || arg === "-h");
+      invocations.push({ skill: script[1], script: script[2], path, action: scriptAction(args), args, target: scriptTarget(args), ...(help ? { help: true } : {}) });
     }
     return invocations;
   }
@@ -162,6 +166,7 @@
       }
     }
     for (const invocation of invocations) {
+      if (invocation.help) continue;
       const script = /^(exec|loop)\.py$/.exec(invocation.script);
       if (invocation.skill !== "agent" || !script) continue;
       const action = invocation.action;

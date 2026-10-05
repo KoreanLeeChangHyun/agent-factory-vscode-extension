@@ -447,6 +447,11 @@ button.act-row { cursor: pointer; }
 .act-detail { margin: 0 0 0.25em var(--act-target-start); min-width: 0; }
 .act-detail[hidden] { display: none; }
 .act-detail .git-diff-overview { display: none; }
+/* Keep file paths under their targets, but give expanded diffs the full row width. */
+.act-detail.git-diff-content { margin-left: 0; }
+.act-detail.git-diff-content > .act-paths { margin-left: var(--act-target-start); }
+.act-detail.git-diff-content > .git-diff-inline,
+.act-detail.git-diff-content > .git-diff-preview { margin-left: 0; }
 .act-detail .act-paths { color: var(--af-cli-muted); font-family: var(--vscode-editor-font-family, monospace); white-space: pre-wrap; overflow-wrap: anywhere; user-select: text; }
 .act-detail .act-raw { margin: 0; color: var(--af-cli-foreground); font: inherit; white-space: pre-wrap; overflow-wrap: anywhere; }
 .act-summary { color: var(--af-cli-muted); white-space: normal; }
@@ -722,7 +727,7 @@ button.act-row { cursor: pointer; }
   --af-card-accent: var(--vscode-panel-border);
   border: 1px solid var(--vscode-panel-border);
   border-radius: 6px;
-  padding: 9px 12px 10px;
+  padding: 6px 10px;
   background: var(--vscode-editorWidget-background);
   min-width: 0;
 }
@@ -731,7 +736,7 @@ button.act-row { cursor: pointer; }
 .managed-agent-card[data-status="active"],
 .managed-agent-card[data-status="starting"],
 .managed-agent-card[data-status="accepted"],
-.managed-agent-card[data-status="queued"] { --af-card-accent: var(--vscode-progressBar-background, #0e7fe8); }
+.managed-agent-card[data-status="queued"] { --af-card-accent: var(--vscode-textLink-foreground, #0e7fe8); }
 .managed-agent-card[data-status="completed"] { --af-card-accent: var(--af-cli-success, var(--vscode-testing-iconPassed, #3fb950)); }
 .managed-agent-card[data-status="failed"],
 .managed-agent-card[data-status="runtime-error"] { --af-card-accent: var(--af-cli-failure, var(--vscode-errorForeground)); }
@@ -739,11 +744,13 @@ button.act-row { cursor: pointer; }
 .managed-agent-card[data-status="cancelled"],
 .managed-agent-card[data-status="cancelling"] { --af-card-accent: var(--af-cli-muted, var(--vscode-descriptionForeground)); }
 
-.managed-agent-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-width: 0; }
-.managed-agent-heading > strong { min-width: 0; overflow-wrap: anywhere; color: var(--af-cli-heading, var(--vscode-foreground)); }
+.managed-agent-heading { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; min-width: 0; }
+.managed-agent-heading > strong { flex: 1; min-width: 0; overflow-wrap: anywhere; color: var(--af-cli-heading, var(--vscode-foreground)); }
 .managed-agent-status {
   display: inline-flex;
   flex: none;
+  max-width: 100%;
+  box-sizing: border-box;
   align-items: center;
   gap: 5px;
   padding: 1px 8px;
@@ -753,7 +760,8 @@ button.act-row { cursor: pointer; }
   color: color-mix(in srgb, var(--af-card-accent) 70%, var(--vscode-foreground));
   font-size: 11px;
   line-height: 16px;
-  white-space: nowrap;
+  white-space: normal;
+  overflow-wrap: anywhere;
 }
 .managed-agent-status::before {
   width: 6px;
@@ -771,7 +779,7 @@ button.act-row { cursor: pointer; }
   .managed-agent-card .managed-agent-status::before { animation: none !important; }
 }
 
-.managed-agent-progress { margin-top: 2px; color: var(--vscode-descriptionForeground); font-size: 12px; }
+.managed-agent-progress { color: var(--vscode-descriptionForeground); font-size: 12px; }
 .managed-agent-identity {
   margin: 5px 0 0;
   overflow-wrap: anywhere;
@@ -782,10 +790,11 @@ button.act-row { cursor: pointer; }
 }
 .managed-agent-open {
   display: inline-flex;
+  flex: none;
   width: auto;
   height: 24px;
-  margin-top: 8px;
-  padding: 0 10px;
+  margin: 0;
+  padding: 0 7px;
   border: 1px solid var(--vscode-button-border, color-mix(in srgb, var(--vscode-foreground) 25%, transparent));
   border-radius: 4px;
   background: var(--vscode-button-secondaryBackground, transparent);
@@ -795,11 +804,16 @@ button.act-row { cursor: pointer; }
 }
 .managed-agent-open:hover { background: var(--vscode-button-secondaryHoverBackground, var(--vscode-toolbar-hoverBackground)); }
 .managed-agent-open:focus-visible { outline: 1px solid var(--vscode-focusBorder); outline-offset: 1px; }
-.managed-agent-details { margin-top: 8px; }
-.factory-command-context { display: flex; flex-wrap: wrap; gap: 2px 10px; margin-top: 5px; min-width: 0; color: var(--vscode-descriptionForeground); font-size: 11px; }
+.managed-agent-details { margin-top: 3px; }
+.managed-agent-details > summary { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 10px; min-height: 22px; list-style: none; }
+.managed-agent-details > summary::-webkit-details-marker { display: none; }
+.managed-agent-disclosure { flex: none; }
+.managed-agent-disclosure::before { content: "▸"; display: inline-block; width: 1em; }
+.managed-agent-details[open] > summary > .managed-agent-disclosure::before { content: "▾"; }
+.factory-command-context { display: inline-flex; flex-wrap: wrap; gap: 2px 8px; min-width: 0; max-width: 100%; color: var(--vscode-descriptionForeground); font-size: 11px; }
 .factory-command-source { overflow-wrap: anywhere; }
 .factory-command-target { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.factory-command-details > summary:focus-visible { outline: 1px solid var(--vscode-focusBorder); outline-offset: 2px; }
+.managed-agent-details > summary:focus-visible { outline: 1px solid var(--vscode-focusBorder); outline-offset: 2px; }
 .managed-agent-details > summary,
 .managed-agent-card .skill-read-details > summary { cursor: pointer; color: var(--vscode-descriptionForeground); font-size: 12px; }
 .managed-agent-details > summary:hover,

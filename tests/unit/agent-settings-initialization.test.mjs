@@ -37,7 +37,7 @@ test('supplied sets are available once; detection selects the project default wi
   ]) {
     const f=await fixture();let choices=0;
     await Promise.all([1,2,3].map(()=>f.store.initializeAgentDefaults(f.global,detected,f.workspace,()=>{choices++;return choice;})));
-    assert.equal(snapshot(f).presets.length,3);
+    assert.equal(snapshot(f).presets.length,5);
     assert.equal(selected(f).id,'factory-'+id);
     assert.equal(choices,1);assert.deepEqual(f.writes,[]);
     for(const set of snapshot(f).presets) for(const role of ['main','work','workLight','verification']) {
@@ -69,11 +69,13 @@ test('default designation uses stable set identity; renaming and editing it affe
 
 test('projects share one library and keep separate default set references, including deletion protection',async()=>{
   const f=await fixture();await f.store.initializeAgentDefaults(f.global,providers,f.workspace,()=>0);
+  await act(f,'save','First custom',selected(f).settings);await act(f,'default','First custom');
   const first=selected(f);
   f.vscode.workspace.workspaceFolders=[{uri:{fsPath:'/second'}}];
   await f.store.initializeAgentDefaults(f.global,providers,memory(),()=>0.99);
-  assert.equal(selected(f).id,'factory-antigravity');assert.equal(snapshot(f).presets.length,3);
+  assert.equal(selected(f).id,'factory-antigravity');assert.equal(snapshot(f).presets.length,6);
   await assert.rejects(act(f,'delete',first.name),/cannot be deleted/);
+  await act(f,'save','Second custom',selected(f).settings);await act(f,'default','Second custom');
   const second=selected(f);
   await act(f,'rename',second.name,undefined,'Shared name');
   f.vscode.workspace.workspaceFolders=[{uri:{fsPath:'/project'}}];
@@ -87,11 +89,11 @@ test('projects share one library and keep separate default set references, inclu
 test('no provider leaves an explicit unconfigured set and reconnecting never overwrites the choice',async()=>{
   const f=await fixture();await f.store.initializeAgentDefaults(f.global,{codex:false,claude:false},f.workspace);
   assert.equal(selected(f).name,'Unconfigured');assert.equal(selected(f).settings.main.model,undefined);
-  assert.equal(snapshot(f).presets.length,4,'Supplied sets remain available for later selection');
+  assert.equal(snapshot(f).presets.length,6,'Supplied sets remain available for later selection');
   await f.store.initializeAgentDefaults(f.global,providers,f.workspace);
   assert.equal(selected(f).name,'Unconfigured');
   await assert.rejects(act(f,'copy','Unconfigured'),/complete|valid/i);
-  await act(f,'default','Agent Factory · Codex');assert.equal(selected(f).id,'factory-codex');
+  await act(f,'default','Codex');assert.equal(selected(f).id,'factory-codex');
 });
 
 test('legacy global, project and chat values migrate without data loss or repeat imports',async()=>{
@@ -131,15 +133,16 @@ test('failed atomic initialization retries the original provider choice without 
   await assert.rejects(f.store.initializeAgentDefaults(f.global,providers,f.workspace,choose),/storage unavailable/);
   assert.equal(snapshot(f).presets.length,0);
   fail=false;await f.store.initializeAgentDefaults(f.global,providers,f.workspace,choose);
-  assert.equal(choices,1);assert.equal(selected(f).id,'factory-antigravity');assert.equal(snapshot(f).presets.length,3);
+  assert.equal(choices,1);assert.equal(selected(f).id,'factory-antigravity');assert.equal(snapshot(f).presets.length,5);
 });
 
 test('failed designation retains the prior default and serial edits retain each changed field',async()=>{
   const f=await fixture();await f.store.initializeAgentDefaults(f.global,providers,f.workspace,()=>0);
   const update=f.global.update;
   f.global.update=async()=>{throw Error('cannot persist');};
-  await assert.rejects(act(f,'default','Agent Factory · Claude'),/cannot persist/);
+  await assert.rejects(act(f,'default','Claude'),/cannot persist/);
   assert.equal(selected(f).id,'factory-codex');f.global.update=update;
+  await act(f,'save','Editable',selected(f).settings);await act(f,'default','Editable');
   const name=selected(f).name;
   await Promise.all([field(f,name,'main','model','gpt-edited'),field(f,name,'work','reasoningEffort','high')]);
   assert.equal(selected(f).settings.main.model,'gpt-edited');assert.equal(selected(f).settings.work.reasoningEffort,'high');
@@ -161,8 +164,8 @@ test('a window without a project has the set library but no global default',asyn
   const f=await fixture();f.vscode.workspace.workspaceFolders=[];
   await f.store.initializeAgentDefaults(f.global,providers,f.workspace);
   assert.equal(snapshot(f).projectAvailable,false);assert.equal(snapshot(f).defaultSetId,undefined);
-  assert.equal(snapshot(f).presets.length,3);assert.deepEqual(snapshot(f).global,{});
-  await assert.rejects(act(f,'default','Agent Factory · Codex'),/Open a project/);
+  assert.equal(snapshot(f).presets.length,5);assert.deepEqual(snapshot(f).global,{});
+  await assert.rejects(act(f,'default','Codex'),/Open a project/);
 });
 
 
@@ -174,4 +177,67 @@ test('legacy globals are retained as sets but never become a settings layer for 
   await f.store.initializeAgentDefaults(f.global,providers,memory(),()=>0.4);
   assert.equal(selected(f).id,'factory-claude');
   assert.ok(snapshot(f).presets.some(set=>set.settings.main.model==='gpt-legacy'));
+});
+
+
+test('all five supplied sets are immutable, with independent editable clones', async()=>{
+  const f=await fixture();await f.store.initializeAgentDefaults(f.global,providers,f.workspace,()=>0);
+  assert.deepEqual(snapshot(f).presets.map(set=>set.name),['Codex','Claude','Antigravity','Agent Factory','Super Factory']);
+  for(const set of snapshot(f).presets){
+    assert.equal(set.builtIn,true);
+    for(const action of ['rename','delete','update'])await assert.rejects(act(f,action,set.name,{},'New name'),/Built-in/);
+    await assert.rejects(field(f,set.name,'main','model','gpt-other'),/Built-in/);
+    await assert.rejects(f.store.updateAgentPresetFastMode(f.global,f.workspace,'chat','global',set.name,'main','gpt-6-astra',true),/Built-in/);
+  }
+  const source=snapshot(f).presets.find(set=>set.name==='Super Factory');
+  assert.deepEqual(['main','work','workLight','verification'].map(role=>[source.settings[role].model,source.settings[role].reasoningEffort]),[
+    ['gpt-6-astra','high'],['claude-fable-5-1','high'],['gpt-6.1-sol','high'],['gpt-6-astra','high']]);
+  await act(f,'save','My Super',source.settings);
+  await field(f,'My Super','workLight','model','gpt-custom');
+  assert.equal(snapshot(f).presets.find(set=>set.name==='My Super').builtIn,false);
+  assert.equal(snapshot(f).presets.find(set=>set.name==='Super Factory').settings.workLight.model,'gpt-6.1-sol');
+  await act(f,'save','Second copy',snapshot(f).presets.find(set=>set.name==='My Super').settings);
+  await act(f,'delete','My Super');
+  assert.equal(snapshot(f).presets.find(set=>set.name==='Second copy').settings.workLight.model,'gpt-custom');
+});
+
+test('upgrade preserves customized supplied sets and defaults, restores missing built-ins and merges identical legacy defaults',async()=>{
+  const f=await fixture();
+  const value={main:{model:'gpt-preserved',reasoningEffort:'high'}};
+  await f.global.update('agentFactory.agentSets.v3',{sets:[
+    {id:'factory-codex',name:'My old Codex',settings:value},
+    {id:'default1',name:'Default',settings:value},
+    {id:'default2',name:'Default (2)',settings:value},
+    {id:'default3',name:'Default (3)',settings:{main:{model:'gpt-different'}}}
+  ],projectDefaults:{'/project':'factory-codex','/second':'default2'},migratedProjects:['/project']});
+  await f.store.initializeAgentDefaults(f.global,providers,f.workspace,()=>{throw Error('must not reselect');});
+  assert.equal(selected(f).settings.main.model,'gpt-preserved');assert.equal(selected(f).builtIn,false);
+  assert.equal(snapshot(f).presets.filter(set=>set.builtIn).length,5);
+  assert.equal(snapshot(f).presets.some(set=>set.name==='Default (2)'),false);
+  assert.equal(snapshot(f).presets.find(set=>set.name==='Default (3)').settings.main.model,'gpt-different');
+  assert.equal(f.global.get('agentFactory.agentSets.v3').projectDefaults['/second'],'default1');
+  const before=snapshot(f);await f.store.ensureAgentPresets(f.global,f.workspace);assert.deepEqual(snapshot(f),before);
+});
+
+
+test('cloning reads its source after prior edits and never aliases a similarly named custom set',async()=>{
+  const f=await fixture();await f.store.initializeAgentDefaults(f.global,providers,f.workspace,()=>0);
+  await act(f,'save','Copy (2)',selected(f).settings);
+  await act(f,'save','Copy',selected(f).settings);
+  assert.ok(snapshot(f).presets.some(set=>set.name==='Copy'));
+  const edit=field(f,'Copy','main','model','gpt-latest');
+  const clone=f.store.useAgentPreset(f.global,f.workspace,'chat','save','global','Latest clone',undefined,undefined,'Copy');
+  await Promise.all([edit,clone]);
+  assert.equal(snapshot(f).presets.find(set=>set.name==='Latest clone').settings.main.model,'gpt-latest');
+  await assert.rejects(f.store.useAgentPreset(f.global,f.workspace,'chat','save','global','Invalid clone',undefined,undefined,'Deleted'),/no longer exists/);
+  assert.ok(!snapshot(f).presets.some(set=>set.name==='Invalid clone'));
+});
+
+test('untouched old supplied sets upgrade in place while retaining the project designation',async()=>{
+  const f=await fixture();
+  const settings=Object.fromEntries(['main','work','workLight','verification'].map(role=>[role,{model:'gpt-6-astra',reasoningEffort:'medium',fast:false}]));
+  await f.global.update('agentFactory.agentSets.v3',{sets:[{id:'factory-codex',name:'Agent Factory · Codex',settings}],projectDefaults:{'/project':'factory-codex'},migratedProjects:['/project']});
+  await f.store.initializeAgentDefaults(f.global,providers,f.workspace);
+  assert.equal(selected(f).name,'Codex');assert.equal(selected(f).settings.workLight.model,'gpt-6-luna');
+  assert.equal(snapshot(f).presets.length,5);
 });

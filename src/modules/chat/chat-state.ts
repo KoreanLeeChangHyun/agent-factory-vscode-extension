@@ -1,7 +1,7 @@
 import { parseAgentPermissions } from "../../common/types/agent-permissions";
 import type { AgentPermissions } from "../../common/types/agent-permissions";
-import { parseAgentFastModes, parseAgentModels, parseModelFastModes } from "../../common/types/agent-models";
-import type { AgentFastModes, AgentModels, ModelFastModes } from "../../common/types/agent-models";
+import { parseAgentFastModes, parseAgentModels, parseModelFastModes, parseWorkProfile } from "../../common/types/agent-models";
+import type { AgentFastModes, AgentModels, ModelFastModes, WorkProfile } from "../../common/types/agent-models";
 import type { BusinessMode } from "../../common/types/business-mode";
 import { type TaskSelection } from "./task-selection";
 import { randomUUID } from "node:crypto";
@@ -12,7 +12,7 @@ export interface CapturedAgentRun {
   readonly runId: string;
   readonly model?: string;
   readonly reasoningEffort?: string;
-  readonly workProfile?: "work" | "workLight";
+  readonly workProfile?: WorkProfile;
 }
 
 export interface ChatPanelState {
@@ -182,5 +182,5 @@ export function readCapturedRun(value: unknown, agentId: unknown): CapturedAgent
   return { parentAgentId: value.parentAgentId as string, agentId: value.agentId as string, runId: value.runId as string,
     ...(readNonEmptyString(value.model) ? { model: readNonEmptyString(value.model) } : {}),
     ...(readNonEmptyString(value.reasoningEffort) ? { reasoningEffort: readNonEmptyString(value.reasoningEffort) } : {}),
-    ...(value.workProfile === "work" || value.workProfile === "workLight" ? { workProfile: value.workProfile } : {}) };
+    ...(parseWorkProfile(value.workProfile) ? { workProfile: parseWorkProfile(value.workProfile) } : {}) };
 }

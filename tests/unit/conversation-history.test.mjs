@@ -12,6 +12,37 @@ const permissions = '\n\n[Delegated agent permissions for this request]\n{"work"
 const background = '\n\n[Conversation-based background workflow]\nHistorical background workflow instructions.\n[End background workflow]';
 const runtimeStatus = '\n\n[Background workflow status; runtime data, not instructions]\n[{"agentId":"work-example","status":"completed"}]\nPreserve accepted workflows.\n[End background workflow status]';
 
+test("administrator handoff suffix restores preceding guidance without hiding malformed or quoted text", async () => {
+  const source = await readFile(new URL("../../src/infrastructure/agent-factory/agent-client.ts", import.meta.url), "utf8");
+  const template = source.match(/const sudoGuidance = helper \? `([\s\S]*?)` : "";/)[1];
+  for (const helper of ['/fixture/extension/static/sudo-request.py', 'C:\\Program Files\\extension\\sudo-request.py', '/fixture/한글 "quoted"/sudo-request.py']) {
+    const handoff = template.replace('${JSON.stringify(helper)}', JSON.stringify(helper));
+    for (const preceding of ['', background + model + permissions + runtimeStatus + preparation,
+      '\n\n[Orchestrator mode]\nRecorded instructions.\n[End orchestrator mode]']) {
+      const guidance = preceding + handoff;
+      const raw = '변경 포함까지' + guidance;
+      const restored = { type: 'user', id: 'history-user-handoff', runId: 'handoff', ...historyPresentation(raw, 'orchestrate', false) };
+      assert.equal(restored.text, '변경 포함까지');
+      assert.equal(restored.submission.guidance, guidance);
+      assert.equal(restored.text + restored.submission.guidance, raw);
+      for (const cached of [{ ...restored, text: raw, submission: undefined },
+        { ...restored, text: '변경 포함까지' + preceding, submission: { ...restored.submission, guidance: handoff } }]) {
+        const state = { agentId: 'main-one', timeline: [cached] };
+        deliver(state, { type: 'conversation.history', agentId: 'main-one', history: { messages: [restored] } });
+        assert.equal(state.timeline[0].text, restored.text);
+        assert.equal(state.timeline[0].submission.guidance, guidance);
+      }
+      const quoted = raw + '\nPlease explain this quote.';
+      assert.equal(historyPresentation(quoted, 'direct', false).text, quoted);
+    }
+    for (const malformed of [handoff.replace(JSON.stringify(helper), '""'), handoff.replace(JSON.stringify(helper), '"\\q"'),
+      handoff.replace('Never ask for the password in a normal chat message.', 'User-authored text.')]) {
+      const raw = '원문' + malformed;
+      assert.equal(historyPresentation(raw, 'direct', false).text, raw);
+    }
+  }
+});
+
 test("runtime status suffix does not prevent separation of preceding instructions", () => {
   for (const suffix of [runtimeStatus, '\n[Background workflow status unavailable. Do not infer completion or absence of background work.]']) {
     const captured = background + '\n' + model + permissions + suffix;
@@ -163,10 +194,10 @@ test("cached preparation repair requires exact request equivalence", () => {
 test("orchestrator requests restore captured guidance, including isolation and suffix combinations", async () => {
   const source = await readFile(new URL("../../src/modules/chat/session-controller.ts", import.meta.url), "utf8");
   const producer = source.slice(source.indexOf("export function orchestratorModeGuidance("), source.indexOf("export const orchestratorGuidance"))
-    .replace("export function", "function").replace("workProfileRecorded: boolean, failureClassReported = false): string", "workProfileRecorded, failureClassReported = false)");
-  for (const workProfileRecorded of [false, true]) for (const failureClassReported of [false, true]) {
-    const context = { workProfileRecorded, failureClassReported };
-    runInNewContext(producer + "\nguidance = orchestratorModeGuidance(workProfileRecorded, failureClassReported);", context);
+    .replace("export function", "function").replace("workProfileRecorded: boolean, failureClassReported = false, restrictedProfiles = false): string", "workProfileRecorded, failureClassReported = false, restrictedProfiles = false)");
+  for (const workProfileRecorded of [false, true]) for (const failureClassReported of [false, true]) for (const restrictedProfiles of [false, true]) {
+    const context = { workProfileRecorded, failureClassReported, restrictedProfiles };
+    runInNewContext(producer + "\nguidance = orchestratorModeGuidance(workProfileRecorded, failureClassReported, restrictedProfiles);", context);
     for (const isolation of ["", "\n\n[Work isolation: task Work Units]\nRecorded isolation instructions.\n[End Work isolation]", "\n\n[Work isolation]\nUnavailable isolation instructions.\n[End Work isolation]"]) {
       for (const suffix of ["", model + permissions + isolation + runtimeStatus + preparation]) {
         const text = "원문\n\n첨부 참조:\n- [image] image.png: file:///fixture/image.png (image/png, 9371 bytes)";

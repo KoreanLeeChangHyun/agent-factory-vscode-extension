@@ -22,6 +22,19 @@ export function historyPresentation(request: string, taskMode: TaskMode, goal: b
     ["Verification selection: standalone inspection by Main, for this request only", "End inspection guidance"]
   ];
   while (true) {
+    // inputCommand appends this legacy, unclosed envelope after all other guidance.
+    // Match its complete recorded body so a quoted heading cannot hide user text.
+    const handoff = /\n\[Agent Factory administrator command handoff\]\nWhen a command needs sudo and the Human has requested it, use python3 ("(?:[^"\\\r\n]|\\.)+") -- <executable> <arguments\.\.\.>\. This opens a protected password form in the current Main chat\. Pass exact argument tokens, never a shell command string\. Wait for the command result before reporting completion\. Never ask for the password in a normal chat message\.\n\s*$/.exec(text);
+    if (handoff) {
+      try {
+        const helper = JSON.parse(handoff[1]!);
+        if (typeof helper === "string" && helper.trim()) {
+          blocks.unshift(text.slice(handoff.index));
+          text = text.slice(0, handoff.index);
+          continue;
+        }
+      } catch { /* Malformed or quoted instructions remain visible user text. */ }
+    }
     const unavailable = "\n[Background workflow status unavailable. Do not infer completion or absence of background work.]";
     if (text.trimEnd().endsWith(unavailable)) {
       const index = text.lastIndexOf(unavailable);

@@ -50,6 +50,8 @@
 .agent-settings-columns { padding-bottom: 5px; font-size: 11px; color: var(--vscode-descriptionForeground); }
 .agent-settings-columns > :last-child { justify-self: center; white-space: nowrap; }
 .agent-model-row { box-sizing: border-box; min-height: 64px; padding: 5px 0; min-width: 0; font-size: 12px; }
+/* Short panels: slightly tighter rows keep all six agents visible without scrolling. */
+@media (max-height: 640px) and (min-width: 465px) { .agent-model-row { min-height: 58px; padding: 2px 0; } }
 .agent-model-name { font-size: 12px; font-weight: 500; overflow-wrap: anywhere; }
 .agent-model-row label { min-width: 0; }
 .agent-model-caption { display: none; }
@@ -148,7 +150,8 @@
 .agent-permissions-heading span { font-size: 11px; color: var(--vscode-descriptionForeground); }
 .agent-permissions-row p { margin: 8px 0 0; font-size: 11px; line-height: 1.5; color: var(--vscode-descriptionForeground); }
 @media (max-width: 560px) {
-  .agent-model-menu { position: fixed; inset: 12px; width: auto; max-width: none; max-height: none; }
+  /* A full-screen menu scrolls instead of squeezing its six agent rows. */
+  .agent-model-menu { position: fixed; inset: 12px; width: auto; max-width: none; max-height: none; grid-auto-rows: max-content; }
   .agent-settings-heading { margin-bottom: 4px; }
 }
 
@@ -211,6 +214,19 @@
 .settings-tabs { display: flex; flex-shrink: 0; gap: 4px; margin: 8px 0; border-bottom: 1px solid var(--vscode-widget-border, var(--vscode-panel-border)); }
 .settings-panel { flex: 1; min-height: 0; overflow: auto; overscroll-behavior: contain; scrollbar-width: none; scrollbar-gutter: auto; }
 .settings-panel::-webkit-scrollbar { width: 0; height: 0; }
+
+/* Fit the compact settings tabs by arranging content, retaining scrolling as an
+   accessibility fallback for unusually small windows or enlarged text. */
+#settings-panel-general,
+#settings-panel-agents,
+#settings-panel-providers,
+#settings-panel-bot { --settings-control-height: 28px; }
+#settings-panel-general :is(.agent-permissions-row, .general-language) { margin-block: 8px; }
+#settings-panel-providers .provider-row { padding: 6px 8px; gap: 3px; margin-bottom: 5px; }
+#settings-panel-providers .provider-version-controls { margin-top: 2px; gap: 4px; }
+#settings-panel-providers .provider-factory-version-controls { margin-top: 0; margin-bottom: 5px; }
+#settings-panel-providers .provider-path-edit { gap: 4px; }
+#settings-panel-bot:not([hidden]) { gap: 6px; }
 
 .settings-panel[hidden], .factory-bot[hidden] { display: none; }
 .settings-option { display: flex; align-items: center; gap: 8px; margin: 14px 4px 6px; }
@@ -495,6 +511,40 @@
   .aligned-settings .agent-reasoning-control > .agent-model-caption { display: block; grid-row: 1; grid-column: 1; }
   .aligned-settings .agent-reasoning-value { justify-self: end; font-size: 10px; }
   .aligned-settings .agent-fast-control > .agent-model-caption { display: none; }
+}
+
+/* Only the full settings editor is compressed; chat's model popover is separate. */
+#global-agent-settings .agent-model-row { min-height: 44px; padding-block: 2px; gap: 3px 6px; }
+#global-agent-settings .agent-model-row > :is(label, .agent-fast-control) { grid-template-rows: 12px 28px; gap: 0; }
+#global-agent-settings .model-picker-button { height: 28px; }
+#global-agent-settings .model-picker-button::after { top: 10px; }
+#global-agent-settings .agent-reasoning-slider { height: 24px; }
+#global-agent-settings .agent-reasoning-slider progress { height: 18px; }
+#global-agent-settings .agent-reasoning-control input[type="range"] { height: 24px; }
+#global-agent-settings .agent-reasoning-control input::-webkit-slider-runnable-track { height: 18px; }
+#global-agent-settings .agent-reasoning-control input::-webkit-slider-thumb { width: 24px; height: 24px; }
+#global-agent-settings .agent-fast-toggle { min-height: 28px; }
+#global-agent-settings .agent-fast-placeholder { min-height: 40px; }
+@container (max-width: 410px) {
+  #global-agent-settings .agent-model-row > :is(.agent-fast-control, .agent-fast-placeholder) { min-height: 20px; }
+  #global-agent-settings .agent-fast-toggle { min-height: 20px; }
+}
+@media (max-height: 480px) and (min-width: 465px) {
+  #global-agent-settings .agent-settings-heading { margin-bottom: 2px; }
+  #global-agent-settings .agent-settings-columns { padding-bottom: 0; }
+  #global-agent-settings .agent-model-row { min-height: 34px; padding-block: 0; }
+  #global-agent-settings .agent-model-row > :is(label, .agent-fast-control) { grid-template-rows: 11px 24px; gap: 0; }
+  #global-agent-settings .agent-model-row > .agent-model-picker { display: flex; align-items: center; }
+  #global-agent-settings .model-picker-button { height: 28px; }
+  #global-agent-settings .agent-reasoning-slider { height: 24px; }
+  #global-agent-settings .agent-fast-placeholder { min-height: 35px; }
+  #settings-panel-providers .provider-settings { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 4px; align-items: start; }
+  #settings-panel-providers .provider-factory-version-controls,
+  #settings-panel-providers .provider-missing { grid-column: 1 / -1; }
+  #settings-panel-providers .provider-row { min-width: 0; margin: 0; }
+  #settings-panel-providers .provider-row-head { flex-wrap: wrap; gap: 0 6px; }
+  #settings-panel-providers .provider-path-edit { grid-template-columns: minmax(0, 1fr) auto auto; }
+  #settings-panel-providers .provider-settings button { padding-inline: 5px; }
 }
 
 @media (max-height: 480px) {

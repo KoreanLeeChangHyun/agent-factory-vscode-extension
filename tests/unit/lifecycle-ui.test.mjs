@@ -13,24 +13,11 @@ function element(tag) {
     addEventListener(name, fn) { this.listeners[name] = fn; } };
 }
 
-test("workflow answer validates complete identity and preserves question and draft across renders", async () => {
+test("workflow answer compatibility still validates exact decision identity without an inline card form", async () => {
   const { parseClientMessage } = await importTypeScript("src/protocol/validator.ts");
-  const messages = [], context = { document: { createElement: element }, t: key => key,
-    vscode: { postMessage: value => messages.push(value) }, workDecisionDrafts: new Map() };
-  runInNewContext(section("  function createWorkDecision(", "  // A loop stopped"), context);
-  const flow = { workAgentId: "work-1", loopId: "loop-1",
-    pendingDecision: { id: "decision-1", questionHash: "a".repeat(64), question: "<b>Exact scope?</b>" } };
-  const first = context.createWorkDecision(flow);
-  assert.equal(first.children[0].textContent, flow.pendingDecision.question);
-  first.children[1].value = "Use the existing target.";
-  first.children[1].listeners.input();
-  const restored = context.createWorkDecision(flow);
-  assert.equal(restored.children[1].value, "Use the existing target.");
-  restored.children[2].listeners.click();
-  const answer = JSON.parse(JSON.stringify(messages[0]));
+  const answer = { type: "workflow.answer", workAgentId: "work-1", loopId: "loop-1",
+    decisionId: "decision-1", questionHash: "a".repeat(64), answer: "Use the existing target." };
   assert.deepEqual(parseClientMessage(answer), answer);
-  assert.equal(answer.questionHash, flow.pendingDecision.questionHash);
-  assert.equal(restored.children[2].disabled, true);
   for (const invalid of [{ questionHash: "bad" }, { answer: " " }, { decisionId: "../other" }]) {
     assert.equal(parseClientMessage({ ...answer, ...invalid }), undefined);
   }

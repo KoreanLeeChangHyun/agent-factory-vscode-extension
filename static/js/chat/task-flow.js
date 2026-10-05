@@ -8,13 +8,17 @@ globalThis.AgentFactoryChat.taskFlow = function (host) {
     childAgentStatusLabel, persist
   } = host;
 
+  document.addEventListener("visibilitychange", function () {
+    refreshTaskDurations();
+    if (!document.hidden && document.querySelector(".task-flow-progress[data-duration-start]:not([data-duration-end])")) startTaskDurationTimer();
+  });
+
   const taskFlowParseCache = new WeakMap();
   let taskFlowSnapshot;
   // Loops whose revision-limit decision was clicked and is not answered by the host yet.
   const workflowDecisionsPending = new Set();
   const taskStopsPending = new Set();
   const taskStopErrors = new Map();
-  const workDecisionDrafts = new Map();
   // Revisions one "Continue" authorizes; the host passes the same number to the runtime.
   const REVISION_LIMIT_EXTENSION = 3;
   function extractTaskFlows(text) {
@@ -92,13 +96,14 @@ globalThis.AgentFactoryChat.taskFlow = function (host) {
       const candidate = { id: workflow.id, title: workflow.title, tasks };
       if (!extractTaskFlows("```task-flow\n" + JSON.stringify(candidate) + "\n```").flows.length) continue;
       const pause = revisionLimitPause(snapshot);
+      const review = draftReview(snapshot);
       flows.set(workflow.id, { ...candidate, engine: true, loopId: snapshot.loopId, workAgentId: snapshot.workAgentId, closable: snapshot.status === "runtime-error", engineStatus: snapshot.status, stopPending: snapshot.stopPending === true,
         pendingDecision: snapshot.pendingDecision?.status === "pending" ? snapshot.pendingDecision : undefined,
         completion: snapshot.completion,
         integrationTaskId: workflow.tasks[workflow.index ?? 0]?.id,
         ...(snapshot.status === "needs-human-decision" && (workflow.tasks.length === 1 || Number.isInteger(workflow.index))
           ? { decisionTaskId: workflow.tasks[workflow.index ?? 0]?.id } : {}),
-        ...(pause ? { pause } : {}) });
+        ...(pause ? { pause } : {}), ...(review ? { draftReview: review } : {}) });
       // A loop's start outlives its revisions and repair runs, so it wins over any single run's time.
       if (validDispatchTime(snapshot.dispatchedAt)) dispatchTimes.set(workflow.id, snapshot.dispatchedAt);
     }
@@ -125,6 +130,12 @@ globalThis.AgentFactoryChat.taskFlow = function (host) {
     return [...ordered, ...dispatched];
   }
   // The runtime's structured stop on the revision limit, reduced to what the decision view shows.
+  // A completed Scribe loop's uncommitted draft and the Human's recorded review decision.
+  function draftReview(snapshot) {
+    const review = snapshot.draftReview;
+    if (!review || snapshot.status !== "completed" || !["pending", "changes-requested", "accepted", "discarded"].includes(review.status)) return undefined;
+    return { status: review.status, paths: (Array.isArray(review.paths) ? review.paths : []).filter(path => typeof path === "string").slice(0, 50) };
+  }
   function revisionLimitPause(snapshot) {
     const pause = snapshot.pause;
     if (!pause || pause.code !== "revision_limit_reached" || snapshot.status !== "needs-human-decision") return undefined;
@@ -153,7 +164,7 @@ globalThis.AgentFactoryChat.taskFlow = function (host) {
   }
   function summarizeTaskFlow(flow, live) {
     const groups = new Map();
-    const assignments = { workLight: new Set(), work: new Set(), unrecorded: new Set() };
+    const assignments = { workLight: new Set(), work: new Set(), explore: new Set(), scribe: new Set(), unrecorded: new Set() };
     for (const task of flow.tasks) {
       const id = task.taskId || task.id;
       if (!groups.has(id)) groups.set(id, []);
@@ -179,7 +190,12 @@ globalThis.AgentFactoryChat.taskFlow = function (host) {
       assignments: Object.fromEntries(Object.entries(assignments).map(([profile, agents]) => [profile, agents.size])), counts, current };
   }
   function recordedWorkProfile(value) {
-    return value === "work" || value === "workLight" ? value : undefined;
+    return Object.hasOwn(PROFILE_ROLES, value) ? value : undefined;
+  }
+  // Each recorded Work profile's role name in labels, counts and the role tint.
+  const PROFILE_ROLES = { work: "expert", workLight: "worker", explore: "explorer", scribe: "scribe" };
+  function openSessionKey(profile) {
+    return profile === "workLight" ? "flow.open.work.session" : "flow.open." + PROFILE_ROLES[profile] + ".session";
   }
   function workProfileForTask(task) {
     const agentId = task.sessionAgentId || task.agentId;
@@ -208,12 +224,12 @@ globalThis.AgentFactoryChat.taskFlow = function (host) {
     assignment.className = "task-flow-assignment task-flow-agent";
     assignment.dataset.assigned = String(Boolean(agentId && (profile || role === "verification")));
     const key = stage === "verification" || role === "verification" ? "ui.verification" : !agentId ? "flow.role.unassigned"
-      : profile ? "flow.role." + (profile === "workLight" ? "worker" : "expert") : "flow.role.unavailable";
+      : profile ? "flow.role." + PROFILE_ROLES[profile] : "flow.role.unavailable";
     assignment.textContent = t(key);
     assignment.title = agentId || assignment.textContent;
     if (agentId && role !== "verification" && !profile) assignment.dataset.unrecorded = "true";
     // A subtle text tint distinguishes the recorded role; the label still carries the meaning.
-    if (agentId && (role === "verification" || profile)) assignment.dataset.agentRole = role === "verification" ? "verifier" : profile === "workLight" ? "worker" : "expert";
+    if (agentId && (role === "verification" || profile)) assignment.dataset.agentRole = role === "verification" ? "verifier" : PROFILE_ROLES[profile];
     if (canOpen) {
       assignment.type = "button";
       assignment.setAttribute("aria-label", task.title + " · " + assignment.textContent + t("ui.open.session"));
@@ -267,19 +283,61 @@ globalThis.AgentFactoryChat.taskFlow = function (host) {
       activity.setAttribute("aria-label", t("flow.activity.label", activityText));
       summary.append(activity);
     }
-    // A task whose agent kept no to-do list is one step: 0/1 until it completes, then 1/1.
     const recorded = agent?.planProgress;
-    const progress = recorded && Number.isInteger(recorded.completed) && Number.isInteger(recorded.total) && recorded.total > 0
-      ? recorded : { completed: liveTaskStatus(work) === "completed" ? 1 : 0, total: 1 };
-    {
-      const steps = document.createElement("span");
-      steps.className = "task-flow-progress";
-      steps.textContent = progress.completed + "/" + progress.total;
-      steps.title = t("flow.progress", progress.completed, progress.total);
+    const steps = document.createElement("span");
+    steps.className = "task-flow-progress";
+    if (recorded && Number.isInteger(recorded.completed) && Number.isInteger(recorded.total) &&
+        recorded.total > 0 && recorded.completed >= 0 && recorded.completed <= recorded.total) {
+      steps.textContent = recorded.completed + "/" + recorded.total;
+      steps.title = t("flow.progress", recorded.completed, recorded.total);
       steps.setAttribute("aria-label", steps.title);
-      summary.append(steps);
+    } else {
+      // Use this exact stage's run, never dispatch/update times or another stage's clock.
+      const timedAgent = taskStageAgent(selected);
+      const start = Date.parse(timedAgent?.startedAt);
+      const finish = Date.parse(timedAgent?.finishedAt);
+      const running = ["running", "verifying", "cancelling"].includes(timedAgent?.status);
+      const end = running ? Date.now() : finish;
+      if (Number.isFinite(start) && Number.isFinite(end) && end >= start) {
+        steps.dataset.durationStart = String(start);
+        if (!running) steps.dataset.durationEnd = String(end);
+        updateTaskDuration(steps);
+        if (running) startTaskDurationTimer();
+      } else {
+        steps.textContent = "—";
+        steps.title = t("flow.duration.missing");
+        steps.setAttribute("aria-label", steps.title);
+      }
     }
+    summary.append(steps);
   }
+  function updateTaskDuration(node) {
+    const start = Number(node.dataset.durationStart);
+    const end = node.dataset.durationEnd === undefined ? Date.now() : Number(node.dataset.durationEnd);
+    const seconds = Math.max(0, end - start) / 1000;
+    const text = seconds < 60 ? t("duration.seconds", Math.floor(seconds))
+      : seconds < 3600 ? t("flow.duration.minutes", Math.floor(seconds / 60))
+      : t("flow.duration.hours", Math.round(seconds / 360) / 10);
+    if (node.textContent !== text) node.textContent = text;
+    node.title = node.dataset.durationEnd === undefined
+      ? t("flow.duration.elapsed", seconds, new Date(start).toISOString())
+      : t("flow.duration.finished", seconds, new Date(start).toISOString(), new Date(end).toISOString());
+    node.setAttribute("aria-label", node.title);
+  }
+  let taskDurationTimer;
+  function refreshTaskDurations() {
+    const nodes = document.querySelectorAll(".task-flow-progress[data-duration-start]:not([data-duration-end])");
+    if (document.hidden || !nodes.length) {
+      clearInterval(taskDurationTimer);
+      taskDurationTimer = undefined;
+      return;
+    }
+    nodes.forEach(updateTaskDuration);
+  }
+  function startTaskDurationTimer() {
+    if (!taskDurationTimer && !document.hidden) taskDurationTimer = window.setInterval(refreshTaskDurations, 1000);
+  }
+
   function taskHasActiveWorker(task, flow) {
     if (flow?.engine && flow.engineStatus !== "active") return false;
     const agentId = task.sessionAgentId || task.agentId;
@@ -469,6 +527,12 @@ globalThis.AgentFactoryChat.taskFlow = function (host) {
       label.textContent = t("flow.integration." + integration);
       label.dataset.observedStatus = "integration-" + integration;
     }
+    // A Scribe's completed work is a draft until the Human decides; the status column shows that decision.
+    const review = !verification && observed === "completed" && flow.integrationTaskId === (task.taskId || task.id) ? flow.draftReview : undefined;
+    if (review) {
+      label.textContent = t("flow.review." + review.status);
+      label.dataset.observedStatus = "review-" + review.status;
+    }
     // A row whose run is actually executing uses the workflow header's pulse: breathing core and staggered rings.
     if (["running", "verifying"].includes(observed) && taskStageRunning(task, flow)) {
       const pulse = document.createElement("span");
@@ -477,8 +541,9 @@ globalThis.AgentFactoryChat.taskFlow = function (host) {
       label.dataset.pulse = "true";
       label.prepend(pulse);
     }
-    const detail = t(observed === "completed" ? "flow.status.detail." + (verification ? "verification.completed" : "completed")
-      : "flow.status.detail." + observed);
+    const detail = review ? t("flow.review.detail", review.paths.join(", ") || "—")
+      : t(observed === "completed" ? "flow.status.detail." + (verification ? "verification.completed" : "completed")
+        : "flow.status.detail." + observed);
     label.title = detail;
     label.setAttribute("aria-label", label.textContent + " · " + detail);
     label.setAttribute("role", "status");
@@ -539,7 +604,7 @@ globalThis.AgentFactoryChat.taskFlow = function (host) {
       open.className = "task-flow-open setting-button";
       const profile = role === "verification" ? undefined : workProfileForTask(task);
       open.textContent = role === "verification" ? t("flow.open.verification.session")
-        : profile ? t(profile === "workLight" ? "flow.open.work.session" : "flow.open.expert.session")
+        : profile ? t(openSessionKey(profile))
         : t("flow.assignment.unrecorded") + t("ui.open.session");
       open.setAttribute("aria-label", work.title + " · " + open.textContent);
       open.title = agentId;
@@ -566,7 +631,6 @@ globalThis.AgentFactoryChat.taskFlow = function (host) {
       section.classList.add("task-flow-single-container");
       section.append(createSingleTaskFlowCard(flow, logicalTasks.values().next().value, live));
       if (decision) section.append(createRevisionLimitDecision(flow, flow.tasks[0].title));
-      if (live && flow.pendingDecision && state.role === "main") section.append(createWorkDecision(flow));
       if (live && flow.completion) section.append(createIntegrationOutcome(flow));
       return section;
     }
@@ -591,14 +655,16 @@ globalThis.AgentFactoryChat.taskFlow = function (host) {
     size.textContent = t("flow.task.count", totals.total);
     const assignments = document.createElement("span");
     assignments.className = "task-flow-assignments task-flow-summary-assignments";
-    for (const profile of ["workLight", "work"]) {
+    // Worker and Expert always show; Explorer and Scribe only when the flow assigned them.
+    for (const profile of ["workLight", "work", "explore", "scribe"]) {
       const count = totals.assignments[profile];
+      if (!count && (profile === "explore" || profile === "scribe")) continue;
       const badge = document.createElement("span");
       badge.className = "task-flow-assignment";
       badge.dataset.assigned = String(count > 0);
       badge.textContent = count > 0
-        ? t("flow.assignment." + (profile === "workLight" ? "worker" : "expert") + ".count", count)
-        : t("flow.assignment." + (profile === "workLight" ? "worker" : "expert") + ".unassigned");
+        ? t("flow.assignment." + PROFILE_ROLES[profile] + ".count", count)
+        : t("flow.assignment." + PROFILE_ROLES[profile] + ".unassigned");
       assignments.append(badge);
     }
     if (totals.assignments.unrecorded > 0) {
@@ -626,7 +692,6 @@ globalThis.AgentFactoryChat.taskFlow = function (host) {
       current.setAttribute("aria-atomic", "true");
     }
     section.append(summary, current);
-    if (live && flow.pendingDecision && state.role === "main") section.append(createWorkDecision(flow));
     if (live && flow.completion) section.append(createIntegrationOutcome(flow));
     if (decision) {
       const paused = flow.tasks.find(task => (task.taskId || task.id) === flow.pause.taskId) || flow.tasks[0];
@@ -692,7 +757,7 @@ globalThis.AgentFactoryChat.taskFlow = function (host) {
         open.className = "task-flow-open setting-button";
         const profile = role === "verification" ? undefined : workProfileForTask(stage);
         open.textContent = role === "verification" ? t("flow.open.verification.session")
-          : profile ? t(profile === "workLight" ? "flow.open.work.session" : "flow.open.expert.session")
+          : profile ? t(openSessionKey(profile))
           : t("flow.assignment.unrecorded") + t("ui.open.session");
         open.setAttribute("aria-label", task.title + " · " + open.textContent);
         open.title = agentId;
@@ -712,28 +777,6 @@ globalThis.AgentFactoryChat.taskFlow = function (host) {
     outcome.dataset.integrationStatus = flow.completion.integration;
     outcome.textContent = t("flow.integration." + flow.completion.integration);
     return outcome;
-  }
-  function createWorkDecision(flow) {
-    const decision = flow.pendingDecision;
-    const view = document.createElement("div");
-    view.className = "task-flow-decision";
-    const question = document.createElement("pre");
-    question.textContent = decision.question;
-    const input = document.createElement("textarea");
-    input.setAttribute("aria-label", t("flow.answer"));
-    input.value = workDecisionDrafts.get(decision.id) || "";
-    input.addEventListener("input", () => workDecisionDrafts.set(decision.id, input.value));
-    const send = document.createElement("button");
-    send.type = "button";
-    send.textContent = t("flow.answer.send");
-    send.addEventListener("click", () => {
-      if (!input.value.trim()) return;
-      send.disabled = true;
-      vscode.postMessage({ type: "workflow.answer", workAgentId: flow.workAgentId, loopId: flow.loopId,
-        decisionId: decision.id, questionHash: decision.questionHash, answer: input.value });
-    });
-    view.append(question, input, send);
-    return view;
   }
   // A loop stopped on its revision limit: what was tried, what remains, and the Human's two decisions.
   function createRevisionLimitDecision(flow, taskTitle) {
@@ -1021,11 +1064,11 @@ globalThis.AgentFactoryChat.taskFlow = function (host) {
   }
   function runningRoleCounts() {
     const active = new Set(["accepted", "queued", "starting", "running", "verifying", "cancelling"]);
-    const counts = { expert: 0, worker: 0, verifier: 0, unrecorded: 0 };
+    const counts = { expert: 0, worker: 0, explorer: 0, scribe: 0, verifier: 0, unrecorded: 0 };
     for (const agent of state.childAgents) {
       if (!active.has(agent.status)) continue;
       if (agent.role === "verification") counts.verifier += 1;
-      else if (agent.role === "work") counts[agent.workProfile === "work" ? "expert" : agent.workProfile === "workLight" ? "worker" : "unrecorded"] += 1;
+      else if (agent.role === "work") counts[PROFILE_ROLES[recordedWorkProfile(agent.workProfile)] || "unrecorded"] += 1;
     }
     return Object.entries(counts).map(([role, count]) => ["flow.header." + role, count]);
   }

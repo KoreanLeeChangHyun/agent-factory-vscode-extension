@@ -201,5 +201,6 @@ async function checkImageComposer(page) {
   // Leave the existing rendering suite with its original empty draft.
   while (await page.locator('.attachment-remove').count()) await page.locator('.attachment-remove').first().click();
   await page.locator('#prompt').fill('');
+  await require('./clipboard-images.cjs').checkClipboardImages(page);
 }
 module.exports = { checkImageComposer };

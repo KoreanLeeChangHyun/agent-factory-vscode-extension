@@ -54,6 +54,7 @@ interface PendingSend {
   readonly execution: ExecutionOptions;
   readonly resolve?: () => void;
   readonly onStarted?: (submission: MessageSubmission) => void;
+  readonly onFailure?: (error: unknown) => void;
 }
 
 export class ChatSessionController {
@@ -263,7 +264,8 @@ export class ChatSessionController {
     text: string,
     attachments: readonly AttachmentReference[],
     execution: ExecutionOptions,
-    onStarted?: (submission: MessageSubmission) => void
+    onStarted?: (submission: MessageSubmission) => void,
+    onFailure?: (error: unknown) => void
   ): Promise<void> {
     if (this.worktreeInFlight) await this.worktreeInFlight;
     if (this.conversationResetInFlight) await this.conversationResetInFlight;
@@ -272,24 +274,27 @@ export class ChatSessionController {
     attachments = attachments.map(attachment => ({ ...attachment }));
     if (this.busy || (this.goalControlPending && this.pendingGoalAction === "reopen")) {
       return new Promise((resolve) => {
-        this.queuedSends.push({ text, attachments, execution, resolve, onStarted });
+        this.queuedSends.push({ text, attachments, execution, resolve, onStarted, onFailure });
         this.events.onQueueChanged?.(this.queuedSends.length);
       });
     }
     if (this.goalControlPending) {
-      this.events.onError(localize("ui.the.previous.goal.control.request.is.still.processing.send.again.after.it.finishes"));
+      const message = localize("ui.the.previous.goal.control.request.is.still.processing.send.again.after.it.finishes");
+      if (onFailure) onFailure(new Error(message));
+      else this.events.onError(message);
       if (!this.running) this.events.onRunningChanged(false);
       return;
     }
     if ((this.queuedSends.length || this.currentRunId) && !this.pendingDecisionRunId) {
       const queued = new Promise<void>(resolve => {
-        this.queuedSends.push({ text, attachments, execution, resolve, onStarted });
+        this.queuedSends.push({ text, attachments, execution, resolve, onStarted, onFailure });
         this.events.onQueueChanged?.(this.queuedSends.length);
       });
       await this.reconnect();
       return queued;
     }
-    await this.sendAndDrainQueue(text, attachments, execution, true, onStarted);
+    await this.sendAndDrainQueue(text, attachments, execution, true, onStarted,
+      [{ text, attachments, execution, onStarted, onFailure }]);
   }
 
   private async sendAndDrainQueue(
@@ -350,7 +355,7 @@ export class ChatSessionController {
         }
         attempted = true;
         const advertised = await this.delegationCapabilities(next[0]!.execution);
-        const merged = mergePendingSends(next, advertised.workProfile, advertised.failureClass, advertised.taskWorkspaces, advertised.workIsolation);
+        const merged = mergePendingSends(next, advertised.workProfile, advertised.failureClass, advertised.taskWorkspaces, advertised.workIsolation, advertised.restrictedWorkProfiles);
         if (next.length > 1) this.events.onProgress(localize("ui.submitting.0.queued.messages.as.one.request.task.mode.model.and.reasoning.use.the.first.message.settings.permissions.use.their.common.allowed.scope", next.length));
         // An older runtime rejects the unknown flag; the guidance then reports the limitation instead.
         const { workIsolation, ...withoutIsolation } = merged.execution;
@@ -379,7 +384,11 @@ export class ChatSessionController {
           // Never replay an unacknowledged submission. The host restores originals.
           for (const item of next) item.resolve?.();
         }
-        this.events.onError(errorMessage(error));
+        // Engine deliveries own their durable failure state and notification.
+        // Preserve the structured rejection instead of resolving it as success.
+        if (next.some(item => item.onFailure)) {
+          for (const item of next) item.onFailure?.(error);
+        } else this.events.onError(errorMessage(error));
         break;
       }
       for (const item of next) item.resolve?.();
@@ -400,13 +409,14 @@ export class ChatSessionController {
   }
 
   /** What the installed runtime advertises: it accepts `--work-profile` (an older one rejects the unknown flag) and reports `failureClass`. */
-  private async delegationCapabilities(execution: ExecutionOptions): Promise<{ readonly workProfile: boolean; readonly failureClass: boolean; readonly taskWorkspaces: boolean; readonly workIsolation: boolean }> {
-    const none = { workProfile: false, failureClass: false, taskWorkspaces: false, workIsolation: false };
+  private async delegationCapabilities(execution: ExecutionOptions): Promise<{ readonly workProfile: boolean; readonly failureClass: boolean; readonly taskWorkspaces: boolean; readonly workIsolation: boolean; readonly restrictedWorkProfiles: boolean }> {
+    const none = { workProfile: false, failureClass: false, taskWorkspaces: false, workIsolation: false, restrictedWorkProfiles: false };
     if ((execution.taskMode ?? "direct") === "direct") return none;
     // Same cached probe the dispatch itself uses; a failed probe only omits the instructions.
     try {
       const { submit } = await this.runtime.capabilities(this.agentId, execution.model);
-      return { workProfile: submit.workProfile === true, failureClass: submit.failureClass === true, taskWorkspaces: submit.taskWorkspaces === true, workIsolation: submit.workIsolation === true };
+      return { workProfile: submit.workProfile === true, failureClass: submit.failureClass === true, taskWorkspaces: submit.taskWorkspaces === true, workIsolation: submit.workIsolation === true,
+        restrictedWorkProfiles: submit.workProfile === true && submit.restrictedWorkProfiles === true };
     } catch { return none; }
   }
 
@@ -721,7 +731,7 @@ Answer the Human's current question without cancelling these workflows. For task
   }
 }
 
-function mergePendingSends(items: readonly PendingSend[], workProfileRecorded = false, failureClassReported = false, taskWorkspaces = false, workIsolation = false): Pick<PendingSend, "text" | "attachments" | "execution"> & { submissions: MessageSubmission[] } {
+function mergePendingSends(items: readonly PendingSend[], workProfileRecorded = false, failureClassReported = false, taskWorkspaces = false, workIsolation = false, restrictedProfiles = false): Pick<PendingSend, "text" | "attachments" | "execution"> & { submissions: MessageSubmission[] } {
   const first = items[0]!;
   const mode = first.execution.taskMode ?? "direct";
   // Off (the default) keeps the shared checkout; only the Human's toggle selects isolated Work Units.
@@ -729,7 +739,7 @@ function mergePendingSends(items: readonly PendingSend[], workProfileRecorded = 
     : taskWorkspaces && workIsolation ? taskWorkspaceGuidance : workIsolationUnavailableGuidance;
   const modelGuidance = mode === "direct"
     ? ""
-    : (mode === "orchestrate" ? orchestratorModeGuidance(workProfileRecorded, failureClassReported) : backgroundWorkflowGuidance) + delegatedModelGuidance(first.execution.agentModels, workProfileRecorded) + delegatedPermissionGuidance(first.execution.agentPermissions) + isolationGuidance;
+    : (mode === "orchestrate" ? orchestratorModeGuidance(workProfileRecorded, failureClassReported, restrictedProfiles) : backgroundWorkflowGuidance) + delegatedModelGuidance(first.execution.agentModels, workProfileRecorded) + delegatedPermissionGuidance(first.execution.agentPermissions) + isolationGuidance;
   const inspectionGuidance = first.execution.inspectionOnly ? withInspectionGuidance("") : "";
   const workflowGuidanceParts: string[] = [];
   const submissions = items.map(item => {
@@ -840,7 +850,7 @@ function delegatedPermissionGuidance(settings: ExecutionOptions["agentPermission
 }
 
 // Orchestrator mode is the default route, not an explicit dispatch request.
-export function orchestratorModeGuidance(workProfileRecorded: boolean, failureClassReported = false): string {
+export function orchestratorModeGuidance(workProfileRecorded: boolean, failureClassReported = false, restrictedProfiles = false): string {
   // Only a runtime that advertises failureClass is told how to act on it; it never re-dispatches Work itself.
   const failureActions = failureClassReported
     ? " A stopped loop reports failureClass; act on it: contract - the runtime's automatic receipt recovery already ran, so report a run that still ended failed; transient - run loop.py reconcile, read the status once more, then decide; environment - stop and report the cause to the Human; human - pass the decision to the Human; provider - report the provider's message and do not dispatch again unless the Human asks. The one retry of a failed workLight attempt with the work profile applies only when its failureClass is contract or absent."
@@ -849,11 +859,17 @@ export function orchestratorModeGuidance(workProfileRecorded: boolean, failureCl
   const profileRecord = workProfileRecorded
     ? " Also pass --work-profile work or --work-profile workLight matching the profile you chose, including --work-profile work on the one retry after a failed workLight attempt; it only records your choice for the task panel and selects no model."
     : "";
+  // Explorer and Scribe narrow tools in the runtime, so only a runtime that enforces them is told to choose them.
+  const restrictedRecord = workProfileRecorded && restrictedProfiles
+    ? " Two more profiles keep agents within their job: --work-profile explore for research, web search and code exploration that change nothing (the runtime keeps it read-only), and --work-profile scribe for changes confined to the project's docs/ (the runtime lets it write only there, without web access). Pass the explore or scribe entry of the delegated model settings as --work-model/--work-reasoning-effort, or the workLight entry when that profile has none. Code changes that also need document updates stay with workLight or work; afterwards dispatch scribe only when the reported changes affect documents. A failed scribe attempt gets the same one work retry; a failed explore run is reported, not retried with write access. Only you dispatch agents."
+      + " A Scribe's changes are drafts: with Work isolation on give scribe the read-only workspace plan (the shared checkout), never a code plan. When a scribe loop completes with draftReview, list its changed paths and ask the Human to accept, request changes or discard; record the answer with loop.py review --actor human --decision accepted|changes-requested|discarded, and for requested changes dispatch scribe again with the Human's notes. Committing an accepted draft or reverting a discarded one happens only in direct mode with the Human's explicit consent."
+      + " To turn recurring lessons into Skill drafts, dispatch scribe to group docs/lessons-learned records by cause and prepare rule candidates with lessons.py candidate, citing the Human's request as authority; publishing needs the Human's approval of that draft."
+    : "";
   return `
 
 [Orchestrator mode]
 This is ordinary conversation in orchestrator mode, not a Human-selected workflow. Answer greetings, questions, planning, Interview and light lookups of local project files directly without dispatch. Questions about causes or options, consultation, discussion and unclear messages are conversation: answer them and ask before any change.
-When the Human explicitly asks for a project change, or the request needs any web search or external lookup (research, however small), delegate it with a brief instead of a work contract. Write one request file inside this run's directory with four short parts: Goal (one or two sentences), Scope (target files or research topic, and what not to do, such as no commits), Done (what must be true when finished) and Report (result summary and changed paths; sources for research). Then run the installed loop.py start --project-root PROJECT --task-mode work --work-agent UNIQUE_ID --request-file BRIEF with the Work profile flags from the delegated model settings.${profileRecord} Do not write a task-list JSON, run announce-tasks, print a task-flow block, bind a contract, create progress documents or retrieve lessons for a brief; the runtime derives the single task shown in the task panel. Use --task-mode work-verification with --verification-agent only when the Human explicitly asks for verification.
+When the Human explicitly asks for a project change, or the request needs any web search or external lookup (research, however small), delegate it with a brief instead of a work contract. Write one request file inside this run's directory with four short parts: Goal (one or two sentences), Scope (target files or research topic, and what not to do, such as no commits), Done (what must be true when finished) and Report (result summary and changed paths; sources for research). Then run the installed loop.py start --project-root PROJECT --task-mode work --work-agent UNIQUE_ID --request-file BRIEF with the Work profile flags from the delegated model settings.${profileRecord}${restrictedRecord} Do not write a task-list JSON, run announce-tasks, print a task-flow block, bind a contract, create progress documents or retrieve lessons for a brief; the runtime derives the single task shown in the task panel. Use --task-mode work-verification with --verification-agent only when the Human explicitly asks for verification.
 Before dispatch, check that the conversation gives enough to act; if a target, desired outcome or constraint is genuinely missing, ask one focused question instead of guessing. After the runtime accepts the brief, finish this turn promptly with the accepted loop and agent IDs so the Human can keep talking; do not poll the child. When the completion notification arrives, acknowledge the exact result or receipt and report it without reviewing the implementation or rerunning its checks. Report separate Verification as not requested unless it ran. Keep Main Goal disabled for delegated routes. A dispatch acknowledgement is not completion; never invent results.${failureActions}
 [End orchestrator mode]`;
 }

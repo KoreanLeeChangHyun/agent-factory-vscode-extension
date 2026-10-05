@@ -5,7 +5,7 @@
 :root {
   /* Shared outer frame for the composer and the task status panel above it. */
   --af-composer-border: 1px solid color-mix(in srgb, var(--vscode-panel-border, var(--vscode-input-border, #454545)) 84%, var(--vscode-foreground) 6%);
-  --af-composer-radius: 20px;
+  --af-composer-radius: 2px;
   --af-composer-background: color-mix(in srgb, var(--vscode-editorWidget-background) 32%, var(--af-chat-background));
 }
 

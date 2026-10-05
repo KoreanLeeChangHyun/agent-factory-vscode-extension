@@ -19,6 +19,24 @@ function agentsRoot(root) {
   return join(runtimeTestHome, "projects", id, "agents");
 }
 
+test("engine send validates dispatch IDs before runtime calls and preserves structured rejection codes", async () => {
+  const { AgentFactoryClient } = await importTypeScript("src/infrastructure/agent-factory/agent-client.ts");
+  const client = new AgentFactoryClient("unused-exec.py", "/unused-project");
+  let processes = 0;
+  client.checkedExecution = async () => { processes++; return []; };
+  for (const deliveryId of ["report-old", "", "dispatch-a\n", "dispatch-" + "a".repeat(129)]) {
+    await assert.rejects(client.send("main-report", "exact report", { deliveryId }),
+      error => error.code === "invalid_dispatch_id");
+  }
+  assert.equal(processes, 0);
+  client.location = async () => ({ home: "/unused-home", projectId: "unused-project" });
+  client.runRuntimeProcess = async () => ({ exitCode: 1, stderr: "", stdout: JSON.stringify({
+    kind: "error", error: { code: "dispatch_id_collision", message: "Immutable request conflict" }
+  }) });
+  await assert.rejects(client.command(["send"]), error => error.code === "dispatch_id_collision"
+    && error.message === "Immutable request conflict");
+});
+
 test("managed snapshots recover atomic replacement without accepting unsafe paths or stale event offsets", async t => {
   const output = await build({ entryPoints: ['src/infrastructure/agent-factory/agent-client.ts'],
     bundle: true, format: 'cjs', platform: 'node', write: false });
@@ -283,8 +301,8 @@ raise SystemExit(2)
 `);
   const client = new AgentFactoryClient(script, root);
   assert.deepEqual(await client.capabilities(), {
-    submit: { model: true, reasoning: false, fast: false, goal: false, images: false, taskModes: [] },
-    send: { model: false, reasoning: false, fast: false, goal: false, sessionProvider: "claude", images: false, taskModes: [] }
+    submit: { model: true, reasoning: false, fast: false, goal: false, images: undefined, taskModes: [] },
+    send: { model: false, reasoning: false, fast: false, goal: false, sessionProvider: "claude", images: undefined, taskModes: [] }
   });
   const compatible = new AgentFactoryClient("/unused/exec.py", root);
   compatible.command = async () => ({

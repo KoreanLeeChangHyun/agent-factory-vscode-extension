@@ -132,7 +132,8 @@ select:focus-visible,
   margin-left: auto;
   min-height: 0;
   box-sizing: border-box;
-  height: min(520px, calc(100% - 38px));
+  /* Tall enough for all six agent rows (Orchestrator through Verifier) without scrolling. */
+  height: min(600px, calc(100% - 38px));
   max-height: calc(100% - 38px);
   overflow: hidden;
   padding: 8px;
@@ -290,14 +291,15 @@ select:focus-visible,
 .notes-panel :focus-visible { outline: 1px solid var(--vscode-focusBorder); outline-offset: 1px; }
 
 /* Account limits prioritize the remaining share, then the refill and report timestamps. */
-#account-usage { display: grid; grid-template-columns: minmax(0, 1fr); align-items: start; gap: 10px; padding: 4px; }
-.usage-group { min-width: 0; padding: 13px 14px; border: 1px solid var(--vscode-widget-border, var(--vscode-panel-border, #ffffff20)); border-radius: 8px; background: color-mix(in srgb, var(--vscode-editorWidget-background, var(--vscode-editor-background)) 92%, var(--vscode-foreground) 8%); }
-.usage-group-heading { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; min-height: 20px; margin-bottom: 12px; }
+#account-usage { display: grid; grid-template-columns: minmax(0, 1fr); align-items: start; gap: 6px; padding: 2px; }
+.usage-group { min-width: 0; padding: 6px 9px; border: 1px solid var(--vscode-widget-border, var(--vscode-panel-border, #ffffff20)); border-radius: 8px; background: color-mix(in srgb, var(--vscode-editorWidget-background, var(--vscode-editor-background)) 92%, var(--vscode-foreground) 8%); }
+.usage-group-heading { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; min-height: 18px; margin-bottom: 4px; }
 .usage-group-heading h3 { margin: 0; color: var(--vscode-foreground); font-size: 13px; font-weight: 650; letter-spacing: .01em; }
-.usage-limits { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(190px, 100%), 1fr)); gap: 12px 16px; }
+.usage-limits { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px 12px; }
+.usage-limits > :only-child { grid-column: 1 / -1; }
 .usage-limit { min-width: 0; padding: 0 2px; }
-.usage-limit-heading { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; margin-bottom: 6px; color: var(--vscode-descriptionForeground); }
-.usage-limit-value { color: var(--vscode-foreground); font-size: 16px; font-variant-numeric: tabular-nums; }
+.usage-limit-heading { display: flex; align-items: baseline; justify-content: space-between; gap: 4px; margin-bottom: 3px; color: var(--vscode-descriptionForeground); }
+.usage-limit-value { color: var(--vscode-foreground); font-size: 14px; font-variant-numeric: tabular-nums; }
 .usage-limit[data-level="medium"] .usage-limit-value { color: var(--vscode-editorWarning-foreground, #cca700); }
 .usage-limit[data-level="low"] .usage-limit-value { color: var(--vscode-errorForeground, #f48771); }
 .usage-meter { display: block; width: 100%; height: 7px; overflow: hidden; border: 0; border-radius: 999px; color: var(--vscode-progressBar-background, var(--af-color-accent)); background: color-mix(in srgb, var(--vscode-foreground) 12%, transparent); }
@@ -306,12 +308,17 @@ select:focus-visible,
 .usage-limit[data-level="medium"] .usage-meter::-webkit-progress-value { background: var(--vscode-editorWarning-foreground, #cca700); }
 .usage-limit[data-level="low"] .usage-meter::-webkit-progress-value { background: var(--vscode-errorForeground, #f48771); }
 .usage-reset, .usage-reported, #account-usage .usage-note { color: var(--vscode-descriptionForeground); font-size: 11px; line-height: 1.45; }
-.usage-reset { margin: 5px 0 0 !important; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-variant-numeric: tabular-nums; }
+.usage-reset { margin: 3px 0 0 !important; overflow-wrap: anywhere; font-variant-numeric: tabular-nums; }
 .usage-reported { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-variant-numeric: tabular-nums; }
 #account-usage .usage-note { margin: 0 !important; }
 .usage-group[data-state="empty"], .usage-group[data-state="unavailable"] { background: transparent; }
 @media (max-width: 380px) {
-  .usage-group-heading { align-items: flex-start; flex-direction: column; gap: 3px; }
+  .usage-group-heading { align-items: flex-start; flex-direction: column; gap: 0; }
+}
+@media (max-height: 480px) and (min-width: 465px) {
+  #account-usage { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .usage-group-heading { align-items: flex-start; flex-direction: column; gap: 0; }
+  .usage-limits { gap: 6px; }
 }
 
 .status-settings #shortcut-bindings dd > button { display: inline-flex; align-items: center; justify-content: center; min-height: 26px; padding: 3px 9px; border: 1px solid var(--vscode-contrastBorder, color-mix(in srgb, var(--vscode-foreground, #ccc) 16%, transparent)); border-radius: 6px; background: var(--vscode-button-secondaryBackground, #ffffff0a); color: var(--vscode-button-secondaryForeground, var(--vscode-foreground)); font: inherit; font-size: 12px; white-space: nowrap; cursor: pointer; }

@@ -194,6 +194,7 @@
     orchestrateMode: saved?.orchestrateMode !== false,
     // Per project; the host restores it on initialize and stores every change.
     workIsolation: false,
+    docsAuditInterval: "off",
     uiLanguage: ["auto", "ko", "en"].includes(saved?.uiLanguage) ? saved.uiLanguage : "auto",
     botsEnabled: false,
     botsAvailable: true,
@@ -226,7 +227,7 @@
     reasoning: normalizeSettingValue(saved?.reasoning, settingOptions.reasoning),
     agentSettingsVersion: saved?.agentSettingsVersion === 1 ? 1 : undefined,
     agentSettingsScope: ["global", "project", "chat"].includes(saved?.agentSettingsScope) ? saved.agentSettingsScope : undefined,
-    agentSettingsSet: typeof saved?.agentSettingsSet === "string" && saved.agentSettingsSet.trim() ? saved.agentSettingsSet.trim() : "Default",
+    agentSettingsSet: typeof saved?.agentSettingsSet === "string" && saved.agentSettingsSet.trim() ? saved.agentSettingsSet.trim() : "Chat",
     fastMode: saved?.fastMode === true,
     goalMode: false,
     businessMode: "normal",
@@ -828,18 +829,12 @@
   });
 
   document.addEventListener("paste", function (event) {
-    if (!event.clipboardData) {
+    // Other text fields (settings, questions, dialogs) own their native paste.
+    if (event.target !== prompt || !event.clipboardData) {
       return;
     }
-    let images = Array.from(event.clipboardData.files || []).filter(function (file) {
-      return Boolean(chatAttachments.browserImageMediaType(file));
-    });
-    // Some screenshot tools expose the image only as a clipboard item, leaving files empty.
-    if (!images.length) images = Array.from(event.clipboardData.items || []).filter(function (item) {
-      return item.kind === "file";
-    }).map(function (item) { return item.getAsFile(); }).filter(function (file) {
-      return file && chatAttachments.browserImageMediaType(file);
-    });
+    // Capture File objects while clipboardData is still readable in the event.
+    const images = chatAttachments.clipboardImages(event.clipboardData);
     if (images.length) {
       event.preventDefault();
       chatAttachments.addBrowserImages(images);
@@ -922,14 +917,14 @@
           document.getElementById("agent-preset-name").value = "";
         }
         if (!message.error && chatAgentSettings.pendingPresetAction === "rename") {
-          if (message.scope === "chat") state.agentSettingsSet = message.name;
+          if (state.agentSettingsScope === "global" && state.agentSettingsSet === document.getElementById("agent-preset-select").value) state.agentSettingsSet = message.name;
           document.getElementById("agent-preset-rename").open = false;
           document.getElementById("agent-preset-rename-name").value = "";
           persist();
           saveComposerSettings();
         }
         chatAgentSettings.pendingPresetAction = "";
-        if (!message.error && message.settings && message.scope === "chat" && message.name) chatAgentSettings.applyAgentSettingsToChat(message.settings, message.scope, message.name);
+        if (!message.error && message.settings && message.name) chatAgentSettings.applyAgentSettingsToChat(message.settings, message.scope, message.name);
         chatAgentSettings.renderAgentDefaults();
         chatAgentSettings.renderAgentPresets();
         break;
@@ -941,6 +936,12 @@
       case "agent.defaults":
         state.agentDefaults = message.settings;
         if (!state.agentSettingsScope) state.agentSettingsScope = "chat";
+        if (state.agentSettingsScope === "global" && !message.settings?.presets?.some(preset => preset.name === state.agentSettingsSet)) {
+          // A removed or renamed source must not strand a preserved snapshot behind locked controls.
+          state.agentSettingsScope = "chat";
+          state.agentSettingsSet = "Chat";
+          persist(); saveComposerSettings();
+        }
         chatAgentSettings.renderAgentDefaults();
         // Existing chat values are an independent snapshot and do not follow later default changes.
         updateModeControls();
@@ -967,6 +968,7 @@
         document.body.dataset.agentRole = state.role;
         state.projectName = message.projectName;
         state.workIsolation = message.workIsolation === true;
+        state.docsAuditInterval = ["daily", "weekly"].includes(message.docsAuditInterval) ? message.docsAuditInterval : "off";
         state.runtimeAvailable = message.runtimeAvailable === true;
         if (message.resetConversation === true || conversationBoundaryChanged) resetConversationState();
         state.conversationId = incomingConversationId ?? (sessionBoundaryChanged ? undefined : state.conversationId);
@@ -1069,6 +1071,13 @@
         state.workIsolation = message.value === true;
         updateModeControls();
         break;
+      case "docsAudit.updated":
+        state.docsAuditInterval = ["daily", "weekly"].includes(message.interval) ? message.interval : "off";
+        break;
+      case "docsAudit.due":
+        state.docsAuditPending = state.role === "main" && state.docsAuditInterval !== "off";
+        startDocsAudit();
+        break;
       case "providers.status":
         chatProviders.receiveProviders(message);
         break;
@@ -1126,6 +1135,7 @@
         }
         break;
       case "attachment.rejected": {
+        chatAttachments.finishImageUpload(message.id);
         const rejected = state.attachments.find(function (item) { return item.id === message.id; });
         if (rejected?.previewUri?.startsWith("blob:")) URL.revokeObjectURL(rejected.previewUri);
         state.attachments = state.attachments.filter(function (item) { return item.id !== message.id; });
@@ -1464,6 +1474,7 @@
         chatBot.renderFactoryBot();
         break;
       case "run.state":
+        if (message.running !== true && state.docsAuditPending) setTimeout(startDocsAudit, 0);
         if (message.running === true && !state.running) {
           chatBot.botOutcome = undefined;
           state.runExecutionStatus = undefined;
@@ -1665,6 +1676,14 @@
     persist();
     vscode.postMessage({ type: "chat.send", ...message });
     return true;
+  }
+
+  // A due periodic documents check waits until this Main chat is idle, then goes to the read-only Explorer.
+  // The pending flag is not persisted: the host offers a due check again after a reload.
+  function startDocsAudit() {
+    if (!state.docsAuditPending || state.running || !state.runtimeAvailable || !state.capabilities || !orchestrateAvailable()) return;
+    state.docsAuditPending = false;
+    if (submit("orchestrate", "normal", false, t("docs.audit.request")) === true) vscode.postMessage({ type: "docsAudit.started" });
   }
 
   function workIsolationActive() {
@@ -3017,7 +3036,7 @@
     return { parentAgentId: value.parentAgentId, agentId: value.agentId, runId: value.runId,
       ...(typeof value.model === "string" && value.model.trim() ? { model: value.model } : {}),
       ...(typeof value.reasoningEffort === "string" && value.reasoningEffort.trim() ? { reasoningEffort: value.reasoningEffort } : {}),
-      ...(["work", "workLight"].includes(value.workProfile) ? { workProfile: value.workProfile } : {}) };
+      ...(["work", "workLight", "explore", "scribe"].includes(value.workProfile) ? { workProfile: value.workProfile } : {}) };
   }
 
   function contextUsedStatusLabel() {
@@ -3078,7 +3097,7 @@
       /^[A-Za-z0-9][A-Za-z0-9._:/-]{0,99}$/.test(model) && typeof enabled === "boolean"));
   }
   function normalizeAgentFastModes(value, legacy) {
-    const roles = ["main", "work", "workLight", "verification"];
+    const roles = ["main", "work", "workLight", "verification", "explore", "scribe"];
     const legacyModes = normalizeModelFastModes(legacy);
     const result = {};
     for (const role of roles) {

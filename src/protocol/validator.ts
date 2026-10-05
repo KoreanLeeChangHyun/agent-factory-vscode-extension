@@ -75,6 +75,8 @@ const clientMessageTypes = new Set([
   "attachment.remove",
   "composer.settings",
   "workIsolation.set",
+  "docsAudit.set",
+  "docsAudit.started",
   "status.reorder"
 ]);
 const attachmentKinds = new Set<AttachmentKind>(["file", "folder", "image"]);
@@ -155,6 +157,10 @@ export function parseClientMessage(value: unknown): ClientMessage | undefined {
       return { type: value.type, runId: value.runId, ...(value.language ? { language: value.language } : {}) };
     case "workIsolation.set":
       return typeof value.value === "boolean" ? { type: "workIsolation.set", value: value.value } : undefined;
+    case "docsAudit.set":
+      return value.interval === "off" || value.interval === "daily" || value.interval === "weekly" ? { type: "docsAudit.set", interval: value.interval } : undefined;
+    case "docsAudit.started":
+      return { type: "docsAudit.started" };
     case "goal.control":
       if (typeof value.action !== "string" || !["get", "refresh", "pause", "cancel", "disable", "reopen"].includes(value.action)) return undefined;
       return { type: "goal.control", action: value.action as import("../common/types/agent-runtime").GoalAction };

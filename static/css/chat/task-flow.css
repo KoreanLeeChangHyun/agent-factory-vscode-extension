@@ -661,9 +661,11 @@ html[data-af-hidden="true"] *::after {
 }
 :is(#run-stage-list, #task-history-panel) .task-flow-row > .task-flow-agent[data-assigned="true"] { border-color: color-mix(in srgb, var(--vscode-widget-border, #666) 70%, transparent); color: var(--vscode-descriptionForeground); }
 /* Role tint: text only, kept clear of the blue/green/red status colours; the border stays neutral. */
-/* Each recorded role has its own hue (purple, cyan, orange), kept clear of the blue/green/red status colours. */
+/* Each recorded role has its own hue (purple, cyan, yellow, magenta, orange), kept clear of the blue/green/red status colours. */
 :is(#run-stage-list, #task-history-panel) .task-flow-row > .task-flow-agent[data-agent-role="expert"] { --task-flow-role-color: var(--vscode-charts-purple, #b180d7); }
 :is(#run-stage-list, #task-history-panel) .task-flow-row > .task-flow-agent[data-agent-role="worker"] { --task-flow-role-color: var(--vscode-terminal-ansiCyan, #29b8db); }
+:is(#run-stage-list, #task-history-panel) .task-flow-row > .task-flow-agent[data-agent-role="explorer"] { --task-flow-role-color: var(--vscode-charts-yellow, #cca700); }
+:is(#run-stage-list, #task-history-panel) .task-flow-row > .task-flow-agent[data-agent-role="scribe"] { --task-flow-role-color: var(--vscode-terminal-ansiMagenta, #bc3fbc); }
 :is(#run-stage-list, #task-history-panel) .task-flow-row > .task-flow-agent[data-agent-role="verifier"] { --task-flow-role-color: var(--vscode-charts-orange, #d18616); }
 :is(#run-stage-list, #task-history-panel) .task-flow-row > .task-flow-agent[data-agent-role] {
   color: color-mix(in srgb, var(--task-flow-role-color) 90%, var(--vscode-foreground));

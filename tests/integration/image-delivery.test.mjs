@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { execFile } from "node:child_process";
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdtemp, readFile, realpath, rm, symlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -13,7 +13,7 @@ const execFileAsync = promisify(execFile);
 
 
 test("browser image bytes reach the plugin contract on submit and send", async function (t) {
-  const root = await mkdtemp(join(tmpdir(), "af-image-delivery-"));
+  const root = await realpath(await mkdtemp(join(tmpdir(), "af-image-delivery-")));
   t.after(() => rm(root, { recursive: true, force: true }));
   const [{ parseClientMessage }, { decodeBrowserImage }, { writeNewImageAttachment }, { ChatSessionController }, { AgentFactoryClient }] = await Promise.all([
     importTypeScript("src/protocol/validator.ts"),
@@ -29,7 +29,7 @@ test("browser image bytes reach the plugin contract on submit and send", async f
   });
   assert.ok(browserMessage);
   const staged = decodeBrowserImage(browserMessage.data, browserMessage.size, browserMessage.mediaType);
-  const stagedPath = join(root, "image.png");
+  const stagedPath = join(root, "한글 image.png");
   await writeNewImageAttachment(stagedPath, staged);
   assert.deepEqual(await readFile(stagedPath), expected);
 
@@ -69,29 +69,53 @@ test("browser image bytes reach the plugin contract on submit and send", async f
   const pluginRuntime = fileURLToPath(new URL("../../../plugin/runtime/", import.meta.url));
   const python = [
     "import hashlib,json,sys", "from pathlib import Path", "sys.path.insert(0, sys.argv[1])",
+    "from system import portable", "portable.WINDOWS = sys.argv[3] == 'windows'",
     "contract=json.loads(Path(sys.argv[2]).read_text(encoding='utf-8'))",
     "from execution.images import read_agent_input", "request, images = read_agent_input(Path(sys.argv[2]))",
     "print(json.dumps({'message': request.decode('utf-8'), 'siblings': [{'path': i['path'], 'exists': (Path(sys.argv[2]).parent / i['path']).is_file()} for i in contract['images']], 'images': [{'size': len(i['content']), 'sha256': hashlib.sha256(i['content']).hexdigest(), 'mediaType': i['mediaType']} for i in images]}))"
   ].join("; ");
+  // Exercise both the descriptor-relative POSIX reader (macOS/Linux/WSL) and
+  // Windows' lstat/open/fstat fallback. This does not emulate a Windows kernel.
+  const readers = process.platform === "win32" ? ["windows"] : ["posix", "windows"];
   const pluginObservations = [];
+  const contractPaths = [];
   const client = new AgentFactoryClient("/unused/exec.py", root);
   const supported = { model: false, reasoning: false, fast: false, goal: false, images: true };
   client.capabilities = async () => ({ submit: supported, send: supported });
   client.command = async (arguments_) => {
     const contractPath = arguments_[arguments_.indexOf("--input-file") + 1];
-    const observed = await execFileAsync("python3", ["-c", python, pluginRuntime, contractPath], { encoding: "utf8" });
-    pluginObservations.push(JSON.parse(observed.stdout));
+    contractPaths.push(contractPath);
+    for (const reader of readers) {
+      const observed = await execFileAsync(process.platform === "win32" ? "python" : "python3", ["-c", python, pluginRuntime, contractPath, reader], { encoding: "utf8" });
+      pluginObservations.push(JSON.parse(observed.stdout));
+    }
     const agentId = arguments_[arguments_.indexOf("--agent") + 1];
     return { schemaVersion: "0.1.0", kind: "ack", status: "accepted", agentId, runId: `run-${arguments_[0]}` };
   };
-  for (const call of controllerCalls) {
-    await client[call.operation](call.agentId, call.message, call.execution, call.images);
+  // macOS /var -> /private/var and redirected TEMP roots must not be handed to
+  // the plugin's no-symlink caller-file traversal. Use a real filesystem alias.
+  const alias = join(root, "temporary directory alias");
+  await symlink(root, alias, process.platform === "win32" ? "junction" : "dir");
+  const saved = Object.fromEntries(["TMPDIR", "TMP", "TEMP"].map(key => [key, process.env[key]]));
+  try {
+    for (const tempRoot of [root, alias]) {
+      for (const key of Object.keys(saved)) process.env[key] = tempRoot;
+      for (const call of controllerCalls) {
+        await client[call.operation](call.agentId, call.message, call.execution, call.images);
+      }
+    }
+  } finally {
+    for (const [key, value] of Object.entries(saved)) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
   }
   const digest = createHash("sha256").update(expected).digest("hex");
-  assert.equal(pluginObservations.length, 2);
+  assert.equal(pluginObservations.length, 4 * readers.length);
   for (const observation of pluginObservations) {
     assert.match(observation.message, /첨부 참조:[\s\S]*image\.png/);
     assert.deepEqual(observation.siblings, [{ path: "00.png", exists: true }]);
     assert.deepEqual(observation.images, [{ size: expected.byteLength, sha256: digest, mediaType: "image/png" }]);
   }
+  for (const path of contractPaths) await assert.rejects(readFile(path), { code: "ENOENT" });
 });

@@ -16,6 +16,7 @@ import { AsyncCache } from "../../common/async-cache";
 import { parseInterviewQuestion } from "../../common/types/business-mode";
 import type { ActivityDetails as ProtocolActivityDetails, ActivityKind, ProjectTaskEntry } from "../../protocol/messages";
 import {
+  DISPATCH_ID,
   TASK_MODES,
   type AccountLimits, type ConversationWorktree, type ExecutionCapabilities, type ExecutionMode, type ExecutionOptions,
   type GoalAction, type NativeGoal, type SavedConversation, type TaskMode, type TaskStopTarget, type WorktreeOptions, type WorktreeRepository
@@ -149,6 +150,8 @@ export interface ChildAgentSession {
   readonly updatedAt?: string;
   /** When the runtime accepted this run; orders task cards, unlike `updatedAt` it never changes. */
   readonly dispatchedAt?: string;
+  readonly startedAt?: string;
+  readonly finishedAt?: string;
   readonly verifiedWorkRunId?: string;
   /** Steps the agent's own to-do list reports done; absent when it keeps no list. */
   readonly planProgress?: PlanProgress;
@@ -278,7 +281,9 @@ export class AgentFactoryClient implements AgentRuntimeClient {
       }
       return {
         ...record,
-        images: record.images === true,
+        // Missing image metadata means an older runtime contract; an explicit
+        // false is a provider limitation (or an unavailable provider CLI).
+        images: typeof record.images === "boolean" ? record.images : undefined,
         taskModes: Array.isArray(record.taskModes) ? record.taskModes.filter((mode): mode is TaskMode => TASK_MODES.includes(mode as TaskMode)) : [],
         ...(typeof document.diagnostic === "string" ? { diagnostic: document.diagnostic } : {})
       } as unknown as ExecutionCapabilities;
@@ -362,6 +367,11 @@ export class AgentFactoryClient implements AgentRuntimeClient {
       throw new Error(localize("ui.update.the.agent.factory.plugin.and.codex.to.versions.that.support.the.selected.task.mode"));
     }
     if (hasImages && supported.images !== true) {
+      if (supported.images === false) {
+        throw new Error(supported.diagnostic
+          ? localize("ui.image.input.unavailable.0", supported.diagnostic)
+          : localize("ui.provider.does.not.support.image.input"));
+      }
       throw new Error(
         localize("ui.the.current.agent.factory.runtime.has.an.incompatible.0.image.transfer.contract", command) +
         localize("ui.install.or.update.the.agent.factory.plugin.to.a.version.compatible.with.this.extension.then") +
@@ -424,7 +434,9 @@ export class AgentFactoryClient implements AgentRuntimeClient {
   }
 
   public async send(agentId: string, message: string, execution: ExecutionOptions, images: readonly RuntimeImageInput[] = []): Promise<RunAcceptance> {
-    if (execution.deliveryId && !MANAGED_ID.test(execution.deliveryId)) throw new Error("Invalid engine delivery identity");
+    if (execution.deliveryId !== undefined && !DISPATCH_ID.test(execution.deliveryId)) {
+      throw Object.assign(new Error("Invalid engine dispatch identity"), { code: "invalid_dispatch_id" });
+    }
     const { document, preparationGuidance } = await this.inputCommand([
       "send",
       "--project-root",
@@ -460,7 +472,10 @@ When a command needs sudo and the Human has requested it, use python3 ${JSON.str
   private async rawInputCommand(arguments_: string[], message: string, images: readonly RuntimeImageInput[]): Promise<Record<string, unknown>> {
     if (images.length === 0 && Buffer.byteLength(message, "utf8") <= 64 * 1024) return this.command([...arguments_, "--message", message]);
     if (images.length > 8) throw new Error(localize("ui.you.can.attach.up.to.8.images"));
-    const directory = await mkdtemp(join(tmpdir(), "agent-factory-input-"));
+    // macOS /var and redirected Windows TEMP roots can be filesystem aliases.
+    // The runtime rejects symlinks in caller paths; canonicalize our staging
+    // root without weakening its validation of the contract or sibling images.
+    const directory = await mkdtemp(join(await realpath(tmpdir()), "agent-factory-input-"));
     try {
       if (images.length === 0) {
         const requestPath = join(directory, "request.md");
@@ -1213,6 +1228,8 @@ When a command needs sudo and the Human has requested it, use python3 ${JSON.str
         ...(latest.workProfile ? { workProfile: latest.workProfile } : {}),
         ...(latest.runId ? { runId: latest.runId } : {}),
         ...(latest.verifiedWorkRunId ? { verifiedWorkRunId: latest.verifiedWorkRunId } : {}),
+        ...(latest.startedAt ? { startedAt: latest.startedAt } : {}),
+        ...(latest.finishedAt ? { finishedAt: latest.finishedAt } : {}),
         ...(latest.planProgress ? { planProgress: latest.planProgress } : {}),
         ...(latest.activity ? { activity: latest.activity } : {}),
         ...(typeof agent.updatedAt === "string" ? { updatedAt: agent.updatedAt } : {}),
@@ -1398,7 +1415,7 @@ When a command needs sudo and the Human has requested it, use python3 ${JSON.str
     this.runStateSnapshots.delete(path);
   }
 
-  private async latestRunInfo(agentId: string, runId?: string): Promise<{ readonly status: string; readonly runId?: string; readonly verifiedWorkRunId?: string; readonly parentAgentId?: string; readonly parentRunId?: string; readonly taskBinding?: Record<string, unknown>; readonly model?: string; readonly reasoningEffort?: string; readonly workProfile?: WorkProfile; readonly dispatchedAt?: string; readonly planProgress?: PlanProgress; readonly activity?: string }> {
+  private async latestRunInfo(agentId: string, runId?: string): Promise<{ readonly status: string; readonly runId?: string; readonly verifiedWorkRunId?: string; readonly parentAgentId?: string; readonly parentRunId?: string; readonly taskBinding?: Record<string, unknown>; readonly model?: string; readonly reasoningEffort?: string; readonly workProfile?: WorkProfile; readonly dispatchedAt?: string; readonly startedAt?: string; readonly finishedAt?: string; readonly planProgress?: PlanProgress; readonly activity?: string }> {
     const runsDirectory = await this.managedPath(agentId, "runs");
     try {
       const runs = runId ? [{ name: runId }] : (await this.managedDirectoryEntries(runsDirectory))
@@ -1420,6 +1437,8 @@ When a command needs sudo and the Human has requested it, use python3 ${JSON.str
               ...(typeof executionOptions?.reasoningEffort === "string" && executionOptions.reasoningEffort ? { reasoningEffort: executionOptions.reasoningEffort } : {}),
               ...(parseWorkProfile(state.workProfile) ? { workProfile: parseWorkProfile(state.workProfile) } : {}),
               ...(typeof state.acceptedAt === "string" && state.acceptedAt ? { dispatchedAt: state.acceptedAt } : {}),
+              ...(typeof state.startedAt === "string" ? { startedAt: state.startedAt } : {}),
+              ...(typeof state.finishedAt === "string" ? { finishedAt: state.finishedAt } : {}),
               ...(parsePlanProgress(state.planProgress) ? { planProgress: parsePlanProgress(state.planProgress) } : {}),
               ...(typeof state.activity === "string" && state.activity.trim() ? { activity: state.activity.trim().slice(0, 160) } : {}),
               ...(typeof state.parentAgentId === "string" && MANAGED_ID.test(state.parentAgentId) ? { parentAgentId: state.parentAgentId } : {}),
@@ -1460,7 +1479,9 @@ When a command needs sudo and the Human has requested it, use python3 ${JSON.str
     if (output.exitCode !== 0 || record.kind === "error") {
       const nested = readRecordOrUndefined(record.error);
       const message = typeof nested?.message === "string" ? nested.message : typeof record.message === "string" ? record.message : output.stderr.trim();
-      throw new Error(message || localize("ui.the.agent.factory.runtime.command.failed.with.exit.code.0", output.exitCode));
+      throw Object.assign(new Error(message || localize("ui.the.agent.factory.runtime.command.failed.with.exit.code.0", output.exitCode)), {
+        code: typeof nested?.code === "string" ? nested.code : typeof record.code === "string" ? record.code : undefined
+      });
     }
     return record;
   }

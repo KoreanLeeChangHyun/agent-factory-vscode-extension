@@ -131,10 +131,33 @@ test("runtime adapter uses a versioned file contract for both submit and send", 
 test("runtime adapter refuses image metadata downgrade when plugin lacks image transport", async function () {
   const { AgentFactoryClient } = await importTypeScript("src/infrastructure/agent-factory/agent-client.ts");
   const client = new AgentFactoryClient("/unused/exec.py", "/unused/project");
-  const flags = { model: false, reasoning: false, fast: false, goal: false, images: false };
-  client.capabilities = async () => ({ submit: flags, send: flags });
-  client.command = async () => { throw new Error("image request must not reach an incompatible runtime"); };
+  const flags = { model: false, reasoning: false, fast: false, goal: false };
+  client.command = async (args) => {
+    assert.equal(args[0], "capabilities", "image request must not reach an incompatible runtime");
+    return { schemaVersion: "0.1.0", kind: "execution-capabilities", submit: flags, send: flags };
+  };
   const image = [{ path: "/tmp/one.png", mediaType: "image/png" }];
   await assert.rejects(client.submit("main-test", "inspect", {}, image), /update.*plugin.*reload.*extension host/s);
   await assert.rejects(client.send("main-test", "inspect", {}, image), /update.*plugin.*reload.*extension host/s);
+});
+
+test("explicit provider image limitations are not diagnosed as an outdated plugin", async function () {
+  const { AgentFactoryClient } = await importTypeScript("src/infrastructure/agent-factory/agent-client.ts");
+  for (const diagnostic of [undefined, "Antigravity CLI unavailable: missing executable"]) {
+    const client = new AgentFactoryClient("/unused/exec.py", "/unused/project");
+    const flags = { model: true, reasoning: true, fast: false, goal: true, images: false };
+    client.command = async (args) => {
+      assert.equal(args[0], "capabilities", "unsupported image requests must not be submitted");
+      return { schemaVersion: "0.1.0", kind: "execution-capabilities", backend: "antigravity-print",
+        submit: flags, send: flags, diagnostic };
+    };
+    for (const operation of ["submit", "send"]) {
+      await assert.rejects(client[operation]("main-test", "inspect", {}, [{ path: "/tmp/one.png", mediaType: "image/png" }]), error => {
+        assert.doesNotMatch(error.message, /update.*plugin|reload.*extension host/s);
+        if (diagnostic) assert.ok(error.message.includes(diagnostic));
+        else assert.match(error.message, /provider does not support image input/);
+        return true;
+      });
+    }
+  }
 });

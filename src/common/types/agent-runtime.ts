@@ -26,6 +26,8 @@ export interface ExecutionCapabilities {
   readonly workIsolation?: boolean;
   /** The runtime accepts and records `loop.py start --work-profile`. */
   readonly workProfile?: boolean;
+  /** `--work-profile` also accepts explore (read-only) and scribe (writes only inside docs/), enforced by the runtime. */
+  readonly restrictedWorkProfiles?: boolean;
   /** A stopped loop reports `failureClass`; Main is then told what to do for each class. */
   readonly failureClass?: boolean;
   /** A loop stopped on its revision limit carries a structured `pause`; the task panel then offers the Human's decision. */
@@ -38,6 +40,10 @@ export const TASK_MODES = ["orchestrate", "direct", "work", "plan", "verificatio
 export type TaskMode = typeof TASK_MODES[number];
 
 export type ExecutionMode = "cli-default" | "workspace-write" | "danger-full-access" | "bypass";
+
+/** Runtime exec.py dispatch identity; distinct from agent/run identifiers. */
+// Strict end-of-input matches Python fullmatch (JS `$` also accepts a final newline).
+export const DISPATCH_ID = /^dispatch-[A-Za-z0-9][A-Za-z0-9._:-]{0,127}(?![\s\S])/;
 
 export interface ExecutionOptions {
   /** Host-owned idempotency identity for a durable engine-result delivery. */
