@@ -2,6 +2,7 @@
   "use strict";
 
   const vscode = acquireVsCodeApi();
+  const _generalSettings = globalThis.AgentFactoryChat.generalSettings({ vscode });
   let conversationClearing = false;
   let persistenceScheduled = false;
   let persistenceTimer;
@@ -196,6 +197,7 @@
     workIsolation: false,
     docsAuditInterval: "off",
     uiLanguage: ["auto", "ko", "en"].includes(saved?.uiLanguage) ? saved.uiLanguage : "auto",
+    settingsTabOrder: saved?.settingsTabOrder,
     botsEnabled: false,
     botsAvailable: true,
     companionAvailable: true,
@@ -2496,6 +2498,7 @@
     root.replaceChildren(...groups);
   }
   const settingsTabs = [...statusSettings.querySelectorAll("[data-settings-tab]")];
+  const settingsTabOrder = globalThis.AgentFactoryChat.settingsTabOrder({ tabs: settingsTabs, state, persist, t });
   function selectSettingsTab(tab) {
     chatAgentSettings.renderAgentDefaults();
     for (const item of settingsTabs) {
@@ -2517,15 +2520,16 @@
   for (const tab of settingsTabs) {
     tab.addEventListener("click", function () { selectSettingsTab(tab); });
     tab.addEventListener("keydown", function (event) {
-      const index = settingsTabs.indexOf(tab);
+      const visibleTabs = settingsTabOrder.visibleTabs();
+      const index = visibleTabs.indexOf(tab);
       let next;
-      if (chatShortcuts.matchesShortcut(event, chatShortcuts.shortcuts.settingsTabNext)) next = (index + 1) % settingsTabs.length;
-      if (chatShortcuts.matchesShortcut(event, chatShortcuts.shortcuts.settingsTabPrevious)) next = (index + settingsTabs.length - 1) % settingsTabs.length;
+      if (chatShortcuts.matchesShortcut(event, chatShortcuts.shortcuts.settingsTabNext)) next = (index + 1) % visibleTabs.length;
+      if (chatShortcuts.matchesShortcut(event, chatShortcuts.shortcuts.settingsTabPrevious)) next = (index + visibleTabs.length - 1) % visibleTabs.length;
       if (chatShortcuts.matchesShortcut(event, chatShortcuts.shortcuts.settingsTabFirst)) next = 0;
-      if (chatShortcuts.matchesShortcut(event, chatShortcuts.shortcuts.settingsTabLast)) next = settingsTabs.length - 1;
+      if (chatShortcuts.matchesShortcut(event, chatShortcuts.shortcuts.settingsTabLast)) next = visibleTabs.length - 1;
       if (next === undefined) return;
       event.preventDefault();
-      selectSettingsTab(settingsTabs[next]);
+      selectSettingsTab(visibleTabs[next]);
     });
   }
   document.getElementById("bots-disabled").addEventListener("change", function (event) {
@@ -2937,6 +2941,7 @@
       autoScroll: state.autoScroll,
       orchestrateMode: state.orchestrateMode,
       uiLanguage: state.uiLanguage,
+      settingsTabOrder: state.settingsTabOrder,
       botVisible: state.botVisible,
       botPosition: state.botPosition,
       botAnimations: state.botAnimations,

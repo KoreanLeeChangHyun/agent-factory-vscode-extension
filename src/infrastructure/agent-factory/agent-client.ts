@@ -157,6 +157,8 @@ export interface ChildAgentSession {
   readonly planProgress?: PlanProgress;
   /** The first line of the agent's latest commentary. */
   readonly activity?: string;
+  /** Localizable current phase from this exact run’s provider events. */
+  readonly progressKey?: string;
 }
 
 export interface PlanProgress { readonly completed: number; readonly total: number; }
@@ -687,6 +689,26 @@ When a command needs sudo and the Human has requested it, use python3 ${JSON.str
       throw new Error(localize("ui.invalid.agent.factory.progress.event.request"));
     }
     const path = await this.managedPath(agentId, "runs", runId, "events.jsonl");
+    const lines = await this.readEventLines(path, cursor);
+    if (!lines) return { cursor, updates: [] };
+    const start = Math.min(cursor, lines.length);
+    const updates: RunUpdate[] = [];
+    const newLines = lines.slice(start);
+    let runWorkingDirectory: unknown;
+    if (newLines.length) {
+      try { runWorkingDirectory = (await this.cachedRunState(join(dirname(path), "state.json")))?.workingDirectory; }
+      catch (error) { if (!isMissingFile(error)) throw error; }
+    }
+    for (const line of newLines) {
+      updates.push(...await progressUpdates(line, typeof runWorkingDirectory === "string" ? runWorkingDirectory : this.projectRoot, join(dirname(path), "result.md")));
+    }
+    const { usage, limits } = await this.readContextUsageUpdate(agentId, runId, newLines.some(isTurnCompletedLine));
+    if (usage) updates.push({ kind: "usage", ...usage });
+    if (limits) updates.push({ kind: "accountLimits", limits });
+    return { cursor: lines.length, updates };
+  }
+
+  private async readEventLines(path: string, cursor?: number): Promise<readonly string[] | undefined> {
     let lines: readonly string[];
     try {
       const info = await lstat(path);
@@ -703,7 +725,7 @@ When a command needs sudo and the Human has requested it, use python3 ${JSON.str
         // Runtime event logs are append-only. Re-read the unfinished byte tail so
         // split UTF-8 characters are decoded only after their newline arrives.
         const identity = `${info.dev}:${info.ino}`;
-        const incremental = cached && cursor > 0 && cursor >= cached.lines.length
+        const incremental = cached && (cursor === undefined || (cursor > 0 && cursor >= cached.lines.length))
           && cached.identity === identity && info.size > cached.bytes;
         const offset = incremental ? cached.offset : 0;
         const bytes = await readManagedBytes(path, MAX_EVENTS_BYTES, offset, identity);
@@ -725,25 +747,11 @@ When a command needs sudo and the Human has requested it, use python3 ${JSON.str
     } catch (error) {
       if (isMissingFile(error)) {
         this.eventSnapshots.clear();
-        return { cursor, updates: [] };
+        return undefined;
       }
       throw error;
     }
-    const start = Math.min(cursor, lines.length);
-    const updates: RunUpdate[] = [];
-    const newLines = lines.slice(start);
-    let runWorkingDirectory: unknown;
-    if (newLines.length) {
-      try { runWorkingDirectory = (await this.cachedRunState(join(dirname(path), "state.json")))?.workingDirectory; }
-      catch (error) { if (!isMissingFile(error)) throw error; }
-    }
-    for (const line of newLines) {
-      updates.push(...await progressUpdates(line, typeof runWorkingDirectory === "string" ? runWorkingDirectory : this.projectRoot, join(dirname(path), "result.md")));
-    }
-    const { usage, limits } = await this.readContextUsageUpdate(agentId, runId, newLines.some(isTurnCompletedLine));
-    if (usage) updates.push({ kind: "usage", ...usage });
-    if (limits) updates.push({ kind: "accountLimits", limits });
-    return { cursor: lines.length, updates };
+    return lines;
   }
 
   private async readContextUsageUpdate(
@@ -1232,6 +1240,7 @@ When a command needs sudo and the Human has requested it, use python3 ${JSON.str
         ...(latest.finishedAt ? { finishedAt: latest.finishedAt } : {}),
         ...(latest.planProgress ? { planProgress: latest.planProgress } : {}),
         ...(latest.activity ? { activity: latest.activity } : {}),
+        ...(latest.progressKey ? { progressKey: latest.progressKey } : {}),
         ...(typeof agent.updatedAt === "string" ? { updatedAt: agent.updatedAt } : {}),
         ...(latest.dispatchedAt ? { dispatchedAt: latest.dispatchedAt } : {})
       });
@@ -1415,7 +1424,39 @@ When a command needs sudo and the Human has requested it, use python3 ${JSON.str
     this.runStateSnapshots.delete(path);
   }
 
-  private async latestRunInfo(agentId: string, runId?: string): Promise<{ readonly status: string; readonly runId?: string; readonly verifiedWorkRunId?: string; readonly parentAgentId?: string; readonly parentRunId?: string; readonly taskBinding?: Record<string, unknown>; readonly model?: string; readonly reasoningEffort?: string; readonly workProfile?: WorkProfile; readonly dispatchedAt?: string; readonly startedAt?: string; readonly finishedAt?: string; readonly planProgress?: PlanProgress; readonly activity?: string }> {
+  private async childProgressKey(agentId: string, runId: string): Promise<string> {
+    try {
+      const path = await this.managedPath(agentId, "runs", runId, "events.jsonl");
+      const lines = await this.readEventLines(path) || [];
+      for (let index = lines.length - 1; index >= 0; index--) {
+        let event: Record<string, unknown> | undefined;
+        try { event = readRecordOrUndefined(JSON.parse(lines[index]!)); } catch { continue; }
+        if (!event) continue;
+        if (event.type === "turn.started") return "flow.activity.analyzing";
+        if (event.type === "thread.started" || event.type === "native.commentary") return "ui.working";
+        if (event.type === "turn.completed") return "ui.finalizing.response";
+        if (event.type === "native.delta" && event.stream === "final") return "ui.finalizing.response";
+        if (event.type !== "item.started" && event.type !== "item.completed") continue;
+        const item = readRecordOrUndefined(event.item);
+        if (!item) continue;
+        const completed = event.type === "item.completed";
+        const failed = item.status === "failed" || item.status === "declined" ||
+          (completed && typeof item.exit_code === "number" && item.exit_code !== 0);
+        if (item.type === "reasoning") return "flow.activity.reasoning";
+        if (item.type === "agent_message") return "ui.finalizing.response";
+        if (item.type === "command_execution") return failed ? "ui.checking.command.failure" : completed ? "ui.analyzing.results" : "ui.running.command";
+        if (item.type === "mcp_tool_call") return failed || (completed && item.error != null) ? "ui.checking.connected.tool.failure" : completed ? "ui.analyzing.results" : "ui.running.connected.tool";
+        if (item.type === "file_change") return completed ? "ui.checking.git.changes" : "ui.applying.git.changes";
+        if (item.type === "webSearch" || item.type === "web_search") return completed ? "ui.analyzing.results" : "ui.searching.the.web";
+        if (item.type === "contextCompaction") return completed ? "ui.context.compaction.completed" : "ui.context.compaction.started";
+      }
+    } catch {
+      // Missing/unsafe or temporarily unavailable events must not hide a task.
+    }
+    return "ui.working";
+  }
+
+  private async latestRunInfo(agentId: string, runId?: string): Promise<{ readonly status: string; readonly runId?: string; readonly verifiedWorkRunId?: string; readonly parentAgentId?: string; readonly parentRunId?: string; readonly taskBinding?: Record<string, unknown>; readonly model?: string; readonly reasoningEffort?: string; readonly workProfile?: WorkProfile; readonly dispatchedAt?: string; readonly startedAt?: string; readonly finishedAt?: string; readonly planProgress?: PlanProgress; readonly activity?: string; readonly progressKey?: string }> {
     const runsDirectory = await this.managedPath(agentId, "runs");
     try {
       const runs = runId ? [{ name: runId }] : (await this.managedDirectoryEntries(runsDirectory))
@@ -1432,6 +1473,7 @@ When a command needs sudo and the Human has requested it, use python3 ${JSON.str
             return {
               ...(readRecordOrUndefined(state.taskBinding) ? { taskBinding: readRecordOrUndefined(state.taskBinding) } : {}),
               status: state.status,
+              ...(state.status === "running" ? { progressKey: await this.childProgressKey(agentId, run.name) } : {}),
               runId: run.name,
               ...(typeof executionOptions?.model === "string" && executionOptions.model ? { model: executionOptions.model } : {}),
               ...(typeof executionOptions?.reasoningEffort === "string" && executionOptions.reasoningEffort ? { reasoningEffort: executionOptions.reasoningEffort } : {}),

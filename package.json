@@ -17,6 +17,7 @@
     "workspace"
   ],
   "activationEvents": [
+    "onStartupFinished",
     "onCommand:agentFactory.mainChat.open",
     "onCommand:agentFactory.mainChat.resume",
     "onCommand:agentFactory.mainChat.rename",

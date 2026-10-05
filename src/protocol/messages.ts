@@ -114,6 +114,7 @@ export type ClientMessage =
   | { readonly type: "decision.approve"; readonly runId: string; readonly language?: "ko" | "en" }
   | { readonly type: "goal.control"; readonly action: import("../common/types/agent-runtime").GoalAction }
   | { readonly type: "workIsolation.set"; readonly value: boolean }
+  | { readonly type: "general.set"; readonly key: keyof import("../common/types/general-settings").GeneralSettings; readonly value: boolean | "restore" | "new" }
   | { readonly type: "docsAudit.set"; readonly interval: import("../common/types/docs-audit").DocsAuditInterval }
   | { readonly type: "docsAudit.started" }
   | { readonly type: "queue.resume" }
@@ -198,6 +199,8 @@ export type HostMessage =
   | { readonly type: "branch.updated"; readonly branch?: string }
   | { readonly type: "goal.updated"; readonly goal: import("../common/types/agent-runtime").NativeGoal | null; readonly error?: string }
   | { readonly type: "workIsolation.updated"; readonly value: boolean }
+  | { readonly type: "general.updated"; readonly settings: import("../common/types/general-settings").GeneralSettings; readonly error?: string }
+  | { readonly type: "notification.sound" }
   | { readonly type: "docsAudit.updated"; readonly interval: string }
   | { readonly type: "docsAudit.due" }
   | { readonly type: "capabilities.updated"; readonly capabilities: { readonly submit: import("../common/types/agent-runtime").ExecutionCapabilities; readonly send: import("../common/types/agent-runtime").ExecutionCapabilities } }
@@ -226,6 +229,7 @@ export type HostMessage =
       readonly capabilities?: { readonly submit: import("../common/types/agent-runtime").ExecutionCapabilities; readonly send: import("../common/types/agent-runtime").ExecutionCapabilities };
       /** Per-project Work isolation toggle; off unless the Human turned it on. */
       readonly workIsolation?: boolean;
+      readonly generalSettings?: import("../common/types/general-settings").GeneralSettings;
       /** Per-project periodic documents check interval; off unless the Human turned it on. */
       readonly docsAuditInterval?: import("../common/types/docs-audit").DocsAuditInterval;
       readonly running: boolean;
@@ -304,6 +308,7 @@ export type HostMessage =
         readonly finishedAt?: string;
         readonly planProgress?: { readonly completed: number; readonly total: number };
         readonly activity?: string;
+        readonly progressKey?: string;
       }[];
     }
   | { readonly type: "decision.pending"; readonly runId: string | null; readonly canApprove?: boolean; readonly approval?: import("../modules/chat/decision-approval").DecisionApproval }

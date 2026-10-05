@@ -303,8 +303,20 @@
           <button id="settings-tab-keyboard" type="button" role="tab" aria-selected="false" aria-controls="settings-panel-keyboard" data-settings-tab="keyboard" tabindex="-1" data-i18n="ui.keyboard.shortcuts">Keyboard shortcuts</button>
         </div>
         <div id="settings-panel-general" class="settings-panel" role="tabpanel" aria-labelledby="settings-tab-general">
-          <div id="general-permissions"></div>
           <label class="general-language" for="ui-language"><span data-i18n="ui.display.language">Display language</span><select id="ui-language"><option value="auto" data-i18n="ui.automatic.vs.code">Automatic (VS Code)</option><option value="ko">한국어</option><option value="en">English</option></select></label>
+          <label class="general-language" for="general-startup"><span data-i18n="general.startup">On startup</span><select id="general-startup" data-general-setting="startup" disabled><option value="restore" data-i18n="general.startup.restore">Restore last chat</option><option value="new" data-i18n="general.startup.new">New chat</option></select></label>
+          <div id="general-permissions" class="general-section"></div>
+          <fieldset class="general-notifications general-section">
+            <legend data-i18n="general.notifications">Notifications</legend>
+            <div class="general-notification-events">
+              <label class="settings-option"><input type="checkbox" data-general-setting="notifyCompleted" checked disabled><span data-i18n="general.completed">Completed</span></label>
+              <label class="settings-option"><input type="checkbox" data-general-setting="notifyFailed" checked disabled><span data-i18n="general.failed">Failed</span></label>
+              <label class="settings-option"><input type="checkbox" data-general-setting="notifyDecision" checked disabled><span data-i18n="general.decision">Response needed</span></label>
+            </div>
+            <label class="settings-option"><input type="checkbox" data-general-setting="notifyBackgroundOnly" checked disabled><span data-i18n="general.background">Only when viewing another screen</span></label>
+            <label class="settings-option"><input type="checkbox" data-general-setting="notifySound" disabled><span data-i18n="general.sound">Notification sound</span></label>
+          </fieldset>
+          <p id="general-settings-status" class="status-settings-hint" role="status" hidden></p>
         </div>
         <div id="settings-panel-agents" class="settings-panel" role="tabpanel" aria-labelledby="settings-tab-agents" hidden>
           <section id="global-agent-settings" class="aligned-settings" aria-label="Agent settings" data-i18n-aria-label="ui.agent.settings"></section>
@@ -490,6 +502,7 @@
     <script nonce="{{nonce}}" src="{{chatModuleBaseUri}}/chat/activities.js"></script>
     <script nonce="{{nonce}}" src="{{chatModuleBaseUri}}/chat/activity-rows.js"></script>
     <script nonce="{{nonce}}" src="{{chatModuleBaseUri}}/chat/agent-settings.js"></script>
+    <script nonce="{{nonce}}" src="{{chatModuleBaseUri}}/chat/general-settings.js"></script>
     <script nonce="{{nonce}}" src="{{chatModuleBaseUri}}/chat/agents.js"></script>
     <script nonce="{{nonce}}" src="{{chatModuleBaseUri}}/chat/attachments.js"></script>
     <script nonce="{{nonce}}" src="{{chatModuleBaseUri}}/chat/bot.js"></script>
@@ -503,6 +516,7 @@
     <script nonce="{{nonce}}" src="{{chatModuleBaseUri}}/chat/providers.js"></script>
     <script nonce="{{nonce}}" src="{{chatModuleBaseUri}}/chat/shortcuts.js"></script>
     <script nonce="{{nonce}}" src="{{chatModuleBaseUri}}/chat/status-bar.js"></script>
+    <script nonce="{{nonce}}" src="{{chatModuleBaseUri}}/chat/settings-tab-order.js"></script>
     <script nonce="{{nonce}}" src="{{chatModuleBaseUri}}/chat/sudo.js"></script>
     <script nonce="{{nonce}}" src="{{chatModuleBaseUri}}/chat/syntax.js"></script>
     <script nonce="{{nonce}}" src="{{chatModuleBaseUri}}/chat/task-flow.js"></script>

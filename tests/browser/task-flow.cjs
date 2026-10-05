@@ -881,7 +881,7 @@ async function checkTaskDismiss(page) {
 module.exports.checkTaskDismiss = checkTaskDismiss;
 
 
-async function checkTaskRows(page, { durationOnly = false } = {}) {
+async function checkTaskRows(page, { durationOnly = false, activityOnly = false } = {}) {
   const fs = require('node:fs'), path = require('node:path');
   await page.evaluate(() => window.postMessage({ type: 'host.initialize', panelId: 'row-fixture', role: 'main', runtimeAvailable: true,
     agentModels: { work: { model: 'composer-expert' }, workLight: { model: 'composer-worker' } }, capabilities: { submit: {}, send: {} } }, '*'));
@@ -889,7 +889,7 @@ async function checkTaskRows(page, { durationOnly = false } = {}) {
   const longModel = 'captured-model-' + 'long-provider-model-'.repeat(5);
   const make = (id, profile, model) => ({ agentId: 'agent-' + id, runId: 'run-' + id, role: 'work', status: 'running', workProfile: profile, model,
     taskBinding: { workflowId: 'row-' + id, workflowTitle: 'Task ' + id, taskId: 'task-' + id, title: id === 'worker' ? longTitle : 'Expert task', description: (id === 'worker' ? longTitle : 'Expert task') + '\nFull request' } });
-  let agents = [{ ...make('worker', 'workLight', longModel), activity: 'Reading the panel code before editing', planProgress: { completed: 2, total: 7 } },
+  let agents = [{ ...make('worker', 'workLight', longModel), activity: 'Reading the panel code before editing', progressKey: 'flow.activity.reasoning', planProgress: { completed: 2, total: 7 } },
     make('expert', 'work', 'captured-expert'),
     { ...make('done', 'work', 'short'), status: 'completed' }];
   const publish = async (workflows = []) => page.evaluate(({ agents, workflows }) => window.postMessage({ type: 'agents.list', agents, workflows }, '*'), { agents, workflows });
@@ -923,16 +923,54 @@ async function checkTaskRows(page, { durationOnly = false } = {}) {
   await page.keyboard.press('Enter');
   assert.deepEqual(await page.evaluate(() => window.sentMessages.at(-1)), { type: 'agent.open', agentId: 'agent-worker', runId: 'run-worker' });
   assert.equal(await worker.getAttribute('open'), null, 'The icon opens the session without toggling the row');
-  // Second line: the agent's latest commentary under the title and its to-do count under the status.
-  assert.equal(await worker.locator('.task-flow-activity').textContent(), 'Reading the panel code before editing');
+  // Second line: the current provider phase, independent of commentary and other runs.
+  assert.equal(await worker.locator('.task-flow-activity').textContent(), 'Reasoning');
+  for (const [key, label] of [['ui.running.command', 'Running command'], ['ui.analyzing.results', 'Analyzing results'], ['flow.activity.reasoning', 'Reasoning']]) {
+    agents[0].progressKey = key;
+    await publish();
+    await page.waitForFunction(label => document.querySelector('[data-flow-id="row-worker"] .task-flow-activity')?.textContent === label, label);
+    assert.equal(await expert.locator('.task-flow-activity').textContent(), 'Working', 'Other runs keep their own phase');
+  }
+  agents[2].progressKey = 'flow.activity.reasoning';
+  await publish();
+  assert.equal(await row('done').locator('.task-flow-activity').textContent(), 'Completed', 'Terminal state overrides stale phases');
   assert.equal(await worker.locator('.task-flow-progress').textContent(), '2/7');
   assert.equal(await worker.locator('.task-flow-progress').getAttribute('aria-label'), '2 of 7 steps done');
   // Missing timing and to-do records stay explicitly unrecorded.
-  // Without an activity record, the first line of the recorded request sits under the title.
-  assert.equal(await expert.locator('.task-flow-activity').textContent(), 'Full request', 'The request line under the title skips a line repeating the title');
+  // Without an event record, show a neutral working state.
+  assert.equal(await expert.locator('.task-flow-activity').textContent(), 'Working');
   assert.equal(await expert.locator('.task-flow-progress').textContent(), '—', 'A running task without time records shows a dash');
   assert.equal(await row('done').locator('.task-flow-progress').textContent(), '—', 'A completed task without time records shows a dash');
   assert.equal(await page.locator('#run-stage-list [data-flow-id="row-done"]').count(), 0, 'The completed row is listed in Task history only');
+  if (activityOnly) {
+    await page.locator('#status-settings-button').click();
+    await page.locator('#settings-tab-general').click();
+    await page.locator('#ui-language').selectOption('ko');
+    await page.locator('#status-settings-close').click();
+    await page.waitForFunction(() => document.querySelector('[data-flow-id="row-worker"] .task-flow-activity')?.textContent === '추론 중');
+    for (const [key, text] of [['ui.running.command', '명령 실행 중'], ['ui.analyzing.results', '결과 분석 중']]) {
+      agents[0].progressKey = key;
+      await publish();
+      await page.waitForFunction(text => document.querySelector('[data-flow-id="row-worker"] .task-flow-activity')?.textContent === text, text);
+    }
+    for (const width of [1200, 465, 320]) {
+      await page.setViewportSize({ width, height: 700 });
+      const bounds = await worker.locator('.task-flow-activity').evaluate(el => {
+        const r = el.getBoundingClientRect(), title = el.parentElement.querySelector('.task-flow-single-title').getBoundingClientRect();
+        return { below: r.y >= title.bottom - 1, inside: r.x >= 0 && r.right <= innerWidth, text: el.textContent };
+      });
+      assert.deepEqual(bounds, { below: true, inside: true, text: '결과 분석 중' });
+      if (process.env.AF_TASK_ROW_ARTIFACT) await page.locator('#run-stage-list').screenshot({ path: path.join(process.env.AF_TASK_ROW_ARTIFACT, 'activity-' + width + '.png') });
+    }
+    agents[0].status = 'needs-human-decision';
+    await publish();
+    await page.waitForFunction(() => document.querySelector('[data-flow-id="row-worker"] .task-flow-activity')?.textContent !== '결과 분석 중');
+    assert.equal(await worker.locator('.task-flow-activity').textContent(), '사용자 결정 필요');
+    await page.evaluate(() => { window.dispatchEvent(new Event('pagehide')); sessionStorage.setItem('submission-restoration-fixture', JSON.stringify(window.saved)); });
+    await page.reload();
+    assert.equal(await worker.locator('.task-flow-activity').textContent(), '사용자 결정 필요');
+    return;
+  }
   const start = '2026-10-05T10:00:00.000Z';
   for (const [seconds, expected] of [[0, '0s'], [32, '32s'], [59.999, '59s'], [60, '1m'], [359, '5m'], [3599, '59m'], [3600, '1h'], [4320, '1.2h']]) {
     agents[2] = { ...agents[2], startedAt: start, finishedAt: new Date(Date.parse(start) + seconds * 1000).toISOString() };

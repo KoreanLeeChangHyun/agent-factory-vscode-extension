@@ -27,7 +27,7 @@ async function checkSettingsFit(page) {
   const artifactDir = process.env.AF_RENDERING_ARTIFACT_DIR || path.resolve(__dirname, '../../../docs/artifact/evidence/settings-fit');
   fs.mkdirSync(artifactDir, { recursive: true });
   const measurements = [];
-  for (const size of [{ width: 572, height: 550 }, { width: 465, height: 556 }, { width: 721, height: 402 }, { width: 320, height: 640 }]) {
+  for (const size of [{ width: 622, height: 680 }, { width: 572, height: 550 }, { width: 465, height: 556 }, { width: 721, height: 402 }, { width: 320, height: 640 }]) {
     await page.setViewportSize(size);
     for (const tab of ['general', 'agents', 'providers', 'usage', 'bot', 'status', 'keyboard']) {
       await page.locator('#settings-tab-' + tab).click();
@@ -35,6 +35,8 @@ async function checkSettingsFit(page) {
       if (tab === 'providers') await emit({ type: 'providers.catalog', catalog: { factory: ['1.0.26'], cli: { codex: ['0.159.2'], claude: ['2.1.285'] }, errors: {} } });
       const panel = page.locator('#settings-panel-' + tab);
       const metrics = await panel.evaluate(node => ({ height: node.clientHeight, content: node.scrollHeight, width: node.clientWidth, contentWidth: node.scrollWidth,
+        windowHeight: node.parentElement.getBoundingClientRect().height,
+        bottomGap: node.getBoundingClientRect().bottom - Math.max(node.getBoundingClientRect().top, ...[...node.children].filter(el => el.getClientRects().length).map(el => el.getBoundingClientRect().bottom)),
         clippedControls: [...node.querySelectorAll('button,input,select,textarea')].filter(el => el.getClientRects().length && !el.closest('details:not([open])')).filter(el => {
           const box = el.getBoundingClientRect(), bounds = node.getBoundingClientRect();
           return box.top < bounds.top - 1 || box.bottom > bounds.bottom + 1 || box.left < bounds.left - 1 || box.right > bounds.right + 1;
@@ -51,7 +53,19 @@ async function checkSettingsFit(page) {
       assert.ok(item.content <= item.height + 1, JSON.stringify(item));
       assert.ok(item.contentWidth <= item.width + 1, JSON.stringify(item));
       assert.deepEqual(item.clippedControls, [], JSON.stringify(item));
+      if (['agents', 'providers', 'usage'].includes(item.tab)) assert.ok(item.bottomGap <= 10, JSON.stringify(item));
     }
+  }
+  if (!process.env.AF_SETTINGS_MEASURE_ONLY) {
+    await page.setViewportSize({ width: 320, height: 300 });
+    await page.locator('#settings-tab-usage').click();
+    const panel = page.locator('#settings-panel-usage');
+    const windowBox = await page.locator('#status-settings').boundingBox();
+    assert.ok(windowBox.y >= 15 && windowBox.y + windowBox.height <= 279, 'Settings stays inside a short viewport');
+    assert.ok(await panel.evaluate(node => node.scrollHeight > node.clientHeight), 'Overflow remains scrollable');
+    await panel.focus();
+    await page.keyboard.press('PageDown');
+    await page.waitForFunction(() => document.querySelector('#settings-panel-usage').scrollTop > 0);
   }
 }
 module.exports = { checkSettingsFit };

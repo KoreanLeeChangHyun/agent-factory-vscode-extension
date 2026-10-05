@@ -212,8 +212,21 @@
 
 /* Chat settings categories share the existing status customization surface. */
 .settings-tabs { display: flex; flex-shrink: 0; gap: 4px; margin: 8px 0; border-bottom: 1px solid var(--vscode-widget-border, var(--vscode-panel-border)); }
+.settings-tabs [draggable="true"] { cursor: grab; }
+.settings-tabs .settings-tab-dragging { opacity: .55; cursor: grabbing; }
+.settings-tabs .settings-tab-drop-before { box-shadow: inset 2px 0 var(--vscode-focusBorder, var(--af-color-accent)); }
+.settings-tabs .settings-tab-drop-after { box-shadow: inset -2px 0 var(--vscode-focusBorder, var(--af-color-accent)); }
 .settings-panel { flex: 1; min-height: 0; overflow: auto; overscroll-behavior: contain; scrollbar-width: none; scrollbar-gutter: auto; }
 .settings-panel::-webkit-scrollbar { width: 0; height: 0; }
+
+/* These compact tabs need only their content height. Keep the
+   viewport cap and flex shrinking so long content remains reachable by scroll. */
+.status-settings:has(> :is(#settings-panel-agents, #settings-panel-providers, #settings-panel-usage):not([hidden])) {
+  height: auto;
+  max-height: min(600px, calc(100% - 38px));
+}
+:is(#settings-panel-agents, #settings-panel-providers, #settings-panel-usage) { flex: 0 1 auto; }
+#settings-panel-agents { padding-bottom: 4px; }
 
 /* Fit the compact settings tabs by arranging content, retaining scrolling as an
    accessibility fallback for unusually small windows or enlarged text. */
@@ -553,3 +566,11 @@
   .aligned-settings .agent-reasoning-value { font-size: 10px; line-height: 12px; }
   .aligned-settings .agent-fast-placeholder { min-height: 46px; }
 }
+
+/* General preferences retain the shared controls and scroll in short windows. */
+#settings-panel-general .general-section { border: 0; border-top: 1px solid var(--vscode-panel-border, #ffffff20); padding: 8px 0 0; margin: 10px 4px 0; min-width: 0; }
+#settings-panel-general #general-permissions .agent-permissions-row { margin-inline: 0; }
+.general-notifications legend { padding: 0 8px 0 0; font-weight: 500; }
+.general-notification-events { display: flex; flex-wrap: wrap; gap: 6px 16px; }
+#settings-panel-general .general-notifications .settings-option { margin: 5px 0; gap: 6px; min-width: 0; }
+.general-notifications input { flex: 0 0 auto; accent-color: var(--vscode-button-background); }

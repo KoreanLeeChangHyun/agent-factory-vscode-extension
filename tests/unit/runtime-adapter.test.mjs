@@ -1738,7 +1738,7 @@ test("direct managed commands discover children through shell wrappers and retai
   const shell = command => `/usr/bin/zsh -lc '${command.replaceAll("'", "'\\''")}'`;
   await writeFile(events, [event(shell(work)), event(shell(verification), JSON.stringify({ kind: "ack", agentId: "verification-hidden", runId: "run-verification" }))].join("\n"));
   assert.deepEqual(await client.listChildSessions("main-parent", "run-current"), [
-    { parentRunId: "run-current", agentId: "verification-hidden", role: "verification", runId: "run-verification", status: "running", verifiedWorkRunId: "run-old", updatedAt: "2026-09-01T11:00:00Z" },
+    { parentRunId: "run-current", agentId: "verification-hidden", role: "verification", runId: "run-verification", status: "running", progressKey: "ui.working", verifiedWorkRunId: "run-old", updatedAt: "2026-09-01T11:00:00Z" },
     { parentRunId: "run-current", agentId: "work-hidden", role: "work", runId: "run-old", status: "completed", updatedAt: "2026-09-01T10:00:00Z" }
   ]);
   const polling = `for i in {1..15}; do state_json=$(python3 skills/agent/scripts/exec.py status --agent verification-hidden --run-id run-verification); done`;
@@ -2549,4 +2549,39 @@ test("child task indexing preserves a description larger than the metadata cache
   const captured = await client.latestRunInfo("work-one", "run-one");
   assert.equal(captured.status, "failed");
   assert.deepEqual(captured.taskBinding, taskBinding);
+});
+
+
+test("child activity follows exact run events, partial appends and terminal state", async t => {
+  const { AgentFactoryClient } = await importTypeScript("src/infrastructure/agent-factory/agent-client.ts");
+  const root = await mkdtemp(join(tmpdir(), "af-child-progress-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const client = new AgentFactoryClient("/unused", root);
+  client.managedPath = async (agent, _runs, run, name) => name ? join(root, agent + "-" + run + "-" + name) : root;
+  const file = join(root, "worker-run-one-events.jsonl");
+  const phase = () => client.childProgressKey("worker", "run-one");
+  assert.equal(await phase(), "ui.working");
+  const append = event => appendFile(file, JSON.stringify(event) + "\n");
+  await append({ type: "turn.started" });
+  assert.equal(await phase(), "flow.activity.analyzing");
+  await append({ type: "item.started", item: { type: "reasoning", text: "private" } });
+  assert.equal(await phase(), "flow.activity.reasoning");
+  await appendFile(file, '{"type":"item.started","item":{"type":"command_execution"}');
+  assert.equal(await phase(), "flow.activity.reasoning", "Incomplete events do not change the phase");
+  await appendFile(file, '}\n');
+  assert.equal(await phase(), "ui.running.command");
+  await append({ type: "item.completed", item: { type: "command_execution", exit_code: 0 } });
+  assert.equal(await phase(), "ui.analyzing.results");
+  assert.equal(await client.childProgressKey("worker", "run-two"), "ui.working", "No phase leaks to another run");
+  await append({ type: "item.completed", item: { type: "mcp_tool_call", error: { message: "failed" } } });
+  assert.equal(await phase(), "ui.checking.connected.tool.failure");
+  await writeFile(file, JSON.stringify({ type: "turn.started" }) + "\n");
+  assert.equal(await phase(), "flow.activity.analyzing", "Truncated logs reset the cache");
+  const state = join(root, "worker-run-one-state.json");
+  await writeFile(state, JSON.stringify({ status: "running" }));
+  assert.equal((await client.latestRunInfo("worker", "run-one")).progressKey, "flow.activity.analyzing");
+  for (const status of ["completed", "failed", "cancelled", "needs-human-decision"]) {
+    await writeFile(state, JSON.stringify({ status }));
+    assert.equal((await client.latestRunInfo("worker", "run-one")).progressKey, undefined);
+  }
 });

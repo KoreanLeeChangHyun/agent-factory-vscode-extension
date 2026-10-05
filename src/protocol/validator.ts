@@ -1,3 +1,4 @@
+import { validGeneralSetting } from "../common/types/general-settings";
 import { isBotModel } from "../modules/chat/bot-model";
 import { COMPANION_ACTIONS, type CompanionAction } from "../modules/chat/companion";
 import { validNoteFolder } from "../infrastructure/vscode/note-store";
@@ -75,6 +76,7 @@ const clientMessageTypes = new Set([
   "attachment.remove",
   "composer.settings",
   "workIsolation.set",
+  "general.set",
   "docsAudit.set",
   "docsAudit.started",
   "status.reorder"
@@ -157,6 +159,8 @@ export function parseClientMessage(value: unknown): ClientMessage | undefined {
       return { type: value.type, runId: value.runId, ...(value.language ? { language: value.language } : {}) };
     case "workIsolation.set":
       return typeof value.value === "boolean" ? { type: "workIsolation.set", value: value.value } : undefined;
+    case "general.set":
+      return validGeneralSetting(value.key, value.value) ? { type: "general.set", key: value.key, value: value.value as boolean | "restore" | "new" } : undefined;
     case "docsAudit.set":
       return value.interval === "off" || value.interval === "daily" || value.interval === "weekly" ? { type: "docsAudit.set", interval: value.interval } : undefined;
     case "docsAudit.started":

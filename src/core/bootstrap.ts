@@ -30,4 +30,7 @@ export function bootstrap(context: vscode.ExtensionContext): void {
       new ChatPanelSerializer(container.chatPanels)
     )
   );
+  // Let a command that activated the extension open its requested chat first.
+  const startup = setTimeout(() => { void container.chatPanels.openStartup().catch(error => console.warn("[Agent Factory] Startup chat could not be opened", error)); }, 0);
+  context.subscriptions.push(new vscode.Disposable(() => clearTimeout(startup)));
 }

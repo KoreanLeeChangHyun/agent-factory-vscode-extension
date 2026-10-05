@@ -1,3 +1,4 @@
+import { normalizeGeneralSettings, shouldNotify, type GeneralSettings, type NotificationKind } from "../../common/types/general-settings";
 import type { AgentDefaults } from "../../core/config/agent-settings";
 import { DOCS_AUDIT_INTERVALS, docsAuditDue, type DocsAuditInterval } from "../../common/types/docs-audit";
 import { BOT_DEFAULT_PROMPTS, resolveBotPrompt } from "../../modules/chat/bot-prompts";
@@ -63,6 +64,8 @@ function modelProvider(model: string | undefined): "codex" | "claude" | "antigra
 }
 
 interface ManagedPanel {
+  notificationKeys?: Set<string>;
+  notificationRunId?: string;
   initialPrompt?: string;
   contractWorkflows?: readonly Record<string, unknown>[];
   readonly panel: vscode.WebviewPanel;
@@ -101,6 +104,8 @@ interface ManagedPanel {
   botContext?: BotContext;
 }
 
+const GENERAL_SETTINGS_KEY = "agentFactory.general.v1";
+const LAST_CHAT_KEY = "agentFactory.mainChat.lastPanel";
 const COMPOSER_PREFERENCES_KEY = "agentFactory.mainChat.composerPreferences";
 // Per project (workspaceState): the Human's Work isolation toggle, off by default.
 const WORK_ISOLATION_KEY = "agentFactory.mainChat.workIsolation";
@@ -122,6 +127,8 @@ export interface SidebarAgent {
 
 export class ChatPanelManager implements vscode.Disposable {
   private readonly taskStopsPending = new Set<string>();
+  private generalSettingsWrite: Promise<void> = Promise.resolve();
+  private startupHandled = false;
   private docsAuditTimer: ReturnType<typeof setInterval> | undefined;
   private docsAuditOfferedAt = 0;
   public readonly viewType = "agentFactory.mainChat";
@@ -208,6 +215,7 @@ export class ChatPanelManager implements vscode.Disposable {
   }
 
   public async openSidebarAgent(state: ChatPanelState): Promise<void> {
+    this.startupHandled = true;
     const existing = [...this.panels.values()].find(panel => panel.state.panelId === state.panelId ||
       (state.agentId && panel.state.agentId === state.agentId));
     if (existing) { existing.panel.reveal(undefined, true); return; }
@@ -241,7 +249,52 @@ export class ChatPanelManager implements vscode.Disposable {
     if (listener) this.context.subscriptions.push(listener);
   }
 
+  public async openStartup(): Promise<void> {
+    if (this.startupHandled) return;
+    this.startupHandled = true;
+    if (this.generalSettings().startup === "new") { await this.openDraft(); return; }
+    const last = this.context.workspaceState?.get<string>(LAST_CHAT_KEY);
+    const saved = this.savedAgents();
+    const state = saved.find(entry => entry.panelId === last) ?? saved.at(-1);
+    if (state) await this.openSidebarAgent(state);
+  }
+
+  private generalSettings(): GeneralSettings {
+    return normalizeGeneralSettings(this.context.globalState.get(GENERAL_SETTINGS_KEY));
+  }
+
+  private async updateGeneralSetting(managed: ManagedPanel, key: keyof GeneralSettings, value: boolean | "restore" | "new"): Promise<void> {
+    const write = this.generalSettingsWrite.then(async () => {
+      await this.context.globalState.update(GENERAL_SETTINGS_KEY, { ...this.generalSettings(), [key]: value });
+      for (const target of this.panels.values()) await this.post(target.panel, { type: "general.updated", settings: this.generalSettings() });
+    });
+    this.generalSettingsWrite = write.catch(() => undefined);
+    try { await write; }
+    catch (error) { await this.post(managed.panel, { type: "general.updated", settings: this.generalSettings(), error: String(error) }); }
+  }
+
+  private notifyRun(managed: ManagedPanel, kind: NotificationKind, identity: string): void {
+    if (managed.disposed || !identity) return;
+    const runId = identity.split(":")[0];
+    if (managed.notificationRunId !== runId) { managed.notificationRunId = runId; managed.notificationKeys = new Set(); }
+    const key = `${identity}:${kind}`;
+    const keys = managed.notificationKeys ??= new Set();
+    if (keys.has(key)) return;
+    keys.add(key);
+    const settings = this.generalSettings();
+    if (!shouldNotify(settings, kind, managed.panel.active && vscode.window.state?.focused !== false)) return;
+    if (settings.notifySound) void this.post(managed.panel, { type: "notification.sound" });
+    const text = localize(`general.notice.${kind}`, managed.state.title);
+    const open = localize("general.notice.open");
+    const notification = kind === "failed" ? vscode.window.showErrorMessage(text, open) : vscode.window.showInformationMessage(text, open);
+    // A notification awaiting dismissal must never block completion or queue processing.
+    void notification.then(choice => {
+      if (choice === open && !managed.disposed) managed.panel.reveal(undefined, false);
+    }, () => {});
+  }
+
   public async openDraft(): Promise<void> {
+    this.startupHandled = true;
     const state = { ...createDraftChatState(this.newChatPreferences()), role: "main" as const };
     const panel = vscode.window.createWebviewPanel(
       this.viewType,
@@ -405,6 +458,7 @@ export class ChatPanelManager implements vscode.Disposable {
     await this.rememberAgent(state);
     if (panel.active) {
       this.activePanelId = state.panelId;
+      if ((state.role ?? "main") === "main") void this.context.workspaceState?.update(LAST_CHAT_KEY, state.panelId);
     }
 
     subscriptions.push(
@@ -427,6 +481,7 @@ export class ChatPanelManager implements vscode.Disposable {
       panel.onDidChangeViewState((event) => {
         if (event.webviewPanel.active) {
           this.activePanelId = state.panelId;
+          if ((managed.state.role ?? "main") === "main") void this.context.workspaceState?.update(LAST_CHAT_KEY, state.panelId);
           void this.refreshTheme(managed);
         }
         if (event.webviewPanel.visible) this.scheduleAgentList(managed, true);
@@ -568,6 +623,7 @@ export class ChatPanelManager implements vscode.Disposable {
       runtimeAvailable: connection.available,
       capabilities,
       workIsolation: this.workIsolation(),
+      generalSettings: this.generalSettings(),
       docsAuditInterval: this.docsAudit().interval ?? "off",
       running: managed.controller?.running ?? Boolean(managed.state.agentId && connection.available),
       statusItems: this.statusItems(),
@@ -812,6 +868,9 @@ export class ChatPanelManager implements vscode.Disposable {
         // Retired scope editors must not mutate the single set library.
         await this.refreshAgentDefaults(managed);
         throw new Error(localize("preset.scope.retired"));
+      case "general.set":
+        await this.updateGeneralSetting(managed, message.key, message.value);
+        return;
       case "docsAudit.set": {
         // Enabling starts the first period now, so a check never fires the moment it is switched on.
         await this.context.workspaceState?.update(DOCS_AUDIT_KEY, { interval: message.interval, ...(message.interval === "off" ? {} : { lastRunAt: Date.now() }) });
@@ -2050,9 +2109,11 @@ Read the exact stored child result/receipt and existing workflow status for repo
           void this.post(managed.panel, { type: "chat.delta", ...delta });
         },
         onInterviewQuestion: (question, runId) => {
+          this.notifyRun(managed, "decision", `${runId}:${question.id}`);
           void this.post(managed.panel, { type: "interview.question", question, runId });
         },
         onDecision: (runId, canApprove, approval) => {
+          if (runId) this.notifyRun(managed, "decision", runId);
           void this.post(managed.panel, { type: "decision.pending", runId, canApprove, ...(approval ? { approval } : {}) });
         },
         onHumanDecision: (text, submission) => {
@@ -2074,6 +2135,7 @@ Read the exact stored child result/receipt and existing workflow status for repo
           void this.post(managed.panel, { type: "goal.updated", goal, error });
         },
         onStatusObserved: (status) => {
+          if ((status === "completed" || status === "failed") && managed.controller?.runId) this.notifyRun(managed, status, managed.controller.runId);
           if (status === "completed" || status === "failed") {
             managed.botContext = status;
             this.companionOutcome = status;

@@ -488,8 +488,8 @@ async function main() {
       console.log('Task status badge own checks passed');
       return;
     }
-    if (process.argv.includes('--task-row-only') || process.argv.includes('--task-duration-only')) {
-      await require('./task-flow.cjs').checkTaskRows(page, { durationOnly: process.argv.includes('--task-duration-only') });
+    if (process.argv.includes('--task-activity-only') || process.argv.includes('--task-row-only') || process.argv.includes('--task-duration-only')) {
+      await require('./task-flow.cjs').checkTaskRows(page, { durationOnly: process.argv.includes('--task-duration-only'), activityOnly: process.argv.includes('--task-activity-only') });
       assert.deepEqual(errors, []);
       console.log('Task row identity, full width and independent controls checks passed');
       return;
@@ -569,10 +569,22 @@ async function main() {
       console.log('Auxiliary scrollbar visibility, wheel, keyboard and timeline checks passed.');
       return;
     }
+    if (process.argv.includes('--settings-tab-order-only')) {
+      await require('./settings-tab-order.cjs').checkSettingsTabOrder(page);
+      assert.deepEqual(errors, []);
+      console.log('Settings tab drag, keyboard, cancellation and restoration checks passed.');
+      return;
+    }
     if (process.argv.includes('--settings-fit-only')) {
       await require('./settings-fit.cjs').checkSettingsFit(page);
       assert.deepEqual(errors, []);
       console.log('Settings panel layout checks passed.');
+      return;
+    }
+    if (process.argv.includes('--general-preferences-only')) {
+      await require('./general-preferences.cjs').checkGeneralPreferences(page);
+      assert.deepEqual(errors, []);
+      console.log('General preferences, notifications controls, restoration and responsive layout passed.');
       return;
     }
     if (process.argv.includes('--general-settings-only')) {

@@ -269,20 +269,17 @@ globalThis.AgentFactoryChat.taskFlow = function (host) {
     if (verification) appendTaskIdentity(summary, verification, "verification", live && taskStageRunning(verification, flow));
     summary.append(label);
     if (!live) return;
-    // The agent's own record only: its latest commentary line and its to-do list count.
-    const agent = taskStageAgent(selected) || taskStageAgent(work);
-    // Under the title: the agent's latest commentary line, else the first line of the recorded request.
-    const requestLine = typeof work.description === "string"
-      ? (work.description.split("\n").map(line => line.replace(/^#+\s*/, "").trim()).find(line => line && line !== work.title.trim() && !/^(Goal|Scope|Done|Report)$/i.test(line)) || "") : "";
-    const activityText = (typeof agent?.activity === "string" ? agent.activity.trim() : "") || requestLine;
-    if (activityText) {
-      const activity = document.createElement("span");
-      activity.className = "task-flow-activity";
-      activity.textContent = activityText;
-      activity.title = activityText;
-      activity.setAttribute("aria-label", t("flow.activity.label", activityText));
-      summary.append(activity);
-    }
+    // Use only this stage's run; never show a previous stage's phase as current.
+    const agent = taskStageAgent(selected);
+    const status = agent?.status || liveTaskStatus(selected);
+    const activityText = status === "running" || status === "verifying"
+      ? t(agent?.progressKey || "ui.working") : agent ? childAgentStatusLabel(status) : t("flow.status." + status);
+    const activity = document.createElement("span");
+    activity.className = "task-flow-activity";
+    activity.textContent = activityText;
+    activity.title = activityText;
+    activity.setAttribute("aria-label", t("flow.activity.label", activityText));
+    summary.append(activity);
     const recorded = agent?.planProgress;
     const steps = document.createElement("span");
     steps.className = "task-flow-progress";

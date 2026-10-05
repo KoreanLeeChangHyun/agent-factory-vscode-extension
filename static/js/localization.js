@@ -335,7 +335,20 @@
   "ui.docs.audit.off": {"en": "Off", "ko": "끔"},
   "ui.docs.audit.daily": {"en": "Daily", "ko": "매일"},
   "ui.docs.audit.weekly": {"en": "Weekly", "ko": "매주"},
-  "ui.docs.audit.description": {"en": "When due, an idle Main chat asks the read-only Explorer to check docs/ and report; nothing is changed.", "ko": "주기가 되면 대기 중인 조율자가 읽기 전용 탐색자에게 docs/ 점검을 맡겨 결과만 보고합니다. 아무것도 바꾸지 않습니다."},
+  "general.startup": {"en": "On startup", "ko": "시작 시 화면"},
+  "general.startup.restore": {"en": "Restore last chat", "ko": "마지막 채팅 복원"},
+  "general.startup.new": {"en": "New chat", "ko": "새 채팅"},
+  "general.notifications": {"en": "Notifications", "ko": "알림"},
+  "general.completed": {"en": "Completed", "ko": "작업 완료"},
+  "general.failed": {"en": "Failed", "ko": "작업 실패"},
+  "general.decision": {"en": "Response needed", "ko": "응답 필요"},
+  "general.background": {"en": "Only when viewing another screen", "ko": "다른 화면을 보고 있을 때만 알림"},
+  "general.sound": {"en": "Notification sound", "ko": "알림 소리"},
+  "general.notice.completed": {"en": "Agent Factory: {0} completed.", "ko": "Agent Factory: {0} 작업이 완료되었습니다."},
+  "general.notice.failed": {"en": "Agent Factory: {0} failed.", "ko": "Agent Factory: {0} 작업이 실패했습니다."},
+  "general.notice.decision": {"en": "Agent Factory: {0} needs your response.", "ko": "Agent Factory: {0}에 응답이 필요합니다."},
+  "general.notice.open": {"en": "Open chat", "ko": "채팅 열기"},
+  "ui.docs.audit.description": {"en": "Checks documents read-only at the selected interval while idle and reports the results.", "ko": "설정한 주기로 대기 중 문서를 읽기 전용으로 점검하고 결과를 알려드립니다."},
   "docs.audit.request": {"en": "[Periodic documents check] Sent automatically at the interval set in General settings. Dispatch the explore profile (read-only) to check docs/ and report only: broken links, the same content in more than one place (single-source violations), documents that no longer match the code, and recurring docs/lessons-learned records worth consolidating into Skill rules. Change no files. List the items to fix so I can approve which ones the Scribe should draft.",
     "ko": "[정기 문서 점검] 일반 설정의 주기에 따라 자동으로 보낸 요청입니다. 탐색자(explore, 읽기 전용)에게 docs/ 점검을 맡겨 결과만 보고해 주세요. 깨진 링크, 같은 내용이 여러 곳에 있는 문서(단일 출처 위반), 코드와 맞지 않게 된 문서, 스킬 규칙으로 정리할 만한 반복 교훈(docs/lessons-learned)을 확인합니다. 파일은 바꾸지 말고, 고칠 항목을 목록으로 정리해 주시면 서기관에게 맡길 항목을 제가 승인하겠습니다."},
   "flow.review.changes-requested": {"en": "Changes requested", "ko": "수정 요청"},
@@ -562,6 +575,8 @@
     "en": "The current CLI cannot change the model in this ongoing conversation.",
     "ko": "현재 CLI는 진행 중인 대화에서 모델을 변경할 수 없습니다."
   },
+  "flow.activity.reasoning": {"en": "Reasoning", "ko": "추론 중"},
+  "flow.activity.analyzing": {"en": "Analyzing request", "ko": "요청 분석 중"},
   "ui.reasoning": {
     "en": "Reasoning",
     "ko": "추론"
@@ -1574,6 +1589,10 @@
   "ui.move.with.alt.left.right": {
     "en": " · Move with Alt+Left/Right",
     "ko": " · Alt+Left/Right로 이동"
+  },
+  "ui.settings.tabs.reorder": {
+    "en": "Drag to reorder · Alt+Left/Right",
+    "ko": "드래그로 순서 변경 · Alt+Left/Right"
   },
   "ui.work.274b31": {
     "en": "Work ",
