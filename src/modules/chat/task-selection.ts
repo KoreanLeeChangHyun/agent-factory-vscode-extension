@@ -1,4 +1,4 @@
-import { TASK_MODES, type TaskMode } from "../../infrastructure/agent-factory/agent-client";
+import { TASK_MODES, type TaskMode } from "../../common/types/agent-runtime";
 
 // Composer selections are distinct from the runtime's supported route enum.
 export const TASK_SELECTIONS = [...TASK_MODES] as const;

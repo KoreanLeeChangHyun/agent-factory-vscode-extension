@@ -4,6 +4,23 @@ import type { StatusItemId } from "../core/config/types";
 import type { AttachmentReference } from "../common/types/attachment";
 import type { InterviewQuestion } from "../common/types/business-mode";
 
+/** Composer settings the webview sends as `composer.settings` and the host restores in `host.initialize`. */
+interface ComposerSettingsFields {
+  readonly model?: string;
+  readonly agentModels?: AgentModels;
+  readonly modelFastModes?: import("../common/types/agent-models").ModelFastModes;
+  readonly agentFastModes?: import("../common/types/agent-models").AgentFastModes;
+  readonly agentPermissions?: AgentPermissions;
+  readonly reasoning?: "none" | "low" | "medium" | "high" | "xhigh" | "max";
+  readonly fastMode: boolean;
+  readonly goalMode: boolean;
+  readonly workLoopMode?: boolean;
+  readonly businessMode?: import("../common/types/business-mode").BusinessMode;
+  readonly taskMode?: import("../modules/chat/task-selection").TaskSelection;
+  readonly agentSettingsScope?: import("../core/config/agent-settings").AgentPresetScope;
+  readonly agentSettingsSet?: string;
+}
+
 /** One task brief (short-term contract) of this project, read from its loop state in any conversation. */
 export interface ProjectTaskEntry {
   readonly id: string;
@@ -69,7 +86,7 @@ export type ClientMessage =
   | { readonly type: "bot.prompt.save"; readonly requestId: string; readonly prompt: string; readonly character?: "lumi" | "factory" }
   | { readonly type: "client.ready"; readonly pendingMessageIds?: readonly string[] }
   | { readonly type: "chat.status"; readonly ids: readonly string[] }
-  | { readonly type: "execution.select"; readonly mode: import("../infrastructure/agent-factory/agent-client").ExecutionMode }
+  | { readonly type: "execution.select"; readonly mode: import("../common/types/agent-runtime").ExecutionMode }
   | { readonly type: "message.copy"; readonly text: string }
   | { readonly type: "reference.copy"; readonly id: string }
   | { readonly type: "image.resolve"; readonly href: string }
@@ -95,7 +112,7 @@ export type ClientMessage =
     }
   | { readonly type: "sudo.reply"; readonly id: string; readonly key?: string; readonly iv?: string; readonly data?: string; readonly cancelled?: boolean }
   | { readonly type: "decision.approve"; readonly runId: string; readonly language?: "ko" | "en" }
-  | { readonly type: "goal.control"; readonly action: import("../infrastructure/agent-factory/agent-client").GoalAction }
+  | { readonly type: "goal.control"; readonly action: import("../common/types/agent-runtime").GoalAction }
   | { readonly type: "workIsolation.set"; readonly value: boolean }
   | { readonly type: "queue.resume" }
   | { readonly type: "run.cancel" }
@@ -106,11 +123,11 @@ export type ClientMessage =
   | { readonly type: "providers.request" | "providers.detect" | "providers.versions.request" }
   | { readonly type: "providers.update"; readonly version?: string }
   | { readonly type: "providers.cli.install"; readonly provider: "codex" | "claude"; readonly version: string }
-  | { readonly type: "providers.configure"; readonly provider: import("../infrastructure/agent-factory/provider-detection").ProviderId; readonly path: string }
-  | { readonly type: "providers.pick"; readonly provider: import("../infrastructure/agent-factory/provider-detection").ProviderId }
-  | { readonly type: "providers.updateMode.select"; readonly mode: import("../infrastructure/agent-factory/provider-detection").PluginUpdateMode }
+  | { readonly type: "providers.configure"; readonly provider: import("../common/types/provider").ProviderId; readonly path: string }
+  | { readonly type: "providers.pick"; readonly provider: import("../common/types/provider").ProviderId }
+  | { readonly type: "providers.updateMode.select"; readonly mode: import("../common/types/provider").PluginUpdateMode }
   | { readonly type: "session.select"; readonly agentId: string }
-  | ({ readonly type: "task.stop" } & import("../infrastructure/agent-factory/agent-client").TaskStopTarget)
+  | ({ readonly type: "task.stop" } & import("../common/types/agent-runtime").TaskStopTarget)
   | { readonly type: "workflow.close"; readonly workAgentId: string; readonly loopId: string }
   | { readonly type: "workflow.decision"; readonly workAgentId: string; readonly loopId: string; readonly decision: "continue" | "stop" }
   | { readonly type: "conversations.request" }
@@ -130,22 +147,7 @@ export type ClientMessage =
   | { readonly type: "attachment.conversionFailed"; readonly id: string }
   | { readonly type: "attachment.open"; readonly id: string }
   | { readonly type: "attachment.remove"; readonly id: string }
-  | {
-      readonly type: "composer.settings";
-      readonly model?: string;
-      readonly agentModels?: AgentModels;
-      readonly modelFastModes?: import("../common/types/agent-models").ModelFastModes;
-      readonly agentFastModes?: import("../common/types/agent-models").AgentFastModes;
-  readonly agentPermissions?: AgentPermissions;
-      readonly reasoning?: "none" | "low" | "medium" | "high" | "xhigh" | "max";
-      readonly fastMode: boolean;
-      readonly goalMode: boolean;
-      readonly workLoopMode?: boolean;
-      readonly businessMode?: import("../common/types/business-mode").BusinessMode;
-      readonly taskMode?: import("../modules/chat/task-selection").TaskSelection;
-      readonly agentSettingsScope?: import("../core/config/agent-settings").AgentPresetScope;
-      readonly agentSettingsSet?: string;
-    }
+  | ({ readonly type: "composer.settings" } & ComposerSettingsFields)
   | {
       readonly type: "status.reorder";
       readonly items: readonly StatusItemId[];
@@ -173,11 +175,11 @@ export type HostMessage =
   | { readonly type: "attachment.conversionResult"; readonly id: string; readonly path?: string; readonly error?: string }
   | { readonly type: "attachment.encode"; readonly id: string; readonly source: string; readonly mediaType: string; readonly name: string }
   | { readonly type: "worktree.created"; readonly error?: string; readonly created?: boolean }
-  | { readonly type: "worktree.repositories"; readonly repositories: readonly import("../infrastructure/agent-factory/agent-client").WorktreeRepository[] }
+  | { readonly type: "worktree.repositories"; readonly repositories: readonly import("../common/types/agent-runtime").WorktreeRepository[] }
   | { readonly type: "deploy.targets"; readonly target?: import("../infrastructure/github/deploy-workflows").DeployTarget; readonly error?: string }
   | { readonly type: "deploy.status"; readonly run?: import("../infrastructure/github/deploy-workflows").DeployRun; readonly repository?: string; readonly error?: string }
   | { readonly type: "composer.prefill"; readonly text: string }
-  | { readonly type: "worktree.updated"; readonly value?: import("../infrastructure/agent-factory/agent-client").ConversationWorktree; readonly busy?: boolean; readonly supported?: boolean }
+  | { readonly type: "worktree.updated"; readonly value?: import("../common/types/agent-runtime").ConversationWorktree; readonly busy?: boolean; readonly supported?: boolean }
   | { readonly type: "notes.list.result"; readonly folders?: readonly string[]; readonly scope: import("../infrastructure/vscode/note-store").NoteScope; readonly notes: readonly import("../infrastructure/vscode/note-store").Note[]; readonly error?: string }
   | { readonly type: "notes.save.result"; readonly scope: import("../infrastructure/vscode/note-store").NoteScope; readonly id: string; readonly note?: import("../infrastructure/vscode/note-store").Note; readonly error?: string }
   | { readonly type: "bot.companion"; readonly companion: import("../modules/chat/companion").CompanionState; readonly working: number; readonly outcome?: "completed" | "failed"; readonly outcomeUntil: number }
@@ -188,24 +190,24 @@ export type HostMessage =
   | { readonly type: "chat.pending"; readonly id: string }
   | { readonly type: "chat.started"; readonly submission?: MessageSubmission; readonly id: string; readonly text: string; readonly attachments: readonly AttachmentReference[] }
   | { readonly type: "agent.run.selected"; readonly capturedRun?: import("../modules/chat/chat-state").CapturedAgentRun }
-  | { readonly type: "execution.updated"; readonly mode?: import("../infrastructure/agent-factory/agent-client").ExecutionMode | "read-only" }
+  | { readonly type: "execution.updated"; readonly mode?: import("../common/types/agent-runtime").ExecutionMode | "read-only" }
   | { readonly type: "syntax.theme"; readonly selection: import("../infrastructure/agent-factory/cli-theme").CliTheme }
   | { readonly type: "branch.updated"; readonly branch?: string }
-  | { readonly type: "goal.updated"; readonly goal: import("../infrastructure/agent-factory/agent-client").NativeGoal | null; readonly error?: string }
+  | { readonly type: "goal.updated"; readonly goal: import("../common/types/agent-runtime").NativeGoal | null; readonly error?: string }
   | { readonly type: "workIsolation.updated"; readonly value: boolean }
-  | { readonly type: "capabilities.updated"; readonly capabilities: { readonly submit: import("../infrastructure/agent-factory/agent-client").ExecutionCapabilities; readonly send: import("../infrastructure/agent-factory/agent-client").ExecutionCapabilities } }
+  | { readonly type: "capabilities.updated"; readonly capabilities: { readonly submit: import("../common/types/agent-runtime").ExecutionCapabilities; readonly send: import("../common/types/agent-runtime").ExecutionCapabilities } }
   | { readonly type: "models.list"; readonly models: readonly string[] }
   | {
       readonly type: "providers.status";
       readonly providers: readonly import("../infrastructure/agent-factory/provider-detection").ProviderStatus[];
       readonly busy?: boolean;
-      readonly errors?: Partial<Readonly<Record<import("../infrastructure/agent-factory/provider-detection").ProviderId, string>>>;
-      readonly pluginUpdateMode?: import("../infrastructure/agent-factory/provider-detection").PluginUpdateMode;
-      readonly versions?: Partial<Readonly<Record<import("../infrastructure/agent-factory/provider-detection").ProviderId, import("../infrastructure/vscode/provider-settings").ProviderVersions>>>;
+      readonly errors?: Partial<Readonly<Record<import("../common/types/provider").ProviderId, string>>>;
+      readonly pluginUpdateMode?: import("../common/types/provider").PluginUpdateMode;
+      readonly versions?: Partial<Readonly<Record<import("../common/types/provider").ProviderId, import("../infrastructure/vscode/provider-settings").ProviderVersions>>>;
     }
   | { readonly type: "providers.catalog"; readonly catalog: import("../infrastructure/agent-factory/provider-version-catalog").ProviderVersionCatalog }
-  | { readonly type: "runtime.updated"; readonly runtimeAvailable: boolean; readonly capabilities?: { readonly submit: import("../infrastructure/agent-factory/agent-client").ExecutionCapabilities; readonly send: import("../infrastructure/agent-factory/agent-client").ExecutionCapabilities } }
-  | {
+  | { readonly type: "runtime.updated"; readonly runtimeAvailable: boolean; readonly capabilities?: { readonly submit: import("../common/types/agent-runtime").ExecutionCapabilities; readonly send: import("../common/types/agent-runtime").ExecutionCapabilities } }
+  | ({
       readonly type: "host.initialize";
       readonly agentSettingsVersion?: 1;
       readonly agentId?: string;
@@ -216,7 +218,7 @@ export type HostMessage =
       readonly verifiedWorkRunId?: string;
       readonly projectName: string;
       readonly runtimeAvailable: boolean;
-      readonly capabilities?: { readonly submit: import("../infrastructure/agent-factory/agent-client").ExecutionCapabilities; readonly send: import("../infrastructure/agent-factory/agent-client").ExecutionCapabilities };
+      readonly capabilities?: { readonly submit: import("../common/types/agent-runtime").ExecutionCapabilities; readonly send: import("../common/types/agent-runtime").ExecutionCapabilities };
       /** Per-project Work isolation toggle; off unless the Human turned it on. */
       readonly workIsolation?: boolean;
       readonly running: boolean;
@@ -225,19 +227,6 @@ export type HostMessage =
       readonly companionAvailable?: boolean;
       readonly botCharacter?: "lumi" | "factory"; readonly localCompanionAvailable?: boolean; readonly botDefaultPrompt?: string; readonly botModel?: string; readonly botPrompt?: string;
       readonly statusItems: readonly StatusItemId[];
-      readonly model?: string;
-      readonly agentModels?: AgentModels;
-      readonly modelFastModes?: import("../common/types/agent-models").ModelFastModes;
-      readonly agentFastModes?: import("../common/types/agent-models").AgentFastModes;
-  readonly agentPermissions?: AgentPermissions;
-      readonly reasoning?: "none" | "low" | "medium" | "high" | "xhigh" | "max";
-      readonly fastMode: boolean;
-      readonly goalMode: boolean;
-      readonly workLoopMode?: boolean;
-      readonly businessMode?: import("../common/types/business-mode").BusinessMode;
-      readonly taskMode?: import("../modules/chat/task-selection").TaskSelection;
-      readonly agentSettingsScope?: import("../core/config/agent-settings").AgentPresetScope;
-      readonly agentSettingsSet?: string;
       readonly contextUsedTokens?: number;
       readonly contextWindowTokens?: number;
       readonly fiveHourUsedPercent?: number;
@@ -248,7 +237,7 @@ export type HostMessage =
       readonly conversationId?: string;
       readonly resetConversation?: boolean;
       readonly pendingMessageIds?: readonly string[];
-    }
+    } & ComposerSettingsFields)
   | {
       readonly type: "attachments.add";
       readonly attachments: readonly AttachmentReference[];
@@ -280,7 +269,7 @@ export type HostMessage =
   | { readonly type: "session.bound"; readonly agentId: string; readonly reset?: boolean; readonly conversationId?: string }
   | { readonly type: "conversation.clearing"; readonly busy: boolean }
   | { readonly type: "conversation.cleared"; readonly conversationId: string }
-  | { readonly type: "conversations.list"; readonly conversations: readonly import("../infrastructure/agent-factory/agent-client").SavedConversation[]; readonly error?: string }
+  | { readonly type: "conversations.list"; readonly conversations: readonly import("../common/types/agent-runtime").SavedConversation[]; readonly error?: string }
   | { readonly type: "conversation.read.result"; readonly requestId: string; readonly history?: import("../infrastructure/agent-factory/agent-client").ConversationHistory; readonly error?: string }
   | { readonly type: "conversation.history"; readonly agentId: string; readonly history: import("../infrastructure/agent-factory/agent-client").ConversationHistory }
   | { readonly type: "sessions.open" }

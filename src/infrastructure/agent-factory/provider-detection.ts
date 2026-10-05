@@ -2,18 +2,14 @@ import {
   configureAntigravityCli, configureClaudeCli, configureCodexCli, probeTerminalPath, resolveProviderCli,
   type CodexCliResolutionOptions, type CodexCliSelection, type CodexCliSource, type ProviderCommand
 } from "./process-environment";
+import { PROVIDER_IDS, PLUGIN_UPDATE_MODES, type PluginUpdateMode, type ProviderId } from "../../common/types/provider";
 
-export const PROVIDER_IDS = ["codex", "claude", "antigravity"] as const;
-export type ProviderId = typeof PROVIDER_IDS[number];
+export { PROVIDER_IDS, PLUGIN_UPDATE_MODES, type PluginUpdateMode, type ProviderId };
 
 /** `agentFactory.mainChat.<key>` holding each provider's manual executable path. */
 export const PROVIDER_PATH_SETTINGS: Readonly<Record<ProviderId, string>> = {
   codex: "codexPath", claude: "claudePath", antigravity: "antigravityPath"
 };
-
-/** `agentFactory.mainChat.pluginUpdateMode`: keep each detected CLI's Agent Factory plugin in sync automatically, or only on request. */
-export const PLUGIN_UPDATE_MODES = ["auto", "manual"] as const;
-export type PluginUpdateMode = typeof PLUGIN_UPDATE_MODES[number];
 
 /** Plugin compatibility follows the shared release base version and ignores build metadata. */
 export function pluginVersionIsCurrent(installed: string | undefined, required: string): boolean {

@@ -10,7 +10,7 @@ import { TASK_SELECTIONS, type TaskSelection } from "../modules/chat/task-select
 import { STATUS_ITEM_IDS, type StatusItemId } from "../core/config/types";
 import type { AttachmentKind, AttachmentReference } from "../common/types/attachment";
 import type { ClientMessage } from "./messages";
-import { PROVIDER_IDS, PLUGIN_UPDATE_MODES, type ProviderId, type PluginUpdateMode } from "../infrastructure/agent-factory/provider-detection";
+import { PROVIDER_IDS, PLUGIN_UPDATE_MODES, type ProviderId, type PluginUpdateMode } from "../common/types/provider";
 
 const clientMessageTypes = new Set([
   "agent.defaults.save", "agent.defaults.fast", "agent.preset", "agent.preset.field", "agent.preset.fast",
@@ -156,10 +156,10 @@ export function parseClientMessage(value: unknown): ClientMessage | undefined {
       return typeof value.value === "boolean" ? { type: "workIsolation.set", value: value.value } : undefined;
     case "goal.control":
       if (typeof value.action !== "string" || !["get", "refresh", "pause", "cancel", "disable", "reopen"].includes(value.action)) return undefined;
-      return { type: "goal.control", action: value.action as import("../infrastructure/agent-factory/agent-client").GoalAction };
+      return { type: "goal.control", action: value.action as import("../common/types/agent-runtime").GoalAction };
     case "execution.select":
       if (typeof value.mode !== "string" || !["cli-default", "workspace-write", "danger-full-access", "bypass"].includes(value.mode)) return undefined;
-      return { type: value.type, mode: value.mode as import("../infrastructure/agent-factory/agent-client").ExecutionMode };
+      return { type: value.type, mode: value.mode as import("../common/types/agent-runtime").ExecutionMode };
     case "attachments.createText":
       if (typeof value.text !== "string" || value.text.length < 8_000) return undefined;
       return { type: value.type, text: value.text };

@@ -3,8 +3,7 @@ import { ObservedRunCache } from "./observed-run-cache";
 import { localize } from "../../common/localization";
 import { submissionContext } from "./submission-context";
 import { historyPresentation } from "./history-presentation";
-import type { AgentPermissions } from "../../common/types/agent-permissions";
-import { parseWorkProfile, type AgentModels, type WorkProfile } from "../../common/types/agent-models";
+import { parseWorkProfile, type WorkProfile } from "../../common/types/agent-models";
 import { constants as fsConstants, type Dirent } from "node:fs";
 import { spawn } from "node:child_process";
 import { antigravityExecutable, claudeExecutable, codexExecutable, defaultPythonCommand, runtimeEnvironment } from "./process-environment";
@@ -16,6 +15,17 @@ import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { AsyncCache } from "../../common/async-cache";
 import { parseInterviewQuestion } from "../../common/types/business-mode";
 import type { ActivityDetails as ProtocolActivityDetails, ActivityKind, ProjectTaskEntry } from "../../protocol/messages";
+import {
+  TASK_MODES,
+  type AccountLimits, type ConversationWorktree, type ExecutionCapabilities, type ExecutionMode, type ExecutionOptions,
+  type GoalAction, type NativeGoal, type SavedConversation, type TaskMode, type TaskStopTarget, type WorktreeOptions, type WorktreeRepository
+} from "../../common/types/agent-runtime";
+
+export {
+  TASK_MODES,
+  type AccountLimits, type ConversationWorktree, type ExecutionCapabilities, type ExecutionMode, type ExecutionOptions,
+  type GoalAction, type NativeGoal, type SavedConversation, type TaskMode, type TaskStopTarget, type WorktreeOptions, type WorktreeRepository
+};
 
 /** Activity details inside a RunUpdate, whose own `kind` is the update discriminant. */
 export type ActivityDetails = Omit<ProtocolActivityDetails, "kind"> & { readonly activityKind?: ActivityKind };
@@ -37,15 +47,6 @@ interface ContextUsage {
   readonly fiveHourResetsAt?: number;
 }
 
-/** Latest account-wide limit windows reported by one provider, independent of any chat's context. */
-export interface AccountLimits {
-  readonly provider: string;
-  readonly weeklyUsedPercent?: number;
-  readonly fiveHourUsedPercent?: number;
-  readonly weeklyResetsAt?: number;
-  readonly fiveHourResetsAt?: number;
-}
-
 interface ContextUsageSnapshot {
   readonly checkedAt: number;
   readonly limitsSignature?: string;
@@ -54,72 +55,6 @@ interface ContextUsageSnapshot {
   readonly nextLookupAt?: number;
   readonly usage?: ContextUsage;
 }
-
-export interface ExecutionCapabilities {
-  readonly model: boolean;
-  readonly reasoning: boolean;
-  readonly fast: boolean;
-  readonly goal: boolean;
-  readonly sessionProvider?: "codex" | "claude" | "antigravity";
-  readonly images?: boolean;
-  readonly automaticRequestHash?: boolean;
-  readonly worktrees?: boolean;
-  /** Captured per-task Work Units, checked integration and same-session conflict revisions. */
-  readonly taskWorkspaces?: boolean;
-  /** Main runs accept `--work-isolation on|off`, the Human's Work isolation toggle that loops inherit. */
-  readonly workIsolation?: boolean;
-  /** The runtime accepts and records `loop.py start --work-profile`. */
-  readonly workProfile?: boolean;
-  /** A stopped loop reports `failureClass`; Main is then told what to do for each class. */
-  readonly failureClass?: boolean;
-  /** A loop stopped on its revision limit carries a structured `pause`; the task panel then offers the Human's decision. */
-  readonly revisionLimitPause?: boolean;
-  readonly taskModes?: readonly TaskMode[];
-  readonly diagnostic?: string;
-}
-
-export const TASK_MODES = ["orchestrate", "direct", "work", "plan", "verification", "plan-work", "work-verification", "plan-work-verification"] as const;
-export type TaskMode = typeof TASK_MODES[number];
-
-export type ExecutionMode = "cli-default" | "workspace-write" | "danger-full-access" | "bypass";
-
-export interface ExecutionOptions {
-  readonly inspectionOnly?: boolean;
-  readonly businessMode?: import("../../common/types/business-mode").BusinessMode;
-  readonly taskMode?: TaskMode;
-  readonly executionMode?: ExecutionMode;
-  readonly model?: string;
-  readonly agentModels?: AgentModels;
-  readonly agentPermissions?: AgentPermissions;
-  /** The Human's per-project Work isolation toggle; sent only to a runtime advertising `workIsolation`. */
-  readonly workIsolation?: boolean;
-  readonly reasoningEffort?: "none" | "low" | "medium" | "high" | "xhigh" | "max";
-  readonly fast?: boolean;
-  readonly goalMode?: boolean;
-  readonly goalObjective?: string;
-  readonly actor?: "main" | "human";
-  readonly verifiedWorkRunId?: string;
-}
-
-export interface NativeGoal {
-  readonly threadId: string;
-  readonly objective: string;
-  readonly status: "active" | "paused" | "blocked" | "usageLimited" | "budgetLimited" | "complete";
-  readonly tokensUsed: number;
-  readonly timeUsedSeconds: number;
-  readonly tokenBudget?: number | null;
-}
-
-export interface TaskStopTarget {
-  readonly workflowId: string;
-  readonly taskId: string;
-  readonly agentId?: string;
-  readonly runId?: string;
-  readonly workAgentId?: string;
-  readonly loopId?: string;
-}
-
-export type GoalAction = "get" | "refresh" | "pause" | "cancel" | "disable" | "reopen";
 
 export interface RunAcceptance {
   readonly preparationGuidance?: string;
@@ -185,12 +120,6 @@ export interface MainAgentSession {
   readonly model?: string;
 }
 
-export interface SavedConversation {
-  readonly conversationId: string | null;
-  readonly startedAt: string;
-  readonly runCount: number;
-}
-
 export interface ConversationHistory {
   readonly conversationId?: string;
   readonly nextBefore?: string;
@@ -241,32 +170,6 @@ function parsePlanProgress(value: unknown): PlanProgress | undefined {
 export type RevisionLimitDecision = "continue" | "stop";
 /** Revisions one "계속" click authorizes after a loop stopped on its revision limit. */
 export const REVISION_LIMIT_EXTENSION = 3;
-
-export interface WorktreeRepository { readonly path: string; readonly branches: readonly string[]; readonly defaultBranch: string | null; }
-
-export interface ConversationWorktree {
-  readonly agentId: string;
-  readonly workspaceRoot: string;
-  readonly workingDirectory: string;
-  readonly branch: string | null;
-  readonly dirty: boolean;
-  readonly available: boolean;
-  readonly conflicts: readonly string[];
-  readonly worktree: { readonly workUnit?: boolean; readonly cleaned?: boolean; readonly repositoryRoot?: string; readonly name?: string; readonly id: string; readonly path: string; readonly branch: string; readonly targetBranch: string; readonly phase: "creating" | "active" | "merging" | "conflict" | "merged" } | null;
-}
-
-export interface WorktreeOptions {
-  readonly repository?: string;
-  readonly name?: string;
-  readonly branch?: string;
-  readonly base?: string;
-  readonly target?: string;
-  readonly changes?: "keep" | "copy";
-  readonly path?: string;
-  readonly executionMode?: ExecutionMode;
-  /** Selects the provider when the worktree creates the conversation's first session. */
-  readonly model?: string;
-}
 
 export interface AgentRuntimeClient {
   worktreeRepositories?(): Promise<readonly WorktreeRepository[]>;

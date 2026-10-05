@@ -6,7 +6,8 @@ import { approvalMessage, describeDecisionApproval, type DecisionApproval } from
 import { randomUUID } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import type { AttachmentReference } from "../../common/types/attachment";
-import type { AgentRuntimeClient, ExecutionOptions, NativeGoal, GoalAction, AccountLimits } from "../../infrastructure/agent-factory/agent-client";
+import type { AgentRuntimeClient } from "../../infrastructure/agent-factory/agent-client";
+import type { ExecutionOptions, NativeGoal, GoalAction, AccountLimits } from "../../common/types/agent-runtime";
 
 const TERMINAL_STATES = new Set(["completed", "needs-human-decision", "failed", "cancelled"]);
 
@@ -78,7 +79,7 @@ export class ChatSessionController {
   private goalControlPending = false;
   private pendingGoalAction: GoalAction | undefined;
   private conversationResetInFlight: Promise<{ readonly conversationId: string; readonly startedAt: string }> | undefined;
-  private worktreeInFlight?: Promise<import("../../infrastructure/agent-factory/agent-client").ConversationWorktree>;
+  private worktreeInFlight?: Promise<import("../../common/types/agent-runtime").ConversationWorktree>;
   private disposed = false;
   private readonly queuedSends: PendingSend[] = [];
 
@@ -154,7 +155,7 @@ export class ChatSessionController {
     }
   }
 
-  public async changeWorktree(action: "create" | "merge", options: import("../../infrastructure/agent-factory/agent-client").WorktreeOptions = {}): Promise<import("../../infrastructure/agent-factory/agent-client").ConversationWorktree> {
+  public async changeWorktree(action: "create" | "merge", options: import("../../common/types/agent-runtime").WorktreeOptions = {}): Promise<import("../../common/types/agent-runtime").ConversationWorktree> {
     if (this.worktreeInFlight || this.running || this.currentRunId || this.queueLength || this.conversationResetInFlight || this.goalControlPending) throw new Error(localize("worktree.busy"));
     if (!this.runtime.worktree) throw new Error(localize("worktree.unsupported"));
     const agent = this.agentId ?? `main-${randomUUID()}`;
