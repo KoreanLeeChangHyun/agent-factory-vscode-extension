@@ -28,4 +28,8 @@ export class AsyncCache<T> {
     if (this.entries.size > this.capacity) this.entries.delete(this.entries.keys().next().value!);
     return entry.promise;
   }
+
+  public deleteWhere(match: (key: string) => boolean): void {
+    for (const key of [...this.entries.keys()]) if (match(key)) this.entries.delete(key);
+  }
 }

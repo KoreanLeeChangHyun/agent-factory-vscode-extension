@@ -2407,3 +2407,28 @@ test('task chat resolves exact historical models, profiles and missing values wi
   assert.equal(await client.childRun('main-owner', 'work-one', 'missing-run'), undefined);
   assert.equal(await client.childRun('main-owner', 'work-one', '../run'), undefined);
 });
+
+test("conversation reset and first send refresh the Main session provider lock", async () => {
+  const { AgentFactoryClient } = await importTypeScript("src/infrastructure/agent-factory/agent-client.ts");
+  const client = new AgentFactoryClient("/unused/exec.py", "/unused/project");
+  const flags = { model: true, reasoning: false, fast: false, goal: false };
+  let sessionProvider = "claude";
+  client.command = async ([command]) => {
+    if (command === "reset-conversation") {
+      sessionProvider = undefined;
+      return { kind: "conversation-reset", agentId: "main-test", conversationId: "conversation-2", startedAt: "2026-10-05T00:00:00Z", historyRetained: true };
+    }
+    return { kind: "execution-capabilities", schemaVersion: "0.1.0", submit: flags, send: { ...flags, ...(sessionProvider ? { sessionProvider } : {}) } };
+  };
+  client.inputCommand = async () => {
+    sessionProvider = "codex";
+    return { document: { kind: "ack", status: "accepted", agentId: "main-test", runId: "run-1" } };
+  };
+  assert.equal((await client.capabilities("main-test")).send.sessionProvider, "claude");
+  assert.equal((await client.capabilities("work-test")).send.sessionProvider, "claude");
+  await client.resetConversation("main-test");
+  assert.equal((await client.capabilities("main-test")).send.sessionProvider, undefined);
+  assert.equal((await client.capabilities("work-test")).send.sessionProvider, "claude");
+  await client.send("main-test", "hello", { model: "gpt-6-astra" });
+  assert.equal((await client.capabilities("main-test")).send.sessionProvider, "codex");
+});
