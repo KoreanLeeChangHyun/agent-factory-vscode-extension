@@ -12,7 +12,14 @@ const output = await build({
     name: "theme-reader-boundary",
     setup(build) {
       build.onResolve({ filter: /\/cli-theme$/ }, () => ({ path: "cli-theme", namespace: "theme-test" }));
-      build.onLoad({ filter: /.*/, namespace: "theme-test" }, () => ({ contents: "export async function readCliTheme() { return globalThis.__readTheme(); }", loader: "js" }));
+      build.onResolve({ filter: /\/github\/deploy-workflows$/ }, () => ({ path: "deploy-workflows", namespace: "theme-test" }));
+      build.onLoad({ filter: /.*/, namespace: "theme-test" }, args => ({ contents: args.path === "deploy-workflows"
+        ? `export class DeployError extends Error { constructor(code, message) { super(message); this.code = code; } }
+           export async function deployRunStatus(...args) { return globalThis.__deployRunStatus({ DeployError, Error, SyntaxError }, ...args); }
+           export async function dispatchDeploy() { return { id: 7, url: "https://github.test/run/7", workflow: "Release", status: "queued" }; }
+           export async function detectDeployTarget() { throw new DeployError("not-github", "not GitHub"); }
+           export async function setupDeploySecret() {}`
+        : "export async function readCliTheme() { return globalThis.__readTheme(); }", loader: "js" }));
     }
   }]
 });
@@ -83,8 +90,10 @@ async function fixture(t, connectRuntime = async () => ({ available: false, diag
     require: name => name === "vscode" ? vscode : require(name),
     setTimeout(fn, delay) { const id = nextTimer++; timers.set(id, { fn, delay }); return id; },
     clearTimeout(id) { timers.delete(id); },
-    __readTheme() { reads++; return readTheme(); }
+    __readTheme() { reads++; return readTheme(); },
+    __deployRunStatus: (...args) => deployRunStatus(...args)
   });
+  let deployRunStatus = async () => { throw new Error("deploy status is not configured"); };
   const manager = new module.exports.ChatPanelManager(
     { extensionUri: { fsPath: "/extension" }, globalStorageUri: { fsPath: "/isolated/theme-test-storage" }, globalState: memento(), workspaceState: memento() },
     { localResourceRoots: [], render: async () => "<html></html>" }, () => [],
@@ -98,6 +107,11 @@ async function fixture(t, connectRuntime = async () => ({ available: false, diag
     reads: () => reads,
     select(value) { selection = value; },
     deferRead(fn) { readTheme = fn; },
+    deployStatus(fn) { deployRunStatus = fn; },
+    async fireTimers(delay) {
+      for (const [id, timer] of [...timers]) if (timer.delay === delay) { timers.delete(id); timer.fn(); }
+      await flush();
+    },
     ready: () => receive.fire({ type: "client.ready" }),
     receive: message => receive.fire(message),
     async viewState(active) { panel.active = active; panel.visible = active; await view.fire({ webviewPanel: panel }); await flush(); },
@@ -245,4 +259,99 @@ test("disposing cancels queued watcher refreshes and discards in-flight theme re
   assert.equal(host.watcher.disposed, true);
   assert.equal(host.reads(), beforeReads);
   assert.equal(host.themes().length, 1);
+});
+
+test("client.ready sends host.initialize and starts refreshes when a preparation step fails", async t => {
+  const host = await fixture(t, async () => { throw new Error("Runtime lookup failed"); });
+  host.deferRead(async () => { throw new Error("Theme read failed"); });
+  host.manager.sendModelList = async () => { throw new Error("Model list failed"); };
+  const managed = host.manager.panels.values().next().value;
+  await host.ready();
+  const initialize = host.messages.find(message => message.type === "host.initialize");
+  assert.ok(initialize, "the webview receives host.initialize");
+  assert.equal(initialize.runtimeAvailable, false);
+  const notices = host.messages.filter(message => message.type === "host.notice" && message.level === "error").map(message => message.text);
+  assert.ok(notices.some(text => /Theme read failed$/.test(text)));
+  assert.ok(notices.some(text => /Runtime lookup failed$/.test(text)));
+  assert.ok(notices.some(text => /Model list failed$/.test(text)));
+  assert.equal(managed.branchRefreshStarted, true, "branch refresh starts after a failed later step");
+});
+
+test("a failed chat request is logged and shown instead of becoming an unhandled rejection", async t => {
+  const host = await fixture(t);
+  const errors = [];
+  const original = console.error;
+  console.error = (...args) => errors.push(args);
+  t.after(() => { console.error = original; });
+  await host.receive({ type: "agent.defaults.save", scope: "project", role: "work", field: "model", value: "claude-sonnet" });
+  await host.receive({ type: "agent.defaults.fast", scope: "project", role: "work", model: "claude-sonnet", value: true });
+  const notices = host.messages.filter(message => message.type === "host.notice" && message.level === "error").map(message => message.text);
+  assert.deepEqual(notices, ["Open a project before changing project settings", "Open a project before changing project settings"]);
+  assert.equal(host.messages.filter(message => message.type === "agent.defaults").length, 2, "the stored values are still refreshed");
+  assert.deepEqual(errors.map(([label, detail]) => [label, detail.type]), [
+    ["[Agent Factory] Chat request failed", "agent.defaults.save"], ["[Agent Factory] Chat request failed", "agent.defaults.fast"]]);
+  assert.ok(!JSON.stringify(errors).includes("claude-sonnet"), "the log carries the operation, not the request values");
+});
+
+test("client.ready and chat.send of one panel run in arrival order", async t => {
+  let releaseRuntime;
+  const runtime = new Promise(resolve => { releaseRuntime = resolve; });
+  const host = await fixture(t, async () => { await runtime; return { available: false, diagnostic: "Runtime unavailable in fixture" }; });
+  host.manager.refreshWorktree = async () => {};
+  host.manager.warnDirectBranch = async () => {};
+  let releaseSend = async () => {};
+  host.manager.sendChat = async (_managed, text) => { await releaseSend(); host.operations.push("send:" + text); };
+  const send = text => host.receive({ type: "chat.send", id: text, text, attachments: [], execution: { fast: false, goal: false } });
+  const initialized = () => host.operations.filter(type => type === "host.initialize").length;
+  const ready = host.ready();
+  const during = send("during-ready");
+  await flush();
+  assert.ok(!host.operations.includes("send:during-ready"), "a send waits for the reload in progress");
+  releaseRuntime();
+  await Promise.all([ready, during]);
+  assert.ok(host.operations.indexOf("host.initialize") < host.operations.indexOf("send:during-ready"));
+  let release;
+  releaseSend = () => new Promise(resolve => { release = resolve; });
+  const before = send("before-ready");
+  await flush();
+  const reload = host.ready();
+  await flush();
+  assert.equal(initialized(), 1, "a reload waits for the earlier send");
+  release();
+  await Promise.all([before, reload]);
+  assert.equal(initialized(), 2);
+  assert.ok(host.operations.indexOf("send:before-ready") < host.operations.lastIndexOf("host.initialize"));
+});
+
+test("deploy status polling retries transient failures and stops on persistent or definitive ones", async t => {
+  const host = await fixture(t);
+  const managed = host.manager.panels.values().next().value;
+  managed.deployTarget = { root: "/project", target: { repository: "owner/repo", ref: "main", workflows: [] } };
+  const poll = async outcomes => {
+    let calls = 0;
+    // Errors come from the module realm, as gh failures do in the Host.
+    host.deployStatus(async (realm, _root, _repository, run) => {
+      const outcome = outcomes[calls++];
+      if (outcome === "gh-missing") throw new realm.DeployError("gh-missing", "GitHub CLI (gh) is not installed.");
+      if (outcome === "reset") throw new realm.Error("gh: connection reset");
+      if (outcome === "syntax") throw new realm.SyntaxError("Unexpected token");
+      return { ...run, ...outcome };
+    });
+    let done = false;
+    const deploy = host.manager.runDeploy(managed, 1, {}).then(() => { done = true; });
+    await flush();
+    while (!done) await host.fireTimers(10_000);
+    await deploy;
+    return calls;
+  };
+  const failure = () => "reset";
+  assert.equal(await poll([failure(), failure(), { status: "in_progress" }, failure(), { status: "completed", conclusion: "success" }]), 5);
+  assert.equal(managed.deployPolling, false);
+  assert.match(host.messages.filter(message => message.type === "host.notice").at(-1).text, /Release succeeded/);
+  assert.equal(await poll([failure(), failure(), failure()]), 3);
+  assert.equal(managed.deployPolling, false, "a new deployment is no longer blocked");
+  assert.match(host.messages.filter(message => message.type === "host.notice").at(-1).text, /Stopped checking Release: gh: connection reset\. The run continues on GitHub: https:\/\/github\.test\/run\/7/);
+  assert.equal(await poll([failure(), "gh-missing"]), 2, "a missing gh is not retried");
+  assert.equal(await poll(["syntax"]), 1, "an unreadable response is not retried");
+  assert.equal(managed.deployPolling, false);
 });

@@ -424,7 +424,7 @@ export class ChatPanelManager implements vscode.Disposable {
         if (event.webviewPanel.visible) this.scheduleAgentList(managed, true);
       }),
       panel.webview.onDidReceiveMessage(async (rawMessage: unknown) => {
-        await this.handleMessage(managed, rawMessage);
+        await this.dispatchMessage(managed, rawMessage);
       })
     );
 
@@ -474,12 +474,159 @@ export class ChatPanelManager implements vscode.Disposable {
     }
   }
 
+  /** Reports a failed chat request in the log and the chat instead of leaving an unhandled rejection. */
+  private async dispatchMessage(managed: ManagedPanel, rawMessage: unknown): Promise<void> {
+    try {
+      await this.handleMessage(managed, rawMessage);
+    } catch (error) {
+      const text = error instanceof Error ? error.message : String(error);
+      // Log the protocol operation only, never chat text, attachments or credentials.
+      console.error("[Agent Factory] Chat request failed", { type: requestType(rawMessage), error: text });
+      if (managed.disposed) return;
+      try { await this.post(managed.panel, { type: "host.notice", level: "error", text }); }
+      catch (notice) { console.error("[Agent Factory] Chat request failure could not be shown", { type: requestType(rawMessage), error: String(notice) }); }
+    }
+  }
+
+  /** Initializes a loaded chat view; host.initialize is sent even when a preparation step fails. */
+  private async initializeClient(managed: ManagedPanel, pendingMessageIds: readonly string[]): Promise<void> {
+    // A failed step must not prevent host.initialize; the chat reports it afterwards.
+    const runtimeErrors = new Set<string>();
+    const runtimeError = (error: unknown) => { runtimeErrors.add(error instanceof Error ? error.message : String(error)); return undefined; };
+    const guard = async <T>(step: () => Promise<T>): Promise<T | undefined> => {
+      try { return await step(); } catch (error) { return runtimeError(error); }
+    };
+    await guard(() => this.reconcileChatRequests(managed, pendingMessageIds));
+    await guard(() => this.ensureSudoBroker(managed));
+    void this.detectDeploy(managed, true);
+    managed.lunaBot?.cancelTalk();
+    const pendingSudo = this.sudoBroker.challengeFor(managed.state.panelId);
+    if (pendingSudo) await guard(() => this.post(managed.panel, pendingSudo));
+    if (!managed.state.agentId) managed.executionMode ??= this.defaultExecutionMode();
+    await guard(() => this.post(managed.panel, { type: "execution.updated", mode: managed.executionMode }));
+    managed.themeReady = true;
+    managed.themeSignature = undefined;
+    await guard(() => this.refreshTheme(managed));
+    const connection: RuntimeConnection = await this.connectRuntime()
+      .catch(error => ({ available: false as const, diagnostic: error instanceof Error ? error.message : String(error) }));
+    await guard(async () => {
+      await ensureAgentPresets(this.context.globalState, this.context.workspaceState, managed.state.panelId, this.agentSettingsFromState(managed.state));
+      await this.post(managed.panel, { type: "agent.defaults", settings: readAgentDefaults(this.context.globalState, this.context.workspaceState, managed.state.panelId) });
+    });
+    await guard(() => this.post(managed.panel, { type: "usage.accounts", accounts: this.accountUsage() }));
+    void this.refreshAntigravityUsage();
+    const selected = managed.state.capturedRun;
+    if (selected) {
+      const capturedRun = await this.restoreCapturedRun(selected).catch(runtimeError);
+      if (managed.state.capturedRun === selected) managed.state = { ...managed.state, capturedRun };
+    }
+    const capabilities = connection.available
+      ? await connection.client.capabilities(managed.state.agentId, this.effectiveModel(managed)).catch(runtimeError) : undefined;
+    this.broadcastCompanion();
+    let runtimeConversationId: string | undefined;
+    if (managed.state.agentId && connection.available) {
+      runtimeConversationId = (await connection.client.listSessions().catch(runtimeError))
+        ?.find(session => session.agentId === managed.state.agentId)?.conversationId;
+    }
+    const resetConversation = Boolean(runtimeConversationId && runtimeConversationId !== managed.state.conversationId);
+    if (runtimeConversationId) {
+      managed.state = {
+        ...managed.state,
+        conversationId: runtimeConversationId,
+        ...(resetConversation ? {
+          contextUsedTokens: undefined,
+          contextWindowTokens: undefined,
+          weeklyUsedPercent: undefined,
+          fiveHourUsedPercent: undefined,
+          weeklyResetsAt: undefined,
+          fiveHourResetsAt: undefined
+        } : {})
+      };
+      if (resetConversation) managed.startedMessages = [];
+    }
+    if (managed.state.agentId && !managed.executionMode) {
+      await guard(() => this.post(managed.panel, { type: "execution.updated", mode: capabilities?.executionMode }));
+    }
+    await this.post(managed.panel, {
+      type: "host.initialize",
+      agentSettingsVersion: 1,
+      capturedRun: managed.state.capturedRun,
+      agentId: managed.state.agentId,
+      panelId: managed.state.panelId,
+      title: managed.state.title,
+      role: managed.state.role ?? "main",
+      verifiedWorkRunId: managed.state.verifiedWorkRunId,
+      projectName: workspaceName(),
+      runtimeAvailable: connection.available,
+      capabilities,
+      workIsolation: this.workIsolation(),
+      running: managed.controller?.running ?? Boolean(managed.state.agentId && connection.available),
+      statusItems: this.statusItems(),
+      botsEnabled: this.botsEnabled(),
+      botsAvailable: true,
+      companionAvailable: this.botCharacter() === "lumi",
+      localCompanionAvailable, botCharacter: this.botCharacter(),
+      botModel: this.botModel(), botDefaultPrompt: BOT_DEFAULT_PROMPTS[this.botCharacter()], botPrompt: resolveBotPrompt(this.botCharacter(), this.botPrompt()),
+      model: managed.state.model,
+      agentModels: managed.state.agentModels,
+      agentFastModes: managed.state.agentFastModes,
+      agentPermissions: managed.state.agentPermissions,
+      reasoning: managed.state.reasoning,
+      agentSettingsScope: managed.state.agentSettingsScope,
+      agentSettingsSet: managed.state.agentSettingsSet,
+      businessMode: "normal",
+      taskMode: "direct",
+      fastMode: managed.state.fastMode === true,
+      goalMode: false,
+      workLoopMode: false,
+      contextUsedTokens: managed.state.contextUsedTokens,
+      contextWindowTokens: managed.state.contextWindowTokens,
+      weeklyUsedPercent: managed.state.weeklyUsedPercent,
+      fiveHourUsedPercent: managed.state.fiveHourUsedPercent,
+      weeklyResetsAt: managed.state.weeklyResetsAt,
+      fiveHourResetsAt: managed.state.fiveHourResetsAt,
+      pendingMessageIds: [...(managed.pendingMessageIds ?? [])],
+      queueCount: managed.controller?.queueLength ?? 0,
+      conversationId: runtimeConversationId,
+      resetConversation
+    });
+    if (!connection.available) {
+      await this.post(managed.panel, {
+        type: "host.notice",
+        level: "error",
+        text: connection.diagnostic
+      });
+    }
+    for (const text of runtimeErrors) await this.post(managed.panel, { type: "host.notice", level: "error", text });
+    runtimeErrors.clear();
+    try {
+      await guard(() => this.sendModelList(managed));
+      if (managed.state.agentId) await this.post(managed.panel, { type: "session.bound", agentId: managed.state.agentId });
+      if (managed.state.agentId && connection.available) {
+        // A history failure must not leave the active run unchecked.
+        await guard(() => this.restoreConversationHistory(managed, connection.client));
+        await this.ensureController(managed);
+        try { await managed.controller?.reconnect(); }
+        catch (error) {
+          await this.post(managed.panel, { type: "host.notice", level: "error", text: localize("ui.unable.to.check.the.active.run.0", error instanceof Error ? describeLocalizedMessage(error.message) ?? error.message : String(error)) });
+        }
+      }
+      await guard(() => this.refreshWorktree(managed));
+      if (managed.initialPrompt) { await this.post(managed.panel, { type: "composer.prefill", text: managed.initialPrompt }); managed.initialPrompt = undefined; }
+    } finally {
+      this.scheduleAgentList(managed, true);
+      if (!managed.branchRefreshStarted) {
+        managed.branchRefreshStarted = true;
+        void this.refreshBranch(managed);
+      }
+    }
+    for (const text of runtimeErrors) await this.post(managed.panel, { type: "host.notice", level: "error", text });
+  }
+
   private async handleMessage(managed: ManagedPanel, rawMessage: unknown): Promise<void> {
     const message = parseClientMessage(rawMessage);
     if (!message) {
-      const type = rawMessage && typeof rawMessage === "object" && "type" in rawMessage
-        && typeof rawMessage.type === "string" && /^[a-z.]{1,64}$/.test(rawMessage.type)
-        ? rawMessage.type : "unknown";
+      const type = requestType(rawMessage);
       // Log the protocol operation only, never chat text, attachments or credentials.
       console.warn("[Agent Factory] Chat request rejected", { type, reason: "protocol-validation-failed" });
       // A rejected upload must release its pending composer chip, or sending stays blocked.
@@ -528,127 +675,14 @@ export class ChatPanelManager implements vscode.Disposable {
       case "chat.status":
         await this.reconcileChatRequests(managed, message.ids);
         return;
-      case "client.ready":
-        await this.reconcileChatRequests(managed, message.pendingMessageIds ?? []);
-        await this.ensureSudoBroker(managed);
-        void this.detectDeploy(managed, true);
-        managed.lunaBot?.cancelTalk();
-        const pendingSudo = this.sudoBroker.challengeFor(managed.state.panelId);
-        if (pendingSudo) await this.post(managed.panel, pendingSudo);
-        if (!managed.state.agentId) managed.executionMode ??= this.defaultExecutionMode();
-        await this.post(managed.panel, { type: "execution.updated", mode: managed.executionMode });
-        managed.themeReady = true;
-        managed.themeSignature = undefined;
-        await this.refreshTheme(managed);
-        const connection = await this.connectRuntime();
-        await ensureAgentPresets(this.context.globalState, this.context.workspaceState, managed.state.panelId, this.agentSettingsFromState(managed.state));
-        await this.post(managed.panel, { type: "agent.defaults", settings: readAgentDefaults(this.context.globalState, this.context.workspaceState, managed.state.panelId) });
-        await this.post(managed.panel, { type: "usage.accounts", accounts: this.accountUsage() });
-        void this.refreshAntigravityUsage();
-        // A failed runtime probe must not prevent host.initialize; the chat reports it instead.
-        const runtimeErrors = new Set<string>();
-        const runtimeError = (error: unknown) => { runtimeErrors.add(error instanceof Error ? error.message : String(error)); return undefined; };
-        const selected = managed.state.capturedRun;
-        if (selected) {
-          const capturedRun = await this.restoreCapturedRun(selected).catch(runtimeError);
-          if (managed.state.capturedRun === selected) managed.state = { ...managed.state, capturedRun };
-        }
-        const capabilities = connection.available
-          ? await connection.client.capabilities(managed.state.agentId, this.effectiveModel(managed)).catch(runtimeError) : undefined;
-        this.broadcastCompanion();
-        let runtimeConversationId: string | undefined;
-        if (managed.state.agentId && connection.available) {
-          runtimeConversationId = (await connection.client.listSessions().catch(runtimeError))
-            ?.find(session => session.agentId === managed.state.agentId)?.conversationId;
-        }
-        const resetConversation = Boolean(runtimeConversationId && runtimeConversationId !== managed.state.conversationId);
-        if (runtimeConversationId) {
-          managed.state = {
-            ...managed.state,
-            conversationId: runtimeConversationId,
-            ...(resetConversation ? {
-              contextUsedTokens: undefined,
-              contextWindowTokens: undefined,
-              weeklyUsedPercent: undefined,
-              fiveHourUsedPercent: undefined,
-              weeklyResetsAt: undefined,
-              fiveHourResetsAt: undefined
-            } : {})
-          };
-          if (resetConversation) managed.startedMessages = [];
-        }
-        if (managed.state.agentId && !managed.executionMode) {
-          await this.post(managed.panel, { type: "execution.updated", mode: capabilities?.executionMode });
-        }
-        await this.post(managed.panel, {
-          type: "host.initialize",
-          agentSettingsVersion: 1,
-          capturedRun: managed.state.capturedRun,
-          agentId: managed.state.agentId,
-          panelId: managed.state.panelId,
-          title: managed.state.title,
-          role: managed.state.role ?? "main",
-          verifiedWorkRunId: managed.state.verifiedWorkRunId,
-          projectName: workspaceName(),
-          runtimeAvailable: connection.available,
-          capabilities,
-          workIsolation: this.workIsolation(),
-          running: managed.controller?.running ?? Boolean(managed.state.agentId && connection.available),
-          statusItems: this.statusItems(),
-          botsEnabled: this.botsEnabled(),
-          botsAvailable: true,
-          companionAvailable: this.botCharacter() === "lumi",
-          localCompanionAvailable, botCharacter: this.botCharacter(),
-          botModel: this.botModel(), botDefaultPrompt: BOT_DEFAULT_PROMPTS[this.botCharacter()], botPrompt: resolveBotPrompt(this.botCharacter(), this.botPrompt()),
-          model: managed.state.model,
-          agentModels: managed.state.agentModels,
-          agentFastModes: managed.state.agentFastModes,
-          agentPermissions: managed.state.agentPermissions,
-          reasoning: managed.state.reasoning,
-          agentSettingsScope: managed.state.agentSettingsScope,
-          agentSettingsSet: managed.state.agentSettingsSet,
-          businessMode: "normal",
-          taskMode: "direct",
-          fastMode: managed.state.fastMode === true,
-          goalMode: false,
-          workLoopMode: false,
-          contextUsedTokens: managed.state.contextUsedTokens,
-          contextWindowTokens: managed.state.contextWindowTokens,
-          weeklyUsedPercent: managed.state.weeklyUsedPercent,
-          fiveHourUsedPercent: managed.state.fiveHourUsedPercent,
-          weeklyResetsAt: managed.state.weeklyResetsAt,
-          fiveHourResetsAt: managed.state.fiveHourResetsAt,
-          pendingMessageIds: [...(managed.pendingMessageIds ?? [])],
-          queueCount: managed.controller?.queueLength ?? 0,
-          conversationId: runtimeConversationId,
-          resetConversation
-        });
-        if (!connection.available) {
-          await this.post(managed.panel, {
-            type: "host.notice",
-            level: "error",
-            text: connection.diagnostic
-          });
-        }
-        for (const text of runtimeErrors) await this.post(managed.panel, { type: "host.notice", level: "error", text });
-        await this.sendModelList(managed);
-        if (managed.state.agentId) await this.post(managed.panel, { type: "session.bound", agentId: managed.state.agentId });
-        if (managed.state.agentId && connection.available) {
-          await this.restoreConversationHistory(managed, connection.client);
-          await this.ensureController(managed);
-          try { await managed.controller?.reconnect(); }
-          catch (error) {
-            await this.post(managed.panel, { type: "host.notice", level: "error", text: localize("ui.unable.to.check.the.active.run.0", error instanceof Error ? describeLocalizedMessage(error.message) ?? error.message : String(error)) });
-          }
-        }
-        await this.refreshWorktree(managed);
-        if (managed.initialPrompt) { await this.post(managed.panel, { type: "composer.prefill", text: managed.initialPrompt }); managed.initialPrompt = undefined; }
-        this.scheduleAgentList(managed, true);
-        if (!managed.branchRefreshStarted) {
-          managed.branchRefreshStarted = true;
-          void this.refreshBranch(managed);
-        }
+      case "client.ready": {
+        // Share the per-panel order with chat.send so a reload cannot interleave
+        // with an earlier send or reset the conversation boundary under a later one.
+        const ready = (managed.chatSendPreparation ?? Promise.resolve()).then(() => this.initializeClient(managed, message.pendingMessageIds ?? []));
+        managed.chatSendPreparation = ready.then(() => undefined, () => undefined);
+        await ready;
         return;
+      }
       case "message.copy":
         await vscode.env.clipboard.writeText(message.text);
         return;
@@ -1938,6 +1972,7 @@ Read the exact stored child result/receipt and existing workflow status for repo
     }
   }
 
+  private readonly deployPollIntervalMs = 10_000;
   private readonly deployDetections = new Map<string, { readonly at: number; readonly result: Promise<DeployTarget> }>();
 
   /** Finds manually dispatchable GitHub workflows for the chat's project; quiet detection only reports availability. */
@@ -2010,14 +2045,23 @@ Read the exact stored child result/receipt and existing workflow status for repo
     await this.post(managed.panel, { type: "deploy.status", run, repository });
     await this.post(managed.panel, { type: "host.notice", level: "info", text: localize("deploy.started", run.workflow, repository, run.url) });
     try {
+      let failures = 0;
       while (!managed.disposed && run.status !== "completed") {
-        await new Promise(resolve => setTimeout(resolve, 10_000));
+        await new Promise(resolve => setTimeout(resolve, this.deployPollIntervalMs));
         if (managed.disposed) return;
         try {
           const next = await deployRunStatus(detected.root, repository, run);
+          failures = 0;
           if (next.status !== run.status || next.conclusion !== run.conclusion) await this.post(managed.panel, { type: "deploy.status", run: next, repository });
           run = next;
-        } catch { /* transient gh failure: keep polling */ }
+        } catch (error) {
+          // Only the status view stops; the run continues on GitHub at its URL.
+          if (!deployStatusRetryable(error, ++failures)) {
+            await this.post(managed.panel, { type: "host.notice", level: "error",
+              text: localize("deploy.status.unavailable", run.workflow, error instanceof Error ? error.message : String(error), run.url) });
+            return;
+          }
+        }
       }
       if (!managed.disposed) {
         const success = run.conclusion === "success";
@@ -2840,6 +2884,27 @@ function assertAttachmentScopeId(value: string, label: string): void {
 
 function uniqueUris(uris: readonly vscode.Uri[]): vscode.Uri[] {
   return [...new Map(uris.map((uri) => [uri.toString(), uri])).values()];
+}
+
+/**
+ * Whether a failed deploy status read is retried. A missing gh, a lost
+ * sign-in, an unknown run or an unreadable response cannot recover by
+ * repeating the same read. Any other failure is retried until it repeats on
+ * consecutive polls: one success resets the count, so only a failure that
+ * persists across the network blips the retry exists for ends polling.
+ */
+export function deployStatusRetryable(error: unknown, consecutiveFailures: number): boolean {
+  if (error instanceof DeployError || error instanceof SyntaxError) return false;
+  return consecutiveFailures < DEPLOY_STATUS_FAILURES;
+}
+
+const DEPLOY_STATUS_FAILURES = 3;
+
+/** The protocol operation of a chat request, safe to log. */
+function requestType(rawMessage: unknown): string {
+  return rawMessage && typeof rawMessage === "object" && "type" in rawMessage
+    && typeof rawMessage.type === "string" && /^[a-z.]{1,64}$/.test(rawMessage.type)
+    ? rawMessage.type : "unknown";
 }
 
 function fallbackHtml(error: unknown): string {

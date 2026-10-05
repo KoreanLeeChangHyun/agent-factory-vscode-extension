@@ -117,6 +117,7 @@
   "deploy.started": {"en": "Started {0} in {1}: {2}", "ko": "{1}에서 {0}을(를) 시작했습니다: {2}"},
   "deploy.succeeded": {"en": "{0} succeeded: {2}", "ko": "{0} 성공: {2}"},
   "deploy.finished": {"en": "{0} finished ({1}): {2}", "ko": "{0} 종료({1}): {2}"},
+  "deploy.status.unavailable": {"en": "Stopped checking {0}: {1}. The run continues on GitHub: {2}", "ko": "{0} 상태 확인을 중단했습니다: {1}. 실행은 GitHub에서 계속됩니다: {2}"},
   "unit.archived": {"en": "This Work Unit is read-only. Start a new Work Unit to continue.", "ko": "정리된 Work Unit은 조회 전용입니다. 새 Work Unit에서 작업해 주세요."},
   "unit.pick.repository": {"en": "Select a repository from the worktree menu.", "ko": "워크트리 아이콘의 목록에서 저장소를 선택해 주세요."},
   "unit.create.title": {"en": "Create worktree", "ko": "워크트리 생성"},
