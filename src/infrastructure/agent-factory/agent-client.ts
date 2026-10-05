@@ -9,7 +9,7 @@ import { spawn } from "node:child_process";
 import { antigravityExecutable, claudeExecutable, codexExecutable, defaultPythonCommand, runtimeEnvironment } from "./process-environment";
 import { sudoHandoffEnvironment } from "../vscode/sudo-broker";
 import { pluginRuntimeEnvironment } from "./development-plugin";
-import { lstat, mkdtemp, open as openFile, readFile, readdir, realpath, rm, writeFile } from "node:fs/promises";
+import { lstat, mkdtemp, open as openFile, readdir, realpath, rm, writeFile } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { AsyncCache } from "../../common/async-cache";
@@ -239,8 +239,7 @@ export class AgentFactoryClient implements AgentRuntimeClient {
         || value.agentsRoot !== join(value.home, "projects", value.projectId, "agents")) {
       throw new Error(localize("ui.invalid.agent.factory.storage.location.response"));
     }
-    const expectedHome = resolve(process.env.AGENT_FACTORY_HOME ?? join(homedir(), ".agent-factory"));
-    if (value.home !== expectedHome) throw new Error(localize("ui.agent.factory.storage.home.binding.does.not.match"));
+    if (value.home !== expectedRuntimeHome()) throw new Error(localize("ui.agent.factory.storage.home.binding.does.not.match"));
     await checkManagedComponents(value.agentsRoot as string);
     this.eventSnapshots.clear();
     this.contextUsageSnapshots.clear();
@@ -977,10 +976,7 @@ When a command needs sudo and the Human has requested it, use python3 ${JSON.str
       "--decision-evidence", evidence, ...extra], COMMAND_TIMEOUT_MS, MAX_PROCESS_OUTPUT_BYTES,
       { ...pluginRuntimeEnvironment(this.developmentRoot), AGENT_FACTORY_PARENT_STATE: parentPath,
         AGENT_FACTORY_EXECUTION_POLICY: JSON.stringify(parent.executionPolicy) });
-    let snapshot: Record<string, unknown>;
-    try { snapshot = JSON.parse(output.stdout); }
-    catch { throw new Error(`${failure}: ${output.stderr.trim() || "Runtime returned an invalid response"}`); }
-    if (output.exitCode !== 0 || snapshot.kind === "error") throw new Error((snapshot.error as { message?: string } | undefined)?.message || failure);
+    const snapshot = readLoopOutput(output, failure);
     this.workflowSnapshots.delete(path);
     return this.presentWorkflow(snapshot, state, mainAgentId, parentRun);
   }
@@ -1056,12 +1052,20 @@ When a command needs sudo and the Human has requested it, use python3 ${JSON.str
       for (const entry of fullScan ? entries : entries.slice(-100)) {
         if (!entry.isDirectory() || !MANAGED_ID.test(entry.name)) continue;
         const path = await this.managedPath(agentId, "loops", entry.name, "state.json");
-        const info = await lstat(path);
+        // The runtime creates the loop directory before publishing its state;
+        // a loop without state yet is listed on a later refresh.
+        let info;
+        try { info = await lstat(path); }
+        catch (error) { if (isMissingFile(error)) continue; throw error; }
         if (info.size > MAX_RESULT_BYTES) throw new Error("Workflow state exceeds limit");
         const fileSignature = `${info.dev}:${info.ino}:${info.size}:${info.mtimeMs}:${info.ctimeMs}`;
         const cached = this.workflowSnapshots.get(path);
-        const state = cached?.signature.startsWith(fileSignature + "|")
-          ? cached.state : JSON.parse(await readFile(path, "utf8"));
+        let state: Record<string, unknown>;
+        if (cached?.signature.startsWith(fileSignature + "|")) state = cached.state;
+        else {
+          try { state = readRecord(JSON.parse((await readManagedBytes(path, MAX_RESULT_BYTES)).toString("utf8")), "workflow"); }
+          catch (error) { if (isMissingFile(error)) continue; throw error; }
+        }
         if (!state.workflow || typeof state.parentStatePath !== "string") continue;
         const parentRun = state.parentStatePath.split(sep).at(-2);
         if (!parentRun || !MANAGED_ID.test(parentRun) || state.parentStatePath !== await this.managedPath(mainAgentId, "runs", parentRun, "state.json")) continue;
@@ -1083,8 +1087,7 @@ When a command needs sudo and the Human has requested it, use python3 ${JSON.str
           { ...pluginRuntimeEnvironment(this.developmentRoot),
             AGENT_FACTORY_PARENT_STATE: state.parentStatePath,
             AGENT_FACTORY_EXECUTION_POLICY: JSON.stringify(policy) });
-        const snapshot = JSON.parse(output.stdout);
-        if (output.exitCode !== 0 || snapshot.kind === "error") throw new Error(snapshot.error?.message || "Workflow reconciliation failed");
+        const snapshot = readLoopOutput(output, "Workflow reconciliation failed");
         await this.presentWorkflow(snapshot, state, mainAgentId, parentRun);
         this.workflowSnapshots.set(path, { signature, observedAt: Date.now(), state, snapshot });
         while (this.workflowSnapshots.size > 256) this.workflowSnapshots.delete(this.workflowSnapshots.keys().next().value!);
@@ -2201,6 +2204,30 @@ function readRecordOrUndefined(value: unknown): Record<string, unknown> | undefi
   return typeof value === "object" && value !== null && !Array.isArray(value)
     ? value as Record<string, unknown>
     : undefined;
+}
+
+/**
+ * The home the runtime binds, normalized as its `home_path()` does: an empty
+ * value selects the default and `~` expands. Links are not resolved because the
+ * runtime rejects a link in any home component before reporting a location.
+ */
+export function expectedRuntimeHome(environment: NodeJS.ProcessEnv = process.env, home = homedir()): string {
+  const value = environment.AGENT_FACTORY_HOME || join(home, ".agent-factory");
+  return resolve(value === "~" ? home : /^~[\\/]/.test(value) ? join(home, value.slice(2)) : value);
+}
+
+/** Reads a loop.py snapshot; a failed exit reports its structured error or stderr, never a JSON parse error. */
+export function readLoopOutput(output: ProcessOutput, failure: string): Record<string, unknown> {
+  let snapshot: Record<string, unknown> | undefined;
+  try { snapshot = readRecordOrUndefined(JSON.parse(output.stdout)); }
+  catch { snapshot = undefined; }
+  if (output.exitCode !== 0 || !snapshot || snapshot.kind === "error") {
+    const nested = readRecordOrUndefined(snapshot?.error);
+    if (typeof nested?.message === "string" && nested.message) throw new Error(nested.message);
+    const stderr = output.stderr.trim();
+    throw new Error(`${failure}: ${stderr || (output.exitCode !== 0 ? `exit code ${output.exitCode}` : "Runtime returned an invalid response")}`);
+  }
+  return snapshot;
 }
 
 function isMissingFile(error: unknown): boolean {

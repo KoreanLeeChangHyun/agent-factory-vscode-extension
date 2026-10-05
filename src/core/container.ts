@@ -6,7 +6,7 @@ import { ChatTemplateRenderer } from "../infrastructure/vscode/chat-template-ren
 import { locateAgentFactoryExec } from "../infrastructure/agent-factory/plugin-locator";
 import { AgentFactoryClient } from "../infrastructure/agent-factory/agent-client";
 import { AsyncCache } from "../common/async-cache";
-import { developmentPluginRoot, developmentExecPath } from "../infrastructure/agent-factory/development-plugin";
+import { developmentPluginRoot, runtimeExecOverride } from "../infrastructure/agent-factory/development-plugin";
 import { defaultPythonCommand } from "../infrastructure/agent-factory/process-environment";
 import { affectsProviderPaths, affectsPluginUpdateMode, configuredDevelopmentPluginRoot } from "../infrastructure/vscode/provider-settings";
 
@@ -31,9 +31,8 @@ export function createContainer(context: vscode.ExtensionContext): Container {
       }
       const isDevelopment = context.extensionMode === vscode.ExtensionMode.Development;
       const developmentRoot = developmentPluginRoot(isDevelopment, process.env, configuredDevelopmentPluginRoot());
-      const configuredPath = developmentRoot ? developmentExecPath(developmentRoot) : isDevelopment ? vscode.workspace
-        .getConfiguration("agentFactory.mainChat")
-        .get<string>("runtimeExecPath") : undefined;
+      const configuredPath = runtimeExecOverride(isDevelopment, developmentRoot,
+        vscode.workspace.getConfiguration("agentFactory.mainChat").get<string>("runtimeExecPath"));
       const pythonPath = vscode.workspace.getConfiguration("agentFactory.mainChat").get<string>("pythonPath")?.trim() || defaultPythonCommand();
       const key = JSON.stringify([projectRoot, configuredPath, pythonPath, process.env.CODEX_HOME, process.env.PATH]);
       return connections.get(key, async () => {

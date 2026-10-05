@@ -2432,3 +2432,63 @@ test("conversation reset and first send refresh the Main session provider lock",
   await client.send("main-test", "hello", { model: "gpt-6-astra" });
   assert.equal((await client.capabilities("main-test")).send.sessionProvider, "codex");
 });
+
+test("workflow discovery skips a loop whose state is not published yet and reads state through the managed checks", async t => {
+  const { AgentFactoryClient } = await importTypeScript("src/infrastructure/agent-factory/agent-client.ts");
+  const root = await mkdtemp(join(tmpdir(), "af-loop-pending-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const directory = agentsRoot(root), loops = join(directory, "work-one", "loops");
+  const parent = join(directory, "main-owner", "runs", "run-parent", "state.json");
+  await mkdir(join(loops, "loop-new"), { recursive: true }); await mkdir(join(loops, "loop-one"), { recursive: true });
+  await mkdir(dirname(parent), { recursive: true });
+  await writeFile(parent, JSON.stringify({ executionPolicy: { schemaVersion: 1 } }));
+  await writeFile(join(loops, "loop-one", "state.json"), JSON.stringify({ workflow: { id: "one" }, status: "completed", parentStatePath: parent }));
+  await writeFile(join(root, "loop.py"), "import json\nprint(json.dumps({'kind':'work-verification-loop','loopId':'loop-one','status':'completed'}))\n");
+  const client = new AgentFactoryClient(join(root, "exec.py"), root);
+  client.location = async () => ({ home: runtimeTestHome, projectId: "project-test", agentsRoot: directory });
+  const refresh = () => client.refreshWorkflows("main-owner", [{ agentId: "work-one", role: "work" }], false);
+  assert.deepEqual((await refresh()).map(snapshot => snapshot.loopId), ["loop-one"], "a loop without state.json does not fail the list");
+  const outside = join(root, "outside.json");
+  await writeFile(outside, JSON.stringify({ workflow: { id: "new" }, status: "completed", parentStatePath: parent }));
+  await symlink(outside, join(loops, "loop-new", "state.json"));
+  await assert.rejects(refresh(), /[Uu]nsafe/);
+});
+
+test("loop command failures report the runtime error before parsing its output", async t => {
+  const { AgentFactoryClient, readLoopOutput } = await importTypeScript("src/infrastructure/agent-factory/agent-client.ts");
+  assert.throws(() => readLoopOutput({ exitCode: 2, stdout: "", stderr: "loop.py: lock busy\n" }, "Workflow reconciliation failed"),
+    { message: "Workflow reconciliation failed: loop.py: lock busy" });
+  assert.throws(() => readLoopOutput({ exitCode: 1, stdout: JSON.stringify({ kind: "error", error: { message: "Loop is closed" } }), stderr: "trace" }, "Workflow close failed"),
+    { message: "Loop is closed" });
+  assert.throws(() => readLoopOutput({ exitCode: 3, stdout: "Traceback", stderr: "" }, "Workflow close failed"),
+    { message: "Workflow close failed: exit code 3" });
+  assert.throws(() => readLoopOutput({ exitCode: 0, stdout: "not json", stderr: "" }, "Workflow close failed"),
+    { message: "Workflow close failed: Runtime returned an invalid response" });
+  assert.deepEqual(readLoopOutput({ exitCode: 0, stdout: JSON.stringify({ kind: "work-verification-loop" }), stderr: "" }, "unused"), { kind: "work-verification-loop" });
+  const root = await mkdtemp(join(tmpdir(), "af-loop-failure-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const directory = agentsRoot(root), loop = join(directory, "work-one", "loops", "loop-one");
+  const parent = join(directory, "main-owner", "runs", "run-parent", "state.json");
+  await mkdir(loop, { recursive: true }); await mkdir(dirname(parent), { recursive: true });
+  await writeFile(parent, JSON.stringify({ executionPolicy: { schemaVersion: 1 } }));
+  await writeFile(join(loop, "state.json"), JSON.stringify({ workflow: { id: "one" }, status: "active", parentStatePath: parent }));
+  await writeFile(join(root, "loop.py"), "import sys\nprint('partial output')\nsys.stderr.write('loop state is locked by another process\\n')\nsys.exit(2)\n");
+  const client = new AgentFactoryClient(join(root, "exec.py"), root);
+  client.location = async () => ({ home: runtimeTestHome, projectId: "project-test", agentsRoot: directory });
+  await assert.rejects(client.refreshWorkflows("main-owner", [{ agentId: "work-one", role: "work" }], true),
+    { message: "Workflow reconciliation failed: loop state is locked by another process" });
+});
+
+test("expected runtime home follows the runtime's normalization without resolving links", async t => {
+  const { expectedRuntimeHome } = await importTypeScript("src/infrastructure/agent-factory/agent-client.ts");
+  assert.equal(expectedRuntimeHome({}, "/home/user"), "/home/user/.agent-factory");
+  assert.equal(expectedRuntimeHome({ AGENT_FACTORY_HOME: "" }, "/home/user"), "/home/user/.agent-factory", "an empty value selects the default");
+  assert.equal(expectedRuntimeHome({ AGENT_FACTORY_HOME: "~" }, "/home/user"), "/home/user");
+  assert.equal(expectedRuntimeHome({ AGENT_FACTORY_HOME: "~/af-home/" }, "/home/user"), "/home/user/af-home");
+  assert.equal(expectedRuntimeHome({ AGENT_FACTORY_HOME: "/data//af/./home/" }, "/home/user"), "/data/af/home");
+  const root = await mkdtemp(join(tmpdir(), "af-home-link-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  await mkdir(join(root, "real")); await symlink(join(root, "real"), join(root, "link"));
+  // The runtime rejects a linked home component itself, so the binding is compared as written.
+  assert.equal(expectedRuntimeHome({ AGENT_FACTORY_HOME: join(root, "link") }, "/home/user"), join(root, "link"));
+});

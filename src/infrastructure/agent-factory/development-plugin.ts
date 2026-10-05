@@ -22,6 +22,12 @@ export function developmentExecPath(root: string): string {
   return existsSync(current) ? current : join(root, "skills", "agent", "scripts", "exec.py");
 }
 
+/** The exec.py override of a runtime connection: the F5 plugin root, then `runtimeExecPath` in the development host only. */
+export function runtimeExecOverride(isDevelopment: boolean, developmentRoot: string | undefined, configuredExecPath: string | undefined): string | undefined {
+  if (developmentRoot) return developmentExecPath(developmentRoot);
+  return isDevelopment ? configuredExecPath?.trim() || undefined : undefined;
+}
+
 /** The plugin source keeps shared metadata in distribution/package.json; generated or legacy roots carry the Codex manifest. */
 async function developmentManifest(root: string): Promise<{ readonly name?: unknown; readonly version?: unknown }> {
   for (const path of [join(root, "distribution", "package.json"), join(root, ".codex-plugin", "plugin.json")]) {

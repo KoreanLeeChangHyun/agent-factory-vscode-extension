@@ -5,7 +5,7 @@ import { bootstrap } from "./core/bootstrap";
 import { ensureAgentFactoryCodexRuntime } from "./infrastructure/agent-factory/codex-plugin-setup";
 import { ensureAgentFactoryClaudePlugin } from "./infrastructure/agent-factory/claude-plugin-dependency";
 import { ensureAgentFactoryAntigravityPlugin } from "./infrastructure/agent-factory/antigravity-plugin-dependency";
-import { developmentPluginRoot, validateDevelopmentPlugin } from "./infrastructure/agent-factory/development-plugin";
+import { developmentPluginRoot, runtimeExecOverride, validateDevelopmentPlugin } from "./infrastructure/agent-factory/development-plugin";
 import { locateAgentFactoryExec } from "./infrastructure/agent-factory/plugin-locator";
 import { detectProviders } from "./infrastructure/agent-factory/provider-detection";
 import { configuredDevelopmentPluginRoot, configuredProviderPaths } from "./infrastructure/vscode/provider-settings";
@@ -31,7 +31,7 @@ export interface ActivationServices {
   readonly ensureAntigravityPlugin?: (requiredVersion: string) => Promise<void>;
   readonly showWarningMessage?: typeof vscode.window.showWarningMessage;
   /** Claude-only hosts cannot install from the Codex marketplace; they need an already installed plugin. */
-  readonly requireInstalledPlugin?: (requiredVersion: string) => Promise<void>;
+  readonly requireInstalledPlugin?: (requiredVersion: string, isDevelopment: boolean) => Promise<void>;
   readonly bootstrap: (context: vscode.ExtensionContext) => void;
   readonly withProgress: typeof vscode.window.withProgress;
   readonly showErrorMessage: typeof vscode.window.showErrorMessage;
@@ -136,7 +136,7 @@ async function start(context: vscode.ExtensionContext, services: ActivationServi
         }
         if (!codexAvailable && services.requireInstalledPlugin) {
           try {
-            await services.requireInstalledPlugin(requiredVersion);
+            await services.requireInstalledPlugin(requiredVersion, context.extensionMode === vscode.ExtensionMode.Development);
           } catch (error) {
             void services.showWarningMessage?.(pluginDependencyWarning(error));
           }
@@ -208,8 +208,10 @@ function defaultActivationServices(): ActivationServices {
     ensureClaudePlugin: ensureAgentFactoryClaudePlugin,
     ensureAntigravityPlugin: (requiredVersion) => ensureAgentFactoryAntigravityPlugin(requiredVersion),
     showWarningMessage: vscode.window.showWarningMessage.bind(vscode.window),
-    requireInstalledPlugin: async (requiredVersion) => {
-      const configuredPath = vscode.workspace?.getConfiguration("agentFactory.mainChat").get<string>("runtimeExecPath")?.trim();
+    requireInstalledPlugin: async (requiredVersion, isDevelopment) => {
+      // The F5 root returned before this check, so only the development-host override can apply, as in the chat connection.
+      const configuredPath = runtimeExecOverride(isDevelopment, undefined,
+        vscode.workspace?.getConfiguration("agentFactory.mainChat").get<string>("runtimeExecPath"));
       const location = await locateAgentFactoryExec({ configuredPath, requiredVersion });
       if (!location.available) throw new Error(localize("ui.claude.only.requires.installed.plugin", location.diagnostic));
     },

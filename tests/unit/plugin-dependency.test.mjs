@@ -110,6 +110,32 @@ test("development root and child environment require explicit development select
   assert.equal(inherited.AGENT_FACTORY_DEV_PLUGIN_ROOT, "/local/plugin");
 });
 
+test("runtimeExecPath applies only in the development host, for activation and the chat connection alike", async t => {
+  const { runtimeExecOverride } = await importTypeScript("src/infrastructure/agent-factory/development-plugin.ts");
+  assert.equal(runtimeExecOverride(false, undefined, "/custom/exec.py"), undefined, "normal windows use the installed plugin");
+  assert.equal(runtimeExecOverride(true, undefined, " /custom/exec.py "), "/custom/exec.py");
+  assert.equal(runtimeExecOverride(true, undefined, "  "), undefined);
+  assert.match(runtimeExecOverride(true, "/f5/plugin", "/custom/exec.py"), /^\/f5\/plugin\/.*exec\.py$/, "the F5 root takes precedence");
+  const { activate } = await importActivation("src/extension.ts");
+  const inheritedRoot = process.env.AGENT_FACTORY_DEV_PLUGIN_ROOT;
+  delete process.env.AGENT_FACTORY_DEV_PLUGIN_ROOT;
+  t.after(() => { if (inheritedRoot !== undefined) process.env.AGENT_FACTORY_DEV_PLUGIN_ROOT = inheritedRoot; });
+  for (const extensionMode of [1, 2]) {
+    const modes = [];
+    await activate({ extensionMode, extension: { packageJSON: { version: "1.0.14" } }, subscriptions: [] }, {
+      detectProviders: async () => ({ codex: false, claude: true, antigravity: false }),
+      ensureClaudePlugin: async () => {},
+      requireInstalledPlugin: async (_version, isDevelopment) => { modes.push(isDevelopment); },
+      bootstrap: () => {},
+      withProgress: async (_, task) => task(),
+      showErrorMessage: async () => assert.fail("activation should succeed")
+    });
+    assert.deepEqual(modes, [extensionMode === 2]);
+  }
+  const sources = await Promise.all(["src/extension.ts", "src/core/container.ts"].map(path => readFile(new URL("../../" + path, import.meta.url), "utf8")));
+  for (const source of sources) assert.match(source, /runtimeExecOverride\(/, "both paths share the same selection");
+});
+
 test("release metadata and installation guidance stay coupled", async () => {
   const packageJson = JSON.parse(await readFile(new URL("../../package.json", import.meta.url), "utf8"));
   const packageLock = JSON.parse(await readFile(new URL("../../package-lock.json", import.meta.url), "utf8"));
