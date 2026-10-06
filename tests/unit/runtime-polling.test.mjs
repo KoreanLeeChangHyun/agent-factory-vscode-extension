@@ -104,6 +104,35 @@ test('failed cancellation restores streaming and exposes its error', async () =>
   assert.deepEqual(f.observed.finals, ['finished']);
 });
 
+test('reconnecting after observation loss retains the stopped run output boundary', async () => {
+  const reading = deferred(), pendingUpdates = deferred(), finished = deferred();
+  const f = fixture(async () => ({ status: 'cancelled' }));
+  let reconnecting = false;
+  f.runtime.updates = async () => {
+    if (reconnecting) return { cursor: 1, updates: [{ kind: 'commentary', text: 'late reconnected text' }] };
+    reading.resolve(); await pendingUpdates.promise;
+    throw new Error('updates transport unavailable');
+  };
+  f.runtime.result = async () => ({ status: 'cancelled', text: 'late reconnected final' });
+  const originalRunning = f.events.onRunningChanged;
+  f.events.onRunningChanged = running => {
+    originalRunning(running);
+    if (!running && reconnecting) finished.resolve();
+  };
+  const controller = new ChatSessionController(f.runtime, f.events, undefined, { pollIntervalMs: 0 });
+  const send = controller.send('work', [], {});
+  await reading.promise; await controller.cancel();
+  pendingUpdates.resolve(); await send;
+  assert.equal(controller.runId, 'run-test');
+  reconnecting = true;
+  assert.equal(await controller.reconnect(), true);
+  await finished.promise;
+  assert.deepEqual(f.observed.finals, []);
+  assert.equal(f.observed.errors.length, 2);
+  assert.equal(f.observed.cancellations, 2);
+  assert.equal(controller.runId, undefined);
+});
+
 test('default observation survives more than 7200 cycles and delivers the terminal result', async t => {
   accelerate(t);
   let cycles = 0;
