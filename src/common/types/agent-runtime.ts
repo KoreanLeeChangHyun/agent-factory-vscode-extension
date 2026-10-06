@@ -26,8 +26,12 @@ export interface ExecutionCapabilities {
   readonly workIsolation?: boolean;
   /** The runtime accepts and records `loop.py start --work-profile`. */
   readonly workProfile?: boolean;
-  /** `--work-profile` also accepts explore (read-only) and scribe (writes only inside docs/), enforced by the runtime. */
+  /** `--work-profile` also accepts explore (assigned evidence Documents) and scribe (writes only inside docs/), enforced by the runtime. */
   readonly restrictedWorkProfiles?: boolean;
+  /** Receipt-bound Main commits and exact task-bound Explorer Documents are enforced. */
+  readonly roleDirectExceptions?: boolean;
+  /** Optional allocation evidence is validated and retained in taskBinding. */
+  readonly taskAllocation?: boolean;
   /** A stopped loop reports `failureClass`; Main is then told what to do for each class. */
   readonly failureClass?: boolean;
   /** A loop stopped on its revision limit carries a structured `pause`; the task panel then offers the Human's decision. */

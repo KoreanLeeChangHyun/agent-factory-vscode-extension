@@ -79,4 +79,70 @@ async function checkManagedEnvelope(page) {
   assert.equal((await page.locator('.message-assistant .markdown-body').last().textContent()).trim(), ordinary);
 }
 
-module.exports = { checkRichMarkdown, checkSafeMarkup, checkManagedEnvelope };
+// Exercise real delta ingestion, completion replacement, cached reload and runtime history.
+async function checkStreamingParity(page) {
+  const emit = data => page.evaluate(data => window.dispatchEvent(new MessageEvent('message', { data })), data);
+  const runId = 'stream-parity';
+  const prefix = '[early]: https://example.test/earlier\n\nRead [documentation][ref].\n\n![Local image](/workspace/parity.png)\n\n````js\n```\n\nstill code\n````\n\n';
+  const suffix = '**Question [1/1]:** Choose\n\n| Option | Decision |\n|---|---|\n| 1 | A |\n| 2 | B |\n\n실행 식별자:\n- Work Agent: `work-parity`\n- Work Run: `run-parity`\n\nAfter [earlier][early].\n\n[ref]: https://example.test/docs\n';
+  const flow = { id: 'flow-parity', title: 'Parity tasks', tasks: [{ id: 'task-parity', title: 'Preserved task', status: 'completed' }] };
+  const text = prefix + suffix + '\n```task-flow\n' + JSON.stringify(flow) + '\n```';
+  const imageSource = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aU1sAAAAASUVORK5CYII=';
+  const resolveImage = async () => {
+    await emit({ type: 'image.resolved', href: '/workspace/parity.png', src: imageSource });
+    await page.waitForFunction(() => document.querySelector('#timeline .message-assistant:last-child img[data-local-image]')?.naturalWidth === 1);
+  };
+  await emit({ type: 'host.initialize', panelId: 'parity', agentId: 'main-parity', role: 'main', runtimeAvailable: true, capabilities: { submit: {}, send: {} } });
+  await emit({ type: 'chat.delta', runId, stream: 'final', id: 'parity', text: prefix });
+  await page.waitForFunction(() => document.querySelector('#timeline .message-assistant:last-child code.language-js'));
+  await resolveImage();
+  const resolutions = await page.evaluate(() => window.sentMessages.filter(item => item.type === 'image.resolve').length);
+  await page.evaluate(() => { window.parityStableCode = document.querySelector('#timeline .message-assistant:last-child code.language-js'); });
+  await emit({ type: 'chat.delta', runId, stream: 'final', id: 'parity', text: text.slice(prefix.length) });
+  const body = () => page.locator('#timeline .message-assistant .message-content').last();
+  await body().locator('a[href="https://example.test/docs"]').waitFor();
+  await body().locator('a[href="https://example.test/earlier"]').waitFor();
+  await page.waitForFunction(() => document.querySelector('#timeline .message-assistant:last-child code.language-js')?.dataset.highlighted === 'true');
+  assert.equal(await body().locator('pre > code').evaluate(code => code === window.parityStableCode), true, 'Unchanged code keeps its DOM while later link definitions update earlier prose');
+  assert.equal(await body().locator('pre > code').textContent(), '```\n\nstill code\n');
+  assert.equal(await body().locator('.execution-reference').count(), 2);
+  assert.equal(await body().locator('.interview-choice').count(), 2);
+  assert.equal(await body().locator('.interview-choice:enabled').count(), 0, 'An unfinished answer cannot submit a choice');
+  const snapshot = () => body().evaluate(element => {
+    const clone = element.cloneNode(true);
+    // Streaming choices are disabled until the authoritative answer completes.
+    clone.querySelectorAll('button').forEach(button => button.removeAttribute('disabled'));
+    return clone.innerHTML;
+  });
+  assert.equal(await body().locator('.task-flow[data-flow-id="flow-parity"]').count(), 1);
+  assert.equal(await page.evaluate(() => window.sentMessages.filter(item => item.type === 'image.resolve').length), resolutions, 'Unchanged local images do not resolve again on every delta');
+  const live = await snapshot();
+  await emit({ type: 'chat.assistant', runId, phase: 'final', text });
+  await page.waitForFunction(() => window.saved.timeline.some(item => item.runId === 'stream-parity' && !item.streaming));
+  assert.equal(await page.locator('#timeline .message-assistant').filter({ hasText: 'documentation' }).count(), 1);
+  await resolveImage();
+  assert.equal(await snapshot(), live, 'Completion keeps the same Markdown and controls');
+  await page.evaluate(() => sessionStorage.setItem('submission-restoration-fixture', JSON.stringify(window.saved)));
+  await page.reload();
+  await body().locator('a[href="https://example.test/docs"]').waitFor();
+  await page.waitForFunction(() => document.querySelector('#timeline .message-assistant:last-child code.language-js')?.dataset.highlighted === 'true');
+  await resolveImage();
+  assert.equal(await snapshot(), live, 'Cached reload keeps the final content and format');
+  await page.evaluate(() => {
+    sessionStorage.setItem('submission-restoration-fixture', JSON.stringify({ timeline: [] }));
+  });
+  await page.reload();
+  await emit({ type: 'host.initialize', panelId: 'parity', agentId: 'main-parity', role: 'main', runtimeAvailable: true, capabilities: { submit: {}, send: {} } });
+  await emit({ type: 'conversation.history', agentId: 'main-parity', history: { messages: [{ type: 'assistant', id: 'history-parity', runId, phase: 'final', text }] } });
+  await body().locator('a[href="https://example.test/docs"]').waitFor();
+  await page.waitForFunction(() => document.querySelector('#timeline .message-assistant:last-child code.language-js')?.dataset.highlighted === 'true');
+  await resolveImage();
+  assert.equal(await snapshot(), live, 'Runtime history uses the same content renderer');
+  await emit({ type: 'run.status', running: false });
+  await emit({ type: 'chat.assistant', runId: 'parity-choices', phase: 'final', text: '**Question [1/1]:** Choose\n\n| Option | Decision |\n|---|---|\n| 1 | A |\n| 2 | B |' });
+  await body().locator('.interview-choice:enabled').first().waitFor();
+  await body().locator('.interview-choice').nth(1).click();
+  assert.equal(await page.evaluate(() => window.sentMessages.filter(item => item.type === 'chat.send').at(-1)?.text), '2');
+}
+
+module.exports = { checkRichMarkdown, checkSafeMarkup, checkManagedEnvelope, checkStreamingParity };

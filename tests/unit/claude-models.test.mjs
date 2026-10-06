@@ -5,7 +5,34 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { importTypeScript } from '../support/import-typescript.mjs';
 
-const { readProviderModels, readClaudeModels, antigravityModels } = await importTypeScript('src/infrastructure/agent-factory/model-catalog.ts');
+const { readProviderModels, readClaudeModels, antigravityModels, modelSelectionCatalog } = await importTypeScript('src/infrastructure/agent-factory/model-catalog.ts');
+
+test('selection evidence keeps exact IDs, constraints, unknown facts and recoverable detail revisions', async t => {
+  const root = await mkdtemp(join(tmpdir(), 'af-model-evidence-'));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  // A large valid cache remains readable; no model or detail is cut off.
+  const model = { slug: 'gpt-exact', visibility: 'list', description: 'Scoped coding',
+    context_window: 100000, supported_reasoning_levels: [{ effort: 'high' }],
+    input_modalities: ['text'], details: '한'.repeat(1500000) };
+  await writeFile(join(root, 'models_cache.json'), JSON.stringify({ client_version: 'fixture', models: [model] }));
+  assert.deepEqual(await readProviderModels(root, join(root, 'no-claude'), join(root, 'no-agy')), ['gpt-exact']);
+  const catalog = await modelSelectionCatalog(root);
+  const candidate = catalog.candidates.find(item => item.id === 'gpt-exact');
+  assert.equal(candidate.suitableTasks, 'Scoped coding');
+  assert.equal(candidate.quality, 'unknown');
+  assert.equal(candidate.cost, 'unknown');
+  assert.equal(candidate.constraints.contextWindow, 100000);
+  assert.deepEqual(candidate.constraints.reasoningEfforts, ['high']);
+  assert.equal(candidate.detail.source, join(root, 'models_cache.json'));
+  assert.equal(candidate.detail.providerVersion, 'fixture');
+  assert.match(candidate.detail.revision, /^[a-f0-9]{64}$/);
+  assert.equal(JSON.stringify(candidate).includes(model.details), false);
+  const previous = candidate.detail.revision;
+  await writeFile(join(root, 'models_cache.json'), JSON.stringify({ models: [{ slug: 'gpt-exact', visibility: 'list' }] }));
+  const changed = (await modelSelectionCatalog(root)).candidates.find(item => item.id === 'gpt-exact');
+  assert.notEqual(changed.detail.revision, previous);
+  assert.equal(changed.suitableTasks, 'unknown');
+});
 
 test('Claude discovery augments Codex and missing optional CLI preserves its catalog', async () => {
   const root = await mkdtemp(join(tmpdir(), 'af-claude-catalog-'));

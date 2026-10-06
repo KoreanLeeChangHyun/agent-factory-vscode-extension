@@ -131,6 +131,7 @@ export type ClientMessage =
   | { readonly type: "providers.updateMode.select"; readonly mode: import("../common/types/provider").PluginUpdateMode }
   | { readonly type: "session.select"; readonly agentId: string }
   | ({ readonly type: "task.stop" } & import("../common/types/agent-runtime").TaskStopTarget)
+  | { readonly type: "task.delete"; readonly workflowId: string; readonly taskId: string; readonly mainAgentId?: string }
   | { readonly type: "workflow.close"; readonly workAgentId: string; readonly loopId: string }
   | { readonly type: "workflow.decision"; readonly workAgentId: string; readonly loopId: string; readonly decision: "continue" | "stop" }
   | { readonly type: "workflow.answer"; readonly workAgentId: string; readonly loopId: string; readonly decisionId: string; readonly questionHash: string; readonly answer: string }
@@ -264,6 +265,7 @@ export type HostMessage =
       readonly taskId: string;
       readonly error?: string;
     }
+  | { readonly type: "task.delete.result"; readonly mainAgentId: string; readonly workflowId: string; readonly taskId: string; readonly error?: string }
   | {
       readonly type: "host.notice";
       readonly level: "info" | "warning" | "error" | "cancelled";
@@ -295,6 +297,7 @@ export type HostMessage =
   | {
       readonly type: "agents.list";
       readonly workflows?: readonly Record<string, unknown>[];
+      readonly workflowsComplete?: boolean;
       readonly agents: readonly {
         readonly agentId: string;
         readonly role: "work" | "verification";

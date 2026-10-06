@@ -10,7 +10,7 @@ import { locateAgentFactoryExec } from "./infrastructure/agent-factory/plugin-lo
 import { detectProviders } from "./infrastructure/agent-factory/provider-detection";
 import { configuredDevelopmentPluginRoot, configuredProviderPaths } from "./infrastructure/vscode/provider-settings";
 import { openWslWorkspace } from "./infrastructure/vscode/wsl-workspace";
-import { initializeAgentDefaults } from "./infrastructure/vscode/agent-settings-store";
+import { bindAgentSetStorage, initializeAgentDefaults } from "./infrastructure/vscode/agent-settings-store";
 
 export interface ProviderAvailability {
   readonly codex: boolean;
@@ -197,7 +197,10 @@ function createStartupView(): StartupView {
 
 function defaultActivationServices(): ActivationServices {
   return {
-    initializeDefaults: async (context, providers) => initializeAgentDefaults(context.globalState, providers, context.workspaceState),
+    initializeDefaults: async (context, providers) => {
+      bindAgentSetStorage(context);
+      await initializeAgentDefaults(context.globalState, providers, context.workspaceState);
+    },
     detectProviders: async () => {
       const statuses = await detectProviders(configuredProviderPaths());
       const detected = (id: string) => statuses.some(status => status.id === id && status.detected);

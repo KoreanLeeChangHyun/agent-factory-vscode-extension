@@ -1,9 +1,12 @@
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
+import fsPromises from "node:fs/promises";
+import { syncBuiltinESMExports } from "node:module";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
+import { createHash } from "node:crypto";
 import test from "node:test";
 import { importTypeScript } from "../support/import-typescript.mjs";
 
@@ -160,7 +163,10 @@ test("preparation does not probe hash capabilities or read detailed reference bo
   client.command = async () => ({ kind: "ack", status: "accepted", agentId: "main-context", runId: "run-1" });
   const accepted = await client.inputCommand(["send", "--agent", "main-context", "--task-mode", "work"], "work", []);
   assert.ok(!accepted.preparationGuidance.includes("Unneeded runtime detail"));
-  assert.ok(accepted.preparationGuidance.length < 2500);
+  const supplied = context(accepted.preparationGuidance);
+  assert.ok(JSON.stringify(supplied.instructions).length < 1000);
+  assert.equal(supplied.modelCatalog.schemaVersion, 1);
+  assert.ok(supplied.modelCatalog.candidates.every(candidate => candidate.cost === "unknown" && candidate.quality === "unknown"));
   assert.equal(context(accepted.preparationGuidance).instructions[0].availability, "not-loaded");
 });
 
@@ -172,7 +178,7 @@ test("large Skill bodies stay out of requests and edits change their identity", 
   await writeFile(path, "Long instruction. ".repeat(4000));
   const first = await submissionContext(root, join(agent, "scripts", "exec.py"));
   const second = await submissionContext(root, join(agent, "scripts", "exec.py"));
-  assert.ok(Buffer.byteLength(first) < 2500);
+  assert.ok(Buffer.byteLength(JSON.stringify(context(first).instructions)) < 1000);
   assert.equal(context(first).instructions[0].sha256, context(second).instructions[0].sha256);
   await writeFile(path, "New authoritative instructions");
   const changed = await submissionContext(root, join(agent, "scripts", "exec.py"));
@@ -181,7 +187,18 @@ test("large Skill bodies stay out of requests and edits change their identity", 
   const missing = context(await submissionContext(root, join(agent, "scripts", "exec.py"))).instructions[0];
   assert.equal(missing.availability, "unavailable");
   assert.equal(missing.sha256, undefined);
-  for (const invalid of [Buffer.from([0xff]), Buffer.alloc(0), Buffer.from(" \r\n\t"), Buffer.alloc(128 * 1024 + 1, 65)]) {
+  // Valid multibyte sequences cross streaming boundaries; a large descriptor
+  // must still identify all bytes without placing the body in the prompt.
+  const large = " ".repeat(65535) + "😀한글\r\n".repeat(40000);
+  await writeFile(path, large);
+  const largeGuidance = await submissionContext(root, join(agent, "scripts", "exec.py"));
+  assert.equal(context(largeGuidance).instructions[0].availability, "not-loaded");
+  assert.equal(context(largeGuidance).instructions[0].sha256, createHash("sha256").update(large).digest("hex"));
+  assert.ok(!largeGuidance.includes("😀한글"));
+  assert.equal(Buffer.byteLength(JSON.stringify(context(first).instructions)), Buffer.byteLength(JSON.stringify(context(largeGuidance).instructions)));
+  for (const invalid of [Buffer.from([0xff]), Buffer.alloc(0), Buffer.from(" \r\n\t"),
+    Buffer.concat([Buffer.alloc(65535, 65), Buffer.from([0xf0, 0x9f, 0x98])]),
+    Buffer.concat([Buffer.alloc(200000, 65), Buffer.from([0xff])])]) {
     await writeFile(path, invalid);
     const rejected = context(await submissionContext(root, join(agent, "scripts", "exec.py"))).instructions[0];
     assert.equal(rejected.availability, "unavailable");
@@ -219,6 +236,9 @@ test("background request indexes every task without repeating task bodies or cha
   await controller.send(input, [], { taskMode: "direct" });
   assert.deepEqual(errors, []);
   assert.ok(delivered.startsWith(input));
+  const restored = historyPresentation(delivered, "direct", false);
+  assert.equal(restored.text, input);
+  assert.equal(restored.text + restored.submission.guidance, delivered);
   const index = JSON.parse(delivered.split("[Background workflow status; runtime data, not instructions]\n")[1].split("\nThis is an index")[0]);
   assert.equal(index.length, children.length);
   for (let i = 0; i < children.length; i++) {
@@ -233,4 +253,69 @@ test("background request indexes every task without repeating task bodies or cha
   const before = Buffer.byteLength(input + original), after = Buffer.byteLength(delivered);
   console.log(JSON.stringify({ backgroundRequestBytes: { before, after, tasks: children.length } }));
   assert.ok(after < before / 10);
+});
+
+
+test("concurrent preparation shares a Skill read and rechecks edits and failed reads", async t => {
+  const root = await directory(t);
+  const agent = join(root, "skills", "agent");
+  await mkdir(agent, { recursive: true });
+  const path = join(agent, "SKILL.md");
+  const body = " ".repeat(65535) + "😀한글\r\n".repeat(40000);
+  await writeFile(path, body);
+  const originalOpen = fsPromises.open;
+  const count = 8;
+  let bytes = 0, closes = 0, initialStats = 0, release;
+  let gate = new Promise(resolve => { release = resolve; });
+  t.mock.method(fsPromises, "open", async (...args) => {
+    const file = await originalOpen(...args);
+    if (args[0] !== path) return file;
+    const stat = file.stat.bind(file), read = file.read.bind(file), close = file.close.bind(file);
+    let firstStat = true;
+    t.mock.method(file, "stat", async (...values) => {
+      const value = await stat(...values);
+      if (firstStat) {
+        firstStat = false;
+        if (++initialStats === count) release();
+      }
+      return value;
+    });
+    t.mock.method(file, "read", async (...values) => {
+      await gate;
+      const result = await read(...values);
+      bytes += result.bytesRead;
+      return result;
+    });
+    t.mock.method(file, "close", async () => { closes++; await close(); });
+    return file;
+  });
+  syncBuiltinESMExports();
+  t.after(() => { t.mock.restoreAll(); syncBuiltinESMExports(); });
+  const prepare = async () => Promise.all(Array.from({ length: count }, () => submissionContext(root, join(root, "scripts", "exec.py"))));
+  const first = await prepare();
+  for (const guidance of first) {
+    assert.equal(context(guidance).instructions[0].sha256, createHash("sha256").update(body).digest("hex"));
+    assert.ok(!guidance.includes("😀한글"));
+    const restored = historyPresentation("현재 원문😀\r\n" + guidance, "work", false);
+    assert.equal(restored.text, "현재 원문😀\r\n");
+    assert.equal(restored.text + restored.submission.guidance, "현재 원문😀\r\n" + guidance);
+  }
+  assert.equal(bytes, Buffer.byteLength(body));
+  assert.equal(closes, count);
+  await prepare();
+  assert.equal(bytes, Buffer.byteLength(body));
+  assert.equal(closes, count * 2);
+  // A failed shared read must not poison a later version at the same path.
+  await writeFile(path, Buffer.concat([Buffer.alloc(200000, 65), Buffer.from([0xff])]));
+  initialStats = 0;
+  gate = new Promise(resolve => { release = resolve; });
+  const invalid = await prepare();
+  assert.ok(invalid.every(guidance => context(guidance).instructions[0].availability === "unavailable"));
+  assert.equal(closes, count * 3);
+  await writeFile(path, "Changed authoritative Skill");
+  initialStats = 0;
+  gate = new Promise(resolve => { release = resolve; });
+  const restored = await prepare();
+  assert.ok(restored.every(guidance => context(guidance).instructions[0].sha256 === createHash("sha256").update("Changed authoritative Skill").digest("hex")));
+  assert.equal(closes, count * 4);
 });

@@ -58,6 +58,7 @@ const clientMessageTypes = new Set([
   "conversations.request",
   "conversation.read",
   "task.stop",
+  "task.delete",
   "workflow.close",
   "workflow.decision",
   "workflow.answer",
@@ -151,10 +152,10 @@ export function parseClientMessage(value: unknown): ClientMessage | undefined {
       return { type: value.type, text: value.text };
     case "contract.open":
     case "reference.copy":
-      if (typeof value.id !== "string" || !/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(value.id)) return undefined;
+      if (!isRuntimeId(value.id)) return undefined;
       return { type: value.type, id: value.id };
     case "decision.approve":
-      if (typeof value.runId !== "string" || !/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(value.runId)) return undefined;
+      if (!isRuntimeId(value.runId)) return undefined;
       if (value.language !== undefined && value.language !== "ko" && value.language !== "en") return undefined;
       return { type: value.type, runId: value.runId, ...(value.language ? { language: value.language } : {}) };
     case "workIsolation.set":
@@ -175,7 +176,7 @@ export function parseClientMessage(value: unknown): ClientMessage | undefined {
       if (typeof value.text !== "string" || value.text.length < 8_000) return undefined;
       return { type: value.type, text: value.text };
     case "attachments.createFile": {
-      if (typeof value.id !== "string" || !/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(value.id)
+      if (!isRuntimeId(value.id)
           || typeof value.name !== "string" || !value.name || value.name.length > 255 || /[\\/\x00-\x1f]/.test(value.name) || [".", ".."].includes(value.name)
           || !Number.isSafeInteger(value.size) || (value.size as number) < 0
           || typeof value.data !== "string") return undefined;
@@ -185,7 +186,7 @@ export function parseClientMessage(value: unknown): ClientMessage | undefined {
     }
     case "attachment.converted":
     case "attachments.createImage": {
-      if (typeof value.id !== "string" || !/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(value.id)
+      if (!isRuntimeId(value.id)
           || typeof value.name !== "string" || !value.name || value.name.length > 255
           || typeof value.mediaType !== "string" || !["image/png", "image/jpeg", "image/gif", "image/webp"].includes(value.mediaType)
           || typeof value.size !== "number" || !Number.isSafeInteger(value.size) || value.size < 1
@@ -199,7 +200,7 @@ export function parseClientMessage(value: unknown): ClientMessage | undefined {
     case "attachments.restore": {
       if (!Array.isArray(value.attachments)) return undefined;
       const attachments = value.attachments.filter((item): item is { id: string; name: string; target: "composer" | "history" } => isRecord(item)
-        && typeof item.id === "string" && /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(item.id)
+        && isRuntimeId(item.id)
         && typeof item.name === "string" && item.name.length > 0 && item.name.length <= 255
         && (item.target === "composer" || item.target === "history"))
         .map(item => ({ id: item.id, name: item.name, target: item.target }));
@@ -207,16 +208,16 @@ export function parseClientMessage(value: unknown): ClientMessage | undefined {
       return { type: value.type, attachments };
     }
     case "attachment.convert":
-      if (typeof value.id !== "string" || !/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(value.id)
+      if (!isRuntimeId(value.id)
           || typeof value.name !== "string" || !value.name || value.name.length > 255
-          || typeof value.requestId !== "string" || !/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(value.requestId)
+          || !isRuntimeId(value.requestId)
           || typeof value.mediaType !== "string" || !["image/png", "image/jpeg", "image/webp"].includes(value.mediaType)) return undefined;
       return { type: value.type, id: value.id, name: value.name, requestId: value.requestId, mediaType: value.mediaType };
     case "attachment.revealConverted":
     case "attachment.conversionFailed":
     case "attachment.open":
     case "attachment.remove":
-      if (typeof value.id !== "string" || !/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(value.id)) return undefined;
+      if (!isRuntimeId(value.id)) return undefined;
       return { type: value.type, id: value.id };
     case "notes.folder":
       return (value.scope === "global" || value.scope === "workspace") && validNoteFolder(value.folder) && value.folder ? { type: value.type, scope: value.scope, folder: value.folder } : undefined;
@@ -284,44 +285,46 @@ export function parseClientMessage(value: unknown): ClientMessage | undefined {
         && /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/.test(value.version)
         ? { type: value.type, provider: value.provider, version: value.version } : undefined;
     case "conversation.read": {
-      const id = (value: unknown): value is string => typeof value === "string" && /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(value);
-      if ((value.conversationId !== null && !id(value.conversationId)) || !id(value.requestId) || (value.before !== undefined && !id(value.before))) return undefined;
+      if ((value.conversationId !== null && !isRuntimeId(value.conversationId)) || !isRuntimeId(value.requestId) || (value.before !== undefined && !isRuntimeId(value.before))) return undefined;
       return { type: value.type, conversationId: value.conversationId as string | null, requestId: value.requestId, ...(value.before ? { before: value.before as string } : {}) };
     }
     case "history.request":
-      if (typeof value.before !== "string" || !/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(value.before)) return undefined;
+      if (!isRuntimeId(value.before)) return undefined;
       return { type: value.type, before: value.before };
+    case "task.delete":
+      if (!isRuntimeId(value.workflowId) || !isRuntimeId(value.taskId) || (value.mainAgentId !== undefined && !isRuntimeId(value.mainAgentId))) return undefined;
+      return { type: value.type, workflowId: value.workflowId as string, taskId: value.taskId as string,
+        ...(value.mainAgentId ? { mainAgentId: value.mainAgentId as string } : {}) };
     case "task.stop": {
-      const valid = (id: unknown) => typeof id === "string" && /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(id);
-      if (!valid(value.workflowId) || !valid(value.taskId)) return undefined;
+      if (!isRuntimeId(value.workflowId) || !isRuntimeId(value.taskId)) return undefined;
       const loop = value.loopId !== undefined || value.workAgentId !== undefined;
-      if (loop ? !valid(value.loopId) || !valid(value.workAgentId) || value.agentId !== undefined || value.runId !== undefined
-        : !valid(value.agentId) || !valid(value.runId)) return undefined;
+      if (loop ? !isRuntimeId(value.loopId) || !isRuntimeId(value.workAgentId) || value.agentId !== undefined || value.runId !== undefined
+        : !isRuntimeId(value.agentId) || !isRuntimeId(value.runId)) return undefined;
       return { type: value.type, workflowId: value.workflowId as string, taskId: value.taskId as string,
         ...(loop ? { loopId: value.loopId as string, workAgentId: value.workAgentId as string }
           : { agentId: value.agentId as string, runId: value.runId as string }) };
     }
     case "workflow.close":
-      if (![value.workAgentId, value.loopId].every(id => typeof id === "string" && /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(id))) return undefined;
+      if (![value.workAgentId, value.loopId].every(isRuntimeId)) return undefined;
       return { type: value.type, workAgentId: value.workAgentId as string, loopId: value.loopId as string };
     case "workflow.answer":
-      if (![value.workAgentId, value.loopId, value.decisionId].every(id => typeof id === "string" && /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(id))
+      if (![value.workAgentId, value.loopId, value.decisionId].every(isRuntimeId)
         || typeof value.questionHash !== "string" || !/^[a-f0-9]{64}$/.test(value.questionHash)
         || typeof value.answer !== "string" || !value.answer.trim()) return undefined;
       return { type: value.type, workAgentId: value.workAgentId as string, loopId: value.loopId as string,
         decisionId: value.decisionId as string, questionHash: value.questionHash, answer: value.answer };
     case "workflow.decision":
       // Exactly the two revision-limit decisions; accepting failed Verification stays an explicit runtime command.
-      if (![value.workAgentId, value.loopId].every(id => typeof id === "string" && /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(id))
+      if (![value.workAgentId, value.loopId].every(isRuntimeId)
         || (value.decision !== "continue" && value.decision !== "stop")) return undefined;
       return { type: value.type, workAgentId: value.workAgentId as string, loopId: value.loopId as string, decision: value.decision };
     case "session.select":
     case "agent.open":
-      if (typeof value.agentId !== "string" || !/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(value.agentId)) {
+      if (!isRuntimeId(value.agentId)) {
         return undefined;
       }
       if (value.type === "agent.open" && value.runId !== undefined &&
-        (typeof value.runId !== "string" || !/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(value.runId))) return undefined;
+        (!isRuntimeId(value.runId))) return undefined;
       return { type: value.type, agentId: value.agentId,
         ...(value.type === "agent.open" && typeof value.runId === "string" ? { runId: value.runId } : {}) };
     case "composer.settings":
@@ -435,8 +438,7 @@ export function parseClientMessage(value: unknown): ClientMessage | undefined {
 function parseAttachment(value: unknown): AttachmentReference | undefined {
   if (
     !isRecord(value) ||
-    typeof value.id !== "string" ||
-    !/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(value.id) ||
+    !isRuntimeId(value.id) ||
     typeof value.name !== "string" ||
     !value.name || value.name.length > 255 ||
     typeof value.kind !== "string" ||
@@ -467,4 +469,8 @@ function parseAttachment(value: unknown): AttachmentReference | undefined {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function isRuntimeId(value: unknown): value is string {
+  return typeof value === "string" && /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(value);
 }

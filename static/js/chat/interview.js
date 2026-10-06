@@ -7,6 +7,7 @@ globalThis.AgentFactoryChat.interview = function (host) {
   } = host;
 
   function canAnswerInterview(event) {
+    if (event.streaming) return false;
     if (event.type === "interview") {
       const position = indexedTimeline().positions.get(event.id);
       if (position === undefined || state.timeline.slice(position + 1).some(item => item.type === "user" || item.type === "interview")) return false;

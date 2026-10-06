@@ -29,7 +29,7 @@
   "agentFactory.mainChat.executionMode.enum.3": "Allow full access and proceed without execution approval or plan reapproval.",
   "agentFactory.agents.name": "Agents",
   "extension.description": "Main Agent chat sessions in VS Code editor tabs.",
-  "agentFactory.sidebar.archive.title": "Remove Agent from List (Archive)",
+  "agentFactory.sidebar.delete.title": "Delete Agent",
   "agentFactory.sidebar.restore.title": "Restore Archived Agent",
   "agentFactory.mainChat.botsEnabled.description": "Enable companion bots in all chats, including animations and AI expressions.",
   "agentFactory.mainChat.antigravityPath.description": "Optional absolute path to the Antigravity CLI (`agy`) on this extension host. Empty or unusable values fall back to finding the `agy` command like a new terminal would. Antigravity models appear only when the CLI is found.",

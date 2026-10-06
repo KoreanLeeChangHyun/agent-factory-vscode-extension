@@ -424,7 +424,9 @@ test('workflow guidance follows each queued snapshot and Normal preserves ordina
   assert.equal((calls[1].text.match(/Workflow guidance for this message only:/g) || []).length, 2);
   assert.match(calls[1].text, /Interview text[\s\S]*message only: interview[\s\S]*Design text[\s\S]*message only: design/);
   assert.doesNotMatch(calls[1].text, /message only: planning/);
-  assert.match(calls[1].text, /docs\/processed\//);
+  assert.match(calls[1].text, /Document skill's current document contract/);
+  assert.match(calls[1].text, /non-authoritative Refined documents/);
+  assert.match(calls[1].text, /canonical paths and package format/);
   assert.match(calls[1].text, /docs\/skills\//);
   assert.doesNotMatch(calls[1].text, /docs\/specification\/|index\.html|Write BOTH/);
   assert.match(calls[1].text, /SKILL\.md/);
@@ -627,9 +629,10 @@ test('accepted submission captures exact guidance and original per-message inten
   }), events(), 'main-existing', { pollIntervalMs: 0 });
   const first = controller.send('ordinary', [], {}, value => accepted.push(value));
   await tick();
-  const options = { taskMode: 'plan-work', businessMode: 'interview' };
+  const settings = { work: { model: 'worker-exact', reasoningEffort: 'high', fast: true } };
+  const options = { taskMode: 'plan-work', businessMode: 'interview', agentModels: settings };
   const second = controller.send('Original interview', [{ id: 'file', kind: 'file', name: 'notes.md', uri: 'file:///tmp/notes.md' }], options, value => accepted.push(value));
-  const third = controller.send('Original design', [], { taskMode: 'plan-work', businessMode: 'design' }, value => accepted.push(value));
+  const third = controller.send('Original design', [], { taskMode: 'plan-work', businessMode: 'design', agentModels: settings }, value => accepted.push(value));
   options.businessMode = 'normal';
   terminal.resolve();
   await Promise.all([first, second, third]);
@@ -637,7 +640,15 @@ test('accepted submission captures exact guidance and original per-message inten
   assert.equal(accepted[1].businessMode, 'interview');
   assert.equal(accepted[2].businessMode, 'design');
   assert.equal(accepted[1].taskMode, 'plan-work');
-  for (const submission of accepted.slice(1)) assert.ok(calls[1].includes(submission.guidance));
+  for (const submission of accepted.slice(1)) {
+    assert.match(submission.guidance, /worker-exact/);
+    const common = submission.guidance.indexOf('\n\n[Conversation-based background workflow]');
+    assert.ok(common > 0);
+    assert.ok(calls[1].includes(submission.guidance.slice(0, common)));
+    assert.ok(calls[1].startsWith(submission.guidance.slice(common)));
+  }
+  assert.equal(calls[1].split('[Delegated agent model settings for this request]').length - 1, 1);
+  assert.equal(calls[1].split('worker-exact').length - 1, 1);
   assert.equal(calls[1].split('file:///tmp/notes.md').length - 1, 1);
   assert.equal(calls[1].split('[Workflow guidance for this message only:').length - 1, 2);
 });

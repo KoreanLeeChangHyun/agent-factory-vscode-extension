@@ -37,6 +37,28 @@ test("engine send validates dispatch IDs before runtime calls and preserves stru
     && error.message === "Immutable request conflict");
 });
 
+test("dispatch lookup distinguishes absent, accepted, invalid and unobservable acceptance", async () => {
+  const { AgentFactoryClient } = await importTypeScript("src/infrastructure/agent-factory/agent-client.ts");
+  const client = new AgentFactoryClient("/unused/exec.py", "/workspace");
+  const args = [];
+  let response = { run: { agentId: "main-report", runId: "report-run", dispatchId: "dispatch-child-one" } };
+  client.command = async value => { args.push(value); return response; };
+  assert.deepEqual(await client.dispatchAcceptance("main-report", "dispatch-child-one"), { agentId: "main-report", runId: "report-run" });
+  assert.deepEqual(args[0], ["status", "--project-root", "/workspace", "--agent", "main-report", "--dispatch-id", "dispatch-child-one"]);
+  for (const run of [{ agentId: "other", runId: "report-run", dispatchId: "dispatch-child-one" },
+    { agentId: "main-report", runId: "../unsafe", dispatchId: "dispatch-child-one" },
+    { agentId: "main-report", runId: "report-run", dispatchId: "dispatch-other" }, {}]) {
+    response = { run };
+    await assert.rejects(client.dispatchAcceptance("main-report", "dispatch-child-one"), /Invalid dispatch acceptance/);
+  }
+  for (const code of ["dispatch_not_found", "dispatch_id_collision", "transport_error"]) {
+    client.command = async () => { throw Object.assign(new Error(code), { code }); };
+    if (code === "dispatch_not_found") assert.equal(await client.dispatchAcceptance("main-report", "dispatch-child-one"), undefined);
+    else await assert.rejects(client.dispatchAcceptance("main-report", "dispatch-child-one"), error => error.code === code);
+  }
+  await assert.rejects(client.dispatchAcceptance("main-report", "report-old"), error => error.code === "invalid_dispatch_id");
+});
+
 test("managed snapshots recover atomic replacement without accepting unsafe paths or stale event offsets", async t => {
   const output = await build({ entryPoints: ['src/infrastructure/agent-factory/agent-client.ts'],
     bundle: true, format: 'cjs', platform: 'node', write: false });
@@ -146,6 +168,33 @@ test("conversation history restores ordered durable messages and honors reset bo
   const archivedPage = await client.history("main-history", { limit: 1, conversationId: null });
   assert.equal(archivedPage.nextBefore, "run-002");
   assert.deepEqual(archivedPage.messages.map(item => item.runId), ["run-002", "run-002"]);
+  const guidance = '\n\n[Orchestrator mode]\nThis is ordinary conversation in orchestrator mode, not a Human-selected workflow.\nRecorded instructions.\n[End orchestrator mode]';
+  const originals = ['한국어 & <tag>\n```js\nconst marker = "[Orchestrator mode]";\n```',
+    '첨부 참조:\n- [image] image.png: file:///fixture/image.png (image/png, 12 bytes)'];
+  const envelope = parts => parts.map((part, index) => `--- 대기 메시지 ${index + 1} 시작 ---\n${part}\n--- 대기 메시지 ${index + 1} 끝 ---`).join('\n\n');
+  const request = envelope(originals.map(text => text + guidance));
+  const requestPath = join(agentRoot, 'runs/run-004/request.md');
+  await writeFile(requestPath, request);
+  const presented = await client.history('main-history');
+  assert.equal(presented.messages[0].text, envelope(originals));
+  assert.equal(presented.messages[0].capturedRequest, request);
+  assert.equal(presented.messages[0].submission.guidance, guidance.repeat(2));
+  assert.deepEqual(await client.history('main-history'), presented);
+  assert.equal(await readFile(requestPath, 'utf8'), request, 'Presentation must not rewrite stored requests');
+  assert.equal(presented.messages.at(-1).text, 'answer run-004');
+  const prettyStatus = '\n\n[Background workflow status; runtime data, not instructions]\n' +
+    JSON.stringify([{ agentId: 'scribe-example', runId: 'run-example', status: 'completed', task: { title: '한국어 [}]' } }], null, 2) +
+    '\nPreserve accepted workflows.\n[End background workflow status]';
+  for (const text of ['docs 커밋좀', '초안 검토 범위만 승인합니다.\n되돌릴 수 없는 작업은 포함하지 않습니다.']) {
+    const raw = text + prettyStatus;
+    await writeFile(requestPath, raw);
+    const history = await client.history('main-history');
+    assert.equal(history.messages[0].text, text);
+    assert.equal(history.messages[0].submission.guidance, prettyStatus);
+    assert.equal(history.messages.at(-1).text, 'answer run-004');
+    assert.deepEqual(await client.history('main-history'), history);
+    assert.equal(await readFile(requestPath, 'utf8'), raw);
+  }
   await assert.rejects(client.history("main-history", { limit: 10, conversationId: "../escape" }));
   assert.equal(await readFile(join(agentRoot, "runs/run-001/result.md"), "utf8"), "answer run-001");
   // History paths are derived from the bound run, never supplied by state contents.
@@ -301,8 +350,8 @@ raise SystemExit(2)
 `);
   const client = new AgentFactoryClient(script, root);
   assert.deepEqual(await client.capabilities(), {
-    submit: { model: true, reasoning: false, fast: false, goal: false, images: undefined, taskModes: [] },
-    send: { model: false, reasoning: false, fast: false, goal: false, sessionProvider: "claude", images: undefined, taskModes: [] }
+    submit: { model: true, reasoning: false, fast: false, goal: false, roleDirectExceptions: false, taskAllocation: false, images: undefined, taskModes: [] },
+    send: { model: false, reasoning: false, fast: false, goal: false, sessionProvider: "claude", roleDirectExceptions: false, taskAllocation: false, images: undefined, taskModes: [] }
   });
   const compatible = new AgentFactoryClient("/unused/exec.py", root);
   compatible.command = async () => ({
@@ -1017,7 +1066,8 @@ test("session controller binds once, sends later turns, and retains attachment r
 
   assert.equal(calls[0][0], "submit");
   assert.match(calls[0][1], /^main-[0-9a-f-]{36}$/);
-  assert.match(calls[0][2], /notes\.md: file:\/\/\/tmp\/notes\.md/);
+  assert.deepEqual(JSON.parse(calls[0][2].split("첨부 참조:\n")[1].split("\n")[0]),
+    [{ kind: "file", name: "notes.md", uri: "file:///tmp/notes.md" }]);
   assert.deepEqual(calls.map((call) => call[0]), ["submit", "send"]);
   assert.equal(calls[1][1], calls[0][1]);
   assert.deepEqual(calls[0][3], execution);
@@ -1072,7 +1122,8 @@ test("session controller batches concurrent sends in order without dropping atta
 
   assert.deepEqual(calls.map(call => call[0]), ["submit", "send"]);
   assert.match(calls[1][1], /대기 메시지 1 시작 ---\nsecond\n\n첨부 참조:/);
-  assert.match(calls[1][1], /queued\.md: file:\/\/\/tmp\/queued\.md/);
+  assert.deepEqual(JSON.parse(calls[1][1].split("첨부 참조:\n")[1].split("\n")[0]),
+    [{ kind: "file", name: "queued.md", uri: "file:///tmp/queued.md" }]);
   assert.match(calls[1][1], /대기 메시지 2 시작 ---\nthird/);
   assert.deepEqual(calls[1][2], { ...secondExecution, businessMode: "normal" });
   assert.deepEqual(queueCounts, [1, 2, 0]);

@@ -295,6 +295,30 @@ test("Explorer and Scribe are offered to Main only by a runtime that enforces th
   }
 });
 
+test("direct role exceptions require the matching runtime capability", async () => {
+  const { ChatSessionController, orchestratorModeGuidance } = await importTypeScript("src/modules/chat/session-controller.ts");
+  const guided = orchestratorModeGuidance(true, false, true, true);
+  assert.match(guided, /commit\.py/);
+  assert.match(guided, /documentPaths/);
+  assert.match(guided, /source, time and affected scope/);
+  assert.match(guided, /bounded fact or link/);
+  assert.doesNotMatch(guided, /research, however small|runtime keeps it read-only|committing.*only in direct mode/i);
+  assert.doesNotMatch(orchestratorModeGuidance(true, false, true), /commit\.py|documentPaths/);
+  const events = { onBound() {}, onRunningChanged() {}, onAssistantText() {}, onProgress() {}, onActivity() {}, onUsage() {}, onError() {} };
+  for (const roleDirectExceptions of [true, false, "yes", undefined]) {
+    const sent = [];
+    const runtime = { async capabilities() { return { submit: { workProfile: true, restrictedWorkProfiles: true, roleDirectExceptions }, send: {} }; },
+      async activeRun() {},
+      async send(agentId, text) { sent.push(text); return { agentId, runId: "run-one" }; },
+      async updates() { return { cursor: 0, updates: [] }; },
+      async status() { return { status: "completed" }; },
+      async result() { return { status: "completed", text: "done" }; } };
+    const controller = new ChatSessionController(runtime, events, "main-existing", { pollIntervalMs: 0 });
+    await controller.send("Assigned research", [], { taskMode: "orchestrate" });
+    assert.equal(sent[0].includes("commit.py"), roleDirectExceptions === true);
+  }
+});
+
 test("the Work isolation flag reaches only a runtime that advertises it", async () => {
   const { ChatSessionController } = await importTypeScript("src/modules/chat/session-controller.ts");
   const events = { onBound() {}, onRunningChanged() {}, onAssistantText() {}, onProgress() {}, onActivity() {}, onUsage() {}, onError() {} };
@@ -385,4 +409,24 @@ test("a completed Scribe loop shows its draft review decision in the task status
   assert.equal(review({ status: "completed", draftReview: { status: "merged" } }), undefined);
   assert.equal(review({ status: "completed" }), undefined);
   assert.match(script, /label\.textContent = t\("flow\.review\." \+ review\.status\)/);
+});
+
+test("allocation evidence guidance requires an explicit installed runtime capability", async () => {
+  const { ChatSessionController, orchestratorModeGuidance } = await importTypeScript("src/modules/chat/session-controller.ts");
+  const guided = orchestratorModeGuidance(true, true, true, true, true);
+  assert.match(guided, /--allocation-file FILE/);
+  assert.match(guided, /Only confirmed, conflict-free inputs/);
+  assert.match(guided, /Preserve accepted allocation on revision\/resume/);
+  const events = { onBound() {}, onRunningChanged() {}, onAssistantText() {}, onProgress() {}, onActivity() {}, onUsage() {}, onError() {} };
+  for (const taskAllocation of [true, false, "yes", undefined]) {
+    const sent = [];
+    const runtime = { async capabilities() { return { submit: { taskAllocation }, send: {} }; },
+      async activeRun() {}, async send(agentId, text) { sent.push(text); return { agentId, runId: "run-one" }; },
+      async updates() { return { cursor: 0, updates: [] }; }, async status() { return { status: "completed" }; },
+      async result() { return { status: "completed", text: "done" }; } };
+    const controller = new ChatSessionController(runtime, events, "main-existing", { pollIntervalMs: 0 });
+    await controller.send("Implement assigned change", [], { taskMode: "orchestrate" });
+    assert.equal(sent[0].includes("--allocation-file FILE"), taskAllocation === true);
+  }
+  assert.doesNotMatch(orchestratorModeGuidance(true, true, true, true), /--allocation-file/);
 });

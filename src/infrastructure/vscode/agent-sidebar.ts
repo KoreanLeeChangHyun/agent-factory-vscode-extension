@@ -65,7 +65,7 @@ export class AgentSidebar implements vscode.TreeDataProvider<Node>, vscode.TreeD
     command("move", node => this.move(node));
     command("renameGroup", node => this.renameGroup(node));
     command("deleteGroup", node => this.deleteGroup(node));
-    command("archive", node => this.archive(node));
+    command("delete", node => this.deleteAgent(node));
     command("restore", () => this.restoreArchived());
     void this.refresh();
   }
@@ -93,14 +93,24 @@ export class AgentSidebar implements vscode.TreeDataProvider<Node>, vscode.TreeD
     return write;
   }
 
-  private async archive(node?: Node): Promise<void> {
+  private async deleteAgent(node?: Node): Promise<void> {
     if (node?.kind !== "agent") return;
     const current = this.agents.find(agent => agent.state.panelId === node.agent.state.panelId);
     if (!current) return;
-    const { panelId, agentId, title } = current.state;
-    // This only changes sidebar visibility; open tabs and running work remain intact.
-    await this.updateArchive(entries => this.isArchived(current.state) ? entries
-      : [...entries, { panelId, agentId, title }]);
+    const confirmed = await vscode.window.showWarningMessage(
+      localize("ui.sidebar.delete.confirm", current.state.title), { modal: true }, localize("ui.delete"));
+    if (confirmed !== localize("ui.delete")) return;
+    if (!("deleteSidebarAgent" in this.panels) || typeof this.panels.deleteSidebarAgent !== "function") {
+      throw new Error(localize("ui.sidebar.delete.unavailable"));
+    }
+    const deleted = await this.panels.deleteSidebarAgent(current.state);
+    const ids = new Set(Array.isArray(deleted) ? deleted : [current.state.panelId]);
+    this.agents = this.agents.filter(agent => !ids.has(agent.state.panelId));
+    for (const id of ids) delete this.layout.assignments[id];
+    this.layout.order = this.layout.order.filter(id => !ids.has(id));
+    this.layoutVersion += 1;
+    await this.save();
+    await this.refresh();
   }
 
   private async restoreArchived(): Promise<void> {

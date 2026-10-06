@@ -1,10 +1,10 @@
 (function () {
   "use strict";
 
-  function extract(text, markdown) {
+  function extract(text, markdown, environment = {}) {
     const unchanged = { text, references: [] };
     if (!markdown || typeof text !== "string" || !text.includes("실행 식별자")) return unchanged;
-    const tokens = markdown.parse(text, {});
+    const tokens = markdown.parse(text, environment);
     const lines = text.split("\n");
     const candidates = [];
     for (let index = 0; index < tokens.length - 3; index += 1) {

@@ -38,6 +38,23 @@ test('interview confirmation retains the request and clickable Yes/No continuati
   assert.equal(restored.submission.guidance, guided.slice(request.length));
 });
 
+test('design delegates document layout and synchronization while preserving promotion authority and history', () => {
+  const request = 'Design the storage boundary';
+  const guided = withBusinessMode(request, 'design');
+  assert.match(guided, /Document skill's current document contract/);
+  assert.match(guided, /non-authoritative Refined documents \(compatible metadata type: processed\)/);
+  assert.match(guided, /Expose only Specification packages to host Skill directories/);
+  assert.doesNotMatch(guided, /docs\/processed\/|\.codex\/original\/|\.codex\/processed\//);
+  assert.match(guided, /mode selection or Agent completion alone does not accept content/);
+  assert.match(guided, /Do not overwrite existing conflicting documents or delete drafts/);
+  const restored = historyPresentation(guided, 'direct', false);
+  assert.equal(restored.text, request);
+  assert.equal(restored.submission.businessMode, 'design');
+  assert.equal(restored.submission.guidance, guided.slice(request.length));
+  const historical = '\n\n[Workflow guidance for this message only: design]\nOld docs/processed/ guidance\n[End workflow guidance]';
+  assert.equal(historyPresentation(request + historical, 'direct', false).submission.guidance, historical);
+});
+
 test('contract preparation is restored with its captured guidance and direct route', () => {
   const request = 'Use the current conversation';
   const guided = withBusinessMode(request, 'contract');

@@ -742,9 +742,92 @@ test("uncertain background acceptance is surfaced without automatic retry storms
   await new Promise(resolve => setImmediate(resolve));
   await manager.continueBackgroundWork(managed, [child]);
   assert.equal(sends, 1);
-  assert.equal(storage.get("agentFactory.background.main-one")["work-one/run-one"], "delivery-error:completed");
+  assert.equal(storage.get("agentFactory.background.main-one")["work-one/run-one"].state, "prepared");
   assert.equal(posted.at(-1).type, "host.notice");
   assert.equal(posted.at(-1).level, "error");
+});
+
+test("real controller fallback reconciles failed or lost acceptance across restored panels", async () => {
+  const { ChatSessionController } = await importTypeScript("src/modules/chat/session-controller.ts");
+  for (const mode of ["before-send", "before-acceptance", "lost-ack", "after-acceptance", "permanent"]) {
+    const key = "agentFactory.background.main-fallback";
+    const storage = new Map([[key, {}]]), calls = [], notices = [], rawErrors = [], lookups = [];
+    const context = { workspaceState: { get: key => storage.get(key), async update(key, value) { storage.set(key, structuredClone(value)); } } };
+    let fail = true, acceptedRun;
+    const runtime = {
+      async activeRun() { if (mode === "before-send" && fail) throw new Error("Discovery unavailable"); },
+      async dispatchAcceptance(agentId, id) { lookups.push(id); return acceptedRun && { agentId, runId: acceptedRun }; },
+      async send(agentId, text, execution) {
+        calls.push({ text, id: execution.deliveryId });
+        if (fail && mode === "permanent") throw Object.assign(new Error("Invalid request"), { code: "request_invalid" });
+        if (fail && mode === "before-acceptance") throw new Error("Connection unavailable");
+        acceptedRun = "report-run";
+        if (fail && mode === "lost-ack") throw new Error("Lost acknowledgement");
+        return { agentId, runId: acceptedRun };
+      },
+      async updates() { if (fail && mode === "after-acceptance") throw new Error("Observation unavailable"); return { cursor: 0, updates: [] }; },
+      async status() { return { status: "completed" }; },
+      async result() { return { status: "completed", text: "Reported" }; }
+    };
+    const controller = () => new ChatSessionController(runtime, {
+      onBound() {}, onRunningChanged() {}, onProgress() {}, onActivity() {}, onAssistantText() {}, onUsage() {},
+      onError(message) { rawErrors.push(message); }
+    }, "main-fallback", { pollIntervalMs: 0 });
+    const managed = { state: { agentId: "main-fallback" }, controller: controller(),
+      panel: { webview: { async postMessage(message) { notices.push(message); } } } };
+    const child = { agentId: "work", runId: "child-run", status: "completed", taskMode: "work" };
+    const manager = () => new module.exports.ChatPanelManager(context, {}, () => [], async () => ({ available: true, client: runtime }));
+    const first = manager();
+    await first.continueBackgroundWork(managed, [child]);
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(managed.backgroundContinuation, false, mode + ": failure releases host ownership");
+    assert.equal(managed.controller.queueLength, 0, "Durable delivery must not also be retained in controller queue");
+    assert.deepEqual(rawErrors, [], "Structured errors belong to the delivery owner");
+    const initial = storage.get(key)["work/child-run"];
+    assert.ok(initial.dispatchId?.startsWith("dispatch-"), "Intent persists a stable runtime dispatch identity");
+    assert.notEqual(initial.state, "completed", "Failure is not a delivered report");
+    fail = false;
+    managed.controller = controller();
+    const restored = manager();
+    await restored.continueBackgroundWork(managed, [{ ...child, updatedAt: "changed since attempt" }]);
+    await new Promise(resolve => setImmediate(resolve));
+    await restored.continueBackgroundWork(managed, [child]);
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(calls.length, mode === "before-acceptance" ? 2 : 1, mode);
+    if (calls.length === 2) assert.deepEqual(calls[0], calls[1], "Retry preserves request bytes and ID");
+    assert.equal(storage.get(key)["work/child-run"].state, mode === "permanent" ? "blocked" : "accepted");
+    assert.equal(lookups.length, ["before-send", "before-acceptance", "lost-ack"].includes(mode) ? 1 : 0);
+    assert.ok(notices.some(message => message.level === "error"));
+  }
+});
+
+test("fallback lookup loss and legacy unidentified failures never authorize another submission", async () => {
+  for (const mode of ["unavailable", "unsupported", "lookup-loss", "legacy"]) {
+    const key = "agentFactory.background.main-uncertain";
+    const stored = mode === "legacy" ? "delivery-error:completed" : {
+      identity: "captured", state: "prepared", dispatchId: "dispatch-child-captured", message: "original bytes"
+    };
+    const storage = new Map([[key, { "work/run": stored }]]), notices = [];
+    let sends = 0;
+    const context = { workspaceState: { get: key => storage.get(key), async update(key, value) { storage.set(key, structuredClone(value)); } } };
+    const connect = async () => ({ available: mode !== "unavailable", client: mode === "unsupported" ? {} : {
+      async dispatchAcceptance() { throw new Error("Observation unavailable"); }
+    } });
+    const managed = { state: { agentId: "main-uncertain" }, controller: { async send() { sends++; } },
+      panel: { webview: { async postMessage(message) { notices.push(message); } } } };
+    const child = { agentId: "work", runId: "run", status: "completed", taskMode: "work" };
+    for (let restore = 0; restore < 2; restore++) {
+      const manager = new module.exports.ChatPanelManager(context, {}, () => [], connect);
+      await manager.continueBackgroundWork(managed, [child]);
+    }
+    assert.equal(sends, 0, mode);
+    if (mode !== "legacy") {
+      assert.equal(storage.get(key)["work/run"].state, "prepared");
+      assert.equal(storage.get(key)["work/run"].dispatchId, stored.dispatchId);
+      assert.equal(managed.backgroundContinuation, false);
+    }
+    assert.equal(notices.length, mode === "lookup-loss" ? 1 : 0);
+  }
 });
 
  test("question copy preserves original multiline text through the host clipboard", async () => {
@@ -1021,7 +1104,7 @@ test("concurrent panels claim a legacy terminal child delivery once", async () =
   await Promise.all(panels.map(panel => manager.sendAgentList(panel)));
   await new Promise(resolve => setImmediate(resolve));
   assert.equal(sends.length, 1, 'Concurrent panels must make one legacy child delivery attempt');
-  assert.equal(storage.get('agentFactory.background.main-child')['work-child/run-child'], 'completed');
+  assert.equal(storage.get('agentFactory.background.main-child')['work-child/run-child'].state, 'accepted');
 });
 
 
@@ -1489,4 +1572,44 @@ test("named-set snapshots reject composer edits until explicitly detached to Cha
   await manager.handleMessage(managed,{...message,agentSettingsScope:'chat',agentSettingsSet:'Chat'});
   assert.equal(managed.state.model,'gpt-6-luna');assert.equal(managed.state.agentSettingsScope,'chat');
   assert.equal(managed.state.agentSettingsSet,'Chat');assert.equal(managed.state.fastMode,true);
+});
+
+test("task history deletion waits for runtime success, broadcasts to panels, preserves stop and rejects wrong project owner", async () => {
+  const posted = [], calls = [];
+  let settle, fail;
+  let pending = new Promise((resolve, reject) => { settle = resolve; fail = reject; });
+  const client = { deleteTask(...args) { calls.push(args); return pending; },
+    async listProjectTasks() { return [{ id: "flow-project", mainAgentId: "main-other", tasks: [{ id: "project-task" }] }]; } };
+  const manager = new module.exports.ChatPanelManager({}, {}, () => [], async () => ({ available: true, client }));
+  manager.post = async (_panel, message) => { posted.push(message); };
+  manager.sendAgentList = async () => {};
+  const managed = { state: { role: "main", agentId: "main-one" }, panel: {}, disposed: false };
+  manager.panels.set("one", managed);
+  manager.panels.set("two", { state: { role: "main", agentId: "main-other" }, panel: {}, disposed: false });
+  const message = { type: "task.delete", workflowId: "flow-one", taskId: "task-one" };
+  const deleting = manager.handleMessage(managed, message);
+  await new Promise(resolve => setImmediate(resolve));
+  await manager.handleMessage(managed, message);
+  assert.deepEqual(calls, [["main-one", "flow-one", "task-one"]]);
+  assert.equal(posted.length, 0, "No optimistic success acknowledgement");
+  settle({ kind: "task-history-deleted" });
+  await deleting;
+  assert.equal(posted.filter(message => message.type === "task.delete.result" && !message.error).length, 2, "Every open panel drops its cache");
+  posted.length = 0;
+  pending = new Promise((resolve, reject) => { fail = reject; });
+  const rejected = manager.handleMessage(managed, message);
+  await new Promise(resolve => setImmediate(resolve));
+  fail(new Error("Live worker owns the selected run"));
+  await rejected;
+  assert.equal(posted.filter(message => message.type === "task.delete.result" && !message.error).length, 0);
+  assert.match(posted.find(message => message.type === "task.delete.result").error, /Live worker/);
+  assert.equal(posted.find(message => message.type === "host.notice").level, "error");
+  const before = calls.length;
+  await manager.handleMessage(managed, { ...message, mainAgentId: "main-other" });
+  assert.equal(calls.length, before, "An arbitrary project Main is rejected before storage mutation");
+  pending = Promise.resolve({ kind: "task-history-deleted" });
+  await manager.handleMessage(managed, { type: "task.delete", workflowId: "flow-project", taskId: "project-task", mainAgentId: "main-other" });
+  assert.deepEqual(calls.at(-1), ["main-other", "flow-project", "project-task"]);
+  await manager.handleMessage({ ...managed, state: { role: "work", agentId: "work-one" } }, message);
+  assert.equal(calls.length, before + 1, "Worker panels cannot invoke Main history deletion");
 });

@@ -1,5 +1,7 @@
 import * as vscode from "vscode";
-import { randomUUID } from "node:crypto";
+import { randomUUID, createHash } from "node:crypto";
+import * as path from "node:path";
+import { AgentSetStorage } from "./agent-set-storage";
 import { isDeepStrictEqual } from "node:util";
 import { localize } from "../../common/localization";
 import { parseAgentFastModes, parseModelFastModes } from "../../common/types/agent-models";
@@ -9,12 +11,26 @@ const section = "agentFactory.agents";
 type PresetState = Pick<vscode.Memento, "get" | "update">;
 type DetectedProviders = { codex: boolean; claude: boolean; antigravity?: boolean };
 interface StoredSet { id: string; name: string; settings: AgentDefaults }
-interface Library { sets: StoredSet[]; projectDefaults: Record<string, string>; migratedProjects: string[]; factoryVersion?: number }
+interface Library { sets: StoredSet[]; projectDefaults: Record<string, string>; migratedProjects: string[]; factoryVersion?: number; legacySources?: Record<string, string[]>; deletedLegacySources?: string[]; legacyTrackedProjects?: string[]; legacyGlobalTracked?: boolean }
 const libraryKey = "agentFactory.agentSets.v3";
 const operations = new WeakMap<object, Promise<unknown>>();
-const pendingInitialization = new WeakMap<object, Library>();
+const pendingInitialization = new WeakMap<object, {base: string; library: Library}>();
+const sharedStorage = new WeakMap<object, AgentSetStorage>();
+export function bindAgentSetStorage(context: vscode.ExtensionContext, storage = new AgentSetStorage(path.join(context.globalStorageUri.fsPath, "agent-sets-v3.json"))): void {
+  if (!sharedStorage.has(context.globalState)) sharedStorage.set(context.globalState,
+    storage);
+}
+export function watchAgentSets(context: vscode.ExtensionContext, refresh: () => void): vscode.Disposable | undefined {
+  if (!sharedStorage.has(context.globalState)) return undefined;
+  const watcher = vscode.workspace.createFileSystemWatcher(new vscode.RelativePattern(context.globalStorageUri, "agent-sets-v3.json"));
+  const listeners = [watcher.onDidCreate(refresh), watcher.onDidChange(refresh), watcher.onDidDelete(refresh)];
+  return {dispose: () => { for (const listener of listeners) listener.dispose(); watcher.dispose(); }};
+}
 function serialized<T>(state: PresetState, action: () => Promise<T>): Promise<T> {
-  const operation = (operations.get(state) ?? Promise.resolve()).catch(() => undefined).then(action);
+  const operation = (operations.get(state) ?? Promise.resolve()).catch(() => undefined).then(() => {
+    const storage = sharedStorage.get(state);
+    return storage ? storage.transaction(action) : action();
+  });
   operations.set(state, operation);
   return operation;
 }
@@ -23,8 +39,16 @@ function projectKey(): string | undefined {
   return uri ? uri.toString() === "[object Object]" ? uri.fsPath : uri.toString() : undefined;
 }
 function readLibrary(state?: Pick<vscode.Memento, "get">): Library | undefined {
-  const library = state?.get<Library>(libraryKey);
+  const library = state && (sharedStorage.get(state)?.read<Library>() ?? state.get<Library>(libraryKey));
+  if (library && (!Array.isArray(library.sets) || !library.projectDefaults || !Array.isArray(library.migratedProjects))) throw new Error("Invalid agent set library");
   return library ? structuredClone(library) : undefined;
+}
+async function writeLibrary(state: PresetState, library: Library): Promise<void> {
+  const storage = sharedStorage.get(state);
+  if (!storage) { await state.update(libraryKey, library); return; }
+  await storage.write(library);
+  // Retire the cached v3 payload only after its replacement is durably written.
+  if (state.get(libraryKey) !== undefined) await state.update(libraryKey, undefined);
 }
 /** Only migration reads the retired VS Code settings layers. Never write them again. */
 function readLegacyDefaults(): {global: AgentDefaults; project: AgentDefaults} {
@@ -94,6 +118,48 @@ const factoryIds = new Set(factoryAgentPresets().map(set => set.id));
 function settingsEqual(a: AgentDefaults, b: AgentDefaults): boolean {
   return isDeepStrictEqual(mergeAgentSettings(a), mergeAgentSettings(b));
 }
+function legacyFingerprint(name: string, settings: AgentDefaults): string {
+  const canonical = (value: unknown): unknown => value && typeof value === "object" ?
+    Object.fromEntries(Object.entries(value).sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0).map(([key, item]) => [key, canonical(item)])) : value;
+  return createHash("sha256").update(JSON.stringify([name, canonical(mergeAgentSettings(settings))])).digest("hex");
+}
+function importLegacySet(library: Library, name: string, settings: AgentDefaults): StoredSet | undefined {
+  const fingerprint = legacyFingerprint(name, settings);
+  if (library.deletedLegacySources?.includes(fingerprint)) return undefined;
+  const set = importSet(library, name, settings);
+  library.legacySources ??= {};
+  library.legacySources[set.id] = [...new Set([...(library.legacySources[set.id] ?? []), fingerprint])];
+  return set;
+}
+/** Existing v3 libraries predate source identities; associate only demonstrable matches. */
+function trackLegacySources(library: Library, globalState: PresetState, workspaceState?: PresetState): boolean {
+  const key = projectKey();
+  const trackGlobal = !library.legacyGlobalTracked;
+  const trackProject = key && !library.legacyTrackedProjects?.includes(key);
+  if (!trackGlobal && !trackProject) return false;
+  const legacy = readLegacyDefaults();
+  type OldSet = {name: string; settings: AgentDefaults; isDefault?: boolean};
+  const associate = (name: string, settings: AgentDefaults) => {
+    for (const set of library.sets) if ((set.name === name || set.name.startsWith(`${name} (`)) && settingsEqual(set.settings, settings)) {
+      library.legacySources ??= {};
+      library.legacySources[set.id] = [...new Set([...(library.legacySources[set.id] ?? []), legacyFingerprint(name, settings)])];
+    }
+  };
+  if (trackGlobal) {
+    for (const storageKey of ["agentFactory.agentPresets.v1", "agentFactory.agentPresets.global.v2"]) {
+      for (const set of globalState.get<OldSet[]>(storageKey, [])) associate(set.name, set.isDefault && hasValues(legacy.global) ? legacy.global : set.settings);
+    }
+    if (hasValues(legacy.global)) associate("Imported settings", legacy.global);
+    library.legacyGlobalTracked = true;
+  }
+  if (trackProject) {
+    for (const set of workspaceState?.get<OldSet[]>("agentFactory.agentPresets.project.v2", []) ?? []) associate(set.name, set.isDefault && hasValues(legacy.project) ? mergeAgentSettings(legacy.global, legacy.project) : set.settings);
+    for (const sets of Object.values(workspaceState?.get<Record<string, OldSet[]>>("agentFactory.agentPresets.chat.v2", {}) ?? {})) for (const set of sets) associate(set.name, set.settings);
+    if (hasValues(legacy.project)) associate("Imported settings", mergeAgentSettings(legacy.global, legacy.project));
+    library.legacyTrackedProjects = [...(library.legacyTrackedProjects ?? []), key];
+  }
+  return true;
+}
 function assertCustom(set: StoredSet): void {
   if (factoryIds.has(set.id)) throw new Error(localize("preset.builtin.readonly"));
 }
@@ -137,8 +203,14 @@ function upgradeFactorySets(library: Library): void {
 async function initializeLibrary(globalState: PresetState, workspaceState?: PresetState, providers: DetectedProviders = {codex: false, claude: false}, random: () => number = Math.random): Promise<void> {
   const saved = readLibrary(globalState);
   const key = projectKey();
-  if (saved?.factoryVersion === 1 && (!key || saved.migratedProjects.includes(key))) return;
-  let library = pendingInitialization.get(globalState);
+  if (saved?.factoryVersion === 1 && (!key || saved.migratedProjects.includes(key))) {
+    const tracked = trackLegacySources(saved, globalState, workspaceState);
+    if (tracked || (sharedStorage.has(globalState) && globalState.get(libraryKey) !== undefined)) await writeLibrary(globalState, saved);
+    return;
+  }
+  const base = JSON.stringify(saved);
+  const pending = pendingInitialization.get(globalState);
+  let library = pending && pending.base === base ? pending.library : undefined;
   if (!library) {
     library = saved ?? {sets: factoryAgentPresets(), projectDefaults: {}, migratedProjects: []};
     upgradeFactorySets(library);
@@ -146,21 +218,21 @@ async function initializeLibrary(globalState: PresetState, workspaceState?: Pres
     type OldSet = {name: string; settings: AgentDefaults; isDefault?: boolean};
     if (!saved) {
       for (const storageKey of ["agentFactory.agentPresets.v1", "agentFactory.agentPresets.global.v2"]) {
-        for (const set of globalState.get<OldSet[]>(storageKey, [])) importSet(library, set.name, set.isDefault && hasValues(legacy.global) ? legacy.global : set.settings);
+        for (const set of globalState.get<OldSet[]>(storageKey, [])) importLegacySet(library, set.name, set.isDefault && hasValues(legacy.global) ? legacy.global : set.settings);
       }
-      if (hasValues(legacy.global)) importSet(library, "Imported settings", legacy.global);
+      if (hasValues(legacy.global)) importLegacySet(library, "Imported settings", legacy.global);
     }
     if (key && !library.migratedProjects.includes(key)) {
       const oldProject = workspaceState?.get<OldSet[]>("agentFactory.agentPresets.project.v2", []) ?? [];
-      for (const set of oldProject) importSet(library, set.name, set.isDefault && hasValues(legacy.project) ? mergeAgentSettings(legacy.global, legacy.project) : set.settings);
+      for (const set of oldProject) importLegacySet(library, set.name, set.isDefault && hasValues(legacy.project) ? mergeAgentSettings(legacy.global, legacy.project) : set.settings);
       const oldChats = workspaceState?.get<Record<string, OldSet[]>>("agentFactory.agentPresets.chat.v2", {}) ?? {};
-      for (const sets of Object.values(oldChats)) for (const set of sets) importSet(library, set.name, set.settings);
+      for (const sets of Object.values(oldChats)) for (const set of sets) importLegacySet(library, set.name, set.settings);
       let initial: StoredSet | undefined;
-      if (hasValues(legacy.project)) initial = importSet(library, "Imported settings", mergeAgentSettings(legacy.global, legacy.project));
+      if (hasValues(legacy.project)) initial = importLegacySet(library, "Imported settings", mergeAgentSettings(legacy.global, legacy.project));
       else if (oldProject.find(set => set.isDefault)) {
         const old = oldProject.find(set => set.isDefault)!;
-        initial = importSet(library, old.name, old.settings);
-      } else if (hasValues(legacy.global) && (!saved || workspaceState?.get<boolean>("agentFactory.projectAgentDefaults.initialized.v3"))) initial = importSet(library, "Imported settings", legacy.global);
+        initial = importLegacySet(library, old.name, old.settings);
+      } else if (hasValues(legacy.global) && (!saved || workspaceState?.get<boolean>("agentFactory.projectAgentDefaults.initialized.v3"))) initial = importLegacySet(library, "Imported settings", legacy.global);
       if (!initial) {
         const available = (["codex", "claude", "antigravity"] as const).filter(id => providers[id]);
         const provider = available.length ? available[Math.min(available.length - 1, Math.max(0, Math.floor(random() * available.length)))] : undefined;
@@ -172,10 +244,11 @@ async function initializeLibrary(globalState: PresetState, workspaceState?: Pres
       library.projectDefaults[key] = initial.id;
       library.migratedProjects.push(key);
     }
-    pendingInitialization.set(globalState, library);
+    trackLegacySources(library, globalState, workspaceState);
+    pendingInitialization.set(globalState, {base, library});
   }
-  // One atomic memento write keeps the library, migration marker and designation consistent.
-  await globalState.update(libraryKey, library);
+  // One atomic write keeps sets, deletion history, migration and designations consistent.
+  await writeLibrary(globalState, library);
   pendingInitialization.delete(globalState);
 }
 
@@ -221,7 +294,13 @@ export function useAgentPreset(globalState: PresetState, workspaceState: PresetS
         if (library.sets.some(item => item !== set && item.name === replacement)) throw new Error(localize("preset.duplicate"));
         set.name = replacement;
       } else if (action === "delete") {
-        if (Object.values(library.projectDefaults).includes(set.id)) throw new Error(localize("preset.default.required"));
+        for (const key of Object.keys(library.projectDefaults)) {
+          if (library.projectDefaults[key] === set.id) delete library.projectDefaults[key];
+        }
+        library.deletedLegacySources = [...new Set([...(library.deletedLegacySources ?? []),
+          ...(library.legacySources?.[set.id] ?? []), legacyFingerprint(set.name, set.settings),
+          legacyFingerprint(set.name.replace(/ \(\d+\)$/, ""), set.settings)])];
+        if (library.legacySources) delete library.legacySources[set.id];
         library.sets = library.sets.filter(item => item !== set);
       } else if (action === "default") {
         const key = projectKey();
@@ -234,7 +313,7 @@ export function useAgentPreset(globalState: PresetState, workspaceState: PresetS
         return mergeAgentSettings(set.settings);
       }
     }
-    await globalState.update(libraryKey, library);
+    await writeLibrary(globalState, library);
     return undefined;
   });
 }
@@ -248,7 +327,7 @@ export function updateAgentPresetField(globalState: PresetState, workspaceState:
     if (!set) throw new Error(localize("preset.missing"));
     assertCustom(set);
     set.settings = mergeAgentSettings(set.settings, {[role]: {[field]: value}});
-    await globalState.update(libraryKey, library);
+    await writeLibrary(globalState, library);
   });
 }
 export function updateAgentPresetFastMode(globalState: PresetState, workspaceState: PresetState | undefined, _chatId: string | undefined, _scope: AgentPresetScope, name: string, role: typeof AGENT_ROLES[number], model: string, value: boolean): Promise<void> {
@@ -260,6 +339,6 @@ export function updateAgentPresetFastMode(globalState: PresetState, workspaceSta
     if (!set) throw new Error(localize("preset.missing"));
     assertCustom(set);
     set.settings.fastByRoleModel = {...set.settings.fastByRoleModel, [role]: {...set.settings.fastByRoleModel?.[role], [model]: value}};
-    await globalState.update(libraryKey, library);
+    await writeLibrary(globalState, library);
   });
 }

@@ -4,7 +4,7 @@ import { readChatSource, runChatInNewContext as runInNewContext } from "../suppo
 
 const source = await readChatSource();
 const indexSource = source.slice(source.indexOf('  function indexedTimeline()'), source.indexOf('  function upsertActivity('));
-const aggregation = source.slice(source.indexOf('  function currentTaskFlows() {'), source.indexOf('  function liveTaskStatus('));
+const aggregation = source.slice(source.indexOf('  function validTaskFlowId('), source.indexOf('  function liveTaskStatus('));
 
 test('task-flow aggregation reuses unchanged histories and invalidates all input replacements', () => {
   let parses = 0;
@@ -54,52 +54,67 @@ const dismissal = source.slice(source.indexOf('  function taskDismissKey('), sou
 const stage = (id, run = 'run-one', extra = {}) => ({ id, title: id, agentId: 'worker', runId: run, status: 'running', ...extra });
 const flow = (id, tasks, extra = {}) => ({ id, tasks, ...extra });
 function dismissView(state) {
-  const context = { state, t: key => key, renders: 0, saves: 0,
+  const sent = [];
+  const context = { state, t: key => key, renders: 0, saves: 0, sent,
+    taskDeletesPending: new Set(), taskFlowSnapshot: undefined,
+    validTaskFlowId: value => typeof value === 'string' && /^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(value),
+    vscode: { postMessage: message => sent.push(message) }, runStageList: { dataset: {} },
     renderWorkLoopPanel() { context.renders++; }, persist() { context.saves++; },
-    document: { createElement() { return { append() {}, setAttribute() {}, addEventListener(_name, handler) { this.click = handler; } }; },
+    document: { getElementById() { return { dataset: {} }; }, createElement() { return { append() {}, setAttribute() {}, addEventListener(_name, handler) { this.click = handler; } }; },
       createElementNS() { return { append() {}, setAttribute() {} }; } } };
   runInNewContext(dismissal, context);
   return context;
 }
 
-test('dismissal changes only the selected list entry and persists without runtime messages', () => {
+test('task delete waits for storage acknowledgement and leaves the row on failure', () => {
   const flows = [flow('one', [stage('same')]), flow('two', [stage('same')])];
-  const state = { role: 'main', childAgents: [{ agentId: 'worker', runId: 'run-one', status: 'running' }], taskFlows: flows };
+  const state = { agentId: 'main-one', role: 'main', childAgents: [], taskFlows: flows, workflows: [], timeline: [] };
   const before = JSON.stringify(state);
   const ctx = dismissView(state);
+  const click = { preventDefault() {}, stopPropagation() {} };
   const button = ctx.createTaskDismiss(flows[0], flows[0].tasks);
-  button.click({ preventDefault() {}, stopPropagation() {} });
-  assert.deepEqual(Array.from(ctx.visibleTaskFlows(flows), item => item.id), ['two']);
-  assert.equal(ctx.renders, 1); assert.equal(ctx.saves, 1);
-  const { dismissedTasks, ...untouched } = state;
-  assert.equal(JSON.stringify(untouched), before, 'run state, task data and other entries are preserved');
-  button.click({ preventDefault() {}, stopPropagation() {} });
-  assert.equal(state.dismissedTasks.length, 1, 'duplicate clicks are idempotent');
-  const restored = dismissView(JSON.parse(JSON.stringify(state)));
-  assert.deepEqual(Array.from(restored.visibleTaskFlows(flows), item => item.id), ['two']);
-  const completed = flows.map(item => ({ ...item, tasks: item.tasks.map(task => ({ ...task, status: 'completed' })) }));
-  assert.deepEqual(Array.from(restored.visibleTaskFlows(completed), item => item.id), ['two']);
-  assert.deepEqual(Array.from(restored.visibleTaskFlows([flow('one', [stage('same', 'new-run')])]), item => item.id), ['one']);
+  button.click(click); button.click(click);
+  assert.equal(ctx.sent.length, 1, 'duplicate clicks do not delete twice');
+  assert.deepEqual(JSON.parse(JSON.stringify(ctx.sent[0])), { type: 'task.delete', workflowId: 'one', taskId: 'same' });
+  assert.equal(JSON.stringify(state), before, 'request does not optimistically hide history');
+  ctx.finishTaskDelete({ mainAgentId: 'main-one', workflowId: 'one', taskId: 'same', error: 'storage denied' });
+  assert.equal(JSON.stringify(state), before);
+  assert.equal(ctx.saves, 0, 'failure is not persisted as deletion');
+  const retry = ctx.createTaskDismiss(flows[0], flows[0].tasks);
+  assert.equal(retry.disabled, false);
+  retry.click(click);
+  ctx.finishTaskDelete({ mainAgentId: 'main-one', workflowId: 'one', taskId: 'same' });
+  assert.deepEqual(Array.from(state.taskFlows, item => item.id), ['two']);
+  assert.equal(ctx.saves, 1);
 });
 
-test('loop dismissal survives revisions while preserving other tasks and separate loops', () => {
-  const tasks = [stage('work-stage', 'run-one', { taskId: 'same', sessionRole: 'work' }),
-    stage('verify-stage', 'verify-one', { taskId: 'same', sessionRole: 'verification' }), stage('other')];
-  const original = flow('workflow', tasks, { loopId: 'loop-one', workAgentId: 'worker', pause: { taskId: 'same' } });
-  const ctx = dismissView({ dismissedTasks: [] });
-  ctx.state.dismissedTasks = [ctx.taskDismissKey(original, tasks.slice(0, 2))];
-  const revised = { ...original, tasks: tasks.map(task => ({ ...task, runId: 'revision-two', status: 'completed' })) };
-  const visible = ctx.visibleTaskFlows([revised]);
-  assert.deepEqual(Array.from(visible[0].tasks, task => task.id), ['other']);
-  assert.equal(visible[0].originalTaskCount, 2, 'hiding a task must not enable unsupported per-task Loop stop');
-  assert.equal(visible[0].pause, undefined, 'a hidden task does not keep its decision controls visible');
-  assert.equal(ctx.visibleTaskFlows([{ ...revised, loopId: 'loop-two' }])[0].tasks.length, 3);
-  assert.equal(ctx.visibleTaskFlows([{ ...revised, id: 'other-workflow' }])[0].tasks.length, 3);
-  assert.equal(original.tasks.length, 3, 'source history retains both stages');
+test('confirmed deletion removes both stages and stale snapshots, keeps Main prose and other tasks', () => {
+  const stages = [stage('work', 'run-one', { taskId: 'same', sessionRole: 'work' }),
+    stage('verify', 'run-verify', { taskId: 'same', sessionRole: 'verification' }), stage('other')];
+  const original = flow('workflow', stages);
+  const state = { agentId: 'main-one', taskFlows: [original],
+    workflows: [{ loopId: 'loop', workflow: { id: 'workflow', tasks: [{ id: 'same' }, { id: 'other' }] } }],
+    childAgents: [{ taskBinding: { workflowId: 'workflow', taskId: 'same' } }, { taskBinding: { workflowId: 'workflow', taskId: 'other' } }],
+    timeline: [{ type: 'assistant', text: 'Main prose\n```task-flow\n' + JSON.stringify(original) + '\n```\n' }],
+    projectTasks: [{ id: 'workflow', mainAgentId: 'main-two', tasks: [{ id: 'same' }] }] };
+  const ctx = dismissView(state);
+  ctx.finishTaskDelete({ mainAgentId: 'main-one', workflowId: 'workflow', taskId: 'same' });
+  assert.deepEqual(Array.from(state.taskFlows[0].tasks, item => item.id), ['other']);
+  assert.deepEqual(Array.from(state.workflows[0].workflow.tasks, item => item.id), ['other']);
+  assert.equal(state.childAgents.length, 1);
+  assert.ok(state.timeline[0].text.startsWith('Main prose\n'));
+  assert.deepEqual(JSON.parse(state.timeline[0].text.split('```task-flow\n')[1].split('\n```')[0]).tasks.map(task => task.id), ['other']);
+  assert.equal(state.projectTasks[0].tasks.length, 1, 'another conversation is preserved');
+  assert.equal(original.tasks.length, 3, 'caller snapshot is not mutated');
+  const restored = dismissView(JSON.parse(JSON.stringify(state)));
+  assert.deepEqual(Array.from(restored.state.taskFlows[0].tasks, task => task.id), ['other']);
+  state.dismissedTasks = ['legacy-ui-hide'];
+  assert.equal(ctx.visibleTaskFlows([original])[0].tasks.length, 3, 'legacy hides never replace physical deletion');
 });
 
 const slotSource = source.slice(source.indexOf('  function liveTaskStatus('), source.indexOf('  function summarizeTaskFlow('))
-  + source.slice(source.indexOf('  function taskDismissKey('), source.indexOf('  function finishTaskStop('));
+  + source.slice(source.indexOf('  function taskDismissKey('), source.indexOf('  function finishTaskStop('))
+  + source.slice(source.indexOf('  function workflowEnded('), source.indexOf('  // A logical task has ended'));
 function slotView(state) {
   const element = tag => ({ tag, className: '', dataset: {}, attributes: {}, children: [],
     get childElementCount() { return this.children.length; },
@@ -107,7 +122,7 @@ function slotView(state) {
     addEventListener(_name, handler) { this.click = handler; } });
   const sent = [];
   const context = { state, t: key => key, persist() {}, renderWorkLoopPanel() {}, vscode: { postMessage: message => sent.push(message) },
-    taskStopsPending: new Set(), taskStopErrors: new Map(), document: { createElement: element, createElementNS: (_ns, tag) => element(tag) } };
+    taskStopsPending: new Set(), taskStopErrors: new Map(), taskDeletesPending: new Set(), validTaskFlowId: value => typeof value === 'string' && /^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(value), document: { createElement: element, createElementNS: (_ns, tag) => element(tag) } };
   runInNewContext(slotSource, context);
   const slot = (flow, stages, rowStages) => {
     const row = element('summary');
@@ -133,6 +148,12 @@ test('stop and delete share one slot: active tasks offer only stop, ended tasks 
     state.childAgents[0].status = status;
     assert.deepEqual(slot({ id: 'flow' }, [task(status)]).buttons, ['task-flow-dismiss'], status + ' task shows only delete');
   }
+  state.childAgents[0].status = 'cancelled';
+  assert.deepEqual(slot({ id: 'flow', engine: true, engineStatus: 'cancelled' }, [task('pending')]).buttons, ['task-flow-dismiss'],
+    'An ended driver does not keep a never-started stage active');
+  state.childAgents[0].status = 'running';
+  assert.deepEqual(slot({ id: 'flow', engine: true, engineStatus: 'cancelled' }, [task('pending')]).buttons, ['task-flow-stop task-flow-icon-button'],
+    'A live owner remains protected even when the driver ended');
   state.childAgents[0].status = 'cancelling';
   assert.deepEqual(slot({ id: 'flow' }, [task('running')]).buttons, ['task-flow-stop task-flow-icon-button'], 'cancelling keeps stop');
   state.childAgents[0].status = 'cancelled';

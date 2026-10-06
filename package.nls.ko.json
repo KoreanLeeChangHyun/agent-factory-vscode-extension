@@ -29,7 +29,7 @@
   "agentFactory.mainChat.executionMode.enum.3": "전체 접근을 허용하며 실행 승인이나 계획 재승인 없이 진행합니다.",
   "agentFactory.agents.name": "에이전트",
   "extension.description": "VS Code 편집기 탭의 메인 에이전트 채팅 세션입니다.",
-  "agentFactory.sidebar.archive.title": "에이전트 목록에서 제거 (보관)",
+  "agentFactory.sidebar.delete.title": "에이전트 삭제",
   "agentFactory.sidebar.restore.title": "보관한 에이전트 복원",
   "agentFactory.mainChat.botsEnabled.description": "모든 채팅에서 봇 캐릭터, 애니메이션과 AI 표정 기능을 사용합니다.",
   "agentFactory.mainChat.antigravityPath.description": "이 익스텐션 호스트의 Antigravity CLI(`agy`) 절대 경로입니다(선택). 비워 두거나 사용할 수 없는 값이면 새 터미널과 같은 방식으로 `agy` 명령을 찾습니다. CLI가 있을 때만 Antigravity 모델이 표시됩니다.",

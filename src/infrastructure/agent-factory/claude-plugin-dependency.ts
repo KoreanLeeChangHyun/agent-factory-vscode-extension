@@ -1,5 +1,5 @@
 import { localize } from "../../common/localization";
-import { PluginDependencyError, parseCliJson, runProcess, semanticBase, type ProcessRunner } from "./plugin-dependency";
+import { PluginDependencyError, parseCliJson, runProcess, semanticBase, sharePluginPreparation, type ProcessRunner } from "./plugin-dependency";
 import { claudeExecutable } from "./process-environment";
 import { readFile, stat } from "node:fs/promises";
 import { join } from "node:path";
@@ -26,15 +26,7 @@ export async function ensureAgentFactoryClaudePlugin(
   requiredExtensionVersion: string,
   runner: ProcessRunner = runProcess
 ): Promise<void> {
-  const inFlight = pending.get(runner);
-  if (inFlight) return inFlight;
-  const promise = ensure(semanticBase(requiredExtensionVersion), runner);
-  pending.set(runner, promise);
-  try {
-    await promise;
-  } finally {
-    pending.delete(runner);
-  }
+  return sharePluginPreparation(pending, runner, () => ensure(semanticBase(requiredExtensionVersion), runner));
 }
 
 async function ensure(requiredBase: string, runner: ProcessRunner): Promise<void> {

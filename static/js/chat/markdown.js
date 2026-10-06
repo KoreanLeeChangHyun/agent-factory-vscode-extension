@@ -56,25 +56,38 @@ globalThis.AgentFactoryChat.markdown = function (host) {
     }
     container.append(list);
   }
-  function renderAssistantMarkdown(container, text) {
+  // Keep unchanged top-level DOM (including resolved images and highlighted code),
+  // but compare output from a full parse so later reference definitions can update it.
+  const markdownParts = new WeakMap();
+  function renderAssistantMarkdown(container, text, environment) {
     if (!markdown) {
       container.textContent = text;
       return;
     }
     container.classList.add("markdown-body");
-    container.innerHTML = markdown.render(text);
+    const fragment = document.createElement("template");
+    fragment.innerHTML = markdown.render(text, environment);
+    const previous = markdownParts.get(container) || [];
+    const existing = Array.from(container.childNodes);
+    const sources = [];
+    const children = Array.from(fragment.content.childNodes).map(function (node, index) {
+      const source = node.outerHTML ?? node.textContent;
+      sources.push(source);
+      return previous[index] === source && existing[index] ? existing[index] : node;
+    });
+    container.replaceChildren(...children);
+    markdownParts.set(container, sources);
     finishAssistantMarkdown(container);
   }
-  function appendAssistantMarkdown(container, text) {
+  function appendAssistantMarkdown(container, text, environment) {
     if (!text) return;
     if (!markdown) {
       container.append(document.createTextNode(text));
       return;
     }
-    const fragment = document.createElement("template");
-    fragment.innerHTML = markdown.render(text);
-    container.append(fragment.content);
-    finishAssistantMarkdown(container);
+    const fragment = document.createElement("div");
+    renderAssistantMarkdown(fragment, text, environment);
+    container.append(...fragment.childNodes);
   }
   // Math is tokenized before Markdown escapes so TeX backslashes survive; KaTeX renders MathML, which needs no inline styles under the CSP.
   function markdownMath(md) {

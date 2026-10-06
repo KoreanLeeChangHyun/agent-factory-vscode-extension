@@ -1,14 +1,65 @@
-import { open, readdir } from "node:fs/promises";
+import { open, readFile, readdir } from "node:fs/promises";
+import { createHash } from "node:crypto";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { antigravityExecutable, claudeExecutable, runtimeEnvironment } from "./process-environment";
 
-const MAX_CATALOG_BYTES = 4 * 1024 * 1024;
 
 const CLAUDE_PROBE_TTL_MS = 60_000;
 const claudeProbes = new Map<string, { readonly checkedAt: number; readonly available: Promise<boolean> }>();
+
+/** Selection evidence only: a provider catalog is not authority or a quality benchmark. */
+export async function modelSelectionCatalog(codexHome = process.env.CODEX_HOME || join(homedir(), ".codex")) {
+  const ids = await readProviderModels(codexHome);
+  const claude = await latestClaudeCatalog(process.env.CLAUDE_CONFIG_DIR || join(homedir(), ".claude"));
+  const source = join(codexHome, "models_cache.json");
+  let models: Record<string, unknown>[] = [];
+  let revision: string | undefined;
+  let providerVersion: unknown = "unknown";
+  let fetchedAt: unknown = "unknown";
+  try {
+    const bytes = await readFile(source);
+    const cache = JSON.parse(bytes.toString("utf8"));
+    models = Array.isArray(cache.models) ? cache.models : [];
+    revision = createHash("sha256").update(bytes).digest("hex");
+    providerVersion = cache.client_version ?? "unknown";
+    fetchedAt = cache.fetched_at ?? "unknown";
+  } catch { /* The picker remains usable with other providers and historical caches. */ }
+  return {
+    schemaVersion: 1, checkedAt: new Date().toISOString(),
+    availability: ids === undefined ? "unknown" : "provider-catalog-observed",
+    candidates: (ids ?? []).map(id => {
+      const model = models.find(item => item?.slug === id);
+      const provider = id.startsWith("claude-") ? "claude" : id.startsWith("gemini-") || id.startsWith("antigravity/") ? "antigravity" : "codex";
+      return {
+        id, provider, evidenceKind: "provider-observation",
+        suitableTasks: model?.description ?? claude?.entries.find(item => item.id === id)?.description ?? "unknown",
+        quality: "unknown", cost: "unknown", latency: "unknown",
+        constraints: {
+          reasoningEfforts: Array.isArray(model?.supported_reasoning_levels)
+            ? model.supported_reasoning_levels.map((level: { effort?: string }) => level?.effort ?? "unknown") : "unknown",
+          modalities: model?.input_modalities ?? "unknown",
+          contextWindow: model?.context_window ?? "unknown",
+          toolMode: model?.tool_mode ?? "unknown",
+          serviceTiers: model?.service_tiers ?? "unknown",
+          accessPrograms: model?.available_access_programs ?? "unknown",
+          apiAvailability: model?.supported_in_api ?? "unknown",
+          runtimeSupport: "Provider observations can exceed the installed CLI/runtime flags; check the exact requested setting",
+          fast: "check runtime capabilities for the exact model",
+          authority: "preserve captured route and role permissions"
+        },
+        detail: model ? { source, revision, providerVersion, fetchedAt, selector: { slug: id },
+          officialReference: "https://learn.chatgpt.com/docs/models" }
+          : provider === "claude" && claude ? { source: claude.source, revision: claude.revision,
+            providerVersion: "unknown", fetchedAt: claude.fetchedAt, selector: { id } }
+          : provider === "codex" ? { source, revision: revision ?? "unknown", providerVersion, selector: { slug: id } }
+          : { source: `${antigravityExecutable()} models`, revision: "unknown", providerVersion: "unknown", selector: { id } }
+      };
+    })
+  };
+}
 
 export interface ProviderSelection {
   readonly codex?: boolean;
@@ -35,12 +86,19 @@ export async function readProviderModels(
 interface ClaudeCatalog {
   readonly fetchedAt: number;
   readonly models: readonly string[];
+  readonly source: string;
+  readonly revision: string;
+  readonly entries: readonly { id: string; description?: string }[];
 }
 
 // Claude Code owns and refreshes this account-specific catalog. Read it again for each picker request.
 export async function readClaudeModels(
   claudeConfigDir = process.env.CLAUDE_CONFIG_DIR || join(homedir(), ".claude")
 ): Promise<readonly string[]> {
+  return (await latestClaudeCatalog(claudeConfigDir))?.models ?? [];
+}
+
+async function latestClaudeCatalog(claudeConfigDir: string): Promise<ClaudeCatalog | undefined> {
   const directory = join(claudeConfigDir, "cache", "model-catalog");
   let names: readonly string[];
   try {
@@ -48,12 +106,12 @@ export async function readClaudeModels(
       .filter(entry => entry.isFile() && entry.name.endsWith(".json"))
       .map(entry => entry.name);
   } catch {
-    return [];
+    return undefined;
   }
   const catalogs = (await Promise.all(names.map(name => readClaudeCatalog(join(directory, name)))))
     .filter((catalog): catalog is ClaudeCatalog => catalog !== undefined)
     .sort((left, right) => right.fetchedAt - left.fetchedAt);
-  return catalogs[0]?.models ?? [];
+  return catalogs[0];
 }
 
 async function readClaudeCatalog(path: string): Promise<ClaudeCatalog | undefined> {
@@ -61,11 +119,9 @@ async function readClaudeCatalog(path: string): Promise<ClaudeCatalog | undefine
     const file = await open(path, "r");
     try {
       const info = await file.stat();
-      if (!info.isFile() || info.size > MAX_CATALOG_BYTES) return undefined;
-      const bytes = Buffer.alloc(MAX_CATALOG_BYTES + 1);
-      const { bytesRead } = await file.read(bytes, 0, bytes.length, 0);
-      if (bytesRead > MAX_CATALOG_BYTES) return undefined;
-      const document: unknown = JSON.parse(bytes.subarray(0, bytesRead).toString("utf8"));
+      if (!info.isFile()) return undefined;
+      const bytes = await file.readFile();
+      const document: unknown = JSON.parse(bytes.toString("utf8"));
       if (!document || typeof document !== "object" || !("catalog" in document)
           || !("fetchedAt" in document) || typeof document.fetchedAt !== "number"
           || !Number.isFinite(document.fetchedAt)) return undefined;
@@ -78,7 +134,12 @@ async function readClaudeCatalog(path: string): Promise<ClaudeCatalog | undefine
             || !/^claude-[A-Za-z0-9][A-Za-z0-9._-]{0,92}$/.test(model.id)) return [];
         return [model.id];
       }))];
-      return { fetchedAt: document.fetchedAt, models };
+      const entries = catalog.config.models.flatMap((model: unknown) => {
+        if (!model || typeof model !== "object" || !("id" in model) || typeof model.id !== "string" || !models.includes(model.id)) return [];
+        return [{ id: model.id, ...("description" in model && typeof model.description === "string" ? { description: model.description } : {}) }];
+      });
+      return { fetchedAt: document.fetchedAt, models, entries, source: path,
+        revision: createHash("sha256").update(bytes).digest("hex") };
     } finally {
       await file.close();
     }
@@ -139,11 +200,9 @@ export async function readCodexModels(
     const file = await open(join(codexHome, "models_cache.json"), "r");
     try {
       const info = await file.stat();
-      if (!info.isFile() || info.size > MAX_CATALOG_BYTES) return undefined;
-      const bytes = Buffer.alloc(MAX_CATALOG_BYTES + 1);
-      const { bytesRead } = await file.read(bytes, 0, bytes.length, 0);
-      if (bytesRead > MAX_CATALOG_BYTES) return undefined;
-      const catalog: unknown = JSON.parse(bytes.subarray(0, bytesRead).toString("utf8"));
+      if (!info.isFile()) return undefined;
+      const bytes = await file.readFile();
+      const catalog: unknown = JSON.parse(bytes.toString("utf8"));
       if (!catalog || typeof catalog !== "object" || !("models" in catalog) || !Array.isArray(catalog.models)) {
         return undefined;
       }

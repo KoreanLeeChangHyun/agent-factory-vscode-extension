@@ -189,7 +189,7 @@ globalThis.AgentFactoryChat.activities = function (host) {
       open.addEventListener("click", function () {
         if (state.childAgents.some(function (agent) { return agent.agentId === managed.agentId; })) vscode.postMessage({ type: "agent.open", agentId: managed.agentId });
       });
-      heading.append(open);
+      heading.insertBefore(open, badge);
     }
     const details = document.createElement("details");
     details.className = "managed-agent-details";

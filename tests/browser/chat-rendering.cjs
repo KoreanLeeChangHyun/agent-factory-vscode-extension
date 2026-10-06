@@ -112,6 +112,14 @@ async function main() {
       console.log('Companion viewport position own checks passed');
       return;
     }
+    if (process.argv.includes('--task-state-only')) {
+      await page.evaluate(() => sessionStorage.setItem('submission-restoration-fixture', JSON.stringify({ botVisible: false })));
+      await page.reload();
+      await require('./task-flow.cjs').checkTaskFlowStates(page);
+      assert.deepEqual(errors, []);
+      console.log('Task flow state own checks passed');
+      return;
+    }
     if (process.argv.includes('--overlay-state-only')) {
       await require('./companion.cjs').checkCompanionOverlay(page);
       // Isolate workflow checks from position fixtures and keep their controls unobstructed.
@@ -151,6 +159,12 @@ async function main() {
     if (process.argv.includes('--conversation-history-only')) {
       await require('./conversation-history.cjs').checkConversationHistory(page);
       assert.deepEqual(errors, []);
+      return;
+    }
+    if (process.argv.includes('--streaming-parity-only')) {
+      await require('./rich-markdown.cjs').checkStreamingParity(page);
+      assert.deepEqual(errors, []);
+      console.log('Streaming/completion/reload/history parity checks passed');
       return;
     }
     if (process.argv.includes('--rich-markdown-only')) {
@@ -286,26 +300,87 @@ async function main() {
         assert.equal(await message.locator('.message-guidance pre').textContent(), guidance);
       }
       const producer = fs.readFileSync(path.join(root, 'src/infrastructure/vscode/chat-panel-manager.ts'), 'utf8');
-      const notification = producer.match(/const notification = `([\s\S]*?)`;/)[1].replace('${JSON.stringify(child)}', JSON.stringify({ agentId: 'work-example', runId: 'run-example', status: 'completed' }));
+      const notification = producer.match(/const notification = previous\?\.message \?\? `([\s\S]*?)`;/)[1].replace('${JSON.stringify(child)}', JSON.stringify({ agentId: 'work-example', runId: 'run-example', status: 'completed' }));
       const continuation = { type: 'user', id: 'history-user-continuation', runId: 'continuation', ...historyPresentation(notification + guidance, 'work', false) };
       for (const timeline of [[], [{ ...continuation, text: notification, submission: { taskMode: 'work', guidance } }]]) {
         await page.evaluate(timeline => sessionStorage.setItem('submission-restoration-fixture', JSON.stringify({ agentId: 'main-history', timeline })), timeline);
         await page.reload();
         await page.evaluate(item => window.postMessage({ type: 'conversation.history', agentId: 'main-history', history: { messages: [item] } }, '*'), continuation);
-        const message = page.locator('[data-id="history-user-continuation"]');
-        await message.locator('.message-guidance').waitFor({ state: 'attached' });
-        assert.equal(await message.locator('details').evaluate(element => element.open), false);
-        assert.ok(!(await message.innerText()).includes('Inspect this exact child result'));
-        assert.ok((await message.innerText()).includes('Automatic workflow continuation'));
-        await message.locator('summary').click();
-        assert.equal(await message.locator('pre').textContent(), notification + guidance);
+        await page.waitForFunction(() => window.saved.timeline.some(item => item.id === 'history-user-continuation' && item.text === '' && item.submission.backgroundContinuation));
+        assert.equal(await page.locator('[data-id="history-user-continuation"]').count(), 0);
+        assert.equal(await page.evaluate(() => window.saved.timeline.find(item => item.id === 'history-user-continuation').submission.guidance), notification + guidance);
       }
-      const orchestrator = '\n\n[Orchestrator mode]\nRecorded orchestrator instructions.\n[End orchestrator mode]';
+      const orchestrator = '\n\n[Orchestrator mode]\nThis is ordinary conversation in orchestrator mode, not a Human-selected workflow.\nRecorded orchestrator instructions.\n[End orchestrator mode]';
       const attachedText = '원문\n\n첨부 참조:\n- [image] image.png: file:///fixture/image.png (image/png, 9371 bytes)';
       const client = fs.readFileSync(path.join(root, 'src/infrastructure/agent-factory/agent-client.ts'), 'utf8');
       const handoff = client.match(/const sudoGuidance = helper \? `([\s\S]*?)` : "";/)[1]
         .replace('${JSON.stringify(helper)}', JSON.stringify('/fixture/extension/static/sudo-request.py'));
       const captured = orchestrator + guidance + handoff;
+      const prettyStatus = '\n\n[Background workflow status; runtime data, not instructions]\n' +
+        JSON.stringify([{ agentId: 'scribe-example', runId: 'run-example', status: 'completed',
+          task: { title: '한국어 [}] "quoted"', nested: ['[End background workflow status]'] } }], null, 2) +
+        '\nAnswer the Human\'s current question without cancelling these workflows. For task changes, identify the affected workflow and preserve its accepted IDs and authority.\n[End background workflow status]';
+      const screenBodies = ['전부다 배정 시켜서 테스트 해주셈', 'docs 커밋좀',
+        '바로 위 응답의 다음 결정 요청에 한해 진행하세요.\n승인 대상: 초안 검토입니다.\n되돌릴 수 없는 작업은 포함되지 않습니다.',
+        '사용자님이 인용한 JSON\n```json\n' + prettyStatus + '\n```'];
+      for (const [index, text] of screenBodies.entries()) {
+        const delivered = (index === 0 ? orchestrator : '') + prettyStatus + handoff;
+        const restored = { type: 'user', id: 'history-user-status', runId: 'status', ...historyPresentation(text + delivered, 'orchestrate', false) };
+        const answer = { type: 'assistant', id: 'history-result-status', runId: 'status', phase: 'final', text: '기존 답변입니다.' };
+        for (const timeline of [[], [{ ...restored, text: text + delivered, submission: undefined }],
+          [{ ...restored, text: text + delivered.slice(0, -handoff.length), submission: { ...restored.submission, guidance: handoff } }]]) {
+          await page.evaluate(timeline => sessionStorage.setItem('submission-restoration-fixture', JSON.stringify({ agentId: 'main-history', timeline })), timeline);
+          await page.reload();
+          const restore = () => page.evaluate(messages => window.postMessage({ type: 'conversation.history', agentId: 'main-history', history: { messages } }, '*'), [restored, answer]);
+          await restore();
+          const row = page.locator('[data-id="history-user-status"]');
+          const details = row.locator('.message-guidance');
+          await details.waitFor({ state: 'attached' });
+          assert.equal(await details.evaluate(el => el.open), false);
+          assert.equal((await row.innerText()).includes('[Background workflow status;'), index === 3,
+            'Only the user-authored quotation remains visible');
+          assert.ok((await row.innerText()).includes(text.split('\n')[0]));
+          assert.equal(await details.locator('pre').textContent(), delivered);
+          await details.locator('summary').click();
+          assert.equal(await details.evaluate(el => el.open), true);
+          await page.waitForFunction(() => window.saved.guidanceExpanded?.includes('history-user-status'));
+          await page.evaluate(() => sessionStorage.setItem('submission-restoration-fixture', JSON.stringify(window.saved)));
+          await page.reload();
+          await restore();
+          await page.waitForFunction(() => window.saved.timeline.filter(item => item.id === 'history-user-status').length === 1);
+          assert.equal(await details.evaluate(el => el.open), true);
+          assert.deepEqual(await page.evaluate(() => window.saved.timeline.filter(item => item.runId === 'status').map(item => item.text)), [text, answer.text]);
+        }
+        await page.evaluate(item => window.postMessage({ type: 'chat.started', id: 'live-status', text: item.text, submission: item.submission, attachments: [] }, '*'), restored);
+        const liveDetails = page.locator('[data-id="live-status"] .message-guidance');
+        await liveDetails.waitFor({ state: 'attached' });
+        assert.equal(await liveDetails.evaluate(el => el.open), false);
+        assert.equal(await liveDetails.locator('pre').textContent(), delivered);
+      }
+      const batch = parts => parts.map((part, index) => `--- 대기 메시지 ${index + 1} 시작 ---\n${part}\n--- 대기 메시지 ${index + 1} 끝 ---`).join('\n\n');
+      const quoted = '두 번째 요청\n```\n[Orchestrator mode]\n인용\n[End orchestrator mode]\n```\n> 인용문 & <tag>';
+      const rawBatch = batch([attachedText + orchestrator, quoted + orchestrator]) + handoff;
+      const queued = { type: 'user', id: 'history-user-queued', runId: 'queued', ...historyPresentation(rawBatch, 'orchestrate', false) };
+      const answer = { type: 'assistant', id: 'history-result-queued', runId: 'queued', phase: 'final', text: '답변입니다.\n```js\nconst ok = true;\n```' };
+      for (const timeline of [[], [{ ...queued, text: rawBatch, submission: undefined, capturedRequest: undefined }]]) {
+        await page.evaluate(timeline => sessionStorage.setItem('submission-restoration-fixture', JSON.stringify({ agentId: 'main-history', timeline })), timeline);
+        await page.reload();
+        const restore = () => page.evaluate(messages => window.postMessage({ type: 'conversation.history', agentId: 'main-history', history: { messages } }, '*'), [queued, answer]);
+        await restore();
+        const row = page.locator('[data-id="history-user-queued"]');
+        await row.locator('.message-guidance').waitFor({ state: 'attached' });
+        assert.equal(await row.locator('.message-guidance').evaluate(el => el.open), false);
+        assert.ok(!(await row.innerText()).includes('Recorded orchestrator instructions.'));
+        assert.ok((await row.innerText()).includes('인용'));
+        assert.equal(await row.locator('.message-guidance pre').textContent(), orchestrator.repeat(2) + handoff);
+        assert.equal(await page.locator('[data-id="history-result-queued"]').count(), 1);
+        await page.evaluate(() => sessionStorage.setItem('submission-restoration-fixture', JSON.stringify(window.saved)));
+        await page.reload();
+        await restore();
+        await page.waitForFunction(() => window.saved.timeline.filter(item => item.id === 'history-user-queued').length === 1);
+        assert.equal(await row.count(), 1);
+        assert.equal(await page.locator('[data-id="history-result-queued"]').count(), 1);
+      }
       const orchestrated = { type: 'user', id: 'history-user-orchestrator', runId: 'orchestrator', ...historyPresentation(attachedText + captured, 'orchestrate', false) };
       const cached = [[], [{ ...orchestrated, text: attachedText + captured, submission: undefined }],
         [{ ...orchestrated, text: attachedText + orchestrator, submission: { ...orchestrated.submission, guidance: guidance + handoff } }], [orchestrated]];
@@ -567,6 +642,43 @@ async function main() {
       await require('./scrollbars.cjs').checkScrollbars(page);
       assert.deepEqual(errors, []);
       console.log('Auxiliary scrollbar visibility, wheel, keyboard and timeline checks passed.');
+      return;
+    }
+    if (process.argv.includes('--completion-right-only')) {
+      const emit = async data => {
+        await page.evaluate(data => window.dispatchEvent(new MessageEvent('message', { data })), data);
+        await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+      };
+      await emit({ type: 'run.activity', id: 'completion-right', category: 'command', phase: 'completed',
+        text: 'python3 skills/agent/scripts/exec.py result --agent work-card --run-id run-card',
+        output: '{"run":{"agentId":"work-card","runId":"run-card","status":"completed"}}' });
+      await emit({ type: 'agents.list', agents: [{ agentId: 'work-card', role: 'work', status: 'completed', runId: 'run-card' }] });
+      const card = page.locator('[data-id="completion-right"] .managed-agent-card');
+      await card.waitFor();
+      const artifactDir = process.env.AF_RENDERING_ARTIFACT_DIR || path.join(root, '../docs/artifact/evidence/completion-right');
+      fs.mkdirSync(artifactDir, { recursive: true });
+      for (const width of [820, 320]) {
+        await page.setViewportSize({ width, height: 900 });
+        // Exercise the longer work-only completion annotation as well as the button.
+        await card.locator('.managed-agent-status').evaluate(node => { node.textContent = '완료 · 별도 검증 요청 없음'; });
+        const geometry = await card.locator('.managed-agent-heading').evaluate(node => {
+          const badge = node.querySelector('.managed-agent-status');
+          const status = badge.getBoundingClientRect();
+          const button = node.querySelector('.managed-agent-open').getBoundingClientRect();
+          return { last: node.lastElementChild === badge, rightGap: node.getBoundingClientRect().right - status.right,
+            overlap: status.left < button.right && status.right > button.left && status.top < button.bottom && status.bottom > button.top };
+        });
+        assert.equal(geometry.last, true);
+        assert.ok(Math.abs(geometry.rightGap) <= 1, JSON.stringify(geometry));
+        assert.equal(geometry.overlap, false);
+        await card.screenshot({ path: path.join(artifactDir, `completion-right-${width}.png`) });
+      }
+      await card.locator('.managed-agent-open').click();
+      assert.deepEqual(await page.evaluate(() => window.sentMessages.at(-1)), { type: 'agent.open', agentId: 'work-card' });
+      await card.locator('summary').first().click();
+      assert.equal(await card.locator('details').first().getAttribute('open'), '');
+      assert.deepEqual(errors, []);
+      console.log('Completion badge right alignment, narrow layout, open chat and details passed.');
       return;
     }
     if (process.argv.includes('--settings-tab-order-only')) {

@@ -773,110 +773,75 @@ async function checkTaskStop(page) {
 module.exports = { checkTaskFlow, checkTaskStop, checkWorkDecisionPlacement };
 
 async function checkTaskDismiss(page) {
-  await page.evaluate(() => window.postMessage({ type: 'host.initialize', panelId: 'dismiss', role: 'main', runtimeAvailable: true,
-    capabilities: { submit: {}, send: {} } }, '*'));
-  const make = (loopId, status = 'running') => ({ kind: 'work-verification-loop', loopId, workAgentId: 'mock-worker',
-    taskMode: 'work', status: 'active', workflow: { id: 'dismiss-flow', title: 'Dismiss fixture', index: 0,
-      tasks: [{ id: 'same-task', title: 'Selected fixture', workRunId: 'fixture-run', workStatus: status, verificationStatus: 'pending' },
-        { id: 'other-task', title: 'Other fixture', workRunId: 'other-run', workStatus: 'running', verificationStatus: 'pending' }] } });
-  const publish = async workflows => page.evaluate(workflows => window.postMessage({ type: 'agents.list',
-    agents: [{ agentId: 'mock-worker', runId: 'fixture-run', role: 'work', status: 'running' }], workflows }, '*'), workflows);
-  let snapshot = make('fixture-loop');
-  await publish([snapshot]);
-  const selected = page.locator('#run-stage-list [data-flow-id="dismiss-flow"] [data-task-id="same-task"]');
-  const other = page.locator('#run-stage-list [data-flow-id="dismiss-flow"] [data-task-id="other-task"]');
-  await selected.locator('.task-flow-stop').waitFor();
-  assert.equal(await selected.locator('.task-flow-stop').isDisabled(), true);
-  assert.equal(await selected.locator('.task-flow-dismiss').count(), 0, 'A running task offers stop, never delete');
-  // Once stopped, the task leaves the in-progress list for Task history, where delete takes the stop slot.
-  const ended = page.locator('#task-history-list [data-flow-id="dismiss-flow"] [data-task-id="same-task"]');
-  const endedOther = page.locator('#task-history-list [data-flow-id="dismiss-flow"] [data-task-id="other-task"]');
-  snapshot = make('fixture-loop', 'cancelled');
-  await publish([snapshot]);
-  await ended.waitFor({ state: 'attached' });
+  await page.evaluate(() => sessionStorage.setItem('submission-restoration-fixture', JSON.stringify({ ...window.saved, botVisible: false })));
+  await page.reload();
+  const post = data => page.evaluate(data => window.postMessage(data, '*'), data);
+  await post({ type: 'host.initialize', panelId: 'delete-history', agentId: 'main-delete', role: 'main', runtimeAvailable: true });
+  const workflow = { loopId: 'loop-delete', workAgentId: 'worker-delete', taskMode: 'work', status: 'completed',
+    workflow: { id: 'flow-delete', title: 'Task history fixture', index: 1, tasks: [
+      { id: 'selected', title: 'Selected task', workStatus: 'completed', workRunId: 'selected-run' },
+      { id: 'other', title: 'Other task', workStatus: 'completed', workRunId: 'other-run' }
+    ] } };
+  await post({ type: 'agents.list', agents: [], workflows: [workflow] });
   if (await page.locator('#workflow-history').evaluate(el => el.classList.contains('is-compact'))) await page.locator('#workflow-history-toggle').click();
-  await page.locator('#task-history > summary').click();
-  await ended.locator('.task-flow-dismiss').waitFor();
-  assert.equal(await selected.count(), 0, 'An ended task leaves the task list while its sibling still runs');
-  assert.equal(await other.isVisible(), true, 'The running sibling stays in the task list');
-  assert.match(await page.locator('#run-status-agents').textContent(), /(?:작업 1개|\b1 tasks)$/, 'The header counts only in-progress tasks');
-  assert.equal(await ended.locator('.task-flow-stop').count(), 0, 'An ended task offers delete in place of stop');
-  assert.equal(await other.locator('.task-flow-dismiss').count(), 0);
-  const timelineBefore = await page.locator('#timeline').innerText();
-  const before = await page.evaluate(() => window.sentMessages.length);
-  await ended.locator('.task-flow-dismiss').click();
-  await ended.waitFor({ state: 'detached' });
-  assert.equal(await other.isVisible(), true);
-  assert.equal(await page.locator('#timeline').innerText(), timelineBefore, 'Main chat is retained');
-  assert.equal(await other.locator('.task-flow-stop').isDisabled(), true, 'partial dismissal does not expand Loop stop authority');
-  assert.equal(await page.evaluate(() => window.sentMessages.length), before, 'dismissal emits no cancel/close/delete message');
-  await page.waitForFunction(() => window.saved.dismissedTasks?.length === 1);
-  assert.equal(await page.evaluate(() => window.saved.workflows[0].workflow.tasks.length), 2, 'history snapshot remains complete');
-  assert.equal(await page.locator('#run-status').evaluate(el => el.classList.contains('is-running')), true);
-  snapshot.workflow.tasks[0].workRunId = 'revision-run';
-  snapshot.workflow.tasks[0].workStatus = 'completed';
-  await publish([snapshot]);
-  await other.waitFor();
-  assert.equal(await selected.count() + await ended.count(), 0, 'status and revision refresh do not resurrect the item');
-  const saved = await page.evaluate(() => window.saved);
+  if (!await page.locator('#task-history').evaluate(el => el.open)) await page.locator('#task-history > summary').click();
+  const group = page.locator('[data-history-id="flow-delete"]');
+  await group.locator(':scope > summary').click();
+  const selected = group.locator('[data-task-id="selected"]');
+  const trash = () => selected.locator('.task-flow-dismiss');
+  await trash().waitFor();
+  assert.equal(await group.locator(':scope > summary > .task-flow-dismiss').count(), 0, 'No bulk deletion of a shared workflow');
+  assert.match(await trash().getAttribute('aria-label'), /^Selected task · (?:Delete|삭제)$/);
+  assert.equal(await trash().locator('svg[aria-hidden="true"]').count(), 1);
+  assert.equal(await selected.locator('.task-flow-stop').count(), 0, 'Ended task offers trash in the stop slot');
+  const originalClass = await page.locator('body').getAttribute('class');
+  for (const theme of ['vscode-light', 'vscode-dark', 'vscode-high-contrast', 'vscode-high-contrast-light']) {
+    await page.locator('body').evaluate((el, theme) => { el.className = theme; }, theme);
+    assert.equal(await trash().isVisible(), true, theme);
+    const geometry = await trash().boundingBox();
+    assert.ok(geometry.width > 0 && geometry.height > 0);
+  }
+  await page.locator('body').evaluate((el, value) => { el.className = value || ''; }, originalClass);
+  await trash().focus();
+  assert.equal(await trash().evaluate(el => el === document.activeElement), true, 'Trash is keyboard accessible');
+  await trash().click();
+  assert.deepEqual(await page.evaluate(() => window.sentMessages.at(-1)), { type: 'task.delete', workflowId: 'flow-delete', taskId: 'selected' });
+  assert.equal(await selected.count(), 1, 'No optimistic deletion');
+  assert.equal(await trash().isDisabled(), true);
+  await post({ type: 'task.delete.result', mainAgentId: 'main-delete', workflowId: 'flow-delete', taskId: 'selected', error: 'Filesystem denied' });
+  assert.equal(await selected.count(), 1, 'Storage failure preserves history');
+  assert.equal(await trash().isDisabled(), false, 'Failure permits retry');
+  await trash().click();
+  await post({ type: 'task.delete.result', mainAgentId: 'main-delete', workflowId: 'flow-delete', taskId: 'selected' });
+  await selected.waitFor({ state: 'detached' });
+  assert.equal(await page.locator('[data-task-id="other"]').count(), 1, 'Other task remains');
+  const saved = await page.evaluate(() => { window.dispatchEvent(new Event('pagehide')); return window.saved; });
+  assert.deepEqual(saved.workflows[0].workflow.tasks.map(task => task.id), ['other']);
+  assert.equal((saved.dismissedTasks || []).length, 0, 'Storage deletion creates no UI tombstone');
   await page.evaluate(saved => sessionStorage.setItem('submission-restoration-fixture', JSON.stringify(saved)), saved);
   await page.reload();
-  await other.waitFor();
-  assert.equal(await selected.count() + await ended.count(), 0, 'tab restoration retains dismissal');
-  const separate = make('separate-loop', 'cancelled');
-  await publish([separate]);
-  await ended.waitFor({ state: 'attached' });
+  assert.equal(await page.locator('[data-task-id="selected"]').count(), 0, 'Reload does not restore deleted history');
+  await post({ type: 'host.initialize', panelId: 'delete-history', agentId: 'main-delete', role: 'main', runtimeAvailable: true });
+  await post({ type: 'agents.list', agents: [], workflows: saved.workflows, workflowsComplete: true });
+  assert.equal(await page.locator('[data-task-id="other"]').count(), 1);
+  await post({ type: 'project.tasks', entries: [{ id: 'project-brief', mainAgentId: 'main-other', title: 'Another conversation', status: 'completed',
+    tasks: [{ id: 'project-task', title: 'Project task', workStatus: 'completed' }] }] });
   if (await page.locator('#workflow-history').evaluate(el => el.classList.contains('is-compact'))) await page.locator('#workflow-history-toggle').click();
   if (!await page.locator('#task-history').evaluate(el => el.open)) await page.locator('#task-history > summary').click();
-  await ended.locator('.task-flow-dismiss').waitFor();
-  assert.equal(await other.isVisible(), true, 'separate execution with the same task ID remains visible');
-  await ended.locator('.task-flow-dismiss').click();
-  separate.workflow.tasks[1].workStatus = 'cancelled';
-  await publish([separate]);
-  await endedOther.locator('.task-flow-dismiss').click();
-  await page.waitForFunction(() => !document.querySelector('#run-stage-list .task-flow'));
-  assert.equal(await page.locator('#run-status').evaluate(el => el.classList.contains('is-running')), false,
-    'empty status does not pulse even while dismissed execution continues');
-  assert.equal(await page.locator('#run-status-agents').isVisible(), true, 'running Agent count stays visible without cards');
-  assert.equal(await page.evaluate(() => window.saved.workUnits.activeUnits), 1);
-  assert.equal(await page.locator('#agents-list .agent-item').count(), 1, 'Agent history remains available');
-  const terminal = make('separate-loop', 'completed');
-  terminal.status = 'completed'; terminal.workflow.tasks[1].workStatus = 'completed';
-  await publish([terminal]);
-  await page.waitForFunction(() => window.saved.workflows.some(flow => flow.loopId === 'separate-loop' && flow.status === 'completed'));
-  assert.equal(await page.locator('#task-history-list [data-flow-id="dismiss-flow"]').count(), 0, 'completion does not resurrect dismissed rows');
-  assert.equal(await page.evaluate(() => window.saved.workflows.find(flow => flow.loopId === 'separate-loop').workflow.tasks.length), 2);
-  // Task history rows can be deleted too: a whole multi-task row and another conversation's brief.
-  const group = { kind: 'work-verification-loop', loopId: 'group-loop', workAgentId: 'mock-worker', taskMode: 'work', status: 'completed',
-    workflow: { id: 'group-flow', title: 'Group fixture', index: 1, tasks: [
-      { id: 'group-a', title: 'Group A', workRunId: 'group-run-a', workStatus: 'completed', verificationStatus: 'pending' },
-      { id: 'group-b', title: 'Group B', workRunId: 'group-run-b', workStatus: 'failed', verificationStatus: 'pending' }] } };
-  await publish([terminal, group]);
-  await page.evaluate(() => window.postMessage({ type: 'project.tasks', entries: [{ id: 'brief-other', title: 'Other conversation brief',
-    status: 'completed', mainAgentId: 'main-other', tasks: [{ id: 'other-t', title: 'Other T', workStatus: 'completed' }] }] }, '*'));
-  const groupRow = page.locator('#task-history-panel [data-history-id="group-flow"]');
-  const projectRow = page.locator('#task-history-panel [data-history-id="brief-other"]');
-  await groupRow.waitFor({ state: 'attached' });
-  await projectRow.waitFor({ state: 'attached' });
-  if (await page.locator('#workflow-history').evaluate(el => el.classList.contains('is-compact'))) await page.locator('#workflow-history-toggle').click();
-  if (!await page.locator('#task-history').evaluate(el => el.open)) await page.locator('#task-history > summary').click();
-  const groupDelete = groupRow.locator(':scope > summary > .task-flow-dismiss');
-  assert.match(await groupDelete.getAttribute('aria-label'), /^Group fixture · (?:Delete|삭제)$/, 'The history delete keeps its accessible name');
-  const sentBeforeHistoryDelete = await page.evaluate(() => window.sentMessages.length);
-  await groupDelete.click();
-  await groupRow.waitFor({ state: 'detached' });
-  await projectRow.locator(':scope > summary > .task-flow-dismiss').click();
-  await projectRow.waitFor({ state: 'detached' });
-  assert.equal(await page.evaluate(() => window.sentMessages.length), sentBeforeHistoryDelete, 'History delete only hides rows');
-  await page.waitForFunction(() => window.saved.dismissedTasks?.some(key => key.includes('brief-other')));
-  const savedAfterHistoryDelete = await page.evaluate(() => window.saved);
-  assert.ok(savedAfterHistoryDelete.workflows.some(flow => flow.loopId === 'group-loop' && flow.workflow.tasks.length === 2), 'The deleted row keeps its snapshot');
-  await page.evaluate(saved => sessionStorage.setItem('submission-restoration-fixture', JSON.stringify(saved)), savedAfterHistoryDelete);
+  const project = page.locator('[data-history-id="project-brief"]');
+  await project.locator(':scope > summary').click();
+  await project.locator('.task-flow-dismiss').click();
+  assert.deepEqual(await page.evaluate(() => window.sentMessages.at(-1)), { type: 'task.delete', mainAgentId: 'main-other', workflowId: 'project-brief', taskId: 'project-task' });
+  await post({ type: 'task.delete.result', mainAgentId: 'main-other', workflowId: 'project-brief', taskId: 'project-task' });
+  await project.waitFor({ state: 'detached' });
+  assert.equal(await page.locator('[data-task-id="other"]').count(), 1, 'Project deletion keeps this conversation');
+  // A closed window still has the old cache. It must wait for actual disk data.
+  await page.evaluate(stale => sessionStorage.setItem('submission-restoration-fixture', JSON.stringify({ ...window.saved, workflows: [stale],
+    taskFlows: [null, { id: stale.workflow.id, title: stale.workflow.title, tasks: stale.workflow.tasks.map(task => ({ ...task, status: task.workStatus })), engine: true, loopId: stale.loopId }] })), workflow);
   await page.reload();
-  await page.evaluate(() => window.postMessage({ type: 'project.tasks', entries: [{ id: 'brief-other', title: 'Other conversation brief',
-    status: 'completed', mainAgentId: 'main-other', tasks: [{ id: 'other-t', title: 'Other T', workStatus: 'completed' }] }] }, '*'));
-  await page.evaluate(() => new Promise(resolve => setTimeout(resolve, 200)));
-  assert.equal(await groupRow.count() + await projectRow.count(), 0, 'Deleted history rows stay deleted after restoration');
+  assert.equal(await page.locator('[data-task-id="selected"]').count(), 0, 'A new window ignores stale Loop cache');
+  await post({ type: 'agents.list', agents: [], workflows: [], workflowsComplete: true });
+  assert.equal(await page.locator('[data-task-id="selected"]').count(), 0, 'Fresh runtime absence is authoritative');
 }
 module.exports.checkTaskDismiss = checkTaskDismiss;
 
@@ -1276,8 +1241,11 @@ async function checkTaskRows(page, { durationOnly = false, activityOnly = false 
 module.exports.checkTaskRows = checkTaskRows;
 
 module.exports.checkTaskFlowStates = async function (page) {
-  const post = data => page.evaluate(data => window.postMessage(data, '*'), data);
-  await post({ type: 'host.initialize', panelId: 'state-test', role: 'main', runtimeAvailable: true, running: false, uiLanguage: 'ko' });
+  const post = data => page.evaluate(data => new Promise(resolve => {
+    window.postMessage(data, '*');
+    requestAnimationFrame(() => requestAnimationFrame(resolve));
+  }), data);
+  await post({ type: 'host.initialize', panelId: 'state-test', agentId: 'main-state', role: 'main', runtimeAvailable: true, running: false, uiLanguage: 'ko' });
   await page.locator('#status-settings-button').click();
   await page.locator('#settings-tab-general').click();
   await page.locator('#ui-language').selectOption('ko');
@@ -1322,18 +1290,28 @@ module.exports.checkTaskFlowStates = async function (page) {
     assert.deepEqual(await page.locator('#run-status-toggle .run-status-pulse').evaluate(el => [getComputedStyle(el).animationName,
       getComputedStyle(el, '::before').content, getComputedStyle(el, '::after').content]), ['none', 'none', 'none'], status + ' dot stays still');
     assert.equal(await toggle.getAttribute('aria-expanded'), 'true');
-    assert.equal(await page.locator('#run-stage-list [data-task-id="state-task"]').count(), 1, status + ' remains visible');
-    assert.doesNotMatch(await page.locator('#run-stage-list').textContent(), /작업 없음/);
+    const container = ['completed', 'failed', 'cancelled'].includes(status) ? '#task-history-list' : '#run-stage-list';
+    assert.equal(await page.locator(container + ' [data-task-id="state-task"]').count(), 1, status + ' remains visible');
+    assert.doesNotMatch(await page.locator(container).textContent(), /작업 없음/);
     await toggle.click(); await toggle.click();
   }
   const originalTasks = snapshot.workflow.tasks;
   snapshot.workflow.tasks = Array.from({ length: 10 }, (_, i) => ({ ...originalTasks[0], id: 'retained-' + i, title: 'Retained completed task ' + i, workStatus: 'completed' }));
   await publish('completed');
+  const openHistory = async () => {
+    if (await page.locator('#workflow-history').evaluate(el => el.classList.contains('is-compact') && !el.classList.contains('is-open'))) await page.locator('#workflow-history-toggle').click();
+    if (!await page.locator('#task-history').evaluate(el => el.open)) await page.locator('#task-history > summary').click();
+  };
   for (const size of [{ width: 465, height: 556 }, { width: 721, height: 402 }, { width: 320, height: 500 }]) {
     await page.setViewportSize(size);
+    await openHistory();
+    const entry = page.locator('.task-history-disclosure[data-history-id="state-flow"]');
+    if (!await entry.evaluate(el => el.open)) await entry.locator(':scope > summary').click();
     const composer = await page.locator('.composer').boundingBox();
     assert.ok(composer.y >= 0 && composer.y + composer.height <= size.height, 'retained tasks leave the whole composer inside the viewport');
-    assert.equal(await page.locator('#run-details').evaluate(el => el.scrollHeight > el.clientHeight), true, 'all retained tasks are available by scrolling');
+    const historyScroll = await page.locator('#task-history-list').evaluate(el => Array.from([el, ...el.querySelectorAll('*')]).filter(item => item.scrollHeight > item.clientHeight && ['auto', 'scroll'].includes(getComputedStyle(item).overflowY)).map(item => item.id || item.className));
+    assert.ok(historyScroll.length, 'all retained tasks are available by scrolling');
+    await page.locator('#task-history > summary').click();
     await page.locator('#prompt').fill('Expanded history input');
     await page.locator('#prompt').click();
     assert.equal(await page.locator('#prompt').evaluate(el => el === document.activeElement), true);
@@ -1375,7 +1353,11 @@ module.exports.checkTaskFlowStates = async function (page) {
   assert.equal(await page.locator('.composer').evaluate(el => el.classList.contains('is-progressing')), false, 'child progress does not pulse idle Main composer');
   assert.equal(await page.locator('#run-stage-list .task-flow-dismiss').count(), 0, 'A running task offers stop, never delete');
   await publish('cancelled');
-  await page.locator('#run-stage-list .task-flow-dismiss').click();
+  await openHistory();
+  await page.locator('#task-history-list .task-flow-dismiss').click();
+  const deleted = await page.evaluate(() => window.sentMessages.at(-1));
+  await post({ ...deleted, type: 'task.delete.result', mainAgentId: 'main-state' });
+  await page.waitForFunction(() => !document.querySelector('#task-history-list [data-task-id="state-task"]'));
   await page.waitForFunction(() => !document.querySelector('#run-stage-list .task-flow'));
   assert.match(await page.locator('#run-stage-list').textContent(), /작업 없음/);
   assert.equal(await toggle.getAttribute('aria-expanded'), 'true');

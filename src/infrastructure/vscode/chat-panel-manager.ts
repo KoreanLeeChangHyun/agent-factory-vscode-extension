@@ -9,7 +9,7 @@ import { workUnitContextText, workUnitBranch } from "./work-unit-context";
 import { unitGit, validateUnitBranch, directBranchEvidence } from "./work-unit-git";
 import { openContractPanel } from "./contract-panel";
 import { listContracts } from "../filesystem/contracts";
-import { readAgentDefaults, updateAgentPresetField, updateAgentPresetFastMode, useAgentPreset, ensureAgentPresets } from "./agent-settings-store";
+import { readAgentDefaults, updateAgentPresetField, updateAgentPresetFastMode, useAgentPreset, ensureAgentPresets, watchAgentSets } from "./agent-settings-store";
 import { readMarkdownImage } from "./markdown-image";
 import { localize, describeLocalizedMessage } from "../../common/localization";
 import { LunaBot, type BotContext, type BotMessage } from "../codex/luna-bot";
@@ -106,6 +106,7 @@ interface ManagedPanel {
 
 const GENERAL_SETTINGS_KEY = "agentFactory.general.v1";
 const LAST_CHAT_KEY = "agentFactory.mainChat.lastPanel";
+const DELETED_PANELS_KEY = "agentFactory.mainChat.deletedPanels";
 const COMPOSER_PREFERENCES_KEY = "agentFactory.mainChat.composerPreferences";
 // Per project (workspaceState): the Human's Work isolation toggle, off by default.
 const WORK_ISOLATION_KEY = "agentFactory.mainChat.workIsolation";
@@ -146,6 +147,11 @@ export class ChatPanelManager implements vscode.Disposable {
     readonly workflows: readonly Record<string, unknown>[] | undefined;
   }>>>();
   private readonly terminalDeliveryClaims = new WeakMap<object, Set<string>>();
+  private readonly taskDeletesPending = new Set<string>();
+  private taskHistoryRevision = 0;
+  private readonly deletingPanels = new Set<string>();
+  private readonly deletedAgentIds = new Set<string>();
+  private readonly deletedPanels = new Set<string>();
   private readonly sudoBroker = new SudoBroker((runId, agentId) => {
     const active = this.findActivePanel();
     const managed = active && (active.state.role ?? "main") === "main" && active.controller?.running && active.controller.runId === runId && active.state.agentId === agentId ? active :
@@ -172,10 +178,73 @@ export class ChatPanelManager implements vscode.Disposable {
     return Array.isArray(saved) ? saved.map(value => restoreChatState(value)) : [];
   }
 
+  private removedChat(state: ChatPanelState): boolean {
+    return this.deletedPanels.has(state.panelId) || Boolean(state.agentId && this.deletedAgentIds.has(state.agentId)) ||
+      Boolean(this.context.workspaceState?.get<readonly string[]>(DELETED_PANELS_KEY)?.includes(state.panelId));
+  }
+
+  public async deleteSidebarAgent(state: ChatPanelState): Promise<readonly string[]> {
+    const matches = [...this.panels.values()].filter(panel => panel.state.panelId === state.panelId ||
+      Boolean(state.agentId && panel.state.agentId === state.agentId));
+    const selected = matches.find(panel => panel.state.panelId === state.panelId)?.state ??
+      this.savedAgents().find(entry => entry.panelId === state.panelId) ?? state;
+    const ids = new Set([selected.panelId, ...matches.map(panel => panel.state.panelId),
+      ...this.savedAgents().filter(entry => selected.agentId && entry.agentId === selected.agentId).map(entry => entry.panelId)]);
+    if ([...ids].some(id => this.deletingPanels.has(id))) throw new Error(localize("ui.sidebar.delete.pending"));
+    if (matches.some(panel => this.tabLoading(panel) || panel.controller?.queueLength || panel.pendingMessageIds?.size ||
+        panel.controllerInitialization || panel.sessionTransition || panel.backgroundContinuation || panel.queueResumeInFlight)) {
+      throw new Error(localize("ui.sidebar.delete.busy"));
+    }
+    for (const id of ids) this.deletingPanels.add(id);
+    try {
+      if (selected.agentId) {
+        const connection = await this.connectRuntime();
+        if (!connection.available || !connection.client.deleteAgent) throw new Error(localize("ui.sidebar.delete.unavailable"));
+        await connection.client.deleteAgent(selected.agentId);
+        this.deletedAgentIds.add(selected.agentId);
+        this.agentRefreshes.delete(connection.client);
+        this.taskHistoryRevision++;
+      }
+      // UI markers prevent stale serialized drafts from reviving. The runtime
+      // records have already been physically deleted before this point.
+      for (const id of ids) this.deletedPanels.add(id);
+      for (const panel of [...this.panels.values()]) {
+        if (ids.has(panel.state.panelId) || (selected.agentId && (panel.state.agentId === selected.agentId ||
+            panel.state.capturedRun?.agentId === selected.agentId))) panel.panel.dispose();
+      }
+      const write = this.sidebarAgentWrite.then(async () => {
+        await this.context.workspaceState?.update(SIDEBAR_AGENTS_KEY, this.savedAgents().filter(entry =>
+          !ids.has(entry.panelId) && (!selected.agentId || entry.agentId !== selected.agentId)));
+        const deleted = this.context.workspaceState?.get<readonly string[]>(DELETED_PANELS_KEY) ?? [];
+        await this.context.workspaceState?.update(DELETED_PANELS_KEY, [...new Set([...deleted, ...ids])]);
+        if (ids.has(this.context.workspaceState?.get<string>(LAST_CHAT_KEY) ?? "")) {
+          await this.context.workspaceState?.update(LAST_CHAT_KEY, undefined);
+        }
+        if (selected.agentId) {
+          for (const prefix of ["agentFactory.background.", "agentFactory.workflowResults."]) {
+            await this.context.workspaceState?.update(prefix + selected.agentId, undefined);
+          }
+        }
+      });
+      this.sidebarAgentWrite = write.catch(() => undefined);
+      await write;
+      this.notifyAgents();
+      if (selected.agentId) {
+        const connection = await this.connectRuntime();
+        if (connection.available && connection.client.listProjectTasks) {
+          const entries = await connection.client.listProjectTasks();
+          await this.broadcast({ type: "project.tasks", entries });
+        }
+      }
+      return [...ids];
+    } finally { for (const id of ids) this.deletingPanels.delete(id); }
+  }
+
   private rememberAgent(state: ChatPanelState): Promise<void> {
     if ((state.role ?? "main") !== "main") return Promise.resolve();
     const snapshot = { ...state };
     const write = this.sidebarAgentWrite.then(async () => {
+      if (this.removedChat(snapshot)) return;
       // Opening or updating a chat must not move its sidebar entry to the end.
       let replaced = false;
       const saved = this.savedAgents().flatMap(entry => {
@@ -194,16 +263,21 @@ export class ChatPanelManager implements vscode.Disposable {
 
   public async sidebarAgents(): Promise<SidebarAgent[]> {
     await this.sidebarAgentWrite;
-    const states = this.savedAgents();
+    let states = this.savedAgents().filter(state => !this.removedChat(state));
     const connection = await this.connectRuntime();
     if (connection.available) {
-      for (const session of await connection.client.listSessions()) {
+      const sessions = await connection.client.listSessions();
+      const existing = new Set(sessions.map(session => session.agentId));
+      states = states.filter(state => !state.agentId || existing.has(state.agentId));
+      for (const session of sessions) {
+        if (this.deletedAgentIds.has(session.agentId)) continue;
         if (!states.some(state => state.agentId === session.agentId)) {
           states.push({ panelId: session.agentId, title: session.agentId, role: "main", agentId: session.agentId, model: session.model });
         }
       }
     }
     for (const managed of this.panels.values()) {
+      if (managed.disposed || this.removedChat(managed.state)) continue;
       if ((managed.state.role ?? "main") !== "main") continue;
       const index = states.findIndex(state => state.panelId === managed.state.panelId ||
         (state.agentId && state.agentId === managed.state.agentId));
@@ -215,6 +289,7 @@ export class ChatPanelManager implements vscode.Disposable {
   }
 
   public async openSidebarAgent(state: ChatPanelState): Promise<void> {
+    if (this.removedChat(state) || this.deletingPanels.has(state.panelId)) return;
     this.startupHandled = true;
     const existing = [...this.panels.values()].find(panel => panel.state.panelId === state.panelId ||
       (state.agentId && panel.state.agentId === state.agentId));
@@ -247,6 +322,12 @@ export class ChatPanelManager implements vscode.Disposable {
       }
     });
     if (listener) this.context.subscriptions.push(listener);
+    const setsListener = watchAgentSets(context, () => {
+      for (const managed of this.panels.values()) void this.refreshAgentDefaults(managed).catch(cause => {
+        void this.post(managed.panel, {type: "host.notice", level: "error", text: cause instanceof Error ? cause.message : String(cause)});
+      });
+    });
+    if (setsListener) this.context.subscriptions.push(setsListener);
   }
 
   public async openStartup(): Promise<void> {
@@ -307,6 +388,7 @@ export class ChatPanelManager implements vscode.Disposable {
 
   public async revive(panel: vscode.WebviewPanel, serializedState: unknown): Promise<void> {
     const state = restoreChatState(serializedState, this.newChatPreferences());
+    if (this.removedChat(state)) { panel.dispose(); return; }
     const panelMatch = this.panels.get(state.panelId);
     const existing = (panelMatch && !panelMatch.disposed ? panelMatch : undefined) ?? [...this.panels.values()].find(candidate =>
       Boolean(!candidate.disposed && state.agentId && candidate.state.agentId === state.agentId));
@@ -319,6 +401,12 @@ export class ChatPanelManager implements vscode.Disposable {
       existing.panel.reveal(panel.viewColumn, true);
       panel.dispose();
       return;
+    }
+    if (state.agentId && (state.role ?? "main") === "main") {
+      const connection = await this.connectRuntime();
+      if (connection.available && !(await connection.client.listSessions()).some(session => session.agentId === state.agentId)) {
+        panel.dispose(); return;
+      }
     }
     await this.attach(panel, state);
   }
@@ -694,6 +782,10 @@ export class ChatPanelManager implements vscode.Disposable {
 
   private async handleMessage(managed: ManagedPanel, rawMessage: unknown): Promise<void> {
     const message = parseClientMessage(rawMessage);
+    if (message && (managed.disposed || (managed.state && (this.removedChat(managed.state) || this.deletingPanels.has(managed.state.panelId))))) {
+      if (message.type === "chat.send") await this.post(managed.panel, { type: "chat.rejected", id: message.id });
+      return;
+    }
     if (!message) {
       const type = requestType(rawMessage);
       // Log the protocol operation only, never chat text, attachments or credentials.
@@ -1015,6 +1107,34 @@ export class ChatPanelManager implements vscode.Disposable {
           providerStatuses(), Object.fromEntries(Object.entries(providerVersions()).map(([id, value]) => [id, value?.plugin]))
         ) });
         return;
+      case "task.delete": {
+        const mainAgentId = message.mainAgentId || managed.state.agentId;
+        if (!mainAgentId || (managed.state.role ?? "main") !== "main") return;
+        const key = mainAgentId + "/" + message.workflowId + "/" + message.taskId;
+        if (this.taskDeletesPending.has(key)) return;
+        this.taskDeletesPending.add(key);
+        try {
+          const connection = await this.connectRuntime();
+          if (!connection.available || !connection.client.deleteTask) throw new Error("Task history deletion is unavailable in this runtime");
+          // Project history uses the recorded owner, checked again against fresh
+          // runtime data. The screen cannot select an arbitrary Main session.
+          if (mainAgentId !== managed.state.agentId) {
+            const entry = (await connection.client.listProjectTasks?.())?.find(entry => entry.id === message.workflowId && entry.mainAgentId === mainAgentId);
+            if (!entry?.tasks.some(task => task.id === message.taskId)) throw new Error("Task does not belong to the selected project history");
+          }
+          await connection.client.deleteTask(mainAgentId, message.workflowId, message.taskId);
+          this.taskHistoryRevision++;
+          this.agentRefreshes.delete(connection.client);
+          await this.broadcast({ type: "task.delete.result", mainAgentId, workflowId: message.workflowId, taskId: message.taskId });
+          for (const panel of this.panels.values()) {
+            if (!panel.disposed && panel.state.agentId === mainAgentId) void this.sendAgentList(panel);
+          }
+        } catch (error) {
+          await this.post(managed.panel, { type: "task.delete.result", mainAgentId, workflowId: message.workflowId, taskId: message.taskId, error: String(error) });
+          await this.post(managed.panel, { type: "host.notice", level: "error", text: String(error) });
+        } finally { this.taskDeletesPending.delete(key); }
+        return;
+      }
       case "task.stop": {
         if (!managed.state.agentId || (managed.state.role ?? "main") !== "main") return;
         const key = managed.state.agentId + "/" + message.workflowId + "/" + message.taskId;
@@ -1100,9 +1220,11 @@ export class ChatPanelManager implements vscode.Disposable {
         return;
       }
       case "project.tasks.request": {
+        const historyRevision = this.taskHistoryRevision;
         try {
           const connection = await this.connectRuntime();
           const entries = connection.available ? await connection.client.listProjectTasks?.() ?? [] : [];
+          if (historyRevision !== this.taskHistoryRevision) return;
           await this.post(managed.panel, { type: "project.tasks", entries });
         } catch (error) {
           await this.post(managed.panel, { type: "project.tasks", entries: [], error: String(error) });
@@ -1497,17 +1619,18 @@ export class ChatPanelManager implements vscode.Disposable {
       return;
     }
     const agentId = managed.state.agentId;
+    const historyRevision = this.taskHistoryRevision;
     if (managed.disposed || managed.agentRefreshInFlight) return;
     managed.agentRefreshInFlight = true;
     try {
       const connection = await this.connectRuntime();
       if (!connection.available) return;
       const { agents, workflows } = await this.sharedAgentRefresh(connection.client, agentId);
-      if (managed.disposed || managed.state.agentId !== agentId) return;
+      if (managed.disposed || managed.state.agentId !== agentId || historyRevision !== this.taskHistoryRevision) return;
       managed.activeChildRuns = agents;
       this.refreshTabLoading(managed);
       this.notifyAgents();
-      await this.post(managed.panel, { type: "agents.list", agents, workflows });
+      await this.post(managed.panel, { type: "agents.list", agents, workflows, ...(workflows ? { workflowsComplete: true } : {}) });
       if (workflows) managed.contractWorkflows = workflows;
       if (workflows) await this.reportWorkflowResults(managed, workflows, connection.client);
       await this.continueBackgroundWork(managed, agents.filter(agent => !workflows?.some(flow => flow.workAgentId === agent.agentId || flow.verificationAgentId === agent.agentId ||
@@ -1664,46 +1787,93 @@ The engine owns execution. Read and acknowledge the exact stored result/receipt 
 
   private async continueBackgroundWork(managed: ManagedPanel, agents: readonly import("../agent-factory/agent-client").ChildAgentSession[], owner: object = this): Promise<void> {
     const key = `agentFactory.background.${managed.state.agentId}`;
-    const saved = this.context.workspaceState?.get<Record<string, string>>(key);
+    type Delivery = { identity: string; state: "prepared" | "accepted" | "blocked";
+      dispatchId: string; message: string; runId?: string; error?: string };
+    const saved = this.context.workspaceState?.get<Record<string, string | Delivery>>(key);
     const states = { ...saved };
+    const observed: Record<string, string> = {};
     const terminal = new Set(["completed", "failed", "cancelled", "needs-human-decision"]);
     const pending = [];
     for (const agent of agents) {
       if (!agent.runId) continue;
       const id = `${agent.agentId}/${agent.runId}`;
-      if (!saved) states[id] = agent.status;
+      if (!saved) observed[id] = states[id] = agent.status;
       else if (terminal.has(agent.status) && states[id] !== agent.status
+          // Legacy attempts had no dispatch identity. Their acceptance cannot be
+          // reconstructed safely; preserve their duplicate suppression.
           && states[id] !== `delivery-error:${agent.status}`) pending.push(agent);
-      else if (!terminal.has(agent.status)) states[id] = agent.status;
+      else if (!terminal.has(agent.status) && typeof states[id] !== "object") observed[id] = states[id] = agent.status;
     }
-    await this.context.workspaceState?.update(key, states);
+    if (Object.keys(observed).length || !saved) {
+      await this.context.workspaceState?.update(key, {
+        ...this.context.workspaceState.get<Record<string, string | Delivery>>(key), ...observed
+      });
+      Object.assign(states, this.context.workspaceState?.get<Record<string, string | Delivery>>(key));
+    }
     if (managed.disposed || managed.backgroundContinuation || managed.controller?.running ||
         managed.pendingMessageIds?.size || !managed.controller || managed.controller.conversationResetBlockedReason || !pending.length) return;
-    // Keep distinct workflow routes separate; later polls deliver the remaining events.
-    const child = pending.find(child => child.taskMode && child.taskMode !== "direct");
+    const child = pending.find(child => {
+      const stored = states[`${child.agentId}/${child.runId}`];
+      return child.taskMode && child.taskMode !== "direct" &&
+        !(typeof stored === "object" && ["accepted", "blocked"].includes(stored.state));
+    });
     if (!child) return;
+    const id = `${child.agentId}/${child.runId}`;
+    const identity = JSON.stringify([managed.state.agentId, child.agentId, child.runId, child.status]);
+    const stored = states[id];
+    const previous = typeof stored === "object" ? stored : undefined;
     const releaseClaim = this.claimTerminalDelivery(owner,
       `${managed.state.agentId}:child:${child.agentId}:${child.runId}:${child.status}`);
     if (!releaseClaim) return;
     managed.backgroundContinuation = true;
-    const notification = `[Background workflow continuation — not a new Human request]
+    const notification = previous?.message ?? `[Background workflow continuation — not a new Human request]
 ${JSON.stringify(child)}
 Read the exact stored child result/receipt and existing workflow status for reporting. The engine owns loop transitions; do not reconcile or advance the loop, redispatch completed Work, review implementation or rerun tests. Goal completion is not a Verification pass. Preserve the accepted identities and captured route. If the child needs a Human decision or failed, report it; do not automatically grant approval or retry failed work. Report completion only when the captured route has completed; otherwise report the current stage and return promptly. When the workflow is bound to a work contract, record the terminal task statuses and result/receipt evidence in its Main-owned progress record. Answer any pending Human questions while preserving this workflow.`;
-    let accepted = false;
-    void managed.controller.send(notification, [], { taskMode: "direct" }, () => {
-      accepted = true;
-      states[`${child.agentId}/${child.runId}`] = child.status;
-      void Promise.resolve(this.context.workspaceState?.update(key, states)).catch(error => this.post(managed.panel, { type: "host.notice", level: "error", text: String(error) }));
-    }).catch(error => this.post(managed.panel, { type: "host.notice", level: "error", text: String(error) }))
-      .finally(async () => {
-        try {
-          if (!accepted) {
-            states[`${child.agentId}/${child.runId}`] = `delivery-error:${child.status}`;
-            await this.context.workspaceState?.update(key, states);
-            if (!managed.disposed) await this.post(managed.panel, { type: "host.notice", level: "error", text: localize("ui.background.continuation.failed", child.agentId, child.runId!) });
-          }
-        } finally { managed.backgroundContinuation = false; releaseClaim(); }
-      }).catch(error => this.post(managed.panel, { type: "host.notice", level: "error", text: String(error) }));
+    let delivery: Delivery = previous ?? { identity, state: "prepared", message: notification,
+      dispatchId: "dispatch-child-" + createHash("sha256").update(identity).digest("hex").slice(0, 32) };
+    const persistDelivery = async (value: Delivery): Promise<void> => {
+      await this.context.workspaceState?.update(key, {
+        ...this.context.workspaceState.get<Record<string, string | Delivery>>(key), [id]: value
+      });
+    };
+    let persisted: PromiseLike<void> | undefined;
+    let failure: { error: unknown } | undefined;
+    const finish = () => { managed.backgroundContinuation = false; releaseClaim(); };
+    const fail = async (error: unknown): Promise<void> => {
+      const code = error && typeof error === "object" && "code" in error ? String(error.code) : undefined;
+      const text = String(error);
+      const blocked = !delivery.runId && ["invalid_dispatch_id", "dispatch_id_collision", "request_invalid"].includes(code ?? "");
+      await persistDelivery({ ...delivery, ...(blocked ? { state: "blocked" as const } : {}), error: text });
+      if (delivery.error !== text && !managed.disposed) await this.post(managed.panel, { type: "host.notice", level: "error", text });
+    };
+    try {
+      if (previous) {
+        // Query before replay: lost ACKs may already own a run. Observation
+        // failure or an old runtime without lookup never proves absence.
+        const connection = await this.connectRuntime();
+        if (!connection.available || !connection.client.dispatchAcceptance || !managed.state.agentId) { finish(); return; }
+        const accepted = await connection.client.dispatchAcceptance(managed.state.agentId, delivery.dispatchId);
+        if (accepted) {
+          await persistDelivery({ ...delivery, state: "accepted", runId: accepted.runId });
+          finish();
+          return;
+        }
+      }
+      await persistDelivery(delivery);
+    } catch (error) {
+      try { await fail(error); } finally { finish(); }
+      return;
+    }
+    void managed.controller.send(delivery.message, [], { taskMode: "direct", deliveryId: delivery.dispatchId }, () => {
+      const runId = managed.controller?.runId;
+      delivery = { ...delivery, state: "accepted", ...(runId ? { runId } : {}) };
+      persisted = persistDelivery(delivery);
+    }, error => { failure = { error }; }).then(async () => {
+      await persisted;
+      if (failure) throw failure.error;
+      if (delivery.state !== "accepted") throw new Error(localize("ui.background.continuation.failed", child.agentId, child.runId!));
+    }).catch(fail).finally(finish)
+      .catch(error => this.post(managed.panel, { type: "host.notice", level: "error", text: String(error) }));
   }
 
   private scheduleAgentList(managed: ManagedPanel, immediate = false): void {

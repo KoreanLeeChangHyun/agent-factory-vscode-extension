@@ -98,10 +98,13 @@
         "icon": "$(ungroup-by-ref-type)"
       },
       {
-        "command": "agentFactory.sidebar.archive",
-        "title": "%agentFactory.sidebar.archive.title%",
+        "command": "agentFactory.sidebar.delete",
+        "title": "%agentFactory.sidebar.delete.title%",
         "category": "Agent Factory",
-        "icon": "$(archive)"
+        "icon": {
+          "light": "static/images/agent-delete-light.svg",
+          "dark": "static/images/agent-delete-dark.svg"
+        }
       },
       {
         "command": "agentFactory.sidebar.restore",
@@ -178,7 +181,7 @@
           "group": "organization@1"
         },
         {
-          "command": "agentFactory.sidebar.archive",
+          "command": "agentFactory.sidebar.delete",
           "when": "view == agentFactory.agents && viewItem == agentFactoryAgent",
           "group": "organization@2"
         }

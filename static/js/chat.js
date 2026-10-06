@@ -246,14 +246,15 @@
     runProgress: typeof saved?.runProgress === "string" ? saved.runProgress : "",
     runProgressLocalization: saved?.runProgressLocalization,
     runStartedAt: Number.isFinite(saved?.runStartedAt) ? saved.runStartedAt : undefined,
-    taskFlows: Array.isArray(saved?.taskFlows) ? saved.taskFlows.slice(-100) : [],
-    dismissedTasks: Array.isArray(saved?.dismissedTasks) ? saved.dismissedTasks.filter(key => typeof key === "string") : [],
+    // Loop cards are restored from the runtime: another window may have deleted
+    // their files while this Webview's persisted cache was closed.
+    taskFlows: Array.isArray(saved?.taskFlows) ? saved.taskFlows.filter(flow => flow && typeof flow === "object" && !flow.engine).slice(-100) : [],
     runPanelExpanded: saved?.runPanelExpanded === true,
     runPanelUserChoice: saved?.runPanelUserChoice === true,
     sessions: [],
     sessionsLoading: false,
     historyNextBefore: saved?.historyNextBefore,
-    workflows: Array.isArray(saved?.workflows) ? saved.workflows : [],
+    workflows: [],
     childAgents: Array.isArray(saved?.childAgents) ? saved.childAgents : [],
     agentsLoading: false,
     workUnitsKnown: false,
@@ -1206,7 +1207,6 @@
             state.guidanceExpanded = [];
             state.timeline = [];
             state.taskFlows = [];
-            state.dismissedTasks = [];
             followLatest = true;
             renderTimeline();
           }
@@ -1264,9 +1264,22 @@
           if (!state.timeline.some(function (item) { return ["user", "assistant", "interview", "activity"].includes(item.type); })) {
             state.timeline = restored;
           } else {
-            const knownRuns = new Set(state.timeline.map(item => item.runId).filter(Boolean));
+            const knownRuns = new Set(state.timeline.filter(item => !item.id?.startsWith("history-"))
+              .map(item => item.runId).filter(Boolean));
             const knownIds = new Set(state.timeline.map(item => item.id));
-            state.timeline = [...restored.filter(item => !knownIds.has(item.id) && !knownRuns.has(item.runId)), ...state.timeline];
+            // A cached history user does not prove its answer was cached too.
+            // Insert missing history beside its recorded neighbors, preserving
+            // the ordering of live entries and already restored messages.
+            for (let index = 0; index < restored.length; index += 1) {
+              const item = restored[index];
+              if (knownIds.has(item.id) || knownRuns.has(item.runId)) continue;
+              const following = restored.slice(index + 1).find(next => knownIds.has(next.id));
+              const preceding = restored.slice(0, index).reverse().find(previous => knownIds.has(previous.id));
+              const position = following ? state.timeline.findIndex(entry => entry.id === following.id)
+                : preceding ? state.timeline.findIndex(entry => entry.id === preceding.id) + 1 : 0;
+              state.timeline.splice(position, 0, item);
+              knownIds.add(item.id);
+            }
             // Repair raw or partially separated history only when the exact
             // captured request matches. Live messages remain untouched.
             const byId = new Map(restored.map(function (item) { return [item.id, item]; }));
@@ -1274,7 +1287,8 @@
               const replacement = byId.get(item.id);
               return item.type === "user" && item.id?.startsWith("history-user-") &&
                 replacement?.submission && item.text !== replacement.text &&
-                item.text + (item.submission?.guidance || "") === replacement.text + (replacement.submission.guidance || "")
+                item.text + (item.submission?.guidance || "") ===
+                  (replacement.capturedRequest || replacement.text + (replacement.submission.guidance || ""))
                 ? replacement : item;
             });
           }
@@ -1301,19 +1315,24 @@
       case "task.stop.result":
         chatTaskFlow.finishTaskStop(message);
         break;
+      case "task.delete.result":
+        chatTaskFlow.finishTaskDelete(message);
+        scheduleTimelineRender();
+        break;
       case "agents.list":
         state.workUnitsKnown = Array.isArray(message.agents);
         state.agentsLoading = false;
         if (Array.isArray(message.workflows)) {
           // A temporarily incomplete session discovery must not erase accepted history.
           const key = snapshot => snapshot.loopId || snapshot.workflow?.id;
-          const snapshots = new Map((state.workflows || []).map(snapshot => [key(snapshot), snapshot]));
+          const snapshots = new Map((message.workflowsComplete ? [] : state.workflows || []).map(snapshot => [key(snapshot), snapshot]));
           for (const snapshot of message.workflows) {
             snapshots.set(key(snapshot), snapshot);
             // The decision took effect once the loop left its stop; a refresh of the same stop changes nothing.
             if (snapshot.status !== "needs-human-decision") chatTaskFlow.workflowDecisionsPending.delete(snapshot.loopId);
           }
           state.workflows = [...snapshots.values()].slice(-100);
+          if (message.workflowsComplete) state.taskFlows = (state.taskFlows || []).filter(flow => !flow.engine);
         }
         state.childAgents = Array.isArray(message.agents) ? message.agents.filter(chatAgents.isChildAgent) : [];
         state.workUnits = chatAgents.summarizeChildAgents(state.childAgents);
@@ -1750,6 +1769,7 @@
       const event = state.timeline[index.length];
       const type = event.type;
       if (!index.positions.has(event.id)) index.positions.set(event.id, index.length);
+      if (type === "user" && event.submission?.backgroundContinuation === true && event.text === "") continue;
       if (type === "assistant") {
         const text = event.text || "";
         let parsed = chatTaskFlow.taskFlowParseCache.get(event);
@@ -1769,14 +1789,20 @@
     return index;
   }
 
-  // A complete message supersedes the oldest live preview of the same run and phase whose text it extends.
+  // A complete message supersedes the latest matching preview. Goal turns share
+  // a run: never move a later result into an older turn's final position.
   function liveAssistantPreview(complete) {
     const normalize = function (text) { return String(text || "").replace(/\s+/g, " ").trim(); };
     const full = normalize(complete.text);
-    return state.timeline.findIndex(function (entry) {
-      return entry.streaming && entry.runId === complete.runId && entry.phase === complete.phase &&
-        (complete.phase === "final" || full.startsWith(normalize(entry.text)));
-    });
+    if (!complete.runId) return -1;
+    for (let index = state.timeline.length - 1; index >= 0; index--) {
+      const entry = state.timeline[index];
+      if (!entry.streaming || entry.runId !== complete.runId || entry.phase !== complete.phase) continue;
+      const partial = normalize(entry.text);
+      if (partial && full.startsWith(partial)) return index;
+      if (complete.phase === "final") return -1;
+    }
+    return -1;
   }
 
   // Growing previews re-render only their own content once per frame instead of the whole timeline.
@@ -1805,61 +1831,30 @@
     });
   }
 
-  // Previews skip syntax highlighting, image resolution and structured extraction; the complete message does them once.
-  // Finished blocks (before the last blank line outside a code fence) render once; only the growing tail re-renders,
-  // so a long answer costs O(new text) per frame instead of O(whole answer).
-  const previewCaches = new WeakMap();
+  // Parse the whole document in every path: later reference definitions and
+  // list/fence continuations can change blocks that appeared complete earlier.
+  function renderAssistantContent(content, event) {
+    const taskContent = chatTaskFlow.extractTaskFlows(assistantDisplayText(localizedText(event.text, event.localization)));
+    const environment = {};
+    const extracted = event.phase !== "commentary" && globalThis.agentFactoryExecutionReferences
+      ? globalThis.agentFactoryExecutionReferences.extract(taskContent.text, chatMarkdown.markdown, environment)
+      : { text: taskContent.text, references: [] };
+    if (extracted.references.length) {
+      chatMarkdown.renderAssistantMarkdown(content, extracted.before, environment);
+      chatMarkdown.renderExecutionReferences(content, extracted.references);
+      chatMarkdown.appendAssistantMarkdown(content, extracted.after, environment);
+    } else {
+      chatMarkdown.renderAssistantMarkdown(content, extracted.text);
+    }
+    for (const flow of taskContent.flows) content.append(chatTaskFlow.createTaskFlow(flow));
+    chatInterview.renderInterviewChoices(content, event);
+    if (!event.streaming && event.runId && event.runId === state.pendingDecisionRunId && event.phase !== "commentary") {
+      chatActivities.renderDecisionActions(content, event.runId);
+    }
+  }
+
   function renderPreviewMarkdown(container, text, entry) {
-    text = assistantDisplayText(text);
-    if (!chatMarkdown.markdown) {
-      container.textContent = text;
-      return;
-    }
-    let cache = entry && previewCaches.get(entry);
-    if (!cache || cache.container !== container || !text.startsWith(cache.stableText)) {
-      container.classList.add("markdown-body");
-      const stable = document.createElement("div");
-      const tail = document.createElement("div");
-      stable.className = tail.className = "markdown-preview-part";
-      container.replaceChildren(stable, tail);
-      cache = { container, stable, tail, stableText: "" };
-      if (entry) previewCaches.set(entry, cache);
-    }
-    const boundary = stablePreviewBoundary(text, cache.stableText.length);
-    if (boundary > cache.stableText.length) {
-      cache.stable.append(...previewFragment(text.slice(cache.stableText.length, boundary)).childNodes);
-      cache.stableText = text.slice(0, boundary);
-    }
-    cache.tail.replaceChildren(...previewFragment(text.slice(boundary)).childNodes);
-  }
-
-  function stablePreviewBoundary(text, from) {
-    let boundary = from;
-    let fenced = false;
-    let lineStart = from;
-    while (lineStart < text.length) {
-      const lineEnd = text.indexOf("\n", lineStart);
-      if (lineEnd < 0) break;
-      const line = text.slice(lineStart, lineEnd);
-      if (/^ {0,3}(```|~~~)/.test(line)) fenced = !fenced;
-      else if (!fenced && !line.trim() && lineStart > from) boundary = lineEnd + 1;
-      lineStart = lineEnd + 1;
-    }
-    return boundary;
-  }
-
-  function previewFragment(text) {
-    const fragment = document.createElement("div");
-    fragment.innerHTML = chatMarkdown.markdown.render(text);
-    chatMarkdown.renderMath(fragment);
-    for (const img of fragment.querySelectorAll("img[src]")) {
-      if (/^(?:file:\/\/|\/|\.\.?\/)/i.test(img.getAttribute("src"))) img.removeAttribute("src");
-    }
-    for (const link of fragment.querySelectorAll("a")) {
-      link.target = "_blank";
-      link.rel = "noopener noreferrer";
-    }
-    return fragment;
+    renderAssistantContent(container, entry || { text, streaming: true });
   }
 
   function dropLivePreviews(runId) {
@@ -2119,6 +2114,7 @@
     const assistantContext = JSON.stringify([state.role, state.childAgents.map(agent => [agent.agentId, agent.role])]);
     const commandContexts = new Map(state.childAgents.map(agent => [agent.agentId, JSON.stringify(agent)]));
     for (const event of visibleEvents) {
+      if (event.type === "user" && event.submission?.backgroundContinuation === true && event.text === "") continue;
       const managedGroup = managedByEvent.get(event.id);
       if (managedGroup && managedGroup.events[0] !== event) continue;
       retainedIds.add(event.id);
@@ -2217,22 +2213,7 @@
       } else if (event.type === "interview") {
         chatInterview.renderStructuredInterview(content, event);
       } else if (event.type === "assistant") {
-        const taskContent = chatTaskFlow.extractTaskFlows(assistantDisplayText(localizedText(event.text, event.localization)));
-        const extracted = event.phase !== "commentary" && globalThis.agentFactoryExecutionReferences
-          ? globalThis.agentFactoryExecutionReferences.extract(taskContent.text, chatMarkdown.markdown)
-          : { text: taskContent.text, references: [] };
-        if (extracted.references.length) {
-          chatMarkdown.renderAssistantMarkdown(content, extracted.before);
-          chatMarkdown.renderExecutionReferences(content, extracted.references);
-          chatMarkdown.appendAssistantMarkdown(content, extracted.after);
-        } else {
-          chatMarkdown.renderAssistantMarkdown(content, extracted.text);
-        }
-        for (const flow of taskContent.flows) content.append(chatTaskFlow.createTaskFlow(flow));
-        chatInterview.renderInterviewChoices(content, event);
-        if (event.runId && event.runId === state.pendingDecisionRunId && event.phase !== "commentary") {
-          chatActivities.renderDecisionActions(content, event.runId);
-        }
+        renderAssistantContent(content, event);
       } else if (activityRow) {
         message.dataset.kind = event.kind || "";
         chatActivityRows.render(content, event);
@@ -2711,7 +2692,6 @@
     state.guidanceExpanded = [];
     state.timeline = [];
     state.taskFlows = [];
-    state.dismissedTasks = [];
     state.pendingRequests = [];
     state.recoveredRequest = undefined;
     state.startedMessageIds = [];
@@ -2954,7 +2934,6 @@
         return persisted;
       }),
       taskFlows: chatTaskFlow.currentTaskFlows().slice(-100),
-      dismissedTasks: state.dismissedTasks,
       timeline: state.timeline.filter(function (event) { return !event.streaming; }).slice(-200).map(function (event) {
         if (!Array.isArray(event.attachments)) return event;
         return {

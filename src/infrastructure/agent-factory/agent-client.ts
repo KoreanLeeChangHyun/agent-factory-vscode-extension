@@ -132,6 +132,7 @@ export interface ConversationHistory {
     readonly question?: import("../../common/types/business-mode").InterviewQuestion;
     readonly phase?: "final";
     readonly submission?: import("../../protocol/messages").MessageSubmission;
+    readonly capturedRequest?: string;
   }[];
 }
 
@@ -185,6 +186,8 @@ export interface AgentRuntimeClient {
   submit(agentId: string, message: string, execution: ExecutionOptions, images?: readonly RuntimeImageInput[]): Promise<RunAcceptance>;
   send(agentId: string, message: string, execution: ExecutionOptions, images?: readonly RuntimeImageInput[]): Promise<RunAcceptance>;
   status(agentId: string, runId: string): Promise<RunStatus>;
+  /** Resolve a durable dispatch. Only an explicit not-found response proves absence. */
+  dispatchAcceptance?(agentId: string, dispatchId: string): Promise<RunAcceptance | undefined>;
   updates(agentId: string, runId: string, cursor: number): Promise<RunUpdates>;
   result(agentId: string, runId: string): Promise<RunResult>;
   cancel(agentId: string, runId: string): Promise<void>;
@@ -196,6 +199,8 @@ export interface AgentRuntimeClient {
   childRun?(mainAgentId: string, agentId: string, runId: string): Promise<ChildAgentSession | undefined>;
   listChildSessions(mainAgentId: string, runId?: string): Promise<readonly ChildAgentSession[]>;
   stopTask?(mainAgentId: string, target: TaskStopTarget): Promise<Record<string, unknown> | undefined>;
+  deleteTask?(mainAgentId: string, workflowId: string, taskId: string): Promise<Record<string, unknown>>;
+  deleteAgent?(agentId: string): Promise<Record<string, unknown>>;
   closeWorkflow?(mainAgentId: string, workAgentId: string, loopId: string): Promise<Record<string, unknown>>;
   decideRevisionLimit?(mainAgentId: string, workAgentId: string, loopId: string, decision: RevisionLimitDecision): Promise<Record<string, unknown>>;
   answerWorkflow?(mainAgentId: string, workAgentId: string, loopId: string, decisionId: string, questionHash: string, answer: string): Promise<Record<string, unknown>>;
@@ -283,6 +288,8 @@ export class AgentFactoryClient implements AgentRuntimeClient {
       }
       return {
         ...record,
+        roleDirectExceptions: record.roleDirectExceptions === true,
+        taskAllocation: record.taskAllocation === true,
         // Missing image metadata means an older runtime contract; an explicit
         // false is a provider limitation (or an unavailable provider CLI).
         images: typeof record.images === "boolean" ? record.images : undefined,
@@ -511,6 +518,23 @@ When a command needs sudo and the Human has requested it, use python3 ${JSON.str
 
   public async status(agentId: string, runId: string): Promise<RunStatus> {
     return this.statusCache.get(JSON.stringify([agentId, runId]), () => this.readStatus(agentId, runId));
+  }
+
+  public async dispatchAcceptance(agentId: string, dispatchId: string): Promise<RunAcceptance | undefined> {
+    if (!DISPATCH_ID.test(dispatchId)) throw Object.assign(new Error("Invalid engine dispatch identity"), { code: "invalid_dispatch_id" });
+    try {
+      const document = await this.command(["status", "--project-root", this.projectRoot,
+        "--agent", agentId, "--dispatch-id", dispatchId]);
+      const run = readRecord(document.run, "dispatch run");
+      if (run.agentId !== agentId || run.dispatchId !== dispatchId || !MANAGED_ID.test(agentId)
+          || typeof run.runId !== "string" || !MANAGED_ID.test(run.runId)) {
+        throw new Error("Invalid dispatch acceptance response");
+      }
+      return { agentId, runId: run.runId };
+    } catch (error) {
+      if (error && typeof error === "object" && "code" in error && error.code === "dispatch_not_found") return undefined;
+      throw error;
+    }
   }
 
   private async readStatus(agentId: string, runId: string): Promise<RunStatus> {
@@ -948,6 +972,48 @@ When a command needs sudo and the Human has requested it, use python3 ${JSON.str
     return this.agentListCache.get(this.projectRoot, () => this.command(["list", "--project-root", this.projectRoot]));
   }
 
+  public async deleteTask(mainAgentId: string, workflowId: string, taskId: string): Promise<Record<string, unknown>> {
+    if (![mainAgentId, workflowId, taskId].every(id => MANAGED_ID.test(id))) throw new Error("Invalid task history identity");
+    const result = await this.command(["delete-task", "--project-root", this.projectRoot, "--main-agent", mainAgentId,
+      "--workflow-id", workflowId, "--task-id", taskId, "--actor", "human",
+      "--authorization-reference", `task-history-trash:${mainAgentId}/${workflowId}/${taskId}`]);
+    if (result.kind !== "task-history-deleted" || result.mainAgentId !== mainAgentId || result.workflowId !== workflowId || result.taskId !== taskId) {
+      throw new Error("Task deletion acknowledgement does not match the selected history");
+    }
+    this.invalidateDeletedHistory();
+    return result;
+  }
+
+  public async deleteAgent(agentId: string): Promise<Record<string, unknown>> {
+    if (!MANAGED_ID.test(agentId)) throw new Error("Invalid agent deletion identity");
+    const result = await this.command(["delete-agent", "--project-root", this.projectRoot, "--agent", agentId,
+      "--actor", "human", "--authorization-reference", `sidebar-trash:${agentId}`]);
+    if (result.kind !== "agent-deleted" || result.agentId !== agentId) {
+      throw new Error("Agent deletion acknowledgement does not match the selected agent");
+    }
+    this.invalidateDeletedHistory();
+    this.capabilityCache.deleteWhere(key => (JSON.parse(key) as unknown[])[1] === agentId);
+    return result;
+  }
+
+  private invalidateDeletedHistory(): void {
+    this.projectTaskCache.deleteWhere(() => true);
+    this.agentListCache.deleteWhere(() => true);
+    this.childSessionCache.deleteWhere(() => true);
+    this.workflowRefreshCache.deleteWhere(() => true);
+    this.statusCache.deleteWhere(() => true);
+    this.workflowSnapshots.clear();
+    this.statusSnapshots.clear();
+    this.runStateSnapshots.clear();
+    this.runStateSnapshotBytes = 0;
+    this.directorySnapshots.clear();
+    this.directorySnapshotEntries = 0;
+    this.observedChildRuns.dispose();
+    this.childEventSnapshots.clear();
+    this.eventSnapshots.clear();
+    this.contextUsageSnapshots.clear();
+  }
+
   public async stopTask(mainAgentId: string, target: TaskStopTarget): Promise<Record<string, unknown> | undefined> {
     const agents = await this.listChildSessions(mainAgentId);
     // Read fresh engine state before allowing a direct-run cancel. An omitted Loop binding
@@ -1065,7 +1131,7 @@ When a command needs sudo and the Human has requested it, use python3 ${JSON.str
 
   public async advanceWorkflows(mainAgentId: string, agents: readonly ChildAgentSession[], drive = true): Promise<readonly Record<string, unknown>[]> {
     const identity = [...new Set(agents.filter(agent => agent.role === "work").map(agent => agent.agentId))].sort();
-    return this.workflowRefreshCache.get(JSON.stringify([mainAgentId, identity, drive]), () => this.refreshWorkflows(mainAgentId, agents, drive));
+    return this.workflowRefreshCache.get(JSON.stringify([mainAgentId, identity, drive]), () => this.refreshWorkflows(mainAgentId, agents, drive, !drive));
   }
 
   private async refreshWorkflows(mainAgentId: string, agents: readonly ChildAgentSession[], drive: boolean, fullScan = false): Promise<readonly Record<string, unknown>[]> {

@@ -151,6 +151,7 @@ globalThis.AgentFactoryChat.history = function (host) {
     if (!conversationAppending) conversationMessages.replaceChildren();
     const fragment = document.createDocumentFragment();
     for (const item of message.history.messages) {
+      if (item.type === "user" && item.submission?.backgroundContinuation === true && item.text === "") continue;
       const article = document.createElement("article");
       const role = document.createElement("strong");
       role.textContent = item.type === "user" ? t("ui.conversation.user") : "Agent";

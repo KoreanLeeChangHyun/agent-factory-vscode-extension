@@ -2,7 +2,7 @@ import { readFile, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { localize } from "../../common/localization";
-import { PluginDependencyError, runProcess, semanticBase, type ProcessRunner } from "./plugin-dependency";
+import { PluginDependencyError, runProcess, semanticBase, sharePluginPreparation, type ProcessRunner } from "./plugin-dependency";
 import { antigravityExecutable } from "./process-environment";
 
 const PLUGIN_NAME = "agent-factory";
@@ -32,15 +32,7 @@ export async function ensureAgentFactoryAntigravityPlugin(
   runner: ProcessRunner = runProcess,
   options: { readonly agy?: string; readonly home?: string } = {}
 ): Promise<void> {
-  const inFlight = pending.get(runner);
-  if (inFlight) return inFlight;
-  const promise = ensure(semanticBase(requiredExtensionVersion), runner, options.agy ?? antigravityExecutable(), options.home ?? homedir());
-  pending.set(runner, promise);
-  try {
-    await promise;
-  } finally {
-    pending.delete(runner);
-  }
+  return sharePluginPreparation(pending, runner, () => ensure(semanticBase(requiredExtensionVersion), runner, options.agy ?? antigravityExecutable(), options.home ?? homedir()));
 }
 
 async function ensure(requiredBase: string, runner: ProcessRunner, agy: string, home: string): Promise<void> {

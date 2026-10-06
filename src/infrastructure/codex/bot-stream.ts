@@ -38,17 +38,31 @@ export async function streamBotTurn(provider: "codex" | "claude", prompt: string
     const child = spawn(provider === "codex" ? codexExecutable() : claudeExecutable(), args,
       { cwd, env: runtimeEnvironment(), signal, stdio: ["pipe", "pipe", "ignore"] });
     let finished = false, text = "", last = "", final = "";
+    const messages = new Map<string, { text: string; phase?: string }>();
     const lines = createInterface({ input: child.stdout });
     const finish = (error?: Error) => {
       if (finished) return;
       finished = true;
       lines.close(); child.stdin.end(); child.kill();
-      if (error) reject(error); else resolve(final || text);
+      if (error) reject(error); else resolve(provider === "codex" ? text : final || text);
     };
     const send = (value: object) => { if (!finished) child.stdin.write(JSON.stringify(value) + "\n"); };
     const emit = () => {
       const reply = partialBotReply(text);
       if (reply && reply !== last && !signal.aborted) { last = reply; publish(reply); }
+    };
+    const message = (id: string, phase?: string) => {
+      let value = messages.get(id);
+      if (!value) { value = { text: "", phase }; messages.set(id, value); }
+      if (phase !== undefined) value.phase = phase;
+      return value;
+    };
+    const emitMessage = () => {
+      // Creation order, rather than completion order, identifies the latest
+      // answer. Late deltas/completions from earlier items cannot replace it.
+      const latest = [...messages.values()].reverse().find(value => value.phase !== "commentary");
+      text = latest?.text ?? "";
+      emit();
     };
     child.on("error", error => finish(error));
     child.stdin.on("error", error => finish(error));
@@ -66,9 +80,18 @@ export async function streamBotTurn(provider: "codex" | "claude", prompt: string
           } else if (event.id === 2) {
             send({ id: 3, method: "turn/start", params: { threadId: event.result.thread.id,
               input: [{ type: "text", text: prompt, text_elements: [] }], outputSchema: schema } });
-          } else if (event.method === "item/agentMessage/delta") { text += event.params.delta; emit(); }
+          } else if (event.method === "item/started" && event.params.item.type === "agentMessage") {
+            const item = event.params.item;
+            message(item.id ?? "", item.phase).text = item.text ?? "";
+            emitMessage();
+          } else if (event.method === "item/agentMessage/delta") {
+            message(event.params.itemId ?? "", event.params.phase).text += event.params.delta;
+            emitMessage();
+          }
           else if (event.method === "item/completed" && event.params.item.type === "agentMessage") {
-            text = event.params.item.text; final = text; emit();
+            const item = event.params.item;
+            message(item.id ?? "", item.phase).text = item.text;
+            emitMessage();
           } else if (event.method === "turn/completed") {
             finish(event.params.turn.status === "completed" ? undefined : new Error("Bot turn failed"));
           } else if (event.id !== undefined && event.method) {

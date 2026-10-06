@@ -48,6 +48,23 @@ export class PluginDependencyError extends Error {
 
 class InvalidJsonError extends PluginDependencyError {}
 
+/** Coalesce one provider's concurrent preparation and clear both success and failure. */
+export async function sharePluginPreparation(
+  pending: WeakMap<ProcessRunner, Promise<void>>,
+  runner: ProcessRunner,
+  prepare: () => Promise<void>
+): Promise<void> {
+  const inFlight = pending.get(runner);
+  if (inFlight) return inFlight;
+  const promise = prepare();
+  pending.set(runner, promise);
+  try {
+    await promise;
+  } finally {
+    pending.delete(runner);
+  }
+}
+
 export async function ensureAgentFactoryPlugin(
   requiredExtensionVersion: string,
   runner: ProcessRunner = runProcess

@@ -433,7 +433,7 @@ globalThis.AgentFactoryChat.agentSettings = function (host) {
     if (select.value === pendingPresetName) pendingPresetName = "";
     select.disabled = agentPresetBusy;
     const selectedPreset = presets.find(preset => preset.name === select.value);
-    document.getElementById("agent-preset-delete").disabled = agentPresetBusy || !select.value || selectedPreset?.inUse === true || selectedPreset?.builtIn === true;
+    document.getElementById("agent-preset-delete").disabled = agentPresetBusy || !select.value || selectedPreset?.builtIn === true;
     const defaultButton = document.getElementById("agent-preset-default");
     defaultButton.disabled = agentPresetBusy || !select.value || !state.agentDefaults?.projectAvailable || selectedPreset?.isDefault === true;
     defaultButton.setAttribute("aria-pressed", String(selectedPreset?.isDefault === true));

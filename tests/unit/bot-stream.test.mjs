@@ -64,3 +64,79 @@ test('premature process exit rejects instead of saving a partial reply', async (
   });
   await assert.rejects(streamBotTurn('codex', '', {}, '', '/tmp', new AbortController().signal, () => {}), /before completion/);
 });
+
+async function codexMessages(events, status = 'completed') {
+  const partials = [];
+  const { streamBotTurn } = load(() => {
+    const child = new EventEmitter(); child.stdin = new PassThrough(); child.stdout = new PassThrough();
+    child.kill = () => {};
+    queueMicrotask(() => {
+      for (const event of events) child.stdout.write(JSON.stringify(event) + '\n');
+      child.stdout.write(JSON.stringify({ method: 'turn/completed', params: { turn: { status } } }) + '\n');
+    });
+    return child;
+  });
+  const answer = await streamBotTurn('codex', '', {}, '', '/tmp', new AbortController().signal, value => partials.push(value));
+  return { answer, partials };
+}
+const started = (id, phase) => ({ method: 'item/started', params: { item: { id, type: 'agentMessage', phase, text: '' } } });
+const delta = (itemId, text) => ({ method: 'item/agentMessage/delta', params: { itemId, delta: text } });
+const completed = (id, text, phase) => ({ method: 'item/completed', params: { item: { id, type: 'agentMessage', text, phase } } });
+const reply = text => JSON.stringify({ reply: text, emotion: 'happy' });
+
+test('Codex isolates interleaved message IDs and chooses the latest final message', async () => {
+  const result = await codexMessages([
+    started('old', 'final_answer'), delta('old', '{"reply":"old'),
+    started('new', 'final_answer'), delta('new', '{"reply":"new'),
+    delta('old', ' answer","emotion":"happy"}'), completed('old', reply('old answer'), 'final_answer'),
+    delta('new', ' answer","emotion":"happy"}'),
+    started('progress', 'commentary'), delta('progress', reply('hidden')),
+    completed('progress', reply('hidden'), 'commentary'),
+  ]);
+  assert.deepEqual(result.partials, ['old', 'new', 'new answer']);
+  assert.equal(JSON.parse(result.answer).reply, 'new answer');
+});
+test('Codex later deltas replace an earlier completed reply even without item completion', async () => {
+  const result = await codexMessages([
+    completed('old', reply('old'), 'final_answer'),
+    delta('new', '{"reply":"new'), delta('new', ' answer","emotion":"happy"}'),
+  ]);
+  assert.deepEqual(result.partials, ['old', 'new', 'new answer']);
+  assert.equal(JSON.parse(result.answer).reply, 'new answer');
+});
+test('Codex authoritative completion replaces preview and ignores subsequent commentary', async () => {
+  const result = await codexMessages([
+    started('final', 'final_answer'), delta('final', '{"reply":"draft'),
+    completed('final', reply('corrected'), 'final_answer'),
+    completed('comment', reply('hidden'), 'commentary'),
+  ]);
+  assert.deepEqual(result.partials, ['draft', 'corrected']);
+  assert.equal(JSON.parse(result.answer).reply, 'corrected');
+});
+for (const status of ['failed', 'interrupted']) test('Codex rejects ' + status + ' turns with reply deltas', async () => {
+  await assert.rejects(codexMessages([delta('final', reply('partial'))], status), /Bot turn failed/);
+});
+test('Codex cancellation suppresses further previews and rejects the turn', async () => {
+  const controller = new AbortController();
+  const partials = [];
+  let killed = false;
+  const { streamBotTurn } = load(() => {
+    const child = new EventEmitter(); child.stdin = new PassThrough(); child.stdout = new PassThrough();
+    child.kill = () => { killed = true; };
+    queueMicrotask(() => {
+      child.stdout.write(JSON.stringify(delta('final', '{"reply":"before')) + '\n');
+      controller.abort();
+      child.stdout.write(JSON.stringify(delta('final', ' after')) + '\n');
+      child.emit('error', Object.assign(new Error('cancelled'), { name: 'AbortError' }));
+    });
+    return child;
+  });
+  await assert.rejects(streamBotTurn('codex', '', {}, '', '/tmp', controller.signal, text => partials.push(text)), { name: 'AbortError' });
+  assert.deepEqual(partials, ['before']);
+  assert.equal(killed, true);
+});
+test('Codex request errors reject instead of returning completed earlier text', async () => {
+  await assert.rejects(codexMessages([
+    completed('old', reply('old'), 'final_answer'), { id: 3, error: { code: -1, message: 'failure' } },
+  ]), /Bot stream request failed/);
+});

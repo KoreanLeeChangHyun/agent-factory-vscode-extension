@@ -749,6 +749,7 @@ button.act-row { cursor: pointer; }
 .managed-agent-status {
   display: inline-flex;
   flex: none;
+  margin-inline-start: auto;
   max-width: 100%;
   box-sizing: border-box;
   align-items: center;

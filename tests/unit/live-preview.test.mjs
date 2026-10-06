@@ -15,9 +15,10 @@ function harness() {
     state: { timeline: [] }, renders: 0, frames: [],
     document: { hidden: false }, requestAnimationFrame(callback) { context.frames.push(callback); return context.frames.length; },
     messageElements: new Map(), messageRenderKeys: new Map(), eventVersion: () => 1, followLatest: false,
-    assistantDisplayText: value => value,
+    assistantDisplayText: value => value, localizedText: value => value,
+    chatInterview: { renderInterviewChoices() {} }, chatActivities: { renderDecisionActions() {} },
     createId: () => "id-" + (id += 1), scheduleTimelineRender() { context.renders += 1; }, renderRunStatus() {}, renderWorkLoopPanel() {},
-    extractTaskFlows: () => ({ flows: [] }), currentTaskFlows: () => [], chatMarkdown: { renderMath() {} }, persist() {}
+    extractTaskFlows: text => ({ text, flows: [] }), currentTaskFlows: () => [], chatMarkdown: { renderAssistantMarkdown() {} }, persist() {}
   };
   runInNewContext(helpers + "\nfunction handle(message) { switch (message.type) {\n" + handlers + "\n} }", context);
   return { context, send: message => runInNewContext("handle(" + JSON.stringify(message) + ")", context) };
@@ -52,6 +53,34 @@ test("invalid deltas are ignored and other runs keep their previews", () => {
   assert.deepEqual(context.state.timeline.map(entry => entry.text), ["mine done"]);
 });
 
+test("same-run Goal finals replace only the latest matching preview after intervening events", () => {
+  const { context, send } = harness();
+  send({ type: "chat.delta", runId: "goal", stream: "final", id: "turn-a", text: "Old answer" });
+  send({ type: "chat.delta", runId: "goal", stream: "commentary", id: "turn-b", text: "Checking again" });
+  send({ type: "chat.assistant", runId: "goal", phase: "commentary", text: "Checking again" });
+  context.state.timeline.push({ type: "activity", id: "tool-b", text: "Check B" });
+  send({ type: "chat.delta", runId: "goal", stream: "final", id: "final-b", text: "Latest answer" });
+  context.state.timeline.push({ type: "activity", id: "after-b", text: "After preview B" });
+  send({ type: "chat.assistant", runId: "goal", text: "Latest answer complete" });
+  send({ type: "chat.assistant", runId: "goal", text: "Latest answer complete" });
+  assert.deepEqual(context.state.timeline.map(entry => entry.text),
+    ["Checking again", "Check B", "Latest answer complete", "After preview B"]);
+  assert.ok(context.state.timeline.every(entry => !entry.streaming));
+});
+
+test("missing or mismatched latest final previews append completion without moving it into an older turn", () => {
+  for (const latest of [undefined, "Unrelated latest text"]) {
+    const { context, send } = harness();
+    if (latest) {
+      send({ type: "chat.delta", runId: "goal", stream: "final", id: "a", text: "Matching" });
+      send({ type: "chat.delta", runId: "goal", stream: "final", id: "b", text: latest });
+    }
+    context.state.timeline.push({ type: "activity", id: "tool", text: "Current activity" });
+    send({ type: "chat.assistant", runId: "goal", text: "Matching complete" });
+    assert.deepEqual(context.state.timeline.map(entry => entry.text), ["Current activity", "Matching complete"]);
+  }
+});
+
 function fakeElement() {
   const element = { children: [], className: "", classList: { add() {} }, innerHTML: "",
     append(...nodes) { element.children.push(...nodes); }, replaceChildren(...nodes) { element.children = nodes; },
@@ -70,28 +99,17 @@ test("growing previews re-render only their own content once per frame", () => {
   context.messageElements.set(entry.id, element);
   context.messageRenderKeys.set(element, key);
   const rendered = [];
-  context.chatMarkdown.markdown = { render: text => { rendered.push(text); return "<" + text + ">"; } };
-  context.document.createElement = () => fakeElement();
+  context.chatMarkdown.renderAssistantMarkdown = (_content, text) => rendered.push(text);
   send({ type: "chat.delta", runId: "r1", stream: "final", id: "b", text: "llo" });
   send({ type: "chat.delta", runId: "r1", stream: "final", id: "b", text: "**" });
   assert.equal(context.frames.length, 1);
   context.frames[0]();
-  assert.deepEqual(rendered, ["Intro\n\n", "**Hello**"]);
+  assert.deepEqual(rendered, ["Intro\n\n**Hello**"]);
   assert.equal(key[0], 1);
   assert.equal(context.renders, 1);
-  // The finished block is kept; only the tail renders again.
   send({ type: "chat.delta", runId: "r1", stream: "final", id: "b", text: " more" });
   context.frames[1]();
-  assert.deepEqual(rendered.slice(2), ["**Hello** more"]);
-});
-
-test("block boundaries ignore blank lines inside code fences", () => {
-  const { context } = harness();
-  const boundary = text => runInNewContext("stablePreviewBoundary(" + JSON.stringify(text) + ", 0)", context);
-  assert.equal(boundary("a\n\nb"), 3);
-  assert.equal(boundary("a\n\n```\ncode\n\nmore"), 3);
-  assert.equal(boundary("```\nx\n\n```\n\ntail"), 12);
-  assert.equal(boundary("no break yet"), 0);
+  assert.deepEqual(rendered.slice(1), ["Intro\n\n**Hello** more"]);
 });
 
 test("live previews are never persisted", () => {

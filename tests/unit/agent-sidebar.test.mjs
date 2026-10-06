@@ -9,7 +9,7 @@ const output = await build({ entryPoints: [new URL("../../src/infrastructure/vsc
   bundle: true, write: false, platform: "node", format: "cjs", external: ["vscode"] });
 
 function harness(storage = new Map(), options = {}) {
-  const commands = new Map(), inputs = [], picks = [], opened = [], renamed = [];
+  const commands = new Map(), inputs = [], picks = [], opened = [], renamed = [], confirmations = [], deleted = [];
   const agents = options.agents ?? [{ state: { panelId: "draft-one", title: "First", role: "main" }, running: false },
     { state: { panelId: "second", agentId: "main-second", title: "Second" }, running: true }];
   let listener;
@@ -22,6 +22,7 @@ function harness(storage = new Map(), options = {}) {
     TreeItemCollapsibleState: { None: 0, Expanded: 2 },
     window: { createTreeView() { return tree; }, async showInputBox() { return inputs.shift(); },
       async showQuickPick(items) { const index = picks.shift(); return index === undefined ? undefined : items[index]; },
+      async showWarningMessage(_message, _options, action) { return confirmations.shift() ? action : undefined; },
       async showErrorMessage(message) { throw new Error(message); } },
     commands: { registerCommand(id, handler) { commands.set(id, handler); return { dispose() { commands.delete(id); } }; } }
   };
@@ -30,6 +31,11 @@ function harness(storage = new Map(), options = {}) {
     require: name => name === "vscode" ? vscode : require(name) });
   const panels = { async sidebarAgents() { return agents; },
     onAgentsChanged(callback) { listener = callback; return { dispose() { listener = undefined; } }; },
+    async deleteSidebarAgent(state) {
+      if (options.deleteError) throw new Error(options.deleteError);
+      deleted.push(state.panelId);
+      agents.splice(agents.findIndex(agent => agent.state.panelId === state.panelId), 1);
+    },
     async openSidebarAgent(state) { opened.push(state); },
     async renameSidebarAgent(state, title) { renamed.push(title); agents.find(agent => agent.state.panelId === state.panelId).state.title = title; }
   };
@@ -40,7 +46,7 @@ function harness(storage = new Map(), options = {}) {
       else storage.set(key, snapshot);
     }
   } }, panels);
-  return { sidebar, agents, inputs, picks, opened, renamed, storage, tree, notify: () => listener?.(),
+  return { sidebar, agents, inputs, picks, opened, renamed, confirmations, deleted, storage, tree, notify: () => listener?.(),
     run: (name, node) => commands.get(`agentFactory.sidebar.${name}`)(node) };
 }
 
@@ -266,76 +272,51 @@ test("dragging directories reorders them, preserves members, and persists the or
   h.sidebar.dispose();
 });
 
-test("archiving hides agents across refresh and reload while preserving records and groups", async () => {
-  const storage = new Map();
+test("existing archives remain preserved across reload and can still be restored", async () => {
+  const storage = new Map([["agentFactory.sidebar.archived", [{ panelId: "draft-one", title: "First" }]]]);
   const h = harness(storage);
   await h.sidebar.refresh();
-  const first = h.sidebar.getChildren()[0];
-  h.inputs.push('Preserved group');
-  await h.run('newGroup');
-  h.picks.push(1);
-  await h.run('move', first);
-  await h.run('archive', first);
-  const group = h.sidebar.getChildren()[0];
-  assert.equal(h.sidebar.getChildren(group).length, 0);
-  assert.equal(h.agents.length, 2, 'Underlying agents are retained');
-  await h.sidebar.refresh();
-  assert.equal(h.sidebar.getChildren(group).length, 0);
+  assert.deepEqual(agentIds(h.sidebar.getChildren()), ["second"]);
+  assert.equal(h.agents.length, 2);
   h.sidebar.dispose();
   const restored = harness(storage);
   await restored.sidebar.refresh();
-  assert.equal(restored.sidebar.getChildren(restored.sidebar.getChildren()[0]).length, 0);
-  await restored.run('restore');
-  assert.equal(storage.get('agentFactory.sidebar.archived').length, 1);
   restored.picks.push(0);
-  await restored.run('restore');
-  assert.equal(restored.sidebar.getChildren(restored.sidebar.getChildren()[0])[0].agent.state.panelId, 'draft-one');
-  assert.equal(storage.get('agentFactory.sidebar.archived').length, 0);
+  await restored.run("restore");
+  assert.equal(restored.sidebar.getChildren().length, 2);
+  assert.equal(storage.get("agentFactory.sidebar.archived").length, 0);
   restored.sidebar.dispose();
 });
 
-test("archive restore keeps the saved position while visible agents are reordered", async () => {
-  const h = harness(new Map(), { agents: [agent("a"), agent("b"), agent("c")] });
+test("delete calls the Host only after confirmation and prunes saved layout", async () => {
+  const h = harness();
   await h.sidebar.refresh();
-  await h.run("archive", h.sidebar.getChildren()[1]);
-  const transfer = new Map(), token = { isCancellationRequested: false };
-  h.sidebar.handleDrag([h.sidebar.getChildren()[1]], transfer, token);
-  await h.sidebar.handleDrop(h.sidebar.getChildren()[0], transfer, token);
-  assert.deepEqual(agentIds(h.sidebar.getChildren()), ["c", "a"]);
-  h.picks.push(0);
-  await h.run("restore");
-  assert.deepEqual(agentIds(h.sidebar.getChildren()), ["c", "a", "b"]);
+  const first = h.sidebar.getChildren()[0];
+  h.inputs.push("Preserved group");
+  await h.run("newGroup");
+  h.picks.push(1);
+  await h.run("move", first);
+  await h.run("delete", first);
+  assert.equal(h.deleted.length, 0);
+  h.confirmations.push(true);
+  await h.run("delete", first);
+  assert.deepEqual(h.deleted, ["draft-one"]);
+  assert.equal(h.sidebar.getChildren(h.sidebar.getChildren()[0]).length, 0);
+  assert.equal(h.storage.get("agentFactory.sidebar.groups").assignments["draft-one"], undefined);
+  assert.deepEqual(h.storage.get("agentFactory.sidebar.groups").order, ["second"]);
+  assert.equal(h.storage.has("agentFactory.sidebar.archived"), false);
   h.sidebar.dispose();
 });
 
-test("archiving a running agent does not stop it and matches its runtime identity", async () => {
-  const h = harness();
+test("delete failures remain visible and are surfaced to the user", async () => {
+  const h = harness(new Map(), { deleteError: "Finish the active run before deleting this agent" });
   await h.sidebar.refresh();
   const running = h.sidebar.getChildren()[1];
-  await Promise.all([h.run('archive', running), h.run('archive', running)]);
-  assert.equal(h.storage.get('agentFactory.sidebar.archived').length, 1);
-  assert.equal(h.agents[1].running, true);
-  h.agents[1].state.panelId = 'restored-panel';
-  await h.sidebar.refresh();
-  assert.deepEqual(Array.from(h.sidebar.getChildren(), node => node.agent.state.panelId), ['draft-one']);
-  h.picks.push(0);
-  await h.run('restore');
+  h.confirmations.push(true);
+  await assert.rejects(h.run("delete", running), /Finish the active run/);
   assert.equal(h.sidebar.getChildren().length, 2);
   assert.equal(h.agents[1].running, true);
-  h.sidebar.dispose();
-});
-
-test("archive storage failures leave the agent visible and allow retry", async () => {
-  const h = harness();
-  await h.sidebar.refresh();
-  const agent = h.sidebar.getChildren()[0];
-  const set = h.storage.set;
-  h.storage.set = () => { throw new Error('storage unavailable'); };
-  await assert.rejects(h.run('archive', agent), /storage unavailable/);
-  assert.equal(h.sidebar.getChildren().length, 2);
-  h.storage.set = set;
-  await h.run('archive', agent);
-  assert.equal(h.sidebar.getChildren().length, 1);
+  assert.equal(h.storage.has("agentFactory.sidebar.archived"), false);
   h.sidebar.dispose();
 });
 
