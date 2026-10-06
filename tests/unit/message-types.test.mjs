@@ -46,7 +46,9 @@ const dynamicSends = {
   // bot.js saveBotPrompt: botPromptPending is assigned { requestId, prompt, character } on the preceding lines.
   'static/js/chat/bot.js { type: "bot.prompt.save", ...botPromptPending }': ["bot.prompt.save"],
   // work-units.js: the click handlers of a loop over ["create", "merge", "refresh"].
-  'static/js/chat/work-units.js { type: "worktree." + action }': ["worktree.create", "worktree.merge", "worktree.refresh"]
+  'static/js/chat/work-units.js { type: "worktree." + action }': ["worktree.create", "worktree.merge", "worktree.refresh"],
+  // task-flow.js: target holds only the validated task-deletion target fields.
+  'static/js/chat/task-flow.js { type: "task.delete", ...target }': ["task.delete"]
 };
 
 const usedDynamicSends = new Set();

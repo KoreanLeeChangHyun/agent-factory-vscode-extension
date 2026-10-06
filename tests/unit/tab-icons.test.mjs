@@ -155,7 +155,11 @@ test("revived Main tabs restore and poll aggregate child loading from durable st
     { agentId: "work-one", runId: "run-one", role: "work", status: "running" },
     { agentId: "verify-two", runId: "run-two", role: "verification", status: "running" }
   ];
-  const client = { async listChildSessions() { return children; }, async advanceWorkflows() { return undefined; } };
+  const client = {
+    async listSessions() { return [{ agentId: "main-parent" }]; },
+    async listChildSessions() { return children; },
+    async advanceWorkflows() { return undefined; }
+  };
   const { ChatPanelManager } = await load("chat-panel-manager.ts", vscode);
   manager = new ChatPanelManager(
     { extensionUri: { fsPath: extensionRoot }, globalStorageUri: { fsPath: storage }, globalState: { get: (_key, fallback) => fallback, async update() {} }, subscriptions: [] },

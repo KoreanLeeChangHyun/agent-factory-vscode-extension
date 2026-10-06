@@ -27,6 +27,83 @@ function accelerate(t) {
   t.mock.method(globalThis, 'setTimeout', (callback) => { queueMicrotask(callback); return 0; });
 }
 
+function deferred() {
+  let resolve;
+  const promise = new Promise(done => { resolve = done; });
+  return { promise, resolve };
+}
+
+test('stop freezes late text and questions while preserving usage, diagnostics and activity settlement', async () => {
+  const pendingUpdates = deferred(), reading = deferred();
+  const text = [], deltas = [], questions = [], activities = [], usage = [];
+  const f = fixture(async () => ({ status: 'cancelled' }));
+  f.runtime.updates = async () => {
+    reading.resolve();
+    return pendingUpdates.promise;
+  };
+  f.runtime.result = async () => ({ status: 'cancelled', text: 'late final' });
+  Object.assign(f.events, {
+    onAssistantText: value => text.push(value), onAssistantDelta: value => deltas.push(value),
+    onInterviewQuestion: value => questions.push(value), onActivity: value => activities.push(value),
+    onUsage: value => usage.push(value)
+  });
+  const controller = new ChatSessionController(f.runtime, f.events, undefined, { pollIntervalMs: 0 });
+  const send = controller.send('work', [], {});
+  await reading.promise;
+  await controller.cancel();
+  pendingUpdates.resolve({ cursor: 6, updates: [
+    { kind: 'delta', stream: 'final', id: 'late', text: 'late delta' },
+    { kind: 'commentary', text: 'late commentary' },
+    { kind: 'interviewQuestion', question: { id: 'late-question' } },
+    { kind: 'activity', id: 'late-start', category: 'tool', phase: 'started', text: 'late tool' },
+    { kind: 'activity', id: 'old', category: 'tool', phase: 'completed', text: 'settled tool' },
+    { kind: 'usage', usedTokens: 42, contextWindowTokens: 100 }
+  ] });
+  await send;
+  assert.deepEqual(text, []);
+  assert.deepEqual(deltas, []);
+  assert.deepEqual(questions, []);
+  assert.deepEqual(activities.map(value => value.id), ['run-test:old']);
+  assert.deepEqual(usage, [42]);
+  assert.equal(f.observed.errors.length, 1);
+  assert.match(f.observed.errors[0], /cancelled/);
+  assert.equal(f.observed.cancellations, 1);
+});
+
+test('a stop during the terminal result read freezes completion text without hiding real failures', async () => {
+  for (const status of ['completed', 'failed']) {
+    const pendingResult = deferred(), reading = deferred();
+    const f = fixture(async () => ({ status }));
+    f.runtime.result = async () => { reading.resolve(); return pendingResult.promise; };
+    const controller = new ChatSessionController(f.runtime, f.events, undefined, { pollIntervalMs: 0 });
+    const send = controller.send('work', [], {});
+    await reading.promise;
+    await controller.cancel();
+    pendingResult.resolve({ status, text: 'late result', ...(status === 'failed' ? { error: { code: 'provider_failed', message: 'real failure' } } : {}) });
+    await send;
+    assert.equal(f.observed.finals.some(text => text.includes('late result')), false);
+    if (status === 'failed') assert.match(f.observed.errors[0], /provider_failed: real failure/);
+    else assert.deepEqual(f.observed.errors, []);
+  }
+});
+
+test('failed cancellation restores streaming and exposes its error', async () => {
+  const pendingUpdates = deferred(), reading = deferred(), deltas = [];
+  const f = fixture(async () => ({ status: 'completed' }));
+  f.runtime.updates = async () => { reading.resolve(); return pendingUpdates.promise; };
+  f.runtime.cancel = async () => { throw new Error('stop transport failed'); };
+  f.events.onAssistantDelta = value => deltas.push(value.text);
+  const controller = new ChatSessionController(f.runtime, f.events, undefined, { pollIntervalMs: 0 });
+  const send = controller.send('work', [], {});
+  await reading.promise;
+  await controller.cancel();
+  pendingUpdates.resolve({ cursor: 1, updates: [{ kind: 'delta', stream: 'final', id: 'normal', text: 'still live' }] });
+  await send;
+  assert.deepEqual(deltas, ['still live']);
+  assert.deepEqual(f.observed.errors, ['stop transport failed']);
+  assert.deepEqual(f.observed.finals, ['finished']);
+});
+
 test('default observation survives more than 7200 cycles and delivers the terminal result', async t => {
   accelerate(t);
   let cycles = 0;

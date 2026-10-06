@@ -76,7 +76,7 @@ export class ChatSessionController {
   private submittedBusinessMode: ExecutionOptions["businessMode"];
   private submittedTaskMode: ExecutionOptions["taskMode"];
   private cancelRequested = false;
-  private cancellationInFlight: Promise<void> | undefined;
+  private cancellationInFlight: { agentId: string; runId: string; promise: Promise<void> } | undefined;
   private goalControlPending = false;
   private pendingGoalAction: GoalAction | undefined;
   private conversationResetInFlight: Promise<{ readonly conversationId: string; readonly startedAt: string }> | undefined;
@@ -195,7 +195,7 @@ export class ChatSessionController {
       this.releaseBusyAndDrainQueue();
       return this.running;
     }
-    this.cancelRequested = false;
+    if (!this.currentRunId) this.cancelRequested = false;
     this.busy = true;
     this.events.onRunningChanged(true);
     try {
@@ -591,22 +591,23 @@ Answer the Human's current question without cancelling these workflows. For task
 
   private async flushCancellation(): Promise<void> {
     if (!this.cancelRequested || !this.currentRunAgentId || !this.currentRunId) return;
-    if (!this.cancellationInFlight) {
-      const agentId = this.currentRunAgentId;
-      const runId = this.currentRunId;
+    const agentId = this.currentRunAgentId;
+    const runId = this.currentRunId;
+    if (this.cancellationInFlight?.agentId !== agentId || this.cancellationInFlight?.runId !== runId) {
       const request = this.runtime.cancel(agentId, runId).catch((error) => {
         // A run that already ended needs no stop; polling observes it and drains the queue.
         if (/run_terminal|already terminal/.test(errorMessage(error))) return;
+        // A delayed response belongs to its original run, even if the queue has advanced.
+        if (this.disposed || this.currentRunAgentId !== agentId || this.currentRunId !== runId) return;
         this.cancelRequested = false;
         this.events.onError(errorMessage(error));
       });
-      let tracked: Promise<void>;
-      tracked = request.finally(() => {
+      const tracked = { agentId, runId, promise: request.finally(() => {
         if (this.cancellationInFlight === tracked) this.cancellationInFlight = undefined;
-      });
+      }) };
       this.cancellationInFlight = tracked;
     }
-    await this.cancellationInFlight;
+    await this.cancellationInFlight.promise;
   }
 
   private async pollUntilTerminal(agentId: string, runId: string): Promise<void> {
@@ -630,10 +631,14 @@ Answer the Human's current question without cancelling these workflows. For task
       let streaming = false;
       let pendingDelta: { runId: string; stream: "commentary" | "final"; id: string; text: string } | undefined;
       const flushDelta = () => {
-        if (pendingDelta) this.events.onAssistantDelta?.(pendingDelta);
+        if (pendingDelta && !this.cancelRequested) this.events.onAssistantDelta?.(pendingDelta);
         pendingDelta = undefined;
       };
       for (const update of updates.updates) {
+        // Continue observing termination and diagnostics, but freeze the cancelled turn's output.
+        if (this.cancelRequested && (update.kind === "delta" || update.kind === "commentary"
+          || update.kind === "interviewQuestion" || update.kind === "status"
+          || (update.kind === "activity" && update.phase === "started"))) continue;
         if (update.kind === "delta") {
           streaming = true;
           // Merge consecutive fragments of one block into a single webview message.
@@ -678,6 +683,7 @@ Answer the Human's current question without cancelling these workflows. For task
         this.events.onStatusObserved?.(status.status);
         if (TERMINAL_STATES.has(status.status)) {
           const result = await this.runtime.result(agentId, runId);
+          if (this.disposed) return;
           if (result.status === "cancelled" || result.status === "failed") {
             const compactionTitle = localize("ui.context.compaction");
             for (const activity of openActivities.values()) {
@@ -699,18 +705,18 @@ Answer the Human's current question without cancelling these workflows. For task
             if (result.status === "cancelled") {
               // The terminal notice already carries the cancellation summary.
               const partialResult = result.text.trim();
-              if (partialResult && partialResult !== summary) {
+              if (!this.cancelRequested && partialResult && partialResult !== summary) {
                 const text = localize("ui.preserved.partial.result.completion.unconfirmed.0", partialResult);
                 this.events.onAssistantText(text, "final", runId, describeLocalizedMessage(text));
               }
             } else {
-              const text = result.text.trim() ? localize("ui.0.preserved.partial.result.completion.unconfirmed.1", describeLocalizedMessage(summary) ?? summary, result.text.trim()) : summary;
+              const text = !this.cancelRequested && result.text.trim() ? localize("ui.0.preserved.partial.result.completion.unconfirmed.1", describeLocalizedMessage(summary) ?? summary, result.text.trim()) : summary;
               this.events.onAssistantText(text, "final", runId, describeLocalizedMessage(text));
             }
-          } else {
+          } else if (!this.cancelRequested) {
             this.events.onAssistantText(result.text.trim() || summary, "final", runId, result.text.trim() ? undefined : describeLocalizedMessage(summary));
           }
-          if (result.status === "needs-human-decision" && result.text.trim() && !diagnostic && !goalError) {
+          if (!this.cancelRequested && result.status === "needs-human-decision" && result.text.trim() && !diagnostic && !goalError) {
             this.pendingDecisionRunId = runId;
             // Irreversible operations are never approvable by one click; the Human names them in a reply.
             const approval = result.decisionKind === "approval" ? describeDecisionApproval(result.text) : undefined;

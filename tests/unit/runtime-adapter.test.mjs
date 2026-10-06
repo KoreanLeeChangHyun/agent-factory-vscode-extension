@@ -1668,7 +1668,8 @@ test("reconnect follows an existing run, queues new input and cancels the correc
   await done;
   assert.equal(controller.running, false);
   assert.ok(calls.some(call => Array.isArray(call) && call[0] === "send" && call[2] === "new request"));
-  assert.deepEqual(finals, ["Recovered result", "Recovered result"]);
+  // The cancelled recovered run does not surface a final result; only the queued request does.
+  assert.deepEqual(finals, ["Recovered result"]);
 });
 
 test("send discovered during a reconnect race waits for the active run and then preserves the input", async () => {

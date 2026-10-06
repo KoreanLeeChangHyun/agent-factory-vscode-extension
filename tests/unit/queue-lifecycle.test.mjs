@@ -143,6 +143,45 @@ test('explicit stop targets only the current run and preserves queued requests',
   assert.deepEqual(sent, ['first', 'second']);
 });
 
+test('late cancellation rejection cannot reset or block the next queued run cancellation', async () => {
+  const firstTerminal = deferred(), secondUpdates = deferred(), secondReading = deferred();
+  const firstCancel = deferred(), secondCancel = deferred();
+  const cancelled = [], errors = [], output = [];
+  const controller = new ChatSessionController(runtime({
+    async updates(_agent, runId) {
+      if (runId === 'second') { secondReading.resolve(); return secondUpdates.promise; }
+      return { cursor: 0, updates: [] };
+    },
+    async status(_agent, runId) { if (runId === 'first') await firstTerminal.promise; return { status: 'cancelled' }; },
+    async result() { return { status: 'cancelled', text: 'late answer' }; },
+    async cancel(_agent, runId) {
+      cancelled.push(runId);
+      const gate = runId === 'first' ? firstCancel : secondCancel;
+      const error = await gate.promise;
+      if (error) throw error;
+    }
+  }), events({ onError: text => errors.push(text), onAssistantText: text => output.push(text),
+    onAssistantDelta: delta => output.push(delta.text) }), 'main-existing', { pollIntervalMs: 0 });
+  const first = controller.send('first', [], {}); await tick();
+  const second = controller.send('second', [], {});
+  const stopFirst = controller.cancel();
+  const duplicateStop = controller.cancel();
+  assert.deepEqual(cancelled, ['first']);
+  firstTerminal.resolve();
+  await secondReading.promise;
+  const stopSecond = controller.cancel();
+  assert.deepEqual(cancelled, ['first', 'second']);
+  firstCancel.resolve(new Error('old stop transport failed'));
+  await Promise.all([stopFirst, duplicateStop]);
+  secondUpdates.resolve({ cursor: 1, updates: [{ kind: 'delta', stream: 'final', id: 'late', text: 'late second delta' }] });
+  await Promise.all([first, second]);
+  secondCancel.resolve(); await stopSecond;
+  assert.equal(errors.some(text => text.includes('old stop')), false);
+  assert.deepEqual(output, []);
+  assert.equal(errors.length, 2);
+  assert.equal(controller.running, false);
+});
+
 test('repeated stop retries cancellation and a terminal refusal still drains the queue', async () => {
   const stopped = deferred(), cancelled = [], sent = [], errors = [];
   const controller = new ChatSessionController(runtime({
