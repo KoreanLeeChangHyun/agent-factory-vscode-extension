@@ -244,6 +244,7 @@ globalThis.AgentFactoryChat.taskFlow = function (host) {
     const captured = agent?.model || (task.sessionRunId ? task.model : undefined);
     model.textContent = typeof captured === "string" && captured.trim() ? captured : t("flow.model.unavailable");
     model.title = model.textContent;
+    model.dataset.animationKey = JSON.stringify(["model", task.taskId || task.id, agentId, runId, stage, model.textContent]);
     assignment.dataset.stage = model.dataset.stage = stage;
     model.dataset.running = String(running);
     // A stage whose run has not started yet (a Verification awaiting its Work) is shown dimmed.
@@ -260,7 +261,7 @@ globalThis.AgentFactoryChat.taskFlow = function (host) {
   }
   function taskStageRunning(task, flow) {
     return ["running", "verifying"].includes(liveTaskStatus(task)) &&
-      (taskHasActiveWorker(task, flow) || Boolean(flow.engine && flow.engineStatus === "active" && taskStageAgent(task)));
+      taskHasActiveWorker(task, flow);
   }
   // Two lines per task: title | worker | verifier | status | action, then activity | models | steps.
   function appendTaskColumns(summary, flow, stages, selected, label, live) {
@@ -572,6 +573,7 @@ globalThis.AgentFactoryChat.taskFlow = function (host) {
     if (["running", "verifying"].includes(observed) && taskStageRunning(task, flow)) {
       const pulse = document.createElement("span");
       pulse.className = "run-status-pulse";
+      pulse.dataset.animationKey = JSON.stringify(["pulse", task.taskId || task.id, agentId, runId, task.sessionRole || agent?.role]);
       pulse.setAttribute("aria-hidden", "true");
       label.dataset.pulse = "true";
       label.prepend(pulse);
@@ -600,6 +602,8 @@ globalThis.AgentFactoryChat.taskFlow = function (host) {
     disclosure.dataset.status = status;
     disclosure.dataset.taskId = work.taskId || work.id;
     disclosure.dataset.workerActive = String(taskHasActiveWorker(selected, flow));
+    disclosure.dataset.animationKey = JSON.stringify(["row", work.taskId || work.id,
+      selected.sessionAgentId || selected.agentId, selected.sessionRunId || selected.runId, selected.sessionRole]);
     if (work.sessionRunId || work.runId) disclosure.dataset.runId = work.sessionRunId || work.runId;
     if (["running", "verifying"].includes(status)) disclosure.setAttribute("aria-current", "step");
     const summary = document.createElement("summary");
@@ -745,6 +749,8 @@ globalThis.AgentFactoryChat.taskFlow = function (host) {
       item.dataset.status = status;
       item.dataset.taskId = task.taskId || task.id;
       item.dataset.workerActive = String(taskHasActiveWorker(selected, flow));
+      item.dataset.animationKey = JSON.stringify(["row", task.taskId || task.id,
+        selected.sessionAgentId || selected.agentId, selected.sessionRunId || selected.runId, selected.sessionRole]);
       if (task.sessionRunId || task.runId) item.dataset.runId = task.sessionRunId || task.runId;
       if (["running", "verifying"].includes(status)) item.setAttribute("aria-current", "step");
       const disclosure = document.createElement("details");
@@ -768,6 +774,14 @@ globalThis.AgentFactoryChat.taskFlow = function (host) {
       if (live) trackDisclosureState(disclosure, taskSummary);
       const detail = document.createElement("div");
       detail.className = "task-flow-detail";
+      if (flow.engine) {
+        const center = document.createElement("button");
+        center.type = "button";
+        center.textContent = t("maestro.center");
+        center.dataset.maestroWorkflow = flow.id;
+        center.dataset.maestroTask = task.taskId || task.id;
+        detail.append(center);
+      }
       if (task.description) {
         const descriptionBlock = document.createElement("div");
         descriptionBlock.className = "task-flow-description";
@@ -1011,6 +1025,35 @@ globalThis.AgentFactoryChat.taskFlow = function (host) {
   function unfinishedFlow(flow) {
     return flow.stopPending || flow.tasks.some(task => ["pending", "running", "verifying", "blocked"].includes(liveTaskStatus(task)));
   }
+  function taskAnimationKey(animation) {
+    const target = animation.effect?.target;
+    if (!target?.dataset?.animationKey || typeof animation.animationName !== "string") return;
+    return JSON.stringify([target.closest(".task-flow")?.dataset.flowId, target.dataset.animationKey,
+      animation.animationName, animation.effect.pseudoElement]);
+  }
+  function captureTaskAnimations() {
+    const clocks = new Map();
+    if (typeof runStageList.getAnimations !== "function") return clocks;
+    for (const animation of runStageList.getAnimations({ subtree: true })) {
+      const key = taskAnimationKey(animation);
+      if (key && Number.isFinite(animation.currentTime)) clocks.set(key, {
+        time: animation.currentTime, timelineTime: animation.timeline?.currentTime,
+        playing: animation.playState === "running", rate: animation.playbackRate
+      });
+    }
+    return clocks;
+  }
+  function restoreTaskAnimations(clocks) {
+    if (!clocks.size) return;
+    for (const animation of runStageList.getAnimations({ subtree: true })) {
+      const clock = clocks.get(taskAnimationKey(animation));
+      if (!clock) continue;
+      const now = animation.timeline?.currentTime;
+      const elapsed = clock.playing && animation.playState === "running" &&
+        Number.isFinite(now) && Number.isFinite(clock.timelineTime) ? Math.max(0, now - clock.timelineTime) : 0;
+      animation.currentTime = clock.time + elapsed * clock.rate;
+    }
+  }
   function renderWorkLoopPanel() {
     const allFlows = displayTaskFlows();
     const flows = visibleTaskFlows(allFlows);
@@ -1086,12 +1129,15 @@ globalThis.AgentFactoryChat.taskFlow = function (host) {
       return flow?.dataset.flowId + "/" + task?.dataset.taskId;
     }));
     runStageList.dataset.flowSignature = signature;
+    // Snapshot only the same task/run's existing CSS clocks; rebuilding rows must not restart them.
+    const animationClocks = captureTaskAnimations();
     runStageList.replaceChildren(...(active.length ? active.map(flow => createTaskFlow(flow, true)) : [historyEmpty("flow.empty")]));
     for (const item of runStageList.querySelectorAll(".task-flow-disclosure, .task-flow-single")) {
       const task = item.closest("[data-task-id]");
       const flow = item.closest(".task-flow");
       item.open = expandedTasks.has(flow?.dataset.flowId + "/" + task?.dataset.taskId);
     }
+    restoreTaskAnimations(animationClocks);
   }
   function runningRoleCounts() {
     const active = new Set(["accepted", "queued", "starting", "running", "verifying", "cancelling"]);

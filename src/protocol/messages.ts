@@ -12,6 +12,7 @@ interface ComposerSettingsFields {
   readonly agentFastModes?: import("../common/types/agent-models").AgentFastModes;
   readonly agentPermissions?: AgentPermissions;
   readonly reasoning?: "none" | "low" | "medium" | "high" | "xhigh" | "max";
+  readonly maestroMode?: boolean;
   readonly fastMode: boolean;
   readonly goalMode: boolean;
   readonly workLoopMode?: boolean;
@@ -31,7 +32,40 @@ export interface ProjectTaskEntry {
   readonly mainAgentId?: string;
   /** The long-term contract this brief executes, when it was bound to one. */
   readonly contract?: { readonly id: string; readonly version?: number };
-  readonly tasks: readonly { readonly id: string; readonly title: string; readonly description?: string; readonly workStatus?: string; readonly verificationStatus?: string }[];
+  readonly loopId?: string;
+  readonly workAgentId?: string;
+  readonly phase?: string;
+  readonly tasks: readonly ProjectTaskDetail[];
+}
+
+export interface ProjectTaskDetail {
+  readonly id: string;
+  readonly title: string;
+  readonly description?: string;
+  readonly completionCriteria?: string;
+  readonly workStatus?: string;
+  readonly verificationStatus?: string;
+  readonly allocation?: Readonly<Record<string, unknown>>;
+  readonly runs?: readonly ProjectTaskRun[];
+}
+export interface ProjectTaskRun {
+  readonly agentId: string;
+  readonly runId: string;
+  readonly role: "work" | "verification";
+  readonly status: string;
+  readonly model?: string;
+  readonly workProfile?: string;
+  readonly parentRunId?: string;
+  readonly acceptedAt?: string;
+  readonly startedAt?: string;
+  readonly finishedAt?: string;
+  readonly updatedAt?: string;
+  readonly attempt?: number;
+  readonly receipt?: { readonly outcome: string; readonly checksRun?: boolean; readonly checks?: string };
+  readonly usage?: Readonly<Record<string, number | null>>;
+  readonly context?: Readonly<Record<string, string | number | boolean | null>>;
+  readonly handoff?: { readonly slot?: string; readonly epoch?: number };
+  readonly errorCode?: string;
 }
 
 /** Captured submission intent and app-added guidance, never the full provider prompt. */
@@ -55,6 +89,8 @@ export interface ActivityDetails {
 
 export interface MessageSubmission {
   readonly backgroundContinuation?: boolean;
+  readonly runId?: string;
+  readonly acceptedAt?: string;
   readonly taskMode: import("../modules/chat/task-selection").TaskSelection;
   readonly businessMode: import("../common/types/business-mode").BusinessMode;
   readonly goal: boolean;
@@ -62,12 +98,14 @@ export interface MessageSubmission {
 }
 
 export type ClientMessage =
+  | { readonly type: "control.center.open"; readonly workflowId?: string; readonly taskId?: string }
   | { readonly type: "agent.preset.field"; readonly scope: import("../core/config/agent-settings").AgentPresetScope; readonly name: string; readonly role: import("../core/config/agent-settings").AgentRole; readonly field: "model" | "reasoningEffort" | "fast"; readonly value: string | boolean }
   | { readonly type: "agent.preset.fast"; readonly scope: import("../core/config/agent-settings").AgentPresetScope; readonly name: string; readonly role: import("../core/config/agent-settings").AgentRole; readonly model: string; readonly value: boolean }
   | { readonly type: "bot.interact"; readonly action: import("../modules/chat/companion").CompanionAction }
   | { readonly type: "contract.open"; readonly id: string }
   | { readonly type: "contracts.request" }
   | { readonly type: "project.tasks.request" }
+  | { readonly type: "project.task.open"; readonly workflowId: string; readonly taskId: string; readonly target: "chat" | "run" | "records" | "feedback" }
   | { readonly type: "agent.preset"; readonly action: "save" | "apply" | "copy" | "update" | "delete" | "rename" | "default"; readonly scope: "global" | "project" | "chat"; readonly name: string; readonly newName?: string; readonly sourceName?: string }
   | { readonly type: "agent.defaults.save"; readonly scope: "global" | "project"; readonly role: import("../core/config/agent-settings").AgentRole; readonly field: "model" | "reasoningEffort" | "fast"; readonly value: string | boolean }
   | { readonly type: "agent.defaults.fast"; readonly scope: "global" | "project"; readonly role: import("../core/config/agent-settings").AgentRole; readonly model: string; readonly value: boolean }
@@ -168,6 +206,7 @@ export interface AccountUsage {
 }
 
 export type HostMessage =
+  | { readonly type: "composer.reference"; readonly text: string }
   | { readonly type: "interview.question"; readonly question: InterviewQuestion; readonly runId?: string }
   | { readonly type: "usage.accounts"; readonly accounts: Readonly<Record<string, AccountUsage>> }
   | { readonly type: "agent.preset.field.result"; readonly error?: string }

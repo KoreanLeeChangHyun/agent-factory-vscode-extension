@@ -35,6 +35,20 @@ results in VS Code.
 - When you request migration, organize existing documents into the project structure
   while preserving their content and references. Accepted Specification documents
   can be synchronized into project Skills for agents to use in later work.
+- Open a `*.archify.json`, `*.architecture.json` or `*.sequence.json` file to see its
+  Archify architecture/sequence diagram immediately. Ordinary `*.json` files keep
+  their normal text editor. The JSON content selects the official diagram type.
+- **원문 편집** opens the same JSON in the text editor beside the diagram; saving
+  refreshes the view. Invalid JSON and unsupported types show an error while keeping
+  that source button available. **새로고침** retries a failed preview.
+- This viewer requires a trusted workspace, Python 3.10+, Node.js 18+, and a matching
+  companion plugin containing `scripts/archify.py`. On first use it downloads and
+  verifies pinned official Archify v3.0.1 in system temporary storage. It runs on the
+  workspace host, including Remote/SSH, without writing source JSON or project HTML.
+- The editor displays the generated SVG as an isolated image with theme support.
+  Its scripts and styles remain extension-local; standalone HTML viewer scripts are
+  not executed inside it. Keep Document JSON in its package `assets/`; use the plugin
+  render CLI separately when you need a retained HTML artifact.
 
 ### 2.2. Contracts → Work–Verification loop
 

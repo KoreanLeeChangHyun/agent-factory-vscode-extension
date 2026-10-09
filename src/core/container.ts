@@ -10,7 +10,7 @@ import { developmentPluginRoot, runtimeExecOverride } from "../infrastructure/ag
 import { defaultPythonCommand } from "../infrastructure/agent-factory/process-environment";
 import { affectsProviderPaths, affectsPluginUpdateMode, configuredDevelopmentPluginRoot } from "../infrastructure/vscode/provider-settings";
 
-type RuntimeConnection = { readonly available: true; readonly client: AgentFactoryClient } | { readonly available: false; readonly diagnostic: string };
+type RuntimeConnection = { readonly available: true; readonly client: AgentFactoryClient; readonly projectRoot: string } | { readonly available: false; readonly diagnostic: string };
 
 export interface Container {
   readonly chatPanels: ChatPanelManager;
@@ -24,8 +24,8 @@ export function createContainer(context: vscode.ExtensionContext): Container {
     context,
     templateRenderer,
     () => resolveStatusItems(vscodeConfiguration()),
-    async () => {
-      const projectRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+    async (boundProjectRoot?: string) => {
+      const projectRoot = boundProjectRoot ?? vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
       if (!projectRoot) {
         return { available: false, diagnostic: localize("host.workspace.required") };
       }
@@ -45,7 +45,7 @@ export function createContainer(context: vscode.ExtensionContext): Container {
         }, undefined, developmentRoot);
         const diagnosis = await client.diagnose();
         if (!diagnosis.available) return diagnosis;
-        return { available: true, client };
+        return { available: true, client, projectRoot };
       }, (connection) => connection.available);
     }
   );

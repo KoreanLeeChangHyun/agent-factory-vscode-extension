@@ -1,0 +1,15 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src data:; style-src {{cspSource}}; script-src 'nonce-{{nonce}}'; connect-src 'none';">
+  <link rel="stylesheet" href="{{styleUri}}">
+</head>
+<body>
+  <header><h1 id="title">Archify</h1><nav aria-label="도표 작업"><button id="source" type="button">원문 편집</button><button id="refresh" type="button">새로고침</button></nav></header>
+  <p id="status" role="status" aria-live="polite">도표를 준비하고 있습니다.</p>
+  <main id="diagram" tabindex="0" aria-label="렌더링된 도표" hidden><img id="image" alt=""></main>
+  <script nonce="{{nonce}}" src="{{scriptUri}}"></script>
+</body>
+</html>

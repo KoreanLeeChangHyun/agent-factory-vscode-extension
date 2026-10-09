@@ -796,7 +796,8 @@ test("real controller fallback reconciles failed or lost acceptance across resto
     assert.equal(calls.length, mode === "before-acceptance" ? 2 : 1, mode);
     if (calls.length === 2) assert.deepEqual(calls[0], calls[1], "Retry preserves request bytes and ID");
     assert.equal(storage.get(key)["work/child-run"].state, mode === "permanent" ? "blocked" : "accepted");
-    assert.equal(lookups.length, ["before-send", "before-acceptance", "lost-ack"].includes(mode) ? 1 : 0);
+    assert.equal(lookups.length, ["before-send", "before-acceptance", "lost-ack"].includes(mode) ? 2 : 1,
+      "The initial event also checks durable acceptance before submitting");
     assert.ok(notices.some(message => message.level === "error"));
   }
 });
@@ -944,6 +945,7 @@ test("concurrent panels claim each terminal workflow delivery once and retry rec
   } };
   const workflow = { loopId: 'loop-terminal', status: 'completed', workAgentId: 'work-terminal' };
   const client = { async listChildSessions() { await new Promise(resolve => setImmediate(resolve)); return []; },
+    async dispatchAcceptance() { return null; },
     async result() { return { status: "completed", text: "Delivered report" }; },
     async advanceWorkflows() { return [workflow]; } };
   const manager = new module.exports.ChatPanelManager(context, {}, () => [], async () => ({ available: true, client }));
@@ -979,6 +981,7 @@ function reportFixture() {
   } };
   const flow = { loopId: "loop-report-recovery", status: "completed", latestWorkRunId: "work-original" };
   const connect = async () => ({ available: true, client: {
+    async dispatchAcceptance() { return null; },
     async result() { return { status: "completed", text: "Reported exact result" }; }
   } });
   const manager = new module.exports.ChatPanelManager(context, {}, () => [], connect);
@@ -999,6 +1002,127 @@ function reportFixture() {
   };
   return { storage, calls, notices, context, connect, flow, manager, managed, key, legacyId, seed, deliver };
 }
+
+test("terminal child status changes deliver once each, including out-of-order replay", async () => {
+  const storage = new Map([["agentFactory.background.main-status", {}]]), calls = [], accepted = new Map();
+  const context = { workspaceState: { get: key => storage.get(key), async update(key, value) { storage.set(key, structuredClone(value)); } } };
+  const client = { async dispatchAcceptance(_agent, id) { return accepted.get(id); } };
+  const connect = async () => ({ available: true, client });
+  const manager = new module.exports.ChatPanelManager(context, {}, () => [], connect);
+  const managed = { state: { agentId: "main-status" }, controller: { runId: "report-status", async send(text, _images, execution, started) {
+    calls.push(JSON.parse(text.split("\n")[1]).status); accepted.set(execution.deliveryId, { runId: this.runId }); started();
+  } } };
+  const child = { agentId: "work-status", runId: "run-status", status: "needs-human-decision", taskMode: "work", role: "work" };
+  await manager.continueBackgroundWork(managed, [child]); await new Promise(resolve => setImmediate(resolve));
+  await manager.continueBackgroundWork(managed, [{ ...child, status: "cancelled" }]); await new Promise(resolve => setImmediate(resolve));
+  assert.deepEqual(calls, ["needs-human-decision", "cancelled"]);
+  const restored = new module.exports.ChatPanelManager(context, {}, () => [], connect);
+  await restored.continueBackgroundWork(managed, [child]);
+  await restored.continueBackgroundWork(managed, [{ ...child, status: "cancelled" }]);
+  assert.equal(calls.length, 2);
+});
+
+const lifecycleActions = [
+  { type: "task.stop", workflowId: "flow-late", taskId: "task-late", agentId: "work-late", runId: "run-late" },
+  { type: "workflow.close", workAgentId: "work-late", loopId: "loop-late" },
+  { type: "workflow.answer", workAgentId: "work-late", loopId: "loop-late", decisionId: "decision-late", questionHash: "a".repeat(64), answer: "Continue" },
+  { type: "workflow.decision", workAgentId: "work-late", loopId: "loop-late", decision: "stop" }
+];
+
+test("late workflow actions never target or update a switched conversation", async () => {
+  for (const message of lifecycleActions) for (const phase of ["connect", "result", "children", "error"]) {
+    const f = reportFixture(); const actions = [], posted = [];
+    let release, reached;
+    const waiting = new Promise(resolve => { reached = resolve; });
+    const wait = () => { reached(); return new Promise(resolve => { release = resolve; }); };
+    const action = async agent => {
+      actions.push(agent);
+      if (phase === "result" || phase === "error") await wait();
+      if (phase === "error") throw new Error("old conversation failure");
+      return { loopId: "loop-late", status: "cancelled" };
+    };
+    const client = { stopTask: action, closeWorkflow: action, answerWorkflow: action, decideRevisionLimit: action,
+      async listChildSessions() { if (phase === "children") await wait(); return []; } };
+    f.manager.connectRuntime = async () => { if (phase === "connect") await wait(); return { available: true, client }; };
+    f.manager.post = async (_panel, msg) => { posted.push(msg); };
+    const pending = f.manager.handleMessage(f.managed, message);
+    await waiting;
+    f.managed.state.agentId = "main-switched";
+    f.managed.state.conversationId = "conversation-switched";
+    release(); await pending;
+    assert.deepEqual(actions, phase === "connect" ? [] : ["main-report-recovery"], `${message.type}/${phase}`);
+    assert.deepEqual(posted, [], `${message.type}/${phase}: old state/error must not reach the new chat`);
+  }
+});
+
+test("identical rapid workflow actions invoke the runtime once and remain retryable after failure", async () => {
+  for (const message of lifecycleActions.slice(1)) {
+    const f = reportFixture(); let release, calls = 0;
+    const gate = new Promise(resolve => { release = resolve; });
+    const action = async () => { calls++; await gate; return { status: "cancelled" }; };
+    const client = { closeWorkflow: action, answerWorkflow: action, decideRevisionLimit: action, async listChildSessions() { return []; } };
+    f.manager.connectRuntime = async () => ({ available: true, client });
+    const first = f.manager.handleMessage(f.managed, message), second = f.manager.handleMessage(f.managed, message);
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(calls, 1, message.type);
+    release(); await Promise.all([first, second]);
+    client.closeWorkflow = client.answerWorkflow = client.decideRevisionLimit = async () => { calls++; throw new Error("transient failure"); };
+    await f.manager.handleMessage(f.managed, message);
+    await f.manager.handleMessage(f.managed, message);
+    assert.equal(calls, 3, "A finished or failed attempt must release its in-flight identity");
+  }
+});
+
+test("late report failures remain with their original conversation", async () => {
+  for (const delivery of ["workflow", "child"]) {
+    const f = reportFixture(); let release;
+    const gate = new Promise(resolve => { release = resolve; });
+    if (delivery === "workflow") {
+      f.manager.connectRuntime = async () => ({ available: true, client: { async dispatchAcceptance() { return undefined; },
+        async result() { await gate; throw new Error("old report result unavailable"); } } });
+      await f.deliver();
+    } else {
+      f.storage.set(`agentFactory.background.${f.managed.state.agentId}`, {});
+      f.managed.controller.send = async () => { await gate; throw new Error("old child report transport failure"); };
+      await f.manager.continueBackgroundWork(f.managed, [{ agentId: "work-late", runId: "run-late", role: "work", status: "completed", taskMode: "work" }]);
+    }
+    f.managed.state.agentId = "main-switched";
+    release(); await new Promise(resolve => setImmediate(resolve));
+    assert.deepEqual(f.notices, [], delivery);
+  }
+});
+
+test("panel runtime stays bound when the workspace starts returning another project's client", async () => {
+  const f = reportFixture(), calls = [];
+  const client = id => ({ async listChildSessions() { calls.push(id); return []; }, async advanceWorkflows() { return []; },
+    async listProjectTasks() { calls.push(`${id}:history`); return []; },
+    async deleteTask() { calls.push(`${id}:delete`); } });
+  f.managed.runtimeClient = client("original-project");
+  f.manager.connectRuntime = async () => ({ available: true, client: client("other-project") });
+  f.manager.scheduleAgentList = () => {};
+  await f.manager.sendAgentList(f.managed);
+  await f.manager.handleMessage(f.managed, { type: "project.tasks.request" });
+  const foreignNotices = [];
+  f.manager.panels.set("original", f.managed);
+  f.manager.panels.set("foreign", { state: { agentId: f.managed.state.agentId }, runtimeClient: client("other-project"),
+    panel: { webview: { async postMessage(message) { foreignNotices.push(message); } } } });
+  f.manager.sendAgentList = async () => {};
+  await f.manager.handleMessage(f.managed, { type: "task.delete", workflowId: "flow-original", taskId: "task-original" });
+  assert.deepEqual(calls, ["original-project", "original-project:history", "original-project:delete"]);
+  assert.deepEqual(foreignNotices, [], "Deleting one project's history cannot invalidate another project's cache");
+});
+
+test("project history failure arriving after deletion cannot replace the refreshed history", async () => {
+  const f = reportFixture();
+  let reject;
+  f.managed.runtimeClient = { listProjectTasks() { return new Promise((_resolve, fail) => { reject = fail; }); } };
+  const pending = f.manager.handleMessage(f.managed, { type: "project.tasks.request" });
+  await new Promise(resolve => setImmediate(resolve));
+  f.manager.taskHistoryRevision++;
+  reject(new Error("Old history read failed"));
+  await pending;
+  assert.deepEqual(f.notices, []);
+});
 
 test("worker questions reach Main once with their identity and conversation-only clarification guidance", async () => {
   const f = reportFixture();
@@ -1085,6 +1209,179 @@ test("ambiguous report failures retain the key and suppress duplicate error noti
   assert.equal(f.calls.length, 2); assert.equal(f.calls[0], f.calls[1]);
   assert.equal(f.notices.length, 1);
   assert.equal(f.storage.get(f.key)[f.flow.loopId].state, "prepared");
+});
+
+test("diagnostic refreshes do not repeat reports, but a new result or decision does", async () => {
+  const f = reportFixture();
+  f.flow.controlPlaneError = { code: "task_target_busy", message: "old diagnostic" };
+  await f.deliver();
+  f.flow.controlPlaneError = { message: "refreshed diagnostic", code: "task_target_busy" };
+  f.flow.terminalReason = { code: "work-completed", message: "different wording" };
+  const restored = new module.exports.ChatPanelManager(f.context, {}, () => [], f.connect);
+  await restored.reportWorkflowResults(f.managed, [f.flow]);
+  assert.equal(f.calls.length, 1);
+  f.flow.latestWorkRunId = "new-work";
+  await f.deliver();
+  assert.equal(f.calls.length, 2);
+  assert.notEqual(f.calls[0].id, f.calls[1].id);
+  f.flow.status = "needs-human-decision";
+  f.flow.pendingDecision = { id: "decision-new", questionHash: "question-one", status: "pending" };
+  await f.deliver();
+  f.flow.pendingDecision = { status: "pending", questionHash: "question-one", id: "decision-new" };
+  await f.deliver();
+  assert.equal(f.calls.length, 3);
+  f.flow.pendingDecision.questionHash = "question-two";
+  await f.deliver();
+  assert.equal(f.calls.length, 4);
+});
+
+test("cancelled, empty and failed Main reports stop automatic retry across restoration", async () => {
+  for (const result of [{ status: "cancelled", text: "" }, { status: "failed", text: "partial", error: { code: "provider_failed" } },
+    { status: "completed", text: "" }]) {
+    const f = reportFixture();
+    f.manager.connectRuntime = async () => ({ available: true, client: { async result() { return result; } } });
+    await f.deliver(); await f.deliver();
+    const restored = new module.exports.ChatPanelManager(f.context, {}, () => [], f.connect);
+    await restored.reportWorkflowResults(f.managed, [f.flow]);
+    assert.equal(f.calls.length, 1);
+    assert.equal(f.storage.get(f.key)[f.flow.loopId].state, "failed");
+  }
+  const f = reportFixture(); f.seed("failed", { runId: "cancelled-legacy" });
+  await f.deliver();
+  assert.equal(f.calls.length, 0, "Legacy failed attempts must not start a new numbered report");
+});
+
+test("lost report ACK is recovered by observing acceptance without replaying Main output", async () => {
+  const f = reportFixture();
+  f.managed.controller.send = async (_text, _images, execution) => {
+    f.calls.push(execution.deliveryId); throw new Error("ACK lost after runtime acceptance");
+  };
+  await f.deliver();
+  const lookups = [], results = [];
+  const restored = new module.exports.ChatPanelManager(f.context, {}, () => [], async () => ({ available: true, client: {
+    async dispatchAcceptance(agentId, id) { lookups.push([agentId, id]); return { agentId, runId: "accepted-report" }; },
+    async result(agentId, runId) { results.push([agentId, runId]); return { status: "completed", text: "already delivered" }; }
+  } }));
+  await restored.reportWorkflowResults(f.managed, [f.flow]);
+  await restored.reportWorkflowResults(f.managed, [f.flow]);
+  assert.equal(f.calls.length, 1);
+  assert.deepEqual(lookups, [[f.managed.state.agentId, f.calls[0]]]);
+  assert.deepEqual(results, [[f.managed.state.agentId, "accepted-report"]]);
+  assert.equal(f.storage.get(f.key)[f.flow.loopId].state, "completed");
+});
+
+test("successful conversation reset suppresses old workflows and children while new completion still arrives", async () => {
+  const f = reportFixture();
+  f.manager.ensureController = async () => {};
+  f.manager.rememberAgent = async () => {};
+  f.manager.scheduleAgentList = () => {};
+  f.managed.controller.resetConversation = async () => ({ conversationId: "conversation-new" });
+  f.manager.connectRuntime = async () => ({ available: true, client: {
+    async listChildSessions() { return []; }, async capabilities() { return {}; },
+    async result() { return { status: "completed", text: "delivered" }; }
+  } });
+  f.managed.state.conversationId = "conversation-old";
+  f.flow.parentConversationId = "conversation-old";
+  await f.manager.transitionConversation(f.managed);
+  assert.equal(f.managed.state.conversationId, "conversation-new");
+  await f.deliver();
+  f.storage.set(`agentFactory.background.${f.managed.state.agentId}`, {});
+  await f.manager.continueBackgroundWork(f.managed, [{ agentId: "work-old", runId: "run-old", taskMode: "work",
+    status: "completed", role: "work", parentConversationId: "conversation-old", currentConversation: false }]);
+  const restored = new module.exports.ChatPanelManager(f.context, {}, () => [], f.connect);
+  await restored.reportWorkflowResults(f.managed, [f.flow]);
+  assert.equal(f.calls.length, 0, "Reset must not inject the old completion into the new conversation");
+  f.flow.parentConversationId = "conversation-new"; f.flow.latestWorkRunId = "new-work";
+  await f.deliver(); await f.deliver();
+  assert.equal(f.calls.length, 1);
+});
+
+test("stale workflow refresh cannot deliver after reset or task history deletion", async () => {
+  for (const change of ["reset", "delete"]) {
+    const f = reportFixture();
+    let release;
+    f.manager.scheduleAgentList = () => {};
+    f.manager.connectRuntime = async () => ({ available: true, client: {
+      async listChildSessions() { await new Promise(resolve => { release = resolve; }); return []; },
+      async advanceWorkflows() { return [f.flow]; }
+    } });
+    const refresh = f.manager.sendAgentList(f.managed);
+    await new Promise(resolve => setImmediate(resolve));
+    if (change === "reset") f.managed.state.conversationId = "conversation-new";
+    else f.manager.taskHistoryRevision++;
+    release(); await refresh;
+    assert.equal(f.calls.length, 0, change);
+    assert.equal(f.storage.has(f.key), false);
+  }
+});
+
+test("deleting a task blocks new reports and invalidates an already prepared intent", async () => {
+  const f = reportFixture();
+  f.flow.workflow = { id: "flow-delete", tasks: [{ id: "task-delete" }] };
+  const deletingKey = `${f.managed.state.agentId}/flow-delete/task-delete`;
+  f.manager.taskDeletesPending.add(deletingKey);
+  await f.deliver();
+  assert.equal(f.calls.length, 0);
+  f.manager.taskDeletesPending.delete(deletingKey);
+  let release;
+  const update = f.context.workspaceState.update;
+  f.context.workspaceState.update = async (...args) => { await new Promise(resolve => { release = resolve; }); return update(...args); };
+  const preparing = f.manager.reportWorkflowResults(f.managed, [f.flow]);
+  await new Promise(resolve => setImmediate(resolve));
+  f.manager.taskDeletesPending.add(deletingKey);
+  f.manager.taskHistoryRevision++;
+  release(); await preparing;
+  assert.equal(f.calls.length, 0, "No controller send after a deletion races with durable intent storage");
+});
+
+test("simultaneous terminal workflows retain both durable acknowledgements", async () => {
+  const f = reportFixture();
+  const update = f.context.workspaceState.update;
+  f.context.workspaceState.update = async (...args) => { await new Promise(resolve => setImmediate(resolve)); return update(...args); };
+  const other = { ...f.managed, controller: { ...f.managed.controller } };
+  const flow2 = { ...f.flow, loopId: "loop-other", latestWorkRunId: "work-other" };
+  await Promise.all([f.manager.reportWorkflowResults(f.managed, [f.flow]), f.manager.reportWorkflowResults(other, [flow2])]);
+  for (let i = 0; i < 8; i++) await new Promise(resolve => setImmediate(resolve));
+  assert.deepEqual(Object.values(f.storage.get(f.key)).map(value => value.state), ["completed", "completed"]);
+  await f.manager.reportWorkflowResults(f.managed, [f.flow, flow2]);
+  assert.equal(f.calls.length, 2);
+});
+
+test("out-of-order duplicate completions use runtime acceptance even after the local latest event changes", async () => {
+  const f = reportFixture();
+  const accepted = new Map();
+  const client = { async dispatchAcceptance(_agent, id) { return accepted.get(id); },
+    async result() { return { status: "completed", text: "report" }; } };
+  const connect = async () => ({ available: true, client });
+  f.manager.connectRuntime = connect;
+  f.managed.controller.send = async (text, _images, execution, started) => {
+    f.calls.push({ text, id: execution.deliveryId });
+    accepted.set(execution.deliveryId, { runId: "report-" + f.calls.length });
+    f.managed.controller.runId = "report-" + f.calls.length; started();
+  };
+  const original = { ...f.flow };
+  await f.deliver();
+  f.flow.latestWorkRunId = "new-work";
+  await f.deliver();
+  assert.equal(f.calls.length, 2);
+  const restored = new module.exports.ChatPanelManager(f.context, {}, () => [], connect);
+  await restored.reportWorkflowResults(f.managed, [{ ...original, controlPlaneError: { code: "stale-diagnostic" } }]);
+  await restored.reportWorkflowResults(f.managed, [original]);
+  assert.equal(f.calls.length, 2, "An old accepted event must be observed, never replayed through the controller");
+  f.storage.clear();
+  await restored.reportWorkflowResults(f.managed, [original]);
+  assert.equal(f.calls.length, 2, "Runtime identity survives local Memento loss");
+});
+
+test("concurrent diagnostic variants claim the same completion event", async () => {
+  const f = reportFixture();
+  const other = { ...f.managed, controller: { ...f.managed.controller } };
+  await Promise.all([
+    f.manager.reportWorkflowResults(f.managed, [{ ...f.flow, controlPlaneError: { code: "busy", message: "first" } }]),
+    f.manager.reportWorkflowResults(other, [{ ...f.flow, controlPlaneError: { message: "second", code: "busy" } }])
+  ]);
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(f.calls.length, 1);
 });
 
 test("concurrent panels claim a legacy terminal child delivery once", async () => {

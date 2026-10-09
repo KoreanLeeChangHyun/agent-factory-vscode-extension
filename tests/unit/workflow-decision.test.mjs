@@ -88,6 +88,7 @@ test("continue authorizes three more revisions and stop closes the loop, each as
 test("the pause reaches the panel only from a runtime that advertises it; the loop start is the dispatch time", async t => {
   const advertised = await stoppedLoop(t);
   const [snapshot] = await advertised.client.advanceWorkflows("main-owner", advertised.children, false);
+  assert.equal(snapshot.parentConversationId, null, "Legacy parents remain in the pre-reset conversation");
   assert.deepEqual(snapshot.pause, PAUSE);
   assert.deepEqual(advertised.probes, ["main-owner"], "the conversation's own cached probe");
   assert.equal(snapshot.dispatchedAt, "2026-10-03T10:00:00Z", "an older runtime's snapshot has no createdAt; the loop state does");
@@ -110,6 +111,9 @@ test("the pause reaches the panel only from a runtime that advertises it; the lo
   const active = await stoppedLoop(t, { snapshot: { status: "active", pause: null } });
   assert.equal((await active.client.advanceWorkflows("main-owner", active.children, false))[0].pause, null);
   assert.deepEqual(active.probes, []);
+  const bounded = await stoppedLoop(t);
+  await writeFile(bounded.parent, JSON.stringify({ executionPolicy: bounded.policy, conversationId: "conversation-original" }));
+  assert.equal((await bounded.client.advanceWorkflows("main-owner", bounded.children, false))[0].parentConversationId, "conversation-original");
 });
 
 test("child sessions carry their run's acceptance time and keep the list order other views use", async t => {

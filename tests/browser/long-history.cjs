@@ -14,7 +14,8 @@ async function checkLongHistory(page) {
   const session = await page.context().newCDPSession(page);
   await session.send('HeapProfiler.collectGarbage');
   const before = await session.send('Runtime.getHeapUsage');
-  const result = await page.evaluate(() => {
+  const result = await page.evaluate(async () => {
+    const frame = () => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
     const times = [];
     const seen = new Set();
     // Walk every retained page: check exact contents, not only DOM counts.
@@ -30,10 +31,14 @@ async function checkLongHistory(page) {
       if (end > 200) {
         const start = performance.now();
         document.querySelector('.history-pages button').click();
+        await frame();
         times.push(performance.now() - start);
       }
     }
-    for (let i = 0; i < 49; i++) document.querySelector('.history-pages button:last-child').click();
+    for (let i = 0; i < 49; i++) {
+      document.querySelector('.history-pages button:last-child').click();
+      await frame();
+    }
     times.sort((a, b) => a - b);
     return { messagesChecked: seen.size, pagesChecked: 50, medianNavigationMs: times[24], p95NavigationMs: times[46] };
   });

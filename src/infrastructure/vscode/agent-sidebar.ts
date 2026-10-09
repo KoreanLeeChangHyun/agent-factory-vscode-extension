@@ -59,6 +59,7 @@ export class AgentSidebar implements vscode.TreeDataProvider<Node>, vscode.TreeD
       })
     );
     command("refresh", () => this.refresh());
+    command("center", node => panels.openControlCenter(node?.kind === "agent" ? node.agent.state : undefined));
     command("open", node => node?.kind === "agent" ? panels.openSidebarAgent(node.agent.state) : undefined);
     command("rename", node => this.rename(node));
     command("newGroup", () => this.newGroup());

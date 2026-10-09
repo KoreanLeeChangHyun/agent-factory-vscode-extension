@@ -651,6 +651,8 @@
 /* Float the companion above the composer without reserving transcript height. */
 .composer-topline { position: relative; display: flex; align-items: flex-end; gap: 8px; }
 .composer-status-column { flex: 1 1 0; min-width: 0; }
+.composer-topline:has(.run-status.is-expanded) { flex-wrap: wrap; }
+.composer-topline:has(.run-status.is-expanded) .composer-status-column { flex-basis: 100%; }
 
 
 .deploy-controls .setting-option { width: 100%; }
@@ -661,6 +663,28 @@
 .composer-topline:has(#agent-progress:not([hidden])) .run-status:not(.is-expanded) .run-status-toggle { max-width: calc(max(150px, 50%) - 8px); }
 .agent-progress { --run-status-active-color: var(--run-status-text-color); --run-status-text-color: var(--vscode-textLink-foreground, var(--af-color-accent)); --run-status-scan-color: color-mix(in srgb, var(--run-status-text-color) 35%, var(--vscode-editor-foreground) 65%); color: var(--run-status-text-color); display: flex; align-items: center; gap: 8px; min-width: 0; font-size: 12px; min-height: 24px; }
 .agent-progress[hidden] { display: none; }
+/* Submission and response feedback reserve a readable row above the controls. */
+.composer-topline:has(.agent-progress-dock > #agent-progress[data-feedback]:not([data-feedback=""]):not([hidden])) { flex-wrap: wrap; }
+.agent-progress-dock:has(> #agent-progress[data-feedback]:not([data-feedback=""]):not([hidden])) {
+  position: static;
+  order: -1;
+  flex: 0 0 100%;
+  max-width: 100%;
+}
+.agent-progress[data-feedback]:not([data-feedback=""]) .run-status-label {
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+.run-status.is-expanded > #agent-progress[data-feedback]:not([data-feedback=""]) {
+  flex: 0 0 100%;
+  max-width: 100%;
+  order: -1;
+  margin-inline-end: 0;
+}
+@media (max-width: 480px) {
+  .composer-topline:has(#agent-progress[data-feedback]:not([data-feedback=""]):not([hidden])) { flex-wrap: wrap; }
+  .composer-topline:has(#agent-progress[data-feedback]:not([data-feedback=""]):not([hidden])) .composer-status-column { flex-basis: 100%; }
+}
 .agent-progress .run-status-pulse { background: var(--run-status-text-color); }
 .composer-status-column .run-status-toggle { margin-left: auto; }
 

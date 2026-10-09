@@ -2,7 +2,7 @@ const assert = require('node:assert/strict');
 
 async function checkQueueConfirmation(page) {
   const capability = { model: true, reasoning: true, fast: true, goal: true, taskModes: ['direct', 'work'] };
-  const post = message => page.evaluate(message => window.postMessage(message, '*'), message);
+  const post = message => page.evaluate(data => window.dispatchEvent(new MessageEvent('message', { data })), message);
   await post({ type: 'host.initialize', panelId: 'queue-test', role: 'main', runtimeAvailable: true, botsEnabled: false, botsAvailable: false, companionAvailable: false, executionMode: 'workspace-write', capabilities: { submit: capability, send: capability } });
   const sends = () => page.evaluate(() => window.sentMessages.filter(message => message.type === 'chat.send'));
   await page.locator('#prompt').fill('holding');
@@ -34,7 +34,7 @@ async function checkQueueConfirmation(page) {
   assert.equal(original.execution.taskMode, 'work');
   assert.equal(original.execution.goal, false);
   await post({ type: 'chat.rejected', id: original.id });
-  await page.locator('#pending-queue-toggle').click();
+  if (await page.locator('#pending-queue-toggle').getAttribute('aria-expanded') !== 'true') await page.locator('#pending-queue-toggle').click();
   await page.locator('[data-queue-recover]').click();
   assert.equal(await page.locator('#prompt').inputValue(), original.text);
   await page.locator('#send-button').click();

@@ -17,6 +17,7 @@
     "workspace"
   ],
   "activationEvents": [
+    "onCustomEditor:agentFactory.archify",
     "onStartupFinished",
     "onCommand:agentFactory.mainChat.open",
     "onCommand:agentFactory.mainChat.resume",
@@ -28,6 +29,18 @@
   ],
   "main": "./dist/extension.js",
   "contributes": {
+    "customEditors": [
+      {
+        "viewType": "agentFactory.archify",
+        "displayName": "Archify Diagram",
+        "selector": [
+          { "filenamePattern": "*.archify.json" },
+          { "filenamePattern": "*.architecture.json" },
+          { "filenamePattern": "*.sequence.json" }
+        ],
+        "priority": "default"
+      }
+    ],
     "commands": [
       {
         "command": "agentFactory.mainChat.open",
@@ -111,10 +124,17 @@
         "title": "%agentFactory.sidebar.restore.title%",
         "category": "Agent Factory",
         "icon": "$(discard)"
+      },
+      {
+        "command": "agentFactory.sidebar.center",
+        "title": "%agentFactory.sidebar.center.title%",
+        "category": "Agent Factory",
+        "icon": "$(dashboard)"
       }
     ],
     "menus": {
       "editor/title": [
+        { "command": "agentFactory.sidebar.center", "when": "activeWebviewPanelId == agentFactory.mainChat", "group": "navigation@2" },
         {
           "command": "agentFactory.mainChat.open",
           "when": "activeWebviewPanelId == agentFactory.mainChat",
@@ -157,6 +177,11 @@
           "command": "agentFactory.sidebar.restore",
           "when": "view == agentFactory.agents",
           "group": "navigation@4"
+        },
+        {
+          "command": "agentFactory.sidebar.center",
+          "when": "view == agentFactory.agents",
+          "group": "navigation"
         }
       ],
       "view/item/context": [
@@ -164,6 +189,11 @@
           "command": "agentFactory.sidebar.rename",
           "when": "view == agentFactory.agents && viewItem == agentFactoryAgent",
           "group": "inline@1"
+        },
+        {
+          "command": "agentFactory.sidebar.delete",
+          "when": "view == agentFactory.agents && viewItem == agentFactoryAgent",
+          "group": "inline@2"
         },
         {
           "command": "agentFactory.sidebar.move",

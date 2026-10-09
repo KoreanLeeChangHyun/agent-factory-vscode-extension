@@ -3,7 +3,6 @@
   "agentFactory.mainChat.botCharacter.description": "Bot character used across chats.",
   "agentFactory.mainChat.lumiPrompt.description": "Lumi prompt. Empty uses Lumi’s default.",
   "agentFactory.mainChat.factoryBotPrompt.description": "Factory Bot prompt. Until configured, preserves the legacy bot prompt.",
-
   "agentFactory.mainChat.botModel.description": "Shared bot conversation model. Empty uses Codex Luna with Claude Haiku fallback when Codex is not installed.",
   "agentFactory.mainChat.botPrompt.description": "Prompt for Luna companion conversations. Leave empty to use the default. Applies to the next bot message.",
   "agentFactory.mainChat.open.title": "Add Main Agent Chat",
@@ -52,5 +51,6 @@
   "agentFactory.agents.verification.model.description": "Verification agent model for this scope. New projects copy global settings, and new chats copy project settings.",
   "agentFactory.agents.verification.reasoningEffort.description": "Verification agent reasoning effort for this scope. Copied settings remain independent.",
   "agentFactory.agents.verification.fast.description": "Use the Codex Fast service tier for Verification in this scope. This does not change reasoning effort.",
-  "agentFactory.workUnits.warnDefaultBranch.description": "Show a repository-specific notice when working directly on main/master."
+  "agentFactory.workUnits.warnDefaultBranch.description": "Show a repository-specific notice when working directly on main/master.",
+  "agentFactory.sidebar.center.title": "Control Center"
 }

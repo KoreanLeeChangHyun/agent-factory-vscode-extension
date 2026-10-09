@@ -50,8 +50,8 @@ async function main() {
   let browser;
   const server = http.createServer((request, response) => {
     const url = new URL(request.url, 'http://localhost');
-    if (url.pathname === '/' || url.pathname === '/gallery') {
-      let html = fs.readFileSync(path.join(root, url.pathname === '/gallery' ? 'templates/loading-animation-gallery.html' : 'templates/chat.html'), 'utf8');
+    if (url.pathname === '/' || url.pathname === '/gallery' || url.pathname === '/center') {
+      let html = fs.readFileSync(path.join(root, url.pathname === '/gallery' ? 'templates/loading-animation-gallery.html' : url.pathname === '/center' ? 'templates/control-center.html' : 'templates/chat.html'), 'utf8');
       for (const [key, value] of Object.entries({
         hostLanguage: ["ko", "en", "fr"].includes(url.searchParams.get("lang")) ? url.searchParams.get("lang") : "en", cspSource: "'self'", nonce: 'browser-regression', styleUri: url.pathname === '/gallery' ? '/static/css/loading-animation-gallery.css' : '/static/css/chat.css',
         localizationScriptUri: '/static/js/localization.js', chatModuleBaseUri: '/static/js', chatStyleBaseUri: '/static/css', scriptUri: url.pathname === '/gallery' ? '/static/js/loading-animation-gallery.js' : '/static/js/chat.js', markdownScriptUri: '/static/vendor/markdown-it.min.js',
@@ -99,6 +99,12 @@ async function main() {
     await page.goto('http://127.0.0.1:' + server.address().port);
     // A startup exception (e.g. a TDZ access) stops chat.js entirely; fail here instead of timing out in a later check.
     assert.deepEqual(pageErrors, [], 'chat.js threw during startup');
+    if (process.argv.includes('--maestro-only')) {
+      await require('./maestro.cjs').checkMaestro(page);
+      assert.deepEqual(pageErrors, [], 'Maestro view caused a browser error');
+      console.log('Maestro selection, runtime projection, navigation, restoration and responsive checks passed.');
+      return;
+    }
     if (process.argv.includes('--queue-confirmation-only')) {
       await checkQueueConfirmation(page);
       assert.deepEqual(pageErrors, [], 'queue confirmation caused a browser error');
@@ -118,6 +124,11 @@ async function main() {
       await require('./task-flow.cjs').checkTaskFlowStates(page);
       assert.deepEqual(errors, []);
       console.log('Task flow state own checks passed');
+      return;
+    }
+    if (process.argv.includes('--task-animation-only')) {
+      await require('./task-animation.cjs').checkTaskAnimation(page);
+      assert.deepEqual(errors, []);
       return;
     }
     if (process.argv.includes('--overlay-state-only')) {
@@ -197,6 +208,27 @@ async function main() {
       assert.deepEqual(errors, []);
       return;
     }
+    if (process.argv.includes('--history-controls-only')) {
+      await require('./history-controls.cjs').checkHistoryControls(page);
+      assert.deepEqual(errors, []);
+      return;
+    }
+    if (process.argv.includes('--rendering-feedback-only')) {
+      await require('./rendering-feedback.cjs').checkRenderingFeedback(page);
+      assert.deepEqual(errors, []);
+      return;
+    }
+    if (process.argv.includes('--ui-efficiency-only')) {
+      await require('./ui-efficiency.cjs').checkUiEfficiency(page);
+      assert.deepEqual(errors, []);
+      return;
+    }
+    if (process.argv.includes('--auto-scroll-only')) {
+      await checkAutoScroll(page);
+      assert.deepEqual(errors, []);
+      console.log('Auto-scroll own checks passed');
+      return;
+    }
     if (process.argv.includes('--rendering-throughput-only')) {
       await require('./rendering-throughput.cjs').checkRenderingThroughput(page);
       assert.deepEqual(errors, []);
@@ -256,9 +288,11 @@ async function main() {
       await page.waitForFunction(() => document.querySelector('.message-assistant:last-child')?.textContent.includes('Paged resource 499'));
       assert.equal(await page.locator('#timeline .message').count(), 200, 'Long history has a bounded DOM');
       await page.locator('.history-pages button').first().click();
+      await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
       assert.equal(await page.locator('#timeline .message').count(), 200);
       assert.equal(await page.locator('#timeline').textContent().then(text => text.includes('Paged resource 499')), false);
       await page.locator('.history-pages button').last().click();
+      await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
       assert.equal(await page.locator('.message-assistant:last-child').textContent().then(text => text.includes('Paged resource 499')), true);
       if (process.env.AF_RESOURCE_REPORT) {
         const session = await page.context().newCDPSession(page);

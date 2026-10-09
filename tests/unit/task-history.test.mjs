@@ -67,8 +67,10 @@ test("real Host client deletes runtime files and fresh clients cannot restore th
   };
   const parent = join(binding.agentsRoot, "main-history", "runs", "run-parent");
   const worker = join(binding.agentsRoot, "work-history");
-  await store(join(binding.agentsRoot, "main-history", "session.json"), { role: "main" });
-  await store(join(parent, "state.json"), { role: "main" });
+  await store(join(binding.agentsRoot, "main-history", "session.json"), { role: "main", agentId: "main-history",
+    projectRoot: project, conversationId: "conversation-old" });
+  await store(join(worker, "session.json"), { role: "work", agentId: "work-history" });
+  await store(join(parent, "state.json"), { role: "main", conversationId: "conversation-old", taskMode: "work" });
   await store(join(parent, "events.jsonl"), "Main conversation remains\n");
   for (const [workflowId, taskId, runId, loopId] of [["flow-delete", "task-delete", "run-delete", "loop-delete"],
     ["flow-keep", "task-keep", "run-keep", "loop-keep"]]) {
@@ -85,6 +87,15 @@ test("real Host client deletes runtime files and fresh clients cannot restore th
     return value;
   };
   const original = client();
+  const [beforeReset] = await original.listChildSessions("main-history");
+  assert.equal(beforeReset.parentConversationId, "conversation-old");
+  assert.equal(beforeReset.currentConversation, true);
+  await original.resetConversation("main-history");
+  const [afterReset] = await original.listChildSessions("main-history");
+  assert.equal(afterReset.parentConversationId, "conversation-old");
+  assert.equal(afterReset.currentConversation, false, "Reset invalidates the child cache without losing historical ownership");
+  assert.equal((await client().listChildSessions("main-history"))[0].currentConversation, false,
+    "A fresh Host also resolves the reset boundary from runtime files");
   assert.deepEqual((await original.listProjectTasks()).map(entry => entry.id).sort(), ["flow-delete", "flow-keep"]);
   const deleted = await original.deleteTask("main-history", "flow-delete", "task-delete");
   assert.equal(deleted.kind, "task-history-deleted");
@@ -93,5 +104,9 @@ test("real Host client deletes runtime files and fresh clients cannot restore th
   assert.equal(await readFile(join(worker, "runs", "run-keep", "result.md"), "utf8"), "task-keep");
   assert.equal(await readFile(join(parent, "events.jsonl"), "utf8"), "Main conversation remains\n");
   assert.equal(JSON.parse(await readFile(join(parent, "children", "work-history.json"), "utf8")).runId, "run-keep");
-  for (const fresh of [original, client()]) assert.deepEqual((await fresh.listProjectTasks()).map(entry => entry.id), ["flow-keep"]);
+  for (const fresh of [original, client()]) {
+    assert.deepEqual((await fresh.listProjectTasks()).map(entry => entry.id), ["flow-keep"]);
+    assert.equal((await fresh.listChildSessions("main-history"))[0].runId, "run-keep",
+      "A deleted completion cannot re-enter through old child references");
+  }
 });

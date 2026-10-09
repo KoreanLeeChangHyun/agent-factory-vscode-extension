@@ -55,29 +55,22 @@ test("added Korean and English decision, discard and negation expressions", () =
   assert.deepEqual(irreversibleOperations("Uncommitted changes stay untouched; the generated file is removed."), []);
 });
 
-test("approval message follows the UI language and keeps the quote and command names verbatim", () => {
-  const request = "Shall I update both documents?";
-  const english = approvalMessage("run-en", request, "en");
-  assert.match(english, /run run-en/);
-  assert.match(english, /Approves: “Shall I update both documents\?”/);
-  assert.match(english, /git checkout·restore·reset·clean/);
-  assert.match(english, /not included in this approval/);
-  assert.doesNotMatch(english, /[가-힣]/);
-  const korean = approvalMessage("run-ko", request, "ko");
-  assert.match(korean, /승인 대상: “Shall I update both documents\?”/);
-  assert.match(korean, /git checkout·restore·reset·clean/);
-  assert.doesNotMatch(approvalMessage("run-en", undefined, "en"), /Approves|[가-힣]/);
-});
-
-test("approval message names the response run and the quoted request, excluding irreversible work", () => {
-  const scoped = approvalMessage("run-1", "이 범위로 구현을 진행할까요?", "ko");
-  assert.match(scoped, /run run-1/);
-  assert.match(scoped, /승인 대상: “이 범위로 구현을 진행할까요\?”/);
-  assert.match(scoped, /제안한 범위와 조건대로 진행하세요/);
-  assert.match(scoped, /되돌릴 수 없는 작업.*포함되지 않습니다/);
-  const unnamed = approvalMessage("run-2", undefined, "ko");
-  assert.match(unnamed, /run run-2/);
-  assert.doesNotMatch(unnamed, /승인 대상/);
+test("approval message preserves its run, quote and irreversible boundary in each UI language", () => {
+  for (const [language, label, boundary] of [
+    ["en", "Approves", /not included in this approval/],
+    ["ko", "승인 대상", /되돌릴 수 없는 작업.*포함되지 않습니다/]
+  ]) {
+    for (const request of ["Shall I update both documents?", "이 범위로 구현을 진행할까요?", undefined]) {
+      const message = approvalMessage(`run-${language}`, request, language);
+      assert.match(message, new RegExp(`run run-${language}`));
+      assert.match(message, /git checkout·restore·reset·clean/);
+      assert.match(message, boundary);
+      if (request) assert.ok(message.includes(`${label}: “${request}”`));
+      else assert.ok(!message.includes(label));
+      if (language === "en") assert.doesNotMatch(message.replace(request ?? "", ""), /[가-힣]/);
+      else assert.match(message, /제안한 범위와 조건대로 진행하세요/);
+    }
+  }
 });
 
 test("controller sends the approval target and refuses one-click approval of irreversible proposals", async () => {
@@ -106,19 +99,15 @@ test("controller sends the approval target and refuses one-click approval of irr
   assert.equal(sent.length, 0);
 
   resultText = "문서 두 개를 갱신하는 범위로 Work를 진행할까요?";
-  const allowed = new ChatSessionController(runtime, events, undefined, { pollIntervalMs: 0, maxPolls: 1 });
-  await allowed.send("task", [], {});
-  assert.equal(decisions.at(-1)[1], true);
-  assert.equal(allowed.approveDecision("proposal-run", {}, "ko"), true);
-  await new Promise(resolve => setImmediate(resolve));
-  assert.match(human[0], /run proposal-run/);
-  assert.match(human[0], /승인 대상: “문서 두 개를 갱신하는 범위로 Work를 진행할까요\?”/);
-  assert.ok(sent[0].startsWith(human[0]));
-
-  const english = new ChatSessionController(runtime, events, undefined, { pollIntervalMs: 0, maxPolls: 1 });
-  await english.send("task", [], {});
-  assert.equal(english.approveDecision("proposal-run", {}, "en"), true);
-  await new Promise(resolve => setImmediate(resolve));
-  assert.match(human[1], /Approves: “문서 두 개를 갱신하는 범위로 Work를 진행할까요\?”/);
-  assert.match(human[1], /^Proceed only with/);
+  for (const [language, label] of [["ko", "승인 대상"], ["en", "Approves"]]) {
+    const allowed = new ChatSessionController(runtime, events, undefined, { pollIntervalMs: 0, maxPolls: 1 });
+    await allowed.send("task", [], {});
+    assert.equal(decisions.at(-1)[1], true);
+    assert.equal(allowed.approveDecision("proposal-run", {}, language), true);
+    await new Promise(resolve => setImmediate(resolve));
+    assert.match(human.at(-1), /run proposal-run/);
+    assert.ok(human.at(-1).includes(`${label}: “문서 두 개를 갱신하는 범위로 Work를 진행할까요?”`));
+    assert.ok(sent.at(-1).startsWith(human.at(-1)));
+    if (language === "en") assert.match(human.at(-1), /^Proceed only with/);
+  }
 });

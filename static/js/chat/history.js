@@ -94,18 +94,43 @@ globalThis.AgentFactoryChat.history = function (host) {
   let selectedConversationId;
   let conversationBefore;
   let conversationAppending = false;
+  let conversationPending = false;
+  const conversationStatus = document.createElement("p");
+  conversationStatus.className = "history-feedback";
+  conversationStatus.setAttribute("role", "status");
+  conversationStatus.setAttribute("aria-live", "polite");
+  conversationStatus.hidden = true;
+  const conversationRetry = document.createElement("button");
+  conversationRetry.type = "button";
+  conversationRetry.className = "history-control";
+  conversationRetry.textContent = t("feedback.history.retry");
+  conversationRetry.hidden = true;
+  conversationOlder.classList.add("history-control");
+  conversationMessages.before(conversationStatus, conversationRetry);
+  conversationRetry.addEventListener("click", () => readSavedConversation(conversationAppending));
   conversationList.append(historyEmpty("ui.conversation.empty"));
   document.getElementById("conversation-reader-close").addEventListener("click", () => conversationReader.close());
   conversationReader.addEventListener("close", function () {
     conversationReadId++;
+    conversationPending = false;
+    conversationMessages.setAttribute("aria-busy", "false");
+    conversationStatus.hidden = true;
+    conversationRetry.hidden = true;
     questionButton.focus();
   });
   conversationOlder.addEventListener("click", function () { readSavedConversation(true); });
 
 
   function readSavedConversation(append) {
+    if (conversationPending) return;
+    conversationPending = true;
     conversationAppending = append;
     conversationOlder.disabled = true;
+    conversationRetry.disabled = true;
+    conversationStatus.hidden = false;
+    conversationStatus.textContent = t("feedback.history.waiting");
+    conversationMessages.setAttribute("aria-busy", "true");
+    if (append) conversationOlder.textContent = t("ui.conversation.loading");
     if (!append) conversationMessages.replaceChildren(historyEmpty("ui.conversation.loading"));
     vscode.postMessage({ type: "conversation.read", conversationId: selectedConversationId,
       requestId: "conversation-read-" + (++conversationReadId), ...(append && conversationBefore ? { before: conversationBefore } : {}) });
@@ -139,17 +164,21 @@ globalThis.AgentFactoryChat.history = function (host) {
   }
 
   function showSavedConversation(message) {
-    if (!conversationReader.open || message.requestId !== "conversation-read-" + conversationReadId) return;
+    if (!conversationReader.open || !conversationPending || message.requestId !== "conversation-read-" + conversationReadId) return;
+    conversationPending = false;
+    conversationMessages.setAttribute("aria-busy", "false");
     conversationOlder.disabled = false;
+    conversationOlder.textContent = t("ui.history.older");
+    conversationRetry.disabled = false;
+    conversationRetry.hidden = !message.error;
     if (message.error) {
-      const error = historyEmpty("ui.conversation.empty");
-      error.textContent = t("ui.conversation.failed", message.error);
-      if (conversationAppending) conversationMessages.prepend(error);
-      else conversationMessages.replaceChildren(error);
+      conversationStatus.textContent = t("ui.conversation.failed", message.error);
+      if (!conversationAppending) conversationMessages.replaceChildren();
       return;
     }
     if (!conversationAppending) conversationMessages.replaceChildren();
     const fragment = document.createDocumentFragment();
+    let applied = 0;
     for (const item of message.history.messages) {
       if (item.type === "user" && item.submission?.backgroundContinuation === true && item.text === "") continue;
       const article = document.createElement("article");
@@ -160,8 +189,10 @@ globalThis.AgentFactoryChat.history = function (host) {
       else { content.className = "history-user-text"; content.textContent = item.text; }
       article.append(role, content);
       fragment.append(article);
+      applied++;
     }
     conversationMessages.prepend(fragment);
+    conversationStatus.textContent = applied ? t("feedback.history.received", applied) : t("feedback.history.unchanged");
     conversationBefore = message.history.nextBefore;
     conversationOlder.hidden = !conversationBefore;
     if (!conversationMessages.children.length && !conversationBefore) conversationMessages.append(historyEmpty("ui.conversation.empty"));
@@ -175,7 +206,8 @@ globalThis.AgentFactoryChat.history = function (host) {
     const queue = document.getElementById("pending-queue-toggle");
     const queueWidth = queue.hidden ? 0 : queue.getBoundingClientRect().width + parseFloat(getComputedStyle(queue).marginRight) + 8;
     status.style.setProperty("--queue-header-width", queueWidth + "px");
-    const available = status.clientWidth - (progress.hidden ? 0 : progress.getBoundingClientRect().width + 8) - queueWidth;
+    const separateFeedbackRow = Boolean(progress.dataset.feedback);
+    const available = status.clientWidth - (progress.hidden || separateFeedbackRow ? 0 : progress.getBoundingClientRect().width + 8) - queueWidth;
     actions.classList.toggle("is-compact", available < 430);
     status.style.setProperty("--workflow-header-width", Math.max(36, available) + "px");
     positionHistory("task-history");

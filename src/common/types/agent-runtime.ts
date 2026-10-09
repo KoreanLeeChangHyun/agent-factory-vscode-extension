@@ -50,6 +50,8 @@ export type ExecutionMode = "cli-default" | "workspace-write" | "danger-full-acc
 export const DISPATCH_ID = /^dispatch-[A-Za-z0-9][A-Za-z0-9._:-]{0,127}(?![\s\S])/;
 
 export interface ExecutionOptions {
+  readonly messageId?: string;
+  readonly receivedAt?: string;
   /** Host-owned idempotency identity for a durable engine-result delivery. */
   readonly deliveryId?: string;
   readonly inspectionOnly?: boolean;

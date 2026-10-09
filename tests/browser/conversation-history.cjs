@@ -140,6 +140,7 @@ async function checkConversationHistory(page) {
   await card.locator('.managed-agent-open').click();
   assert.deepEqual(await page.evaluate(() => window.sentMessages.filter(item => item.type === 'agent.open').at(-1)),
     { type: 'agent.open', agentId: child.agentId });
+  await page.waitForFunction(loopId => window.saved.workflows?.some(item => item.loopId === loopId), workflow.loopId);
   assert.deepEqual(await page.evaluate(() => window.saved.workflows), [workflow], 'Loop and receipt identities remain unchanged');
   assert.equal(await page.locator('#timeline [data-id="history-user-engine"]').count(), 0);
   assert.match(await page.locator('#timeline [data-id="history-result-engine"]').textContent(), /Preserved Main result/);

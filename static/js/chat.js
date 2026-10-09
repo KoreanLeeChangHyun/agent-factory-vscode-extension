@@ -209,7 +209,7 @@
       return item && !item.pending && !item.previewUri?.startsWith("blob:") && item.data === undefined;
     }) : [],
     startedMessageIds: Array.isArray(saved?.startedMessageIds) ? saved.startedMessageIds : [],
-    pendingRequests: Array.isArray(saved?.pendingRequests) ? saved.pendingRequests : [],
+    pendingRequests: Array.isArray(saved?.pendingRequests) ? saved.pendingRequests.map(item => ({ ...item, hostAcknowledged: false })) : [],
     recoveredRequest: saved?.recoveredRequest,
     timeline: collapseAdjacentReads(collapseCancellationNotices(Array.isArray(saved?.timeline) ? saved.timeline : [])),
     statusItems: normalizeStatusItems(saved?.statusItems),
@@ -233,6 +233,7 @@
     fastMode: saved?.fastMode === true,
     goalMode: false,
     businessMode: "normal",
+    maestroMode: saved?.maestroMode === true,
     taskMode: "direct",
     workLoopMode: false,
     queueCount: 0,
@@ -315,6 +316,10 @@
     agentsMenu, state, renderStatusBar: chatStatusBar.renderStatusBar, vscode, agentsList, t,
     closeWorktreeMenu() { if (openSettingId === "worktree") closeSettingMenu(false); },
     get chatTaskFlow() { return chatTaskFlow; }
+  });
+  document.addEventListener("click", event => {
+    const target = event.target.closest?.("[data-maestro-workflow]");
+    if (target) vscode.postMessage({ type: "control.center.open", workflowId: target.dataset.maestroWorkflow, taskId: target.dataset.maestroTask });
   });
   const chatTaskFlow = globalThis.AgentFactoryChat.taskFlow({
     indexedTimeline, state, t, vscode, runStageList, selectQuestionTab: chatNavigation.selectQuestionTab, historyEmpty, runDetails,
@@ -702,7 +707,8 @@
   });
 
   function updateJumpToBottom() {
-    jumpToBottom.hidden = timeline.scrollHeight - timeline.clientHeight - timeline.scrollTop <= 24;
+    const hidden = timeline.scrollHeight - timeline.clientHeight - timeline.scrollTop <= 24;
+    if (jumpToBottom.hidden !== hidden) jumpToBottom.hidden = hidden;
   }
 
   jumpToBottom.addEventListener("click", function () {
@@ -727,18 +733,20 @@
   });
   timeline.addEventListener("scroll", function () {
     const top = timeline.scrollTop;
-    const distance = timeline.scrollHeight - timeline.clientHeight - top;
+    const viewportHeight = timeline.clientHeight;
+    const distance = timeline.scrollHeight - viewportHeight - top;
     if (top < timelineScrollTop && distance > 1) {
       // Clamping and anchoring keep the bottom; moving away from it is a reader scrolling up.
       followLatest = false;
-    } else if (timelineViewportHeight === timeline.clientHeight) {
+    } else if (timelineViewportHeight === viewportHeight) {
       // Layout changes can emit scroll events before ResizeObserver runs.
       // Preserve the previous follow intent until the new viewport is handled.
       followLatest = distance <= 24;
     }
     timelineScrollTop = top;
     updateAutoScrollControl();
-    updateJumpToBottom();
+    const hidden = distance <= 24;
+    if (jumpToBottom.hidden !== hidden) jumpToBottom.hidden = hidden;
   }, { passive: true });
   timeline.addEventListener("toggle", updateJumpToBottom, true);
   timeline.addEventListener("load", updateJumpToBottom, true);
@@ -978,6 +986,8 @@
         state.capabilities = message.capabilities;
         if (currentCapabilities().diagnostic) appendNotice("warning", currentCapabilities().diagnostic);
         state.running = message.running === true;
+        if (state.chatFeedback === "checking") state.chatFeedback = state.running ? "waiting" : "ready";
+        else if (state.running && (message.resetConversation === true || conversationBoundaryChanged || !state.chatFeedback)) state.chatFeedback = "waiting";
         if (!state.running) state.cancellationRequested = false;
         state.model = normalizeModel(message.model);
         state.agentModels = message.agentModels || state.agentModels || {};
@@ -986,6 +996,7 @@
         state.agentSettingsScope = ["global", "project", "chat"].includes(message.agentSettingsScope) ? message.agentSettingsScope : state.agentSettingsScope;
         state.agentSettingsSet = typeof message.agentSettingsSet === "string" && message.agentSettingsSet.trim() ? message.agentSettingsSet.trim() : state.agentSettingsSet;
         state.businessMode = "normal";
+        state.maestroMode = state.role === "main" && message.maestroMode === true;
         state.taskMode = "direct";
         state.fastMode = message.fastMode === true;
         state.workLoopMode = false;
@@ -1000,7 +1011,7 @@
         state.queueCount = safeCount(message.queueCount);
         if (Array.isArray(message.pendingMessageIds)) {
           for (const item of state.pendingRequests || []) {
-            if (message.pendingMessageIds.includes(item.id)) item.rejected = false;
+            if (message.pendingMessageIds.includes(item.id)) { item.rejected = false; item.hostAcknowledged = true; }
           }
         }
         if (state.running && !state.runStartedAt) {
@@ -1189,6 +1200,14 @@
         if (typeof message.agentId === "string" && message.agentId) {
           state.agentId = message.agentId;
           if (message.reset === true) {
+            state.chatFeedback = "checking";
+            state.runExecutionStatus = undefined;
+            state.runProgress = "";
+            state.runProgressLocalization = undefined;
+            state.runStartedAt = undefined;
+            state.historyFeedback = undefined;
+            state.historyPageOperation = undefined;
+            state.historyPageError = undefined;
             state.conversationId = message.conversationId;
             state.contextUsedTokens = undefined;
             state.contextWindowTokens = undefined;
@@ -1212,6 +1231,7 @@
           }
           updateModeControls();
           chatNavigation.closeSessionMenu(false);
+          renderRunStatus();
           persist();
         }
         break;
@@ -1241,8 +1261,13 @@
         contractListMessage = message;
         renderContractList();
         break;
+      case "composer.reference":
+        prompt.value = [prompt.value, message.text].filter(Boolean).join("\n\n");
+        state.draft = prompt.value;
+        resizePrompt(); persist(false); prompt.focus();
+        break;
       case "project.tasks":
-        state.projectTasks = Array.isArray(message.entries) ? message.entries : [];
+        if (!message.error) state.projectTasks = Array.isArray(message.entries) ? message.entries : [];
         chatTaskFlow.renderProjectHistory();
         if (contractListMessage) renderContractList();
         break;
@@ -1256,6 +1281,9 @@
         if (message.agentId === state.agentId && message.history &&
             message.history.conversationId === state.conversationId &&
             Array.isArray(message.history.messages)) {
+          const loading = state.historyFeedback?.pending === true && state.historyFeedback.agentId === message.agentId && state.historyFeedback.conversationId === message.history.conversationId;
+          const previousLength = state.timeline.length;
+          let repaired = 0;
           state.historyNextBefore = message.history.nextBefore;
           const restored = message.history.messages.filter(function (item) {
             return item && ["user", "assistant", "interview"].includes(item.type) &&
@@ -1285,12 +1313,19 @@
             const byId = new Map(restored.map(function (item) { return [item.id, item]; }));
             state.timeline = state.timeline.map(function (item) {
               const replacement = byId.get(item.id);
-              return item.type === "user" && item.id?.startsWith("history-user-") &&
+              if (item.type === "user" && item.id?.startsWith("history-user-") &&
                 replacement?.submission && item.text !== replacement.text &&
                 item.text + (item.submission?.guidance || "") ===
-                  (replacement.capturedRequest || replacement.text + (replacement.submission.guidance || ""))
-                ? replacement : item;
+                  (replacement.capturedRequest || replacement.text + (replacement.submission.guidance || ""))) {
+                repaired++;
+                return replacement;
+              }
+              return item;
             });
+          }
+          if (loading) {
+            const count = Math.max(0, state.timeline.length - previousLength) + repaired;
+            state.historyFeedback = { phase: count ? "received" : "unchanged", count };
           }
           if (state.historyBrowsing && restored.length) {
             timelineEndId = restored[restored.length - 1].id;
@@ -1347,6 +1382,8 @@
         state.pendingDecisionCanApprove = Boolean(message.runId) && message.canApprove === true;
         state.pendingDecisionApproval = message.runId ? decisionApproval(message.approval) : undefined;
         state.pendingDecisionRunId = typeof message.runId === "string" ? message.runId : undefined;
+        if (state.pendingDecisionRunId) state.chatFeedback = "decision";
+        else if (state.chatFeedback === "decision") state.chatFeedback = state.running ? "awaiting" : "ready";
         state.decisionSubmitting = false;
         renderRunStatus();
         chatPendingQueue.renderPendingQueue();
@@ -1393,6 +1430,7 @@
             state.taskFlows = [...snapshots.values()].slice(-100);
           }
           const complete = { type: "assistant", id: createId(), text: message.text, localization: message.localization?.text, runId: message.runId, phase: message.phase === "commentary" ? "commentary" : "final" };
+          if (state.running && !["completed", "failed", "cancelled"].includes(state.runExecutionStatus)) state.chatFeedback = complete.phase === "final" ? "response" : "streaming";
           const preview = liveAssistantPreview(complete);
           if (preview >= 0) state.timeline.splice(preview, 1, complete);
           else state.timeline.push(complete);
@@ -1406,6 +1444,10 @@
       case "chat.delta":
         if (typeof message.runId === "string" && typeof message.id === "string" && typeof message.text === "string" && message.text &&
             (message.stream === "commentary" || message.stream === "final")) {
+          if (state.running && !["completed", "failed", "cancelled"].includes(state.runExecutionStatus) && state.chatFeedback !== "streaming") {
+            state.chatFeedback = "streaming";
+            renderRunStatus();
+          }
           const key = message.runId + "\u0000" + message.stream + "\u0000" + message.id;
           const entry = state.timeline.find(function (item) { return item.streaming && item.streamKey === key; });
           if (entry) {
@@ -1490,19 +1532,31 @@
         break;
       case "run.observed":
         state.runExecutionStatus = message.status;
+        if (message.status === "running" && ["checking", "decision", "ready", "ended", "completed", "failed", "cancelled"].includes(state.chatFeedback)) state.chatFeedback = "waiting";
+        if (["completed", "failed", "cancelled", "needs-human-decision"].includes(message.status)) {
+          state.chatFeedback = message.status === "needs-human-decision" ? "decision" : message.status;
+        }
         renderRunStatus();
         chatBot.botOutcome = message.status;
         chatBot.renderFactoryBot();
         break;
       case "run.state":
+        const wasRunning = state.running;
+        const wasChecking = state.chatFeedback === "checking";
+        if (message.running === true && wasChecking) state.chatFeedback = "waiting";
         if (message.running !== true && state.docsAuditPending) setTimeout(startDocsAudit, 0);
         if (message.running === true && !state.running) {
+          state.chatFeedback = wasChecking ? "waiting" : "awaiting";
           chatBot.botOutcome = undefined;
           state.runExecutionStatus = undefined;
           clearTimeout(chatBot.botWaveTimer);
           chatBot.botWaveTimer = undefined;
         }
         state.running = message.running === true;
+        if (!state.running && wasChecking) state.chatFeedback = "ready";
+        else if (!state.running && wasRunning) {
+          state.chatFeedback = ["completed", "failed", "cancelled", "decision"].includes(state.chatFeedback) ? state.chatFeedback : "ended";
+        }
         if (!state.running) state.cancellationRequested = false;
         state.runProgress = state.running ? (state.runProgress || t("ui.starting.main.agent")) : "";
         state.runProgressLocalization = globalThis.AgentFactoryI18n.describe(state.runProgress) || state.runProgressLocalization;
@@ -1519,15 +1573,18 @@
         break;
       case "chat.pending": {
         const pending = (state.pendingRequests || []).find(item => item.id === message.id);
-        if (pending) pending.rejected = false;
+        if (pending) { pending.rejected = false; pending.hostAcknowledged = true; }
         chatPendingQueue.renderPendingQueue();
+        renderRunStatus();
         persist(false);
         break;
       }
       case "chat.rejected": {
         const pending = (state.pendingRequests || []).find(function (item) { return item.id === message.id; });
         if (pending) pending.rejected = true;
+        if (pending) document.getElementById("pending-queue-toggle").setAttribute("aria-expanded", "true");
         chatPendingQueue.renderPendingQueue();
+        renderRunStatus();
         persist(false);
         break;
       }
@@ -1537,9 +1594,11 @@
         const revealSubmission = Boolean(pending) && !(state.startedMessageIds || []).includes(message.id) &&
           !state.timeline.some(item => item.type === "user" && item.id === message.id);
         if (revealSubmission) followLatest = true;
+        if (pending) state.chatFeedback = "awaiting";
         if (!(state.startedMessageIds || []).includes(message.id) && !state.timeline.some(function (item) { return item.type === "user" && item.id === message.id; })) {
           state.timeline.push({ type: "user", id: message.id,
             text: message.text || message.attachments.map(function (item) { return t("ui.attachments.c53076") + item.name; }).join("\n"),
+            submittedAt: pending?.submittedAt,
             submission: message.submission || submissionFromExecution(pending?.execution),
             attachments: pending ? pending.attachments : message.attachments });
           state.pendingDecisionRunId = undefined;
@@ -1656,6 +1715,7 @@
       return;
     }
     const recovered = choiceAnswer === null && action === enterAction() && workflow === "normal" && !asGoal ? state.recoveredRequest : undefined;
+    if (!recovered && workflow === "normal" && state.role === "main" && state.maestroMode) workflow = "maestro";
     const message = {
       id: recovered?.id || createId(),
       text,
@@ -1681,7 +1741,8 @@
       const { pending, ...submitted } = attachment;
       return submitted;
     });
-    (state.pendingRequests ??= []).push({ ...message, attachments: submittedAttachments });
+    (state.pendingRequests ??= []).push({ ...message, submittedAt: new Date().toISOString(), attachments: submittedAttachments });
+    if (!state.running) state.chatFeedback = undefined;
     if (choiceAnswer === null) state.recoveredRequest = undefined;
     if (choiceAnswer === null) {
       saveComposerSettings();
@@ -2011,7 +2072,7 @@
   function renderSubmission(content, submission, messageId) {
     if (!submission || typeof submission !== "object") return;
     const actions = { work: t("ui.work"), plan: t("ui.plan"), verification: t("ui.verification"), "plan-work": t("ui.plan.work.f294a9"), "work-verification": t("ui.work.verification.6a0009"), "plan-work-verification": t("ui.plan.work.verification.d02a66") };
-    const workflows = { contract: t("ui.contract"), interview: t("ui.interview"), planning: t("ui.planning"), design: t("ui.design"), migration: t("ui.migration"), lessons: t("ui.lessons"), pipeline: t("ui.pipeline") };
+    const workflows = { maestro: "Maestro", contract: t("ui.contract"), interview: t("ui.interview"), planning: t("ui.planning"), design: t("ui.design"), migration: t("ui.migration"), lessons: t("ui.lessons"), pipeline: t("ui.pipeline") };
     const labels = [Object.hasOwn(workflows, submission.businessMode) ? workflows[submission.businessMode] : undefined, Object.hasOwn(actions, submission.taskMode) ? actions[submission.taskMode] : undefined, submission.goal === true ? t("ui.goal") : undefined].filter(Boolean);
     if (submission.backgroundContinuation === true) labels.unshift(t("ui.background.continuation.label"));
     if (labels.length) {
@@ -2076,21 +2137,47 @@
     const displayStates = messageViewStates;
     let focusedControl;
     emptyState.hidden = state.timeline.length > 0;
+    let historyStatus = timeline.querySelector(".history-feedback");
+    if (!historyStatus) {
+      historyStatus = document.createElement("p");
+      historyStatus.className = "history-feedback";
+      historyStatus.setAttribute("role", "status");
+      historyStatus.setAttribute("aria-live", "polite");
+    }
     let older = timeline.querySelector(".history-older");
     if (!older) {
       older = document.createElement("button");
       older.type = "button";
       older.className = "history-older";
       older.addEventListener("click", function () {
-        if (state.historyNextBefore) {
+        if (state.historyNextBefore && !state.historyFeedback?.pending) {
+          state.historyFeedback = { pending: true, agentId: state.agentId, conversationId: state.conversationId };
+          older.disabled = true;
+          older.setAttribute("aria-busy", "true");
+          older.textContent = t("ui.conversation.loading");
+          historyStatus.textContent = t("feedback.history.waiting");
+          historyStatus.hidden = false;
           state.historyBrowsing = true;
           vscode.postMessage({ type: "history.request", before: state.historyNextBefore });
         }
       });
       timeline.prepend(older);
     }
-    older.textContent = t("ui.history.older");
+    if (!historyStatus.isConnected) older.after(historyStatus);
+    older.disabled = state.historyFeedback?.pending === true;
+    older.setAttribute("aria-busy", String(older.disabled));
+    older.textContent = t(older.disabled ? "ui.conversation.loading" : "ui.history.older");
     older.hidden = !state.historyNextBefore;
+    historyStatus.hidden = !state.historyFeedback && !state.historyPageOperation && !state.historyPageError;
+    const historyLabel = state.historyPageOperation ? t("feedback.history.rendering")
+      : state.historyPageError ? t("feedback.history.renderfailed")
+      : state.historyFeedback?.pending ? t("feedback.history.waiting")
+      : state.historyFeedback?.phase === "page" ? t("feedback.history.page", start + 1, end, state.timeline.length)
+      : state.historyFeedback?.phase === "received" ? t("feedback.history.received", state.historyFeedback.count)
+      : state.historyFeedback?.phase === "unchanged" ? t("feedback.history.unchanged") : "";
+    if (historyStatus.textContent !== historyLabel) historyStatus.textContent = historyLabel;
+    if (state.historyPageError) historyStatus.title = state.historyPageError;
+    else historyStatus.removeAttribute("title");
     let pages = timeline.querySelector(".history-pages");
     if (!pages) { pages = document.createElement("nav"); pages.className = "history-pages"; timeline.prepend(pages); }
     const pageKey = [start, end, state.timeline.length, uiLocale()].join(":");
@@ -2100,16 +2187,65 @@
       for (const [label, enabled, target] of [["ui.history.previous", start > 0, start], ["ui.history.next", end < state.timeline.length, Math.min(state.timeline.length, end + 200)]]) {
         const button = document.createElement("button"); button.type = "button"; button.textContent = t(label); button.disabled = !enabled;
         button.addEventListener("click", function () {
-          timelineEndId = target === state.timeline.length ? undefined : state.timeline[target - 1]?.id;
+          if (state.historyPageOperation) return;
+          const nextEndId = target === state.timeline.length ? undefined : state.timeline[target - 1]?.id;
+          const operation = { agentId: state.agentId, conversationId: state.conversationId };
+          state.historyPageOperation = operation;
+          state.historyPageError = undefined;
+          const previousEndId = timelineEndId;
+          const previousButtons = Array.from(pages.children);
+          const previousMessages = Array.from(timeline.querySelectorAll(".message"));
+          const previousPageKey = pages.dataset.renderKey;
+          const previousHistoryFeedback = state.historyFeedback;
+          const focused = document.activeElement === button;
+          const disabled = Array.from(pages.children, control => control.disabled);
+          for (const control of pages.children) control.disabled = true;
+          historyStatus.hidden = false;
+          historyStatus.textContent = t("feedback.history.rendering");
           followLatest = false;
-          renderTimeline();
-          timeline.scrollTop = 0;
+          // Yield a paint for local display feedback before rebuilding the page.
+          requestAnimationFrame(function () {
+            requestAnimationFrame(function () {
+              if (state.historyPageOperation !== operation || state.agentId !== operation.agentId || state.conversationId !== operation.conversationId) return;
+              state.historyPageOperation = undefined;
+              timelineEndId = nextEndId;
+              if (!state.historyFeedback?.pending) state.historyFeedback = { phase: "page" };
+              try {
+                renderTimeline();
+                timeline.scrollTop = 0;
+              } catch (error) {
+                timelineEndId = previousEndId;
+                state.historyFeedback = previousHistoryFeedback;
+                state.historyPageError = error instanceof Error ? error.message : String(error);
+                for (const node of timeline.querySelectorAll(".message")) {
+                  if (!previousMessages.includes(node)) node.remove();
+                }
+                let previousNode = emptyState;
+                for (const node of previousMessages) { previousNode.after(node); previousNode = node; }
+                pages.replaceChildren(...previousButtons);
+                pages.dataset.renderKey = previousPageKey;
+                historyStatus.hidden = false;
+                historyStatus.textContent = t("feedback.history.renderfailed");
+                historyStatus.title = state.historyPageError;
+                Array.from(pages.children).forEach((control, index) => { control.disabled = disabled[index]; });
+              }
+              if (focused && (document.activeElement === button || document.activeElement === document.body)) {
+                const controls = Array.from(pages.children);
+                const replacement = controls.find(control => control.textContent === button.textContent && !control.disabled) || controls.find(control => !control.disabled);
+                replacement?.focus({ preventScroll: true });
+              }
+            });
+          });
         });
         pages.append(button);
       }
       pages.hidden = state.timeline.length <= 200;
       pages.setAttribute("aria-label", t("ui.history.pages"));
     }
+    Array.from(pages.children).forEach(function (button, index) {
+      const disabled = Boolean(state.historyPageOperation) || (index === 0 ? start === 0 : end >= state.timeline.length);
+      if (button.disabled !== disabled) button.disabled = disabled;
+    });
     const managedByEvent = managedActivities(visibleEvents);
     const assistantContext = JSON.stringify([state.role, state.childAgents.map(agent => [agent.agentId, agent.role])]);
     const commandContexts = new Map(state.childAgents.map(agent => [agent.agentId, JSON.stringify(agent)]));
@@ -2151,11 +2287,11 @@
       const compaction = event.type === "activity" && event.category === "tool" &&
         ["Context compaction", "컨텍스트 압축", t("ui.context.compaction")].includes(event.title);
       // Factory script runs keep their cards; every other action is one tracking row.
-      const factoryScripts = event.type === "activity" && event.category === "command" && !managedGroup
-        ? (globalThis.agentFactoryExecutionReferences?.runtimeScripts(event.output) || []).length
-          ? globalThis.agentFactoryExecutionReferences.runtimeScripts(event.output)
-          : globalThis.agentFactoryExecutionReferences?.scriptInvocations(event.text) || []
-        : [];
+      let factoryScripts = [];
+      if (event.type === "activity" && event.category === "command" && !managedGroup) {
+        factoryScripts = globalThis.agentFactoryExecutionReferences?.runtimeScripts(event.output) || [];
+        if (!factoryScripts.length) factoryScripts = globalThis.agentFactoryExecutionReferences?.scriptInvocations(event.text) || [];
+      }
       const activityRow = event.type === "activity" && !compaction && !managedGroup && !factoryScripts.length;
       if (event.type === "assistant" || event.type === "interview") {
         message.classList.add(event.phase === "commentary" ? "message-commentary" : "message-final");
@@ -2298,14 +2434,18 @@
     const label = state.autoScroll
       ? t("ui.auto.scroll.on") + status + t("ui.click.to.turn.off")
       : t("ui.auto.scroll.off.click.to.jump.to.the.latest.content.and.turn.on");
-    autoScrollButton.title = label;
-    autoScrollButton.setAttribute("aria-label", label);
-    autoScrollButton.setAttribute("aria-pressed", String(state.autoScroll));
+    // Scroll and resize can repeat the same state; retain its existing DOM.
+    if (autoScrollButton.title !== label) autoScrollButton.title = label;
+    if (autoScrollButton.getAttribute("aria-label") !== label) autoScrollButton.setAttribute("aria-label", label);
+    const pressed = String(state.autoScroll);
+    if (autoScrollButton.getAttribute("aria-pressed") !== pressed) autoScrollButton.setAttribute("aria-pressed", pressed);
     autoScrollState.toggleAttribute("hidden", !state.autoScroll);
-    autoScrollState.setAttribute("aria-label", status);
-    autoScrollState.dataset.state = following ? "following" : "paused";
-    autoScrollState.querySelector("path").setAttribute("d", following
-      ? "m6 5 6 6 6-6m-12 8 6 6 6-6" : "M8 5v14M16 5v14");
+    if (autoScrollState.getAttribute("aria-label") !== status) autoScrollState.setAttribute("aria-label", status);
+    const displayState = following ? "following" : "paused";
+    if (autoScrollState.dataset.state !== displayState) autoScrollState.dataset.state = displayState;
+    const path = autoScrollState.querySelector("path");
+    const shape = following ? "m6 5 6 6 6-6m-12 8 6 6 6-6" : "M8 5v14M16 5v14";
+    if (path.getAttribute("d") !== shape) path.setAttribute("d", shape);
   }
 
   function createTranscriptDot() {
@@ -2336,16 +2476,24 @@
   }
 
   function renderRunStatus() {
-    document.getElementById("agent-progress").hidden = !state.running;
-    runElapsed.hidden = !state.running;
+    const pending = state.pendingRequests || [];
+    const phase = !state.running && pending.length
+      ? pending.some(item => !item.rejected && !item.hostAcknowledged) ? "sending"
+        : pending.some(item => !item.rejected) ? "queued" : "rejected"
+      : state.chatFeedback;
+    document.getElementById("agent-progress").hidden = !state.running && !phase;
+    document.getElementById("agent-progress").dataset.feedback = phase || "";
+    runElapsed.hidden = !state.running || phase === "checking";
     runStatus.hidden = state.role !== "main";
-    const progressing = state.running && state.runExecutionStatus === "running" && !state.pendingDecisionRunId && !state.cancellationRequested;
+    const progressing = state.running && state.runExecutionStatus === "running" &&
+      (!phase || ["awaiting", "waiting", "streaming", "response"].includes(phase)) && !state.pendingDecisionRunId && !state.cancellationRequested;
     document.querySelector(".composer").classList.toggle("is-progressing", progressing);
     document.getElementById("agent-progress").classList.toggle("is-progressing", progressing);
-    if (!state.running) {
+    if (!state.running || phase === "checking") {
       stopElapsedTimer();
       runStatusLabel.textContent = t("ui.task.workflow");
       runStatusLabel.title = t("ui.task.workflow");
+      if (phase) runStatusLabel.textContent = runStatusLabel.title = t("feedback." + phase);
       runElapsed.textContent = t("duration.seconds", 0);
       return;
     }
@@ -2355,6 +2503,11 @@
     const elapsed = Math.max(0, Date.now() - state.runStartedAt);
     runStatusLabel.textContent = state.cancellationRequested ? t("ui.cancellation.requested") : localizedText(state.runProgress, state.runProgressLocalization) || t("ui.working");
     runStatusLabel.title = state.cancellationRequested ? t("ui.cancellation.requested") : localizedText(state.runProgress, state.runProgressLocalization) || t("ui.working");
+    if (phase && (!state.cancellationRequested || ["completed", "failed", "cancelled"].includes(phase))) {
+      const label = t("feedback." + phase);
+      runStatusLabel.textContent = label;
+      runStatusLabel.title = label + " · " + (localizedText(state.runProgress, state.runProgressLocalization) || t("ui.working"));
+    }
     runElapsed.textContent = formatElapsed(elapsed);
     const elapsedItem = statusBar.querySelector('[data-item-id="elapsed"]');
     if (elapsedItem) {
@@ -2686,6 +2839,10 @@
   }
 
   function resetConversationState() {
+    state.chatFeedback = undefined;
+    state.historyFeedback = undefined;
+    state.historyPageOperation = undefined;
+    state.historyPageError = undefined;
     state.historyNextBefore = undefined;
     timelineEndId = undefined;
     messageViewStates.clear();
@@ -2920,6 +3077,7 @@
       draft: state.draft,
       autoScroll: state.autoScroll,
       orchestrateMode: state.orchestrateMode,
+      maestroMode: state.maestroMode,
       uiLanguage: state.uiLanguage,
       settingsTabOrder: state.settingsTabOrder,
       botVisible: state.botVisible,
@@ -3005,6 +3163,7 @@
       fastMode: state.fastMode,
       goalMode: false,
       businessMode: "normal",
+      maestroMode: state.maestroMode === true,
     });
   }
 

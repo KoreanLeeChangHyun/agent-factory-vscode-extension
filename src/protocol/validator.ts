@@ -55,6 +55,8 @@ const clientMessageTypes = new Set([
   "contract.open",
   "contracts.request",
   "project.tasks.request",
+  "project.task.open",
+  "control.center.open",
   "conversations.request",
   "conversation.read",
   "task.stop",
@@ -327,6 +329,16 @@ export function parseClientMessage(value: unknown): ClientMessage | undefined {
         (!isRuntimeId(value.runId))) return undefined;
       return { type: value.type, agentId: value.agentId,
         ...(value.type === "agent.open" && typeof value.runId === "string" ? { runId: value.runId } : {}) };
+    case "control.center.open":
+      if (value.workflowId === undefined && value.taskId === undefined) return { type: value.type };
+      if (typeof value.workflowId !== "string" || !/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(value.workflowId)
+          || typeof value.taskId !== "string" || !/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(value.taskId)) return undefined;
+      return { type: value.type, workflowId: value.workflowId, taskId: value.taskId };
+    case "project.task.open":
+      if (typeof value.workflowId !== "string" || !/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(value.workflowId)
+          || typeof value.taskId !== "string" || !/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(value.taskId)
+          || !["chat", "run", "records", "feedback"].includes(String(value.target))) return undefined;
+      return { type: value.type, workflowId: value.workflowId, taskId: value.taskId, target: value.target as "chat" | "run" | "records" | "feedback" };
     case "composer.settings":
       if (
         (value.businessMode !== undefined && !BUSINESS_MODES.includes(value.businessMode as BusinessMode)) ||
@@ -339,6 +351,7 @@ export function parseClientMessage(value: unknown): ClientMessage | undefined {
         (value.reasoning !== undefined && (typeof value.reasoning !== "string" || !reasoningEfforts.has(value.reasoning))) ||
         (value.agentSettingsScope !== undefined && value.agentSettingsScope !== "global" && value.agentSettingsScope !== "project" && value.agentSettingsScope !== "chat") ||
         (value.agentSettingsSet !== undefined && (typeof value.agentSettingsSet !== "string" || !value.agentSettingsSet.trim())) ||
+        (value.maestroMode !== undefined && typeof value.maestroMode !== "boolean") ||
         typeof value.fastMode !== "boolean" ||
         (value.workLoopMode !== undefined && typeof value.workLoopMode !== "boolean") ||
         typeof value.goalMode !== "boolean"
@@ -355,6 +368,7 @@ export function parseClientMessage(value: unknown): ClientMessage | undefined {
         ...(typeof value.reasoning === "string"
           ? { reasoning: value.reasoning as "none" | "low" | "medium" | "high" | "xhigh" | "max" }
           : {}),
+        ...(value.maestroMode !== undefined ? { maestroMode: value.maestroMode as boolean } : {}),
         ...(value.businessMode !== undefined ? { businessMode: value.businessMode as BusinessMode } : {}),
         ...(value.taskMode !== undefined ? { taskMode: value.taskMode as TaskSelection } : {}),
         ...(value.agentSettingsScope !== undefined ? { agentSettingsScope: value.agentSettingsScope as "global" | "project" | "chat" } : {}),

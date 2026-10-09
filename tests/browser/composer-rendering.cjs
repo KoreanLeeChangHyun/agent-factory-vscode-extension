@@ -17,7 +17,14 @@ async function checkComposerRendering(page) {
     assert.deepEqual(await geometry(), empty, 'One-line drafts retain default heights');
     await page.evaluate(() => window.postMessage({ type: 'run.state', running: true }, '*'));
     await page.waitForFunction(() => !document.querySelector('#run-status').hidden);
-    assert.deepEqual(await geometry(), empty, 'Compact run status must not shrink the transcript or notes');
+    const active = await geometry();
+    assert.deepEqual(active['#prompt'], empty['#prompt'], 'Feedback preserves the draft dimensions and position');
+    assert.deepEqual(active['.composer'], empty['.composer'], 'Feedback stays above the composer');
+    for (const selector of ['#timeline', '#notes-panel']) {
+      assert.equal(active[selector].y, empty[selector].y);
+      const reserved = empty[selector].height - active[selector].height;
+      assert.ok(reserved >= 0 && reserved <= 64, 'Only the readable feedback/header rows reserve transcript height');
+    }
     const status = await page.locator('#run-status-toggle').boundingBox();
     assert.ok(status.height > 0 && status.y + status.height <= empty['.composer'].y, 'Status remains above the composer');
     await page.locator('#prompt').fill('first\nsecond\nthird');
@@ -26,9 +33,9 @@ async function checkComposerRendering(page) {
     await page.locator('#prompt').fill('');
     await page.waitForFunction(height => document.querySelector('#prompt').getBoundingClientRect().height === height, empty['#prompt'].height);
     await page.evaluate(() => window.postMessage({ type: 'run.state', running: false }, '*'));
-    // The Main workflow header stays visible; completion hides only the loading indicator.
-    await page.waitForFunction(() => document.querySelector('#agent-progress').hidden);
-    assert.deepEqual(await geometry(), empty, 'Clearing and completing restores the same geometry');
+    // A stopped run without an explicit outcome keeps the honest terminal feedback visible.
+    await page.waitForFunction(() => document.querySelector('#run-status-label').textContent === 'Execution ended');
+    assert.deepEqual(await geometry(), active, 'Clearing and ending retain one feedback row without accumulating height');
   }
   await page.locator('#notes-close').click();
   await page.setViewportSize({ width: 721, height: 402 });
@@ -101,6 +108,9 @@ async function checkComposerRendering(page) {
   await page.locator('#pending-queue-toggle').click();
   assert.equal(await queue.locator('*').count(), 0);
   await emit({ type: 'chat.rejected', id: 'queued-1' });
+  assert.equal(await queue.isVisible(), true, 'Rejected submission exposes the recovery controls');
+  await page.locator('#pending-queue-toggle').click();
+  await emit({ type: 'chat.pending', id: 'queued-2' });
   assert.equal(await queue.locator('*').count(), 0, 'Hidden queue updates remain lazy');
   await page.locator('#pending-queue-toggle').click();
   assert.equal(await queue.locator('[data-queue-recover]').first().isDisabled(), true, 'Reopening reflects latest rejection and draft');
@@ -163,7 +173,7 @@ async function checkPendingQueueHeader(page) {
           assert.ok(Math.abs(boxes.queue.center-boxes.flow.center)<2, 'Queue shares workflow baseline '+context);
           assert.ok(boxes.flow.right<=boxes.history.x+1 && boxes.history.right<=boxes.queue.x+1, 'Header order is preserved '+context);
           assert.ok(boxes.flow.x>=0 && boxes.queue.right<=size.width, 'Header fits viewport '+context);
-          if(running) assert.ok(boxes.progress.right<=boxes.flow.x+1, 'Loading does not overlap '+context);
+          if(running) assert.ok(boxes.progress.bottom<=boxes.flow.y+1 || boxes.flow.bottom<=boxes.progress.y+1 || boxes.progress.right<=boxes.flow.x+1, 'Loading does not overlap '+context);
           // The open header keeps Main's indicator at its left edge, as the closed dock does.
           if(running && expanded) assert.ok(boxes.progress.x<=boxes.details.x+8, 'Loading leads the open header at the left '+context);
           if(expanded) assert.ok(boxes.queue.bottom<=boxes.details.y+1, 'Queue stays above task cards '+context);

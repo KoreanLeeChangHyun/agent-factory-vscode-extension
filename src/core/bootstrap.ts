@@ -3,9 +3,11 @@ import { AgentSidebar } from "../infrastructure/vscode/agent-sidebar";
 import { createContainer } from "./container";
 import { ChatPanelSerializer } from "../infrastructure/vscode/chat-panel-serializer";
 import { LoadingAnimationGallery } from "../infrastructure/vscode/loading-animation-gallery";
+import { ArchifyEditor } from "../infrastructure/vscode/archify-editor";
 
 export function bootstrap(context: vscode.ExtensionContext): void {
   const container = createContainer(context);
+  ArchifyEditor.register(context);
 
   context.subscriptions.push(
     container.chatPanels,

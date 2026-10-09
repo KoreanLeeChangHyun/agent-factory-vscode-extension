@@ -43,12 +43,33 @@ test("project task history reads every conversation's briefs without driving loo
   assert.equal(second.contract, undefined);
   assert.deepEqual(first.contract, { id: "WC-1", version: 2 });
   assert.equal(first.mainAgentId, "main-a");
-  assert.equal(first.tasks[0].description.length, 4000, "Descriptions are bounded");
-  assert.deepEqual(Object.keys(first.tasks[0]).sort(), ["description", "id", "title", "workStatus"], "No agent identity or path leaves the host");
+  assert.equal(first.tasks[0].description.length, 5000, "The complete original remains accessible");
+  assert.deepEqual(Object.keys(first.tasks[0]).sort(), ["description", "id", "runs", "title", "workStatus"], "Only known task fields leave the host");
   assert.equal(JSON.stringify(entries).includes(agentsRoot), false);
 });
 
 test("project task protocol carries only the request type", async () => {
   const { parseClientMessage } = await importTypeScript("src/protocol/validator.ts");
   assert.deepEqual(parseClientMessage({ type: "project.tasks.request", extra: 1 }), { type: "project.tasks.request" });
+});
+
+
+test("control center projects accepted allocation, bound receipt and observed usage without driving work", async t => {
+  const { AgentFactoryClient } = await importTypeScript("src/infrastructure/agent-factory/agent-client.ts");
+  const root = await mkdtemp(join(tmpdir(), "af-center-")); t.after(() => rm(root, {recursive:true, force:true}));
+  const agentsRoot = join(root, "agents");
+  const allocation = {schemaVersion:1, unitReason:"One shared owner", profile:{id:"work",reason:"Integration"}, session:{strategy:"reuse",reason:"Same task"}, readScope:["src/"], writeScopeReason:"src/main.ts", parallelCandidate:false, inputs:[{source:"message-exact",revision:"revision-1",capturedAt:"2026-10-07T20:00:00Z",confirmed:true}], dependencies:[{taskId:"prior",source:"prior receipt",revision:"r1",capturedAt:"2026-10-07T20:00:00Z",confirmed:true}], sharedResources:[{resource:"src/main.ts",ownerTaskId:"self",confirmed:true,evidence:"Main handoff"}], secret:"DO_NOT_PROJECT"};
+  await writeLoop(agentsRoot,"worker","loop-center",{status:"completed",phase:"ended",workAgentId:"worker",parentStatePath:join(agentsRoot,"main","runs","parent","state.json"),workflow:{id:"flow-center",title:"Actual task",tasks:[{id:"task-center",title:"Integrate",description:"Original / interpretation / assumptions",completionCriteria:"Works",allocation,workStatus:"completed",workAgentId:"worker",workRunId:"run-center"}]}});
+  const runDir=join(agentsRoot,"worker","runs","run-center");await mkdir(runDir,{recursive:true});
+  const state={agentId:"worker",runId:"run-center",role:"work",status:"completed",parentRunId:"parent",taskBinding:{workflowId:"flow-center",taskId:"task-center"},receiptRequestHash:"hash-exact",executionOptions:{model:"fixed-model"},tokenUsage:{inputTokens:100,cachedInputTokens:20,outputTokens:30,reasoningOutputTokens:10},contextUsage:{usedTokens:80,contextWindowTokens:100,observedAt:"2026-10-07T20:01:00Z",estimated:true},handoffBinding:{slot:"B",epoch:2},attempt:2,finishedAt:"2026-10-07T20:02:00Z",secret:"DO_NOT_PROJECT"};
+  await writeFile(join(runDir,"state.json"),JSON.stringify(state));
+  await writeFile(join(runDir,"receipt.json"),JSON.stringify({runId:"run-center",requestHash:"hash-exact",outcome:"completed",tests:{run:true,reason:"Own checks"}}));
+  const client=new AgentFactoryClient(join(root,"exec.py"),root);client.location=async()=>({home:root,projectId:"project-test",agentsRoot});
+  const [entry]=await client.listProjectTasks(); const task=entry.tasks[0],run=task.runs[0];
+  assert.equal(entry.loopId,"loop-center");assert.equal(entry.mainAgentId,"main");assert.equal(task.allocation.inputs[0].revision,"revision-1");
+  assert.deepEqual(run.usage,{inputTokens:100,cachedInputTokens:20,outputTokens:30,reasoningOutputTokens:10});assert.equal(run.receipt.outcome,"completed");assert.equal(run.handoff.epoch,2);
+  assert.equal(JSON.stringify(entry).includes("DO_NOT_PROJECT"),false);
+  const records=await client.projectTaskRecords(entry.id,task.id); assert.ok(records.some(value=>value.name.endsWith("receipt.json")));assert.equal((await client.projectTaskRecords("unbound","task-center")).length,0);
+  state.receiptRequestHash="other"; state.tokenUsage={inputTokens:100};await writeFile(join(runDir,"state.json"),JSON.stringify(state));client.projectTaskCache.deleteWhere(()=>true);
+  const fresh=(await client.listProjectTasks())[0].tasks[0].runs[0];assert.equal(fresh.receipt,undefined);assert.equal(fresh.usage.outputTokens,null);
 });

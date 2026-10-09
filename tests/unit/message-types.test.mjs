@@ -18,6 +18,7 @@ const contractPanelPath = "src/infrastructure/vscode/contract-panel.ts";
 const isChatSource = path => path === "static/js/chat.js" || /^static\/js\/chat\/[^/]+\.js$/.test(path);
 /** The contract panel is a second webview whose host reads its requests without parseClientMessage. */
 const contractSource = "static/js/contracts.js";
+const centerSource = "static/js/control-center.js";
 
 // Known mismatches. An entry names the type, where it is spelled and why it is tolerated; an entry
 // that no longer describes the source fails the test, so these lists cannot go stale.
@@ -204,8 +205,8 @@ test("every chat request type is sent, validated, handled and declared under the
   const chatScripts = scripts.filter(isChatSource);
   const sendingScripts = scripts.filter(path => /\bpostMessage\b/.test(parse(path).text));
   // A new script that posts messages must be assigned to a channel before its types can be checked.
-  assert.deepEqual(difference(sendingScripts, [...chatScripts, contractSource]), []);
-  const sent = unique(chatScripts.flatMap(sentTypes));
+  assert.deepEqual(difference(sendingScripts, [...chatScripts, contractSource, centerSource]), []);
+  const sent = unique([...chatScripts, centerSource].flatMap(sentTypes));
   assert.ok(sent.length > 0, "the chat webview sends no types");
   assert.deepEqual(difference(Object.keys(dynamicSends), [...usedDynamicSends]), [], "dynamicSends lists a call that no longer exists");
 

@@ -5,6 +5,7 @@ import type { AgentFastModes, AgentModels, ModelFastModes, WorkProfile } from ".
 import type { BusinessMode } from "../../common/types/business-mode";
 import { type TaskSelection } from "./task-selection";
 import { randomUUID } from "node:crypto";
+import { isAbsolute } from "node:path";
 
 export interface CapturedAgentRun {
   readonly parentAgentId: string;
@@ -24,6 +25,8 @@ export interface ChatPanelState {
   readonly title: string;
   readonly agentId?: string;
   readonly conversationId?: string;
+  /** Original runtime project; a worktree changes the working directory, not this binding. */
+  readonly projectRoot?: string;
   readonly role?: "main" | "work" | "verification";
   readonly verifiedWorkRunId?: string;
   readonly model?: string;
@@ -39,6 +42,7 @@ export interface ChatPanelState {
   readonly workLoopMode?: boolean;
   readonly taskMode?: TaskSelection;
   readonly businessMode?: BusinessMode;
+  readonly maestroMode?: boolean;
   readonly contextUsedTokens?: number;
   readonly contextWindowTokens?: number;
   readonly fiveHourUsedPercent?: number;
@@ -50,7 +54,7 @@ export interface ChatPanelState {
 
 export type ComposerPreferences = Pick<
   ChatPanelState,
-  "agentPermissions" | "agentModels" | "modelFastModes" | "agentFastModes" | "model" | "reasoning" | "agentSettingsScope" | "agentSettingsSet" | "fastMode" | "goalMode" | "workLoopMode" | "taskMode" | "businessMode"
+  "agentPermissions" | "agentModels" | "modelFastModes" | "agentFastModes" | "model" | "reasoning" | "agentSettingsScope" | "agentSettingsSet" | "fastMode" | "goalMode" | "workLoopMode" | "taskMode" | "businessMode" | "maestroMode"
 >;
 
 export function createDraftChatState(preferences: ComposerPreferences = {}): ChatPanelState {
@@ -60,6 +64,7 @@ export function createDraftChatState(preferences: ComposerPreferences = {}): Cha
     agentSettingsVersion: 1,
     ...JSON.parse(JSON.stringify(preferences)),
     businessMode: "normal",
+    maestroMode: false,
     goalMode: false,
     taskMode: "direct",
     workLoopMode: false
@@ -86,6 +91,8 @@ export function restoreChatState(
     ...(value.agentSettingsVersion === 1 ? {agentSettingsVersion: 1 as const} : {}),
     panelId: readNonEmptyString(value.panelId) ?? randomUUID(),
     title: readNonEmptyString(value.title) ?? "Main Agent",
+    ...(typeof value.projectRoot === "string" && isAbsolute(value.projectRoot) && !value.projectRoot.includes("\0")
+      ? { projectRoot: value.projectRoot } : {}),
     ...(readCapturedRun(value.capturedRun, value.agentId) ? { capturedRun: readCapturedRun(value.capturedRun, value.agentId) } : {}),
     ...(readRole(value.role) ? { role: readRole(value.role) } : {}),
     ...(readManagedId(value.verifiedWorkRunId) ? { verifiedWorkRunId: readManagedId(value.verifiedWorkRunId) } : {}),
@@ -107,6 +114,7 @@ export function restoreChatState(
     ...((parseAgentPermissions(value.agentPermissions) ?? preferences.agentPermissions) ? { agentPermissions: parseAgentPermissions(value.agentPermissions) ?? preferences.agentPermissions } : {}),
     fastMode: typeof value.fastMode === "boolean" ? value.fastMode : preferences.fastMode === true,
     goalMode: false,
+    maestroMode: value.maestroMode === true,
     businessMode: "normal",
     taskMode: "direct",
     workLoopMode: false,

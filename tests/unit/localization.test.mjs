@@ -48,7 +48,7 @@ test('VS Code command, configuration and public view resources are packaged', as
     assert.ok(en[key] && ko[key], key);
   }
   assert.match(await readFile(new URL('.vscodeignore', root), 'utf8'), /!package\.nls\*\.json/);
-  for (const template of ['chat', 'loading-animation-gallery']) {
+  for (const template of ['chat', 'loading-animation-gallery', 'control-center']) {
     const html = await readFile(new URL(`templates/${template}.html`, root), 'utf8');
     assert.match(html, /nonce="\{\{nonce\}\}" src="\{\{localizationScriptUri\}\}"/);
     for (const key of [...html.matchAll(/data-i18n(?:-[a-z-]+)?="([^"]+)"/g)].map(match => match[1])) {

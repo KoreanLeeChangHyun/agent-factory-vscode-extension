@@ -1,0 +1,21 @@
+.maestro-center header, .maestro-filters, .maestro-overview, .maestro-detail-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.maestro-center button { border: 1px solid var(--vscode-panel-border); border-radius: 5px; color: var(--vscode-foreground); background: var(--vscode-editorWidget-background); padding: 5px 8px; cursor: pointer; font: inherit; }
+.maestro-center button[aria-current="true"] { background: var(--vscode-list-activeSelectionBackground); color: var(--vscode-list-activeSelectionForeground); }
+.maestro-center button:hover { background: var(--vscode-list-hoverBackground); }
+.maestro-center button:focus-visible { outline: 1px solid var(--vscode-focusBorder); outline-offset: 2px; }
+.maestro-center button:disabled { opacity: .55; cursor: default; }
+.maestro-center { position: absolute; inset: 0; padding: 12px; display: flex; flex-direction: column; gap: 10px; background: var(--vscode-editor-background); overflow: auto; z-index: 3; }
+.maestro-center[hidden] { display: none; }
+.maestro-center h2, .maestro-center h3, .maestro-center h4, .maestro-center p { margin: 0; }
+.maestro-center h2 { margin-inline-end: auto; font-size: 1.15em; }
+.maestro-filters label { display: flex; align-items: center; gap: 5px; min-width: 0; flex: 1 1 160px; }
+.maestro-filters select, .maestro-filters input { width: 100%; min-width: 0; }
+.maestro-workspace { display: grid; grid-template-columns: minmax(150px, 1fr) minmax(0, 2fr); gap: 12px; flex: 1; min-height: 0; }
+#maestro-tasks, #maestro-detail { overflow: auto; min-width: 0; padding: 3px; }
+#maestro-tasks { display: flex; flex-direction: column; gap: 6px; }
+#maestro-tasks button { text-align: start; overflow-wrap: anywhere; }
+#maestro-detail { display: flex; flex-direction: column; gap: 10px; overflow-wrap: anywhere; }
+#maestro-detail p, #maestro-detail pre { white-space: pre-wrap; overflow-wrap: anywhere; font: inherit; margin: 0; }
+#maestro-detail details { padding: 8px; border: 1px solid var(--vscode-panel-border); border-radius: 5px; }
+#maestro-detail summary { cursor: pointer; }
+@media (max-width: 600px) { .maestro-workspace { display: flex; flex-direction: column; min-height: auto; } #maestro-tasks { max-height: 30vh; flex-shrink: 0; } #maestro-detail { overflow: visible; } }

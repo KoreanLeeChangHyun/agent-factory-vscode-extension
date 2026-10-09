@@ -480,6 +480,7 @@ test("chat panel restoration preserves composer settings and context usage", asy
     reasoning: "high",
     fastMode: true,
     goalMode: false,
+    maestroMode: false,
     workLoopMode: false,
     taskMode: "direct",
     businessMode: "normal",

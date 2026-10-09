@@ -8,8 +8,8 @@ export class ChatTemplateRenderer {
     return [vscode.Uri.joinPath(this.extensionUri, "static")];
   }
 
-  public async render(webview: vscode.Webview): Promise<string> {
-    const templateUri = vscode.Uri.joinPath(this.extensionUri, "templates", "chat.html");
+  public async render(webview: vscode.Webview, templateName: "chat.html" | "control-center.html" = "chat.html"): Promise<string> {
+    const templateUri = vscode.Uri.joinPath(this.extensionUri, "templates", templateName);
     const template = Buffer.from(await vscode.workspace.fs.readFile(templateUri)).toString("utf8");
     const nonce = randomBytes(24).toString("base64url");
     const styleUri = webview.asWebviewUri(

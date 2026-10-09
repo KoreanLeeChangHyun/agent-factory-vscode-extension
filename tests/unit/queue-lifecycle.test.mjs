@@ -1,11 +1,10 @@
 import assert from 'node:assert/strict';
 import { runUiInNewContext as runInNewContext } from '../support/ui-localization.mjs';
 import test from 'node:test';
-import { build } from 'esbuild';
+import { importTypeScript } from '../support/import-typescript.mjs';
 import { readChatSource } from "../support/chat-source.mjs";
 
-const output = await build({ entryPoints: [new URL('../../src/modules/chat/session-controller.ts', import.meta.url).pathname], bundle: true, format: 'esm', platform: 'node', write: false });
-const { ChatSessionController } = await import(`data:text/javascript;base64,${Buffer.from(output.outputFiles[0].text).toString('base64')}`);
+const { ChatSessionController } = await importTypeScript('src/modules/chat/session-controller.ts');
 const tick = () => new Promise(resolve => setImmediate(resolve));
 function deferred() { let resolve; const promise = new Promise(done => { resolve = done; }); return { promise, resolve }; }
 function events(extra = {}) {
@@ -21,6 +20,85 @@ function runtime(extra = {}) {
     ...extra
   };
 }
+
+test('inference occupancy reaches the experiment callback separately from display usage', async () => {
+  const observed = [], displayed = [];
+  const observation = { usedTokens: 80, contextWindowTokens: 100, observedAt: '2026-10-07T18:00:00Z',
+    sessionId: 'a', turnId: 'turn', source: 'thread/tokenUsage/updated', estimated: true, providerVersion: null };
+  let delivered = false;
+  const controller = new ChatSessionController(runtime({
+    async updates() {
+      if (delivered) return { cursor: 2, updates: [] };
+      delivered = true;
+      return { cursor: 2, updates: [{ kind: 'contextObservation', observation },
+        { kind: 'usage', usedTokens: 70, contextWindowTokens: 100 }] };
+    }
+  }), events({ onContextObservation: (...args) => observed.push(args), onUsage: (...args) => displayed.push(args) }),
+  'main-existing', { pollIntervalMs: 0 });
+  await controller.send('message', [], {});
+  assert.deepEqual(observed, [[observation, 'message']]);
+  assert.equal(displayed[0][0], 70);
+});
+
+test('opt-in handoff switches only at a send boundary and preserves the stable queue owner', async () => {
+  const calls = [], prepared = [];
+  const controller = new ChatSessionController(runtime({
+    async handoff(agent, action, payload) {
+      calls.push({ agent, action, payload });
+      return { state: { owner: 'A', epoch: 2, preparation: { status: 'ready', slot: 'B' } }, preparationSnapshot: { cursor: 4 } };
+    },
+    async send(agent, text) { calls.push({ agent, action: 'send', text }); return { agentId: agent, runId: 'next' }; }
+  }), events({ onHandoffPreparation: status => prepared.push(status) }), 'main-experiment',
+  { pollIntervalMs: 0, handoffExperiment: true });
+  await controller.send('exact next input', [], { model: 'fixed-model', fast: false });
+  assert.deepEqual(calls.map(call => call.action), ['status', 'event', 'status', 'switch', 'send', 'status', 'event']);
+  assert.ok(calls.every(call => call.agent === 'main-experiment'));
+  assert.deepEqual(calls[3].payload, { slot: 'A', epoch: 2 });
+  assert.deepEqual(calls[1].payload.original, { text: 'exact next input', attachments: [], execution: { model: 'fixed-model', fast: false } });
+  assert.equal(calls[6].payload.id, calls[1].payload.id);
+  assert.equal(calls[6].payload.operation, 'processed');
+  assert.equal(prepared.length, 1);
+});
+
+test('stale preparation leaves A in charge and ordinary chats never call the handoff API', async () => {
+  for (const enabled of [true, false]) {
+    const calls = [];
+    const controller = new ChatSessionController(runtime({
+      async handoff(_agent, action) {
+        calls.push(action);
+        if (action === 'switch') throw new Error('handoff_invalid: stale cursor');
+        return { state: { owner: 'A', epoch: 0, preparation: { status: 'ready', slot: 'B' } }, preparationSnapshot: {} };
+      },
+      async send(agentId) { calls.push('send'); return { agentId, runId: 'next' }; }
+    }), events(), 'main-experiment', { pollIntervalMs: 0, handoffExperiment: enabled });
+    await controller.send('preserved input', [], {});
+    assert.deepEqual(calls, enabled ? ['status', 'event', 'status', 'switch', 'send', 'status', 'event'] : ['send']);
+  }
+});
+
+test('experiment persists queued originals while A is active and acknowledges the same ID after delivery', async () => {
+  const terminal = deferred(), recorded = [], sent = [];
+  const controller = new ChatSessionController(runtime({
+    async handoff(_agent, action, payload) {
+      if (action === 'event') recorded.push(payload);
+      return { state: { owner: 'A', epoch: 0, preparation: null }, preparationSnapshot: {} };
+    },
+    async send(agentId, text) { sent.push(text); return { agentId, runId: text }; },
+    async status(_agent, runId) { if (runId === 'first') await terminal.promise; return { status: 'completed' }; }
+  }), events(), 'main-experiment', { pollIntervalMs: 0, handoffExperiment: true });
+  const first = controller.send('first', [], {});
+  await tick();
+  const second = controller.send('queued approval change', [], { fast: false });
+  await tick();
+  const original = recorded.find(item => item.original?.text === 'queued approval change');
+  assert.ok(original);
+  assert.deepEqual(sent, ['first']);
+  terminal.resolve();
+  await Promise.all([first, second]);
+  assert.equal(recorded.filter(item => item.kind === 'pending-input' && item.id === original.id).length, 1);
+  assert.equal(recorded.filter(item => item.operation === 'processed' && item.id === original.id).length, 1);
+  assert.deepEqual(sent, ['first', 'queued approval change']);
+});
 
 test('queue promotes only accepted requests and batches snapshots and active identity', async () => {
   const terminal = deferred(), acceptance = deferred();
@@ -201,6 +279,21 @@ test('repeated stop retries cancellation and a terminal refusal still drains the
   assert.deepEqual(cancelled, [['main-existing', 'first'], ['main-existing', 'first']]);
   assert.deepEqual(sent, ['first', 'second']);
   assert.equal(errors.some(text => /terminal/.test(text)), false);
+});
+
+test('completed run refuses cancellation without losing its final answer or the next queued input', async () => {
+  const terminal = deferred(), output = [], sent = [];
+  const controller = new ChatSessionController(runtime({
+    async send(agent, text) { sent.push(text); return { agentId: agent, runId: text }; },
+    async status(_agent, run) { if (run === 'already-complete') await terminal.promise; return { status: 'completed' }; },
+    async result(_agent, run) { return { status: 'completed', text: run + ' result' }; },
+    async cancel() { terminal.resolve(); throw new Error('run_terminal: already terminal'); }
+  }), events({ onAssistantText: text => output.push(text) }), 'main-existing', { pollIntervalMs: 0 });
+  const first = controller.send('already-complete', [], {}); await tick();
+  const second = controller.send('queued-next', [], {});
+  await controller.cancel(); await Promise.all([first, second]);
+  assert.deepEqual(sent, ['already-complete', 'queued-next']);
+  assert.deepEqual(output, ['already-complete result', 'queued-next result']);
 });
 
 test('conversation reset requires an idle controller and preserves the Agent binding', async () => {
@@ -516,7 +609,7 @@ test('inspection snapshots are dispatched separately from queued implementation'
   assert.match(calls[2].text, /^Implement later\n/);
 });
 
-test('inspection decision continuation retains its original constraints', async () => {
+test('inspection decision continuation retains its captured settings over current composer settings', async () => {
   const calls = [], resumed = deferred();
   const controller = new ChatSessionController(runtime({
     async send(agentId, text, execution) {
@@ -528,11 +621,19 @@ test('inspection decision continuation retains its original constraints', async 
       return { status: runId === 'inspection' ? 'needs-human-decision' : 'completed', text: 'Approve inspection proposal', decisionKind: runId === 'inspection' ? 'approval' : undefined };
     }
   }), events(), 'main-existing', { pollIntervalMs: 0 });
-  await controller.send('Inspect', [], { taskMode: 'direct', inspectionOnly: true });
-  assert.equal(controller.approveDecision('inspection', { taskMode: 'work', inspectionOnly: false, goalMode: true, goalObjective: 'Implement from UI' }), true);
+  const original = { taskMode: 'direct', inspectionOnly: true, businessMode: 'design',
+    agentModels: { work: { model: 'captured-worker' } }, agentPermissions: { work: 'workspace-write' } };
+  await controller.send('Inspect', [], original);
+  assert.equal(controller.approveDecision('inspection', { taskMode: 'work', inspectionOnly: false, businessMode: 'planning',
+    agentModels: { work: { model: 'composer-worker' } }, agentPermissions: { work: 'danger-full-access' },
+    goalMode: true, goalObjective: 'Implement from UI', model: 'current-main' }), true);
   await resumed.promise;
   assert.equal(calls[1].execution.taskMode, 'direct');
   assert.equal(calls[1].execution.inspectionOnly, true);
+  assert.equal(calls[1].execution.businessMode, 'design');
+  assert.deepEqual(calls[1].execution.agentModels, original.agentModels);
+  assert.deepEqual(calls[1].execution.agentPermissions, original.agentPermissions);
+  assert.equal(calls[1].execution.model, 'current-main');
   assert.equal(calls[1].execution.goalMode, false);
   assert.equal(Object.hasOwn(calls[1].execution, 'goalObjective'), false);
   assert.match(calls[1].text, /Do not implement repairs/);
@@ -675,11 +776,16 @@ test('accepted submission captures exact guidance and original per-message inten
   options.businessMode = 'normal';
   terminal.resolve();
   await Promise.all([first, second, third]);
-  assert.deepEqual(accepted[0], { taskMode: 'direct', businessMode: 'normal', goal: false, guidance: '' });
+  const { runId, acceptedAt, ...firstIntent } = accepted[0];
+  assert.deepEqual(firstIntent, { taskMode: 'direct', businessMode: 'normal', goal: false, guidance: '' });
+  assert.equal(runId, 'first');
+  assert.ok(Number.isFinite(Date.parse(acceptedAt)));
   assert.equal(accepted[1].businessMode, 'interview');
   assert.equal(accepted[2].businessMode, 'design');
   assert.equal(accepted[1].taskMode, 'plan-work');
   for (const submission of accepted.slice(1)) {
+    assert.equal(submission.runId, 'batch', 'Every queued input keeps the accepted batch identity');
+    assert.ok(Number.isFinite(Date.parse(submission.acceptedAt)));
     assert.match(submission.guidance, /worker-exact/);
     const common = submission.guidance.indexOf('\n\n[Conversation-based background workflow]');
     assert.ok(common > 0);
@@ -732,7 +838,10 @@ test('role permissions stay captured and prevent queue merging', async () => {
 
 test('Main answers a new question with background identities after workflow acceptance', async () => {
   const calls = [];
-  const children = [{ agentId: 'work-background', runId: 'work-run', role: 'work', status: 'running' }];
+  const children = [{ agentId: 'work-background', runId: 'work-run', role: 'work', status: 'running' },
+    ...['completed', 'cancelled', 'failed'].map(status => ({ agentId: `past-${status}`, runId: 'past-run', role: 'work', status })),
+    { agentId: 'old-decision', runId: 'old-run', role: 'work', status: 'needs-human-decision', currentConversation: false },
+    { agentId: 'current-decision', runId: 'decision-run', role: 'work', status: 'needs-human-decision', currentConversation: true }];
   const controller = new ChatSessionController(runtime({
     async listChildSessions() { return children; },
     async send(agentId, text, execution) { calls.push({ text, execution }); return { agentId, runId: `main-${calls.length}` }; }
@@ -744,7 +853,11 @@ test('Main answers a new question with background identities after workflow acce
   assert.equal(calls[1].execution.taskMode, 'direct');
   assert.match(calls[1].text, /work-background/);
   assert.match(calls[1].text, /without cancelling/);
-  assert.equal(children[0].status, 'running');
+  assert.match(calls[1].text, /current-decision/);
+  assert.doesNotMatch(calls[1].text, /past-|old-decision/);
+  children.splice(0, children.length, { agentId: 'done-history', role: 'work', status: 'completed' });
+  await controller.send('Another question', [], { taskMode: 'direct' });
+  assert.doesNotMatch(calls[2].text, /Background workflow status/);
 });
 
 for (const decisionKind of [undefined, 'clarification']) {
@@ -814,4 +927,29 @@ test('confirmation protocol validates request identities and retains legacy read
     assert.equal(parseClientMessage({ type: 'chat.status', ids: value }), undefined);
     assert.equal(parseClientMessage({ type: 'client.ready', pendingMessageIds: value }), undefined);
   }
+});
+
+
+test('Maestro selection preserves originals and separates normal queued inputs without changing execution authority', async () => {
+  const terminal = deferred(), calls = [], accepted = [];
+  const controller = new ChatSessionController(runtime({
+    async send(agentId, text, options) { calls.push({agentId, text, options}); return {agentId, runId: String(calls.length)}; },
+    async status(_agent, runId) { if (runId === '1') await terminal.promise; return {status: 'completed'}; }
+  }), events(), 'same-main', {pollIntervalMs: 0});
+  const first = controller.send('running original', [], {}); await tick();
+  const settings = {taskMode: 'orchestrate', businessMode: 'maestro', model: 'designated-model', fast: false, executionMode: 'workspace-write', messageId: 'message-exact', receivedAt: '2026-10-07T20:00:00Z'};
+  const second = controller.send('Maestro exact original', [], settings, value => accepted.push(value));
+  const third = controller.send('normal later original', [], {...settings, businessMode: 'normal', messageId: 'message-next'}, value => accepted.push(value));
+  settings.businessMode = 'normal'; terminal.resolve(); await Promise.all([first,second,third]);
+  assert.equal(calls.length, 3);
+  assert.ok(calls.every(value => value.agentId === 'same-main'));
+  assert.match(calls[1].text, /Maestro exact original/);
+  assert.match(calls[1].text, /Message reference: message-exact/);
+  assert.equal(calls[1].options.taskMode, 'orchestrate');
+  assert.equal(calls[1].options.model, 'designated-model');
+  assert.equal(calls[1].options.executionMode, 'workspace-write');
+  assert.equal(calls[1].options.fast, false);
+  assert.equal(accepted[0].businessMode, 'maestro');
+  assert.equal(accepted[1].businessMode, 'normal');
+  assert.equal(controller.queueLength, 0);
 });

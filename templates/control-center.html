@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="en" data-host-language="{{hostLanguage}}">
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'none'; img-src {{cspSource}} data: blob:; font-src {{cspSource}}; style-src {{cspSource}}; script-src 'nonce-{{nonce}}' 'wasm-unsafe-eval';"
+    />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <link rel="stylesheet" href="{{styleUri}}" />
+    <link rel="stylesheet" href="{{chatStyleBaseUri}}/chat/controls.css" />
+    <link rel="stylesheet" href="{{chatStyleBaseUri}}/chat/maestro.css" />
+  </head>
+  <body>
+        <section id="maestro-center" class="maestro-center" aria-label="Control center" data-i18n-aria-label="maestro.center">
+          <header><h2 data-i18n="maestro.center">Control center</h2><button id="maestro-refresh" type="button" data-i18n="maestro.refresh">Refresh</button></header>
+          <div class="maestro-filters"><label><span data-i18n="maestro.scope">Conversation</span><select id="maestro-scope"></select></label><label><span data-i18n="maestro.status">Status</span><select id="maestro-status"></select></label><label><span data-i18n="maestro.search">Find task</span><input id="maestro-search" type="search" /></label></div>
+          <p id="maestro-observation" role="status"></p><div id="maestro-overview" class="maestro-overview"></div>
+          <div class="maestro-workspace"><nav id="maestro-tasks" aria-label="Tasks" data-i18n-aria-label="maestro.tasks"></nav><article id="maestro-detail" tabindex="-1"></article></div>
+        </section>
+    <script nonce="{{nonce}}" src="{{localizationScriptUri}}"></script>
+    <script nonce="{{nonce}}" src="{{chatModuleBaseUri}}/chat/maestro.js"></script>
+    <script nonce="{{nonce}}" src="{{chatModuleBaseUri}}/control-center.js"></script>
+  </body>
+</html>

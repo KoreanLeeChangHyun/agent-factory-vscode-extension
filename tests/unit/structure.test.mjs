@@ -389,7 +389,7 @@ test("Git changes render a bounded unified diff preview with file statistics", f
 });
 
 test("every chat feature module is loaded before chat.js and installed once", async function () {
-  const modules = (await readdir(new URL("../../static/js/chat/", import.meta.url))).filter(name => name.endsWith(".js"));
+  const modules = (await readdir(new URL("../../static/js/chat/", import.meta.url))).filter(name => name.endsWith(".js") && name !== "maestro.js");
   assert.ok(modules.length > 0);
   const chatIndex = template.indexOf('src="{{scriptUri}}"');
   for (const name of modules) {
@@ -403,7 +403,7 @@ test("every chat feature module is loaded before chat.js and installed once", as
 });
 
 test("every chat feature stylesheet is linked after chat.css", async function () {
-  const sheets = (await readdir(new URL("../../static/css/chat/", import.meta.url))).filter(name => name.endsWith(".css"));
+  const sheets = (await readdir(new URL("../../static/css/chat/", import.meta.url))).filter(name => name.endsWith(".css") && name !== "maestro.css");
   assert.ok(sheets.length > 0);
   const baseIndex = template.indexOf('href="{{styleUri}}"');
   for (const name of sheets) {
@@ -441,4 +441,15 @@ test("status settings uses an accessible SVG-only button", function () {
   assert.match(button[0], /aria-controls="status-settings"/);
   assert.match(button[1], /<svg[^>]*aria-hidden="true"[^>]*focusable="false"/);
   assert.equal(button[1].replace(/<[^>]*>/g, '').trim(), '');
+});
+
+
+test("control center assets belong to the separate window and use the shared theme", async () => {
+  const center = await readFile(new URL("../../templates/control-center.html", import.meta.url), "utf8");
+  const script = await readFile(new URL("../../static/js/control-center.js", import.meta.url), "utf8");
+  assert.ok(center.indexOf('/chat/maestro.js') < center.indexOf('/control-center.js'));
+  assert.match(center, /href="\{\{chatStyleBaseUri\}\}\/chat\/maestro.css"/);
+  assert.match(center, /href="\{\{styleUri\}\}"/);
+  assert.match(script, /AgentFactoryChat.maestro\(/);
+  assert.doesNotMatch(template, /maestro.css|maestro.js|id="maestro-center"/);
 });

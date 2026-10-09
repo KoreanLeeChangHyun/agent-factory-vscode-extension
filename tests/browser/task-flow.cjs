@@ -848,7 +848,7 @@ module.exports.checkTaskDismiss = checkTaskDismiss;
 
 async function checkTaskRows(page, { durationOnly = false, activityOnly = false } = {}) {
   const fs = require('node:fs'), path = require('node:path');
-  await page.evaluate(() => window.postMessage({ type: 'host.initialize', panelId: 'row-fixture', role: 'main', runtimeAvailable: true,
+  await page.evaluate(() => window.postMessage({ type: 'host.initialize', panelId: 'row-fixture', agentId: 'row-main', role: 'main', runtimeAvailable: true,
     agentModels: { work: { model: 'composer-expert' }, workLight: { model: 'composer-worker' } }, capabilities: { submit: {}, send: {} } }, '*'));
   const longTitle = 'Task title ' + 'with a long name '.repeat(18);
   const longModel = 'captured-model-' + 'long-provider-model-'.repeat(5);
@@ -1022,6 +1022,7 @@ async function checkTaskRows(page, { durationOnly = false, activityOnly = false 
     const geometry = await page.evaluate(() => {
       const rect = selector => { const r = document.querySelector(selector).getBoundingClientRect(); return { x: r.x, right: r.right, y: r.y, bottom: r.bottom, width: r.width }; };
       return { column: rect('.composer-status-column'), panel: rect('#run-details'), bot: rect('#companion-dock'),
+        header: rect('#run-status'),
         top: rect('.composer-topline'), queue: rect('#pending-queue-toggle'), composer: rect('.composer'), toggle: rect('#run-status-toggle'), rows: Array.from(document.querySelectorAll('#run-stage-list .task-flow-single')).map(el => {
           const r = el.getBoundingClientRect(), parent = el.parentElement.getBoundingClientRect();
           const buttons = Array.from(el.querySelectorAll('summary button')).map(b => b.getBoundingClientRect());
@@ -1034,7 +1035,7 @@ async function checkTaskRows(page, { durationOnly = false, activityOnly = false 
     assert.ok(Math.abs(geometry.panel.width - geometry.column.width) <= 1);
     // The bot floats: no empty band between panel and composer, and the header keeps the right edge.
     assert.ok(geometry.composer.y - geometry.panel.bottom <= 44, width + ' no reserved gap above the composer ' + JSON.stringify([geometry.panel, geometry.composer]));
-    assert.ok(Math.abs(geometry.toggle.right - geometry.composer.right) <= 2, width + ' header stays right-aligned ' + JSON.stringify([geometry.toggle, geometry.composer]));
+    assert.ok(Math.abs(geometry.header.right - geometry.composer.right) <= 2, width + ' header stays right-aligned ' + JSON.stringify([geometry.header, geometry.composer]));
     assert.ok(geometry.column.right <= width, width + ' header counts never widen the composer column');
     assert.ok(await page.locator('#run-status-agents').evaluate(el => getComputedStyle(el).whiteSpace === 'nowrap' && getComputedStyle(el).textOverflow === 'ellipsis'), 'Header counts truncate on one line');
     assert.ok(geometry.bot.x >= 0 && geometry.bot.right <= width, 'Absolute bot stays inside the webview');
@@ -1088,7 +1089,7 @@ async function checkTaskRows(page, { durationOnly = false, activityOnly = false 
       }
     }
   }
-  // Main's working indicator leads the open panel's header and returns to the composer dock when the panel closes.
+  // Main's feedback has a readable row above the open header and returns to the dock when closed.
   await page.evaluate(() => window.dispatchEvent(new MessageEvent('message', { data: { type: 'run.state', running: true } })));
   await page.locator('#agent-progress').waitFor();
   const placement = () => page.evaluate(() => {
@@ -1102,8 +1103,8 @@ async function checkTaskRows(page, { durationOnly = false, activityOnly = false 
     assert.equal(open.parent, 'run-status', width + ' open panel hosts the indicator');
     assert.ok(open.progress.width > 0 && Math.abs(open.progress.x - open.panel.x) <= 6, width + ' indicator starts at the panel left ' + JSON.stringify(open));
     assert.ok(open.progress.bottom <= open.panel.y + 1, width + ' indicator sits above the panel body');
-    assert.ok(Math.abs(open.progress.mid - open.toggle.mid) <= 2, width + ' indicator shares the header row');
-    assert.ok(open.progress.right <= open.toggle.x + 1, width + ' indicator stays left of the title');
+    assert.ok(open.progress.bottom <= open.toggle.y + 1, width + ' feedback stays above the header controls');
+    assert.ok(open.progress.right <= open.panel.right + 1, width + ' feedback fits the panel width');
     if (process.env.AF_TASK_ROW_ARTIFACT) await page.locator('.composer-region').screenshot({ path: path.join(process.env.AF_TASK_ROW_ARTIFACT, 'progress-open-' + width + '.png') });
   }
   await page.locator('#run-status-toggle').click();
@@ -1157,8 +1158,13 @@ async function checkTaskRows(page, { durationOnly = false, activityOnly = false 
   const before = await page.evaluate(() => window.sentMessages.length);
   await mixedRow('stopped').locator('.task-flow-dismiss').focus();
   await page.keyboard.press('Enter');
+  assert.equal(await mixedRow('stopped').count(), 1, 'The row stays present until Host confirms deletion');
+  const deletion = await page.evaluate(() => window.sentMessages.at(-1));
+  assert.deepEqual(deletion, { type: 'task.delete', workflowId: 'row-mixed', taskId: 'task-stopped' });
+  await page.evaluate(data => window.dispatchEvent(new MessageEvent('message', { data })), { ...deletion, type: 'task.delete.result', mainAgentId: 'row-main' });
+  agents = agents.filter(agent => agent.taskBinding?.workflowId !== deletion.workflowId || agent.taskBinding?.taskId !== deletion.taskId);
   assert.equal(await mixedRow('stopped').count(), 0);
-  assert.equal(await page.evaluate(() => window.sentMessages.length), before, 'List removal sends no execution control');
+  assert.equal(await page.evaluate(() => window.sentMessages.length), before + 1, 'Deletion sends exactly its Host request and no execution control');
   await publish();
   assert.equal(await mixedRow('stopped').count(), 0, 'Removed row remains hidden on refresh');
   assert.equal(await mixedRow('live').count(), 1, 'The running task stays listed');
@@ -1304,6 +1310,7 @@ module.exports.checkTaskFlowStates = async function (page) {
   };
   for (const size of [{ width: 465, height: 556 }, { width: 721, height: 402 }, { width: 320, height: 500 }]) {
     await page.setViewportSize(size);
+    await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
     await openHistory();
     const entry = page.locator('.task-history-disclosure[data-history-id="state-flow"]');
     if (!await entry.evaluate(el => el.open)) await entry.locator(':scope > summary').click();

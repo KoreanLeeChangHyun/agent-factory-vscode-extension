@@ -3,7 +3,6 @@
   "agentFactory.mainChat.botCharacter.description": "전체 채팅에서 사용할 봇입니다.",
   "agentFactory.mainChat.lumiPrompt.description": "루미 전용 프롬프트입니다. 비우면 루미 기본값을 사용합니다.",
   "agentFactory.mainChat.factoryBotPrompt.description": "팩토리봇 전용 프롬프트입니다. 설정 전까지 기존 봇 프롬프트를 보존합니다.",
-
   "agentFactory.mainChat.botModel.description": "봇 공통 대화 모델입니다. 비워두면 Codex Luna를 사용하고 Codex 미설치 시 Claude Haiku로 대체합니다.",
   "agentFactory.mainChat.botPrompt.description": "루나 봇 대화 프롬프트입니다. 비워두면 기본값을 사용하며 다음 봇 대화부터 적용됩니다.",
   "agentFactory.mainChat.open.title": "메인 에이전트 채팅 추가",
@@ -52,5 +51,6 @@
   "agentFactory.agents.verification.model.description": "이 범위에서 사용할 검증 에이전트 모델입니다. 새 프로젝트는 글로벌 설정을, 새 채팅은 프로젝트 설정을 복사합니다.",
   "agentFactory.agents.verification.reasoningEffort.description": "이 범위에서 사용할 검증 에이전트 추론 수준입니다. 복사된 설정은 이후 독립적으로 유지됩니다.",
   "agentFactory.agents.verification.fast.description": "이 범위의 검증자에서 Codex Fast 실행 티어를 사용합니다. 추론 수준은 바꾸지 않습니다.",
-  "agentFactory.workUnits.warnDefaultBranch.description": "main·master 브랜치에서 직접 작업할 때 저장소별 알림을 표시합니다."
+  "agentFactory.workUnits.warnDefaultBranch.description": "main·master 브랜치에서 직접 작업할 때 저장소별 알림을 표시합니다.",
+  "agentFactory.sidebar.center.title": "컨트롤 센터"
 }

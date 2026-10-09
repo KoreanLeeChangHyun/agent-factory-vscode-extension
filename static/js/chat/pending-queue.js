@@ -69,7 +69,7 @@ globalThis.AgentFactoryChat.pendingQueue = function (host) {
       if (!ids.has(id)) pendingQueueRows.delete(id);
     }
     pending.forEach(function (item) {
-      const key = JSON.stringify([uiLocale(), item.text, item.attachments.map(function (attachment) { return attachment.name; }), submissionFromExecution(item.execution), Boolean(item.rejected)]);
+      const key = JSON.stringify([uiLocale(), item.text, item.attachments.map(function (attachment) { return attachment.name; }), submissionFromExecution(item.execution), Boolean(item.rejected), Boolean(item.hostAcknowledged)]);
       const cached = pendingQueueRows.get(item.id);
       if (cached?.key === key) {
         const recover = cached.nodes[1];
@@ -80,6 +80,10 @@ globalThis.AgentFactoryChat.pendingQueue = function (host) {
       const rowNodes = [];
       const entry = document.createElement("div");
       entry.textContent = item.text + (item.attachments.length ? " · " + item.attachments.map(function (attachment) { return attachment.name; }).join(", ") : "");
+      const status = document.createElement("span");
+      status.className = "pending-request-feedback";
+      status.textContent = t(item.rejected ? "feedback.rejected" : item.hostAcknowledged ? "feedback.queued" : "feedback.sending");
+      entry.append(status);
       renderSubmission(entry, submissionFromExecution(item.execution));
       rowNodes.push(entry);
       if (item.rejected) {
@@ -93,6 +97,7 @@ globalThis.AgentFactoryChat.pendingQueue = function (host) {
           const request = state.pendingRequests.find(function (pending) { return pending.id === item.id; });
           if (!request) return;
           state.pendingRequests = state.pendingRequests.filter(function (request) { return request.id !== item.id; });
+          state.chatFeedback = "restored";
           state.recoveredRequest = { id: request.id, execution: request.execution };
           state.draft = request.text;
           prompt.value = request.text;

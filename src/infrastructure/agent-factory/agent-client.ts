@@ -1,4 +1,5 @@
 import { codexConnectionEnvironment } from "./codex-connection-host";
+import { randomUUID } from "node:crypto";
 import { ObservedRunCache } from "./observed-run-cache";
 import { localize } from "../../common/localization";
 import { submissionContext } from "./submission-context";
@@ -85,7 +86,29 @@ export interface RunUpdates {
   readonly updates: readonly RunUpdate[];
 }
 
+/** Last inference observation for opt-in experiments; never cumulative billing usage. */
+export interface ContextObservation {
+  readonly usedTokens: number | null;
+  readonly contextWindowTokens: number | null;
+  readonly observedAt: string | null;
+  readonly sessionId: string | null;
+  readonly turnId: string | null;
+  readonly source: string | null;
+  readonly estimated: boolean;
+  readonly providerVersion: string | null;
+}
+
+export interface HandoffStatus {
+  readonly state: null | {
+    readonly owner: "A" | "B";
+    readonly epoch: number;
+    readonly preparation: null | { readonly status: string; readonly slot: "A" | "B" };
+  };
+  readonly preparationSnapshot: Record<string, unknown> | null;
+}
+
 export type RunUpdate =
+  | { readonly kind: "contextObservation"; readonly observation: ContextObservation }
   | { readonly kind: "interviewQuestion"; readonly question: import("../../common/types/business-mode").InterviewQuestion }
   | { readonly kind: "commentary"; readonly text: string }
   /** Live preview of text still being generated; the complete commentary or final result supersedes it. */
@@ -139,6 +162,8 @@ export interface ConversationHistory {
 export interface ChildAgentSession {
   readonly taskBinding?: Record<string, unknown>;
   readonly parentRunId?: string;
+  readonly parentConversationId?: string;
+  readonly currentConversation?: boolean;
   readonly taskMode?: TaskMode;
   readonly agentId: string;
   readonly runId?: string;
@@ -178,6 +203,7 @@ export type RevisionLimitDecision = "continue" | "stop";
 export const REVISION_LIMIT_EXTENSION = 3;
 
 export interface AgentRuntimeClient {
+  handoff?(agentId: string, action: "status" | "configure" | "ready" | "switch" | "event", payload?: Record<string, unknown>): Promise<HandoffStatus>;
   worktreeRepositories?(): Promise<readonly WorktreeRepository[]>;
   worktree?(agentId: string, action: "status" | "create" | "merge", options?: WorktreeOptions): Promise<ConversationWorktree>;
   conversations?(agentId: string): Promise<readonly SavedConversation[]>;
@@ -206,6 +232,7 @@ export interface AgentRuntimeClient {
   answerWorkflow?(mainAgentId: string, workAgentId: string, loopId: string, decisionId: string, questionHash: string, answer: string): Promise<Record<string, unknown>>;
   advanceWorkflows?(mainAgentId: string, agents: readonly ChildAgentSession[], drive?: boolean): Promise<readonly Record<string, unknown>[]>;
   listProjectTasks?(): Promise<readonly ProjectTaskEntry[]>;
+  projectTaskRecords?(workflowId: string, taskId: string): Promise<readonly { readonly name: string; readonly path: string }[]>;
 }
 
 export class AgentFactoryClient implements AgentRuntimeClient {
@@ -314,6 +341,23 @@ export class AgentFactoryClient implements AgentRuntimeClient {
     return { goal: readNativeGoal(document.goal), ...(typeof document.error === "string" ? { error: document.error } : {}) };
   }
 
+  public async handoff(agentId: string, action: "status" | "configure" | "ready" | "switch" | "event", payload?: Record<string, unknown>): Promise<HandoffStatus> {
+    const input = payload ? join(tmpdir(), `agent-factory-handoff-${randomUUID()}.json`) : undefined;
+    try {
+      if (input) await writeFile(input, JSON.stringify(payload), { encoding: "utf8", flag: "wx", mode: 0o600 });
+      const value = await this.command(["handoff", "--project-root", this.projectRoot, "--agent", agentId, action,
+        ...(input ? ["--input", input] : [])]);
+      const state = readRecordOrUndefined(value.state);
+      if (value.kind !== "handoff" || value.schemaVersion !== 1 ||
+          (value.state !== null && (!state || !["A", "B"].includes(String(state.owner)) || !Number.isInteger(state.epoch)))) {
+        throw new Error("Invalid experimental handoff response");
+      }
+      return value as unknown as HandoffStatus;
+    } finally {
+      if (input) await rm(input, { force: true });
+    }
+  }
+
   public async worktreeRepositories(): Promise<readonly WorktreeRepository[]> {
     const value = await this.command(["worktree", "--project-root", this.projectRoot, "--agent", "main-discovery", "repositories"]);
     if (value.kind !== "worktree-repositories" || value.schemaVersion !== 1 || !Array.isArray(value.repositories) ||
@@ -359,6 +403,7 @@ export class AgentFactoryClient implements AgentRuntimeClient {
       throw new Error(localize("ui.the.agent.factory.runtime.returned.an.invalid.conversation.reset.response"));
     }
     this.invalidateCapabilities(agentId);
+    this.childSessionCache.deleteWhere(key => (JSON.parse(key) as unknown[])[0] === agentId);
     this.contextUsageSnapshots.clear();
     this.eventSnapshots.clear();
     return { conversationId: document.conversationId, startedAt: document.startedAt };
@@ -1080,6 +1125,7 @@ When a command needs sudo and the Human has requested it, use python3 ${JSON.str
       { ...pluginRuntimeEnvironment(this.developmentRoot), AGENT_FACTORY_PARENT_STATE: parentPath,
         AGENT_FACTORY_EXECUTION_POLICY: JSON.stringify(parent.executionPolicy) });
     const snapshot = readLoopOutput(output, failure);
+    snapshot.parentConversationId = parent.conversationId ?? null;
     this.workflowSnapshots.delete(path);
     return this.presentWorkflow(snapshot, state, mainAgentId, parentRun);
   }
@@ -1191,6 +1237,7 @@ When a command needs sudo and the Human has requested it, use python3 ${JSON.str
             AGENT_FACTORY_PARENT_STATE: state.parentStatePath,
             AGENT_FACTORY_EXECUTION_POLICY: JSON.stringify(policy) });
         const snapshot = readLoopOutput(output, "Workflow reconciliation failed");
+        snapshot.parentConversationId = parent.conversationId ?? null;
         await this.presentWorkflow(snapshot, state, mainAgentId, parentRun);
         this.workflowSnapshots.set(path, { signature, observedAt: Date.now(), state, snapshot });
         while (this.workflowSnapshots.size > 256) this.workflowSnapshots.delete(this.workflowSnapshots.keys().next().value!);
@@ -1218,14 +1265,43 @@ When a command needs sudo and the Human has requested it, use python3 ${JSON.str
       for (const loop of await this.managedDirectoryEntries(await this.managedPath(agent.name, "loops"))) {
         if (!loop.isDirectory() || !MANAGED_ID.test(loop.name)) continue;
         let state: Record<string, unknown> | undefined;
-        try { state = await this.cachedRunState(await this.managedPath(agent.name, "loops", loop.name, "state.json")); }
+        try { state = await this.cachedRunState(await this.managedPath(agent.name, "loops", loop.name, "state.json"), Infinity); }
         catch (error) { if (isMissingFile(error)) continue; throw error; }
-        const entry = state && projectTaskEntry(state);
+        const entry = state && projectTaskEntry(state, agent.name, loop.name);
+        if (entry) for (const task of entry.tasks) {
+          const original = (readRecordOrUndefined(state?.workflow)?.tasks as Record<string, unknown>[]).find(value => value.id === task.id);
+          const runs: import("../../protocol/messages").ProjectTaskRun[] = [];
+          for (const role of ["work", "verification"] as const) {
+            const agentId = original?.[role + "AgentId"] ?? state?.[role + "AgentId"];
+            const runId = original?.[role + "RunId"];
+            if (typeof agentId !== "string" || !MANAGED_ID.test(agentId) || typeof runId !== "string" || !MANAGED_ID.test(runId)) continue;
+            const run = await this.cachedRunState(await this.managedPath(agentId, "runs", runId, "state.json"), Infinity).catch(error => { if (isMissingFile(error)) return undefined; throw error; });
+            if (!run || run.agentId !== agentId || run.runId !== runId) continue;
+            const binding = readRecordOrUndefined(run.taskBinding);
+            if (binding?.workflowId !== entry.id || binding?.taskId !== task.id) continue;
+            const receipt = await this.cachedRunState(await this.managedPath(agentId, "runs", runId, "receipt.json"), Infinity).catch(error => { if (isMissingFile(error)) return undefined; throw error; });
+            runs.push(projectTaskRun(run, receipt));
+          }
+          Object.assign(task, { runs });
+        }
         // A brief re-dispatched in a newer loop keeps one row: the most recent state wins.
         if (entry && !((latest.get(entry.id)?.updatedAt ?? "") > (entry.updatedAt ?? ""))) latest.set(entry.id, entry);
       }
     }
     return [...latest.values()].sort((left, right) => (right.createdAt ?? "").localeCompare(left.createdAt ?? "") || left.id.localeCompare(right.id));
+  }
+
+  public async projectTaskRecords(workflowId: string, taskId: string): Promise<readonly { name: string; path: string }[]> {
+    const entry = (await this.listProjectTasks()).find(value => value.id === workflowId);
+    const task = entry?.tasks.find(value => value.id === taskId);
+    if (!entry || !task || !entry.workAgentId || !entry.loopId) return [];
+    const records = [{ name: "Loop state", path: await this.managedPath(entry.workAgentId, "loops", entry.loopId, "state.json") }];
+    for (const run of task.runs ?? []) for (const name of ["request.md", "state.json", "events.jsonl", "result.md", "receipt.json"]) {
+      const path = await this.managedPath(run.agentId, "runs", run.runId, name);
+      try { await lstat(path); records.push({ name: `${run.role} · ${run.runId} · ${name}`, path }); }
+      catch (error) { if (!isMissingFile(error)) throw error; }
+    }
+    return records;
   }
 
   /** Resolve the clicked historical run, retaining Main ownership and its captured options. */
@@ -1254,6 +1330,10 @@ When a command needs sudo and the Human has requested it, use python3 ${JSON.str
   private async readChildSessions(mainAgentId: string, runId?: string): Promise<readonly ChildAgentSession[]> {
     const referenced = await this.discoverChildAgents(mainAgentId, runId);
     if (referenced.size === 0) return [];
+    const mainSession = await this.managedPath(mainAgentId, "session.json").then(path => this.cachedRunState(path)).catch(error => {
+      if (isMissingFile(error)) return undefined;
+      throw error;
+    });
     const sessions = await Promise.all([...referenced.keys()].map(async agentId => {
       try { return await this.cachedRunState(await this.managedPath(agentId, "session.json")); }
       catch (error) { if (isMissingFile(error)) return undefined; throw error; }
@@ -1264,6 +1344,7 @@ When a command needs sudo and the Human has requested it, use python3 ${JSON.str
     }
     const agents: ChildAgentSession[] = [];
     const parentModes = new Map<string, TaskMode | undefined>();
+    const parentConversations = new Map<string, string | undefined>();
     for (const value of document.agents) {
       const agent = readRecordOrUndefined(value);
       if (
@@ -1285,6 +1366,7 @@ When a command needs sudo and the Human has requested it, use python3 ${JSON.str
         try {
           const parent = readRecord(await this.cachedRunState(path), "parent run");
           parentModes.set(parentRunId, TASK_MODES.includes(parent.taskMode as TaskMode) ? parent.taskMode as TaskMode : undefined);
+          parentConversations.set(parentRunId, typeof parent.conversationId === "string" ? parent.conversationId : undefined);
         } catch (error) {
           if (!isMissingFile(error)) throw error;
           parentModes.set(parentRunId, undefined);
@@ -1292,6 +1374,9 @@ When a command needs sudo and the Human has requested it, use python3 ${JSON.str
       }
       agents.push({
         parentRunId,
+        ...(parentRunId && (parentConversations.get(parentRunId) !== undefined || mainSession?.conversationId !== undefined)
+          ? { parentConversationId: parentConversations.get(parentRunId),
+          currentConversation: parentConversations.get(parentRunId) === mainSession?.conversationId } : {}),
         ...(parentRunId && parentModes.get(parentRunId) ? { taskMode: parentModes.get(parentRunId) } : {}),
         agentId: agent.agentId,
         role: agent.role,
@@ -1786,6 +1871,18 @@ async function progressUpdates(line: string, projectRoot: string, ownResultPath:
   }
   const event = readRecordOrUndefined(value);
   if (!event) return [];
+  if (event.type === "provider.context") {
+    return [{ kind: "contextObservation", observation: {
+      usedTokens: readTokenCount(event.usedTokens) ?? null,
+      contextWindowTokens: readTokenCount(event.contextWindowTokens) ?? null,
+      observedAt: typeof event.observedAt === "string" ? event.observedAt : null,
+      sessionId: typeof event.session_id === "string" ? event.session_id : null,
+      turnId: typeof event.turn_id === "string" ? event.turn_id : null,
+      source: typeof event.source === "string" ? event.source : null,
+      estimated: event.estimated !== false,
+      providerVersion: typeof event.providerVersion === "string" ? event.providerVersion : null
+    } }];
+  }
   if (event.type === "interview.question") {
     const question = parseInterviewQuestion(event.question);
     return question ? [{ kind: "interviewQuestion", question }] : [];
@@ -2316,30 +2413,71 @@ function truncate(value: string, limit: number): string {
   return value.length > limit ? `${value.slice(0, limit - 1)}…` : value;
 }
 
-/** The display summary of one loop state; descriptions are bounded and no path or policy leaves the host. */
-function projectTaskEntry(state: Record<string, unknown>): ProjectTaskEntry | undefined {
+/** Read-only loop projection preserving complete briefs; private paths remain in the host. */
+function projectTaskEntry(state: Record<string, unknown>, workAgentId?: string, loopId?: string): ProjectTaskEntry | undefined {
   const workflow = readRecordOrUndefined(state.workflow);
   if (!workflow || typeof workflow.id !== "string" || !MANAGED_ID.test(workflow.id) || typeof workflow.title !== "string" || !Array.isArray(workflow.tasks)) return undefined;
-  const text = (value: unknown, limit: number) => typeof value === "string" ? value.slice(0, limit) : undefined;
   const parentPath = typeof state.parentStatePath === "string" ? state.parentStatePath.split(sep) : [];
   const mainAgentId = parentPath.at(-4);
   const contract = readRecordOrUndefined(state.contract);
   const tasks = workflow.tasks.flatMap(value => {
     const task = readRecordOrUndefined(value);
     if (!task || typeof task.id !== "string" || typeof task.title !== "string") return [];
-    return [{ id: task.id, title: task.title.slice(0, 300),
-      ...(text(task.description, 4_000) ? { description: text(task.description, 4_000) } : {}),
+    return [{ id: task.id, title: task.title,
+      ...(typeof task.description === "string" ? { description: task.description } : {}),
+      ...(typeof task.completionCriteria === "string" ? { completionCriteria: task.completionCriteria } : {}),
+      ...(projectTaskAllocation(task.allocation) ? { allocation: projectTaskAllocation(task.allocation) } : {}),
       ...(typeof task.workStatus === "string" ? { workStatus: task.workStatus } : {}),
       ...(typeof task.verificationStatus === "string" ? { verificationStatus: task.verificationStatus } : {}) }];
   });
   return {
-    id: workflow.id, title: workflow.title.slice(0, 300), status: typeof state.status === "string" ? state.status : "unknown", tasks,
+    id: workflow.id, title: workflow.title, ...(workAgentId ? { workAgentId } : {}), ...(loopId ? { loopId } : {}),
+    ...(typeof state.phase === "string" ? { phase: state.phase } : {}), status: typeof state.status === "string" ? state.status : "unknown", tasks,
     ...(typeof state.createdAt === "string" ? { createdAt: state.createdAt } : {}),
     ...(typeof state.updatedAt === "string" ? { updatedAt: state.updatedAt } : {}),
     ...(mainAgentId && MANAGED_ID.test(mainAgentId) && parentPath.at(-3) === "runs" ? { mainAgentId } : {}),
     ...(contract && typeof contract.id === "string" && contract.id
       ? { contract: { id: contract.id, ...(Number.isInteger(contract.version) ? { version: contract.version as number } : {}) } } : {})
   };
+}
+
+/** Only known allocation fields leave the host, never private run payloads or credentials. */
+function projectTaskAllocation(value: unknown): Record<string, unknown> | undefined {
+  const allocation = readRecordOrUndefined(value);
+  if (!allocation || allocation.schemaVersion !== 1) return undefined;
+  const strings = (record: unknown, keys: string[]) => {
+    const source = readRecordOrUndefined(record);
+    if (!source) return {};
+    return Object.fromEntries(keys.flatMap(key => typeof source[key] === "string" || typeof source[key] === "boolean" ? [[key, source[key]]] : []));
+  };
+  const list = (key: string, keys: string[]) => Array.isArray(allocation[key]) ? (allocation[key] as unknown[]).map(item => strings(item, keys)) : [];
+  return { schemaVersion: 1, ...strings(allocation, ["unitReason", "writeScopeReason", "parallelCandidate"]),
+    profile: strings(allocation.profile, ["id", "reason"]), session: strings(allocation.session, ["strategy", "reason"]),
+    readScope: Array.isArray(allocation.readScope) ? allocation.readScope.filter(item => typeof item === "string") : [],
+    inputs: list("inputs", ["source", "revision", "capturedAt", "confirmed"]),
+    dependencies: list("dependencies", ["taskId", "source", "revision", "capturedAt", "confirmed"]),
+    sharedResources: list("sharedResources", ["resource", "ownerTaskId", "confirmed", "evidence"]) };
+}
+
+function projectTaskRun(run: Record<string, unknown>, receipt?: Record<string, unknown>): import("../../protocol/messages").ProjectTaskRun {
+  const options = readRecordOrUndefined(run.executionOptions);
+  const fields = Object.fromEntries(["parentRunId", "acceptedAt", "startedAt", "finishedAt", "updatedAt", "workProfile"].flatMap(key => typeof run[key] === "string" ? [[key, run[key]]] : []));
+  const tokens = readRecordOrUndefined(run.tokenUsage);
+  const usage = tokens && Object.fromEntries(["inputTokens", "cachedInputTokens", "outputTokens", "reasoningOutputTokens"].map(key => [key, typeof tokens[key] === "number" && Number.isSafeInteger(tokens[key]) && Number(tokens[key]) >= 0 ? tokens[key] : null]));
+  const contextSource = readRecordOrUndefined(run.contextUsage);
+  const context = contextSource && Object.fromEntries(["availability", "usedTokens", "contextWindowTokens", "usedPercent", "observedAt", "source", "estimated", "sessionId", "turnId"].flatMap(key => ["string", "number", "boolean"].includes(typeof contextSource[key]) || contextSource[key] === null ? [[key, contextSource[key]]] : []));
+  const handoff = readRecordOrUndefined(run.handoffBinding);
+  const error = readRecordOrUndefined(run.error);
+  const checks = readRecordOrUndefined(receipt?.tests);
+  const boundReceipt = receipt?.runId === run.runId && receipt?.requestHash === (run.receiptRequestHash ?? run.requestHash) && receipt?.outcome === "completed";
+  return { agentId: String(run.agentId), runId: String(run.runId), role: run.role === "verification" ? "verification" : "work", status: typeof run.status === "string" ? run.status : "unknown",
+    ...fields, ...(typeof options?.model === "string" ? { model: options.model } : {}),
+    ...(Number.isInteger(run.attempt) ? { attempt: Number(run.attempt) } : {}),
+    ...(boundReceipt ? { receipt: { outcome: "completed", ...(typeof checks?.run === "boolean" ? { checksRun: checks.run } : {}), ...(typeof checks?.reason === "string" ? { checks: checks.reason } : {}) } } : {}),
+    ...(usage ? { usage: usage as Record<string, number | null> } : {}),
+    ...(context ? { context: context as Record<string, string | number | boolean | null> } : {}),
+    ...(handoff ? { handoff: { ...(typeof handoff.slot === "string" ? { slot: handoff.slot } : {}), ...(Number.isInteger(handoff.epoch) ? { epoch: Number(handoff.epoch) } : {}) } } : {}),
+    ...(typeof error?.code === "string" ? { errorCode: error.code } : {}) };
 }
 
 function readRecordOrUndefined(value: unknown): Record<string, unknown> | undefined {
