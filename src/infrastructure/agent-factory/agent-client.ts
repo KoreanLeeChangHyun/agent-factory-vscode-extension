@@ -15,7 +15,7 @@ import { homedir, tmpdir } from "node:os";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { AsyncCache } from "../../common/async-cache";
 import { parseInterviewQuestion } from "../../common/types/business-mode";
-import type { ActivityDetails as ProtocolActivityDetails, ActivityKind, ProjectTaskEntry } from "../../protocol/messages";
+import type { ActivityDetails as ProtocolActivityDetails, ActivityKind, ProjectDomainEdit, ProjectDomains, ProjectTaskEntry } from "../../protocol/messages";
 import {
   DISPATCH_ID,
   TASK_MODES,
@@ -232,8 +232,18 @@ export interface AgentRuntimeClient {
   answerWorkflow?(mainAgentId: string, workAgentId: string, loopId: string, decisionId: string, questionHash: string, answer: string): Promise<Record<string, unknown>>;
   advanceWorkflows?(mainAgentId: string, agents: readonly ChildAgentSession[], drive?: boolean): Promise<readonly Record<string, unknown>[]>;
   listProjectTasks?(): Promise<readonly ProjectTaskEntry[]>;
+  listProjectDomains?(): Promise<ProjectDomains | undefined>;
+  editProjectDomains?(edit: ProjectDomainEdit): Promise<ProjectDomains>;
+  sendWorkerCommand?(agentId: string, text: string, commandId: string, expected?: WorkerCommandTarget): Promise<WorkerCommandResult>;
+  stopWorkerTask?(agentId: string, loopId: string, workflowId: string, taskId: string): Promise<Record<string, unknown>>;
+  removeWorker?(agentId: string, revision: number): Promise<ProjectDomains>;
   projectTaskRecords?(workflowId: string, taskId: string): Promise<readonly { readonly name: string; readonly path: string }[]>;
 }
+
+export interface WorkerCommandResult { readonly mode: "addition" | "task"; readonly loopId: string; readonly runId?: string; readonly taskId?: string;
+  readonly rework?: { readonly workflowId: string; readonly taskId: string } }
+/** What the sender saw: the running loop/run for an addition, or the ended task a rework revises. */
+export interface WorkerCommandTarget { readonly loopId?: string; readonly runId?: string; readonly rework?: { readonly workflowId: string; readonly taskId: string } }
 
 export class AgentFactoryClient implements AgentRuntimeClient {
   private readonly worktreeAgents = new Set<string>();
@@ -317,6 +327,8 @@ export class AgentFactoryClient implements AgentRuntimeClient {
         ...record,
         roleDirectExceptions: record.roleDirectExceptions === true,
         taskAllocation: record.taskAllocation === true,
+        taskDomain: record.taskDomain === true,
+        projectDomains: record.projectDomains === true,
         // Missing image metadata means an older runtime contract; an explicit
         // false is a provider limitation (or an unavailable provider CLI).
         images: typeof record.images === "boolean" ? record.images : undefined,
@@ -1276,19 +1288,209 @@ When a command needs sudo and the Human has requested it, use python3 ${JSON.str
             const runId = original?.[role + "RunId"];
             if (typeof agentId !== "string" || !MANAGED_ID.test(agentId) || typeof runId !== "string" || !MANAGED_ID.test(runId)) continue;
             const run = await this.cachedRunState(await this.managedPath(agentId, "runs", runId, "state.json"), Infinity).catch(error => { if (isMissingFile(error)) return undefined; throw error; });
-            if (!run || run.agentId !== agentId || run.runId !== runId) continue;
+            if (!run || run.agentId !== agentId || run.runId !== runId || run.role !== role) continue;
             const binding = readRecordOrUndefined(run.taskBinding);
             if (binding?.workflowId !== entry.id || binding?.taskId !== task.id) continue;
             const receipt = await this.cachedRunState(await this.managedPath(agentId, "runs", runId, "receipt.json"), Infinity).catch(error => { if (isMissingFile(error)) return undefined; throw error; });
-            runs.push(projectTaskRun(run, receipt));
+            const projected = projectTaskRun(run, receipt, typeof original?.workRunId === "string" ? original.workRunId : undefined);
+            // Use the existing managed result reader; a missing/error result is distinct from an empty result.
+            let result: import("../../protocol/messages").ProjectTaskRun["result"];
+            if (typeof run.resultPath === "string") {
+              try {
+                const text = await this.readManagedResult(run.resultPath, agentId, runId);
+                const summary = resultSummaryLine(text);
+                result = { availability: "recorded", ...(summary ? { summary: truncate(summary, 240) } : {}) };
+              } catch (error) {
+                result = isMissingFile(error) ? { availability: "missing" } : { availability: "error", error: String(error) };
+              }
+            }
+            runs.push({ ...projected, ...(result ? { result } : {}) });
           }
-          Object.assign(task, { runs });
+          const workspace = readRecordOrUndefined(readRecordOrUndefined(state?.taskWorkspaces)?.[task.id]);
+          const integration = Array.isArray(workspace?.repositories) ? workspace.repositories.flatMap(value => {
+            const unit = readRecordOrUndefined(value);
+            if (!unit || typeof unit.repositoryRoot !== "string") return [];
+            return [{ repository: unit.repositoryRoot, ...(typeof unit.phase === "string" ? { phase: unit.phase } : {}),
+              ...(typeof unit.mergeCommit === "string" ? { mergeCommit: unit.mergeCommit } : {}) }];
+          }) : undefined;
+          Object.assign(task, { runs, ...(integration ? { integration } : {}), commands: projectTaskCommands(state ?? {}, task, runs) });
         }
         // A brief re-dispatched in a newer loop keeps one row: the most recent state wins.
         if (entry && !((latest.get(entry.id)?.updatedAt ?? "") > (entry.updatedAt ?? ""))) latest.set(entry.id, entry);
       }
     }
     return [...latest.values()].sort((left, right) => (right.createdAt ?? "").localeCompare(left.createdAt ?? "") || left.id.localeCompare(right.id));
+  }
+
+  /** The shared editable domain list, or undefined when the installed plugin has no domains.py. */
+  public async listProjectDomains(): Promise<ProjectDomains | undefined> {
+    const script = join(dirname(this.execPath), "domains.py");
+    try { await lstat(script); } catch (error) { if (isMissingFile(error)) return undefined; throw error; }
+    return projectDomains(readRecord((await this.domainsCommand(["list"])).domains, "project domains"));
+  }
+
+  /** Control-center edits are the Human's (actor human); the plugin protects them from later Main writes. */
+  public async editProjectDomains(edit: ProjectDomainEdit): Promise<ProjectDomains> {
+    const write = ["--actor", "human", "--source", "control-center", "--expected-revision", String(edit.revision)];
+    const command = edit.type === "domain.create" ? ["create", ...write, ...("placeholder" in edit ? ["--placeholder"] : ["--name", edit.name])]
+      : edit.type === "domain.rename" ? ["rename", ...write, "--domain-id", edit.domainId, "--name", edit.name]
+        : ["assign", ...write, "--agent", edit.agentId, ...(edit.domainId === null ? ["--unclassified"] : ["--domain-id", edit.domainId])];
+    const result = await this.domainsCommand(command);
+    const changed = typeof result.domainId === "string" && /^domain-[0-9a-f]{12}$/.test(result.domainId) ? { changedDomainId: result.domainId } : {};
+    return { ...projectDomains(readRecord(result.domains, "project domains")), ...changed };
+  }
+
+  /** The Human removes a stopped worker from the worker list; the plugin refuses while it still runs. */
+  public async removeWorker(agentId: string, revision: number): Promise<ProjectDomains> {
+    if (!MANAGED_ID.test(agentId)) throw new Error("Invalid worker identity");
+    const result = await this.domainsCommand(["remove-worker", "--actor", "human", "--source", "control-center", "--expected-revision", String(revision), "--agent", agentId]);
+    return projectDomains(readRecord(result.domains, "project domains"));
+  }
+
+  /**
+   * The Human's instruction to a worker. A running loop of this worker receives it as a bound addition at the next
+   * safe Work turn (loop steer, recorded as queued then delivered). An idle worker gets a new task in the same session
+   * through loop start, reusing its latest loop's model, effort, permissions and parent policy.
+   */
+  public async sendWorkerCommand(agentId: string, text: string, commandId: string, expected: WorkerCommandTarget = {}): Promise<WorkerCommandResult> {
+    if (!MANAGED_ID.test(agentId) || !text.trim() || !/^[A-Za-z0-9-]{8,64}$/.test(commandId)) throw new Error("Invalid worker command");
+    const loops = await this.workerLoops(agentId);
+    const active = loops.filter(loop => loop.state.status === "active");
+    if (active.length > 1) throw Object.assign(new Error("This worker has more than one active task; send from the task instead"), { code: "worker_command_ambiguous" });
+    const reference = `control-center:${agentId}:${commandId}`;
+    // A rework starts a new task linked to the ended one; it never becomes an addition to whatever runs now.
+    if (expected.rework) {
+      if (expected.loopId || expected.runId) throw new Error("Invalid worker command");
+      if (active.length) throw Object.assign(new Error("The worker is running another task; send the rework after it ends"), { code: "worker_rework_busy" });
+      const { workflowId, taskId } = expected.rework;
+      const origin = loops.filter(loop => {
+        const workflow = readRecordOrUndefined(loop.state.workflow);
+        return workflow?.id === workflowId && Array.isArray(workflow.tasks) && workflow.tasks.some(task => readRecordOrUndefined(task)?.id === taskId);
+      }).sort((left, right) => String(right.state.createdAt ?? "").localeCompare(String(left.state.createdAt ?? "")))[0];
+      if (!origin) throw Object.assign(new Error("This task does not belong to the selected worker"), { code: "worker_rework_scope" });
+      const task = readRecord((readRecord(origin.state.workflow, "loop workflow").tasks as unknown[]).find(value => readRecordOrUndefined(value)?.id === taskId), "task");
+      // The new request names the earlier task so its records stay the reference; earlier results are not rewritten.
+      const header = [`Rework of task ${taskId} (${typeof task.title === "string" ? task.title : "untitled"})`,
+        `Earlier workflow ${workflowId}, loop ${origin.id}${typeof origin.state.latestWorkRunId === "string" ? `, latest Work run ${origin.state.latestWorkRunId}` : ""}.`,
+        "Read that task's recorded result first. Where this instruction differs from the earlier request, this instruction applies."].join("\n");
+      const started = await this.startWorkerTask(agentId, origin.state, `${header}\n\n${text}`);
+      return { ...started, rework: { workflowId, taskId } };
+    }
+    if (active[0]) {
+      const { id, state } = active[0];
+      const task = readRecord(readRecord(state.execution, "loop execution").taskBinding, "task binding");
+      const runId = state.latestWorkRunId;
+      if (typeof runId !== "string" || typeof task.taskId !== "string") throw Object.assign(new Error("The running task has no Work run to receive an addition yet"), { code: "worker_command_not_ready" });
+      // The target the Human saw must still be current: a different loop or run means the screen is stale.
+      if ((expected.loopId && expected.loopId !== id) || (expected.runId && expected.runId !== runId)) {
+        throw Object.assign(new Error("The worker's running task changed; reload before sending"), { code: "worker_command_stale" });
+      }
+      await this.controlLoopCommand(agentId, id, state, "steer", ["--actor", "human", "--authorization-reference", reference,
+        "--decision-evidence", "Human instruction from the control center", "--task-id", task.taskId, "--run-id", runId, "--message", text]);
+      this.projectTaskCache.deleteWhere(() => true);
+      return { mode: "addition", loopId: id, runId, taskId: task.taskId };
+    }
+    if (expected.loopId || expected.runId) throw Object.assign(new Error("The worker's task already ended; reload before sending"), { code: "worker_command_stale" });
+    const latest = loops.sort((left, right) => String(right.state.createdAt ?? "").localeCompare(String(left.state.createdAt ?? "")))[0];
+    if (!latest) throw Object.assign(new Error("This worker has no recorded task to take its settings from"), { code: "worker_command_unsupported" });
+    return this.startWorkerTask(agentId, latest.state, text);
+  }
+
+  /** New task in the worker's own session, with the model, effort, approval policy and profile of the given loop. */
+  private async startWorkerTask(agentId: string, source: Record<string, unknown>, text: string): Promise<WorkerCommandResult> {
+    const execution = readRecord(source.execution, "loop execution");
+    const models = readRecordOrUndefined(readRecordOrUndefined(execution.agentModels)?.work);
+    const permissions = readRecordOrUndefined(readRecordOrUndefined(execution.agentPermissions)?.work);
+    const options = [
+      ...(typeof models?.model === "string" ? ["--work-model", models.model] : []),
+      ...(typeof models?.reasoningEffort === "string" ? ["--work-reasoning-effort", models.reasoningEffort] : []),
+      ...(typeof permissions?.humanApprovalPolicy === "string" ? ["--work-execution-mode", permissions.humanApprovalPolicy] : []),
+      ...(typeof execution.workProfile === "string" ? ["--work-profile", execution.workProfile] : [])];
+    const directory = await mkdtemp(join(tmpdir(), "af-worker-command-"));
+    try {
+      const request = join(directory, "request.md");
+      await writeFile(request, text, { mode: 0o600 });
+      const started = await this.controlLoopCommand(agentId, undefined, source, "start", ["--requested-by", "human", "--task-mode", "work",
+        "--request-file", request, "--receipt-recovery", "auto", ...options]);
+      this.projectTaskCache.deleteWhere(() => true);
+      if (typeof started.loopId !== "string") throw new Error("The new task was not accepted");
+      return { mode: "task", loopId: started.loopId };
+    } finally { await rm(directory, { recursive: true, force: true }); }
+  }
+
+  /** Stop exactly one worker task: the loop records the Human stop first, then cancels its own current child run. */
+  public async stopWorkerTask(agentId: string, loopId: string, workflowId: string, taskId: string): Promise<Record<string, unknown>> {
+    const loop = (await this.workerLoops(agentId)).find(value => value.id === loopId);
+    const workflow = readRecordOrUndefined(loop?.state.workflow);
+    if (!loop || workflow?.id !== workflowId || !(Array.isArray(workflow.tasks) && workflow.tasks.some(task => readRecordOrUndefined(task)?.id === taskId))) {
+      throw Object.assign(new Error("This task does not belong to the selected worker"), { code: "worker_stop_scope" });
+    }
+    const result = await this.controlLoopCommand(agentId, loopId, loop.state, "stop-task", ["--actor", "human",
+      "--authorization-reference", `control-center:${agentId}:${loopId}:stop`, "--decision-evidence", "Human selected Force stop in the control center",
+      "--workflow-id", workflowId, "--task-id", taskId]);
+    this.invalidateDeletedHistory();
+    return result;
+  }
+
+  private async workerLoops(agentId: string): Promise<{ id: string; state: Record<string, unknown> }[]> {
+    const directory = await this.managedPath(agentId, "loops").catch(error => { if (isMissingFile(error)) return undefined; throw error; });
+    if (!directory) return [];
+    const loops: { id: string; state: Record<string, unknown> }[] = [];
+    for (const entry of await this.managedDirectoryEntries(directory).catch(error => { if (isMissingFile(error)) return []; throw error; })) {
+      if (!entry.isDirectory() || !MANAGED_ID.test(entry.name)) continue;
+      const path = await this.managedPath(agentId, "loops", entry.name, "state.json");
+      try { loops.push({ id: entry.name, state: readRecord(JSON.parse((await readManagedBytes(path, MAX_RESULT_BYTES)).toString("utf8")), "loop") }); }
+      catch (error) { if (!isMissingFile(error)) throw error; }
+    }
+    return loops;
+  }
+
+  /** Run loop.py for a worker with the loop's own parent Main run and policy, verified to lie inside this project's records. */
+  private async controlLoopCommand(agentId: string, loopId: string | undefined, state: Record<string, unknown>, command: "steer" | "stop-task" | "start", extra: readonly string[]): Promise<Record<string, unknown>> {
+    const location = await this.location();
+    const environment: Record<string, string | undefined> = { ...pluginRuntimeEnvironment(this.developmentRoot) };
+    // Only this loop's own parent and policy apply; never ones inherited from the extension host's environment.
+    delete environment.AGENT_FACTORY_PARENT_STATE;
+    delete environment.AGENT_FACTORY_EXECUTION_POLICY;
+    const parentPath = typeof state.parentStatePath === "string" ? state.parentStatePath : "";
+    const parts = parentPath.split(sep);
+    if (parentPath && parts.at(-3) === "runs" && MANAGED_ID.test(parts.at(-4) ?? "") && MANAGED_ID.test(parts.at(-2) ?? "")
+        && parentPath === await this.managedPath(parts.at(-4)!, "runs", parts.at(-2)!, "state.json")) {
+      // A Main run whose records are gone cannot be the parent; the loop's own captured policy then applies.
+      const parent = await readManagedBytes(parentPath, MAX_RESULT_BYTES).then(bytes => readRecordOrUndefined(JSON.parse(bytes.toString("utf8"))),
+        error => { if (isMissingFile(error)) return undefined; throw error; });
+      if (parent) environment.AGENT_FACTORY_PARENT_STATE = parentPath;
+      if (parent?.executionPolicy) environment.AGENT_FACTORY_EXECUTION_POLICY = JSON.stringify(parent.executionPolicy);
+    }
+    const policy = readRecordOrUndefined(state.execution)?.executionPolicy;
+    if (!environment.AGENT_FACTORY_EXECUTION_POLICY && policy) environment.AGENT_FACTORY_EXECUTION_POLICY = JSON.stringify(policy);
+    const output = await runBoundedProcess(this.pythonCommand, [join(dirname(this.execPath), "loop.py"), command,
+      "--project-root", this.projectRoot, "--runtime-home", location.home, "--project-id", location.projectId,
+      "--work-agent", agentId, ...(loopId ? ["--loop-id", loopId] : []), ...extra], COMMAND_TIMEOUT_MS, MAX_PROCESS_OUTPUT_BYTES, environment);
+    let value: Record<string, unknown> | undefined;
+    try { value = readRecordOrUndefined(JSON.parse(output.stdout)); } catch { value = undefined; }
+    const failure = readRecordOrUndefined(value?.error);
+    if (output.exitCode !== 0 || !value || value.kind === "error") {
+      throw Object.assign(new Error(typeof failure?.message === "string" ? failure.message : output.stderr.trim() || `exit code ${output.exitCode}`),
+        { code: typeof failure?.code === "string" ? failure.code : "worker_control_failed" });
+    }
+    return value;
+  }
+
+  private async domainsCommand(command: readonly string[]): Promise<Record<string, unknown>> {
+    const location = await this.location();
+    const output = await runBoundedProcess(this.pythonCommand, [join(dirname(this.execPath), "domains.py"), ...command.slice(0, 1),
+      "--project-root", this.projectRoot, "--runtime-home", location.home, "--project-id", location.projectId, ...command.slice(1)],
+    COMMAND_TIMEOUT_MS, MAX_PROCESS_OUTPUT_BYTES, pluginRuntimeEnvironment(this.developmentRoot));
+    let value: Record<string, unknown> | undefined;
+    try { value = readRecordOrUndefined(JSON.parse(output.stdout)); } catch { value = undefined; }
+    const failure = readRecordOrUndefined(value?.error);
+    if (output.exitCode !== 0 || !value || value.kind === "error") {
+      const code = typeof failure?.code === "string" ? failure.code : typeof value?.code === "string" ? value.code : "";
+      const message = typeof failure?.message === "string" ? failure.message : typeof value?.message === "string" ? value.message : output.stderr.trim() || `exit code ${output.exitCode}`;
+      throw Object.assign(new Error(message), { code });
+    }
+    return value;
   }
 
   public async projectTaskRecords(workflowId: string, taskId: string): Promise<readonly { name: string; path: string }[]> {
@@ -2423,15 +2625,29 @@ function projectTaskEntry(state: Record<string, unknown>, workAgentId?: string, 
   const tasks = workflow.tasks.flatMap(value => {
     const task = readRecordOrUndefined(value);
     if (!task || typeof task.id !== "string" || typeof task.title !== "string") return [];
+    // The existing control-center contract uses the loop's explicit role binding when a task has no override.
+    const assignedWork = task.workAgentId ?? state.workAgentId;
+    const assignedVerification = task.verificationAgentId ?? state.verificationAgentId;
+    const allocation = projectTaskAllocation(task.allocation);
     return [{ id: task.id, title: task.title,
+      // The work area Main recorded at assignment; absent means unclassified and is never inferred.
+      ...(typeof allocation?.domain === "string" ? { domain: allocation.domain } : {}),
       ...(typeof task.description === "string" ? { description: task.description } : {}),
       ...(typeof task.completionCriteria === "string" ? { completionCriteria: task.completionCriteria } : {}),
-      ...(projectTaskAllocation(task.allocation) ? { allocation: projectTaskAllocation(task.allocation) } : {}),
+      ...(allocation ? { allocation } : {}),
       ...(typeof task.workStatus === "string" ? { workStatus: task.workStatus } : {}),
+      ...(typeof assignedWork === "string" && MANAGED_ID.test(assignedWork) ? { workAgentId: assignedWork } : {}),
+      ...(typeof assignedVerification === "string" && MANAGED_ID.test(assignedVerification) ? { verificationAgentId: assignedVerification } : {}),
+      ...(["work", "plan-work"].includes(String(readRecordOrUndefined(state.execution)?.taskMode))
+        ? { verificationDisposition: "not-requested" as const }
+        : state.humanSkip && task.verificationStatus !== "completed" && task.workStatus === "completed"
+          ? { verificationDisposition: "human-skipped" as const } : {}),
       ...(typeof task.verificationStatus === "string" ? { verificationStatus: task.verificationStatus } : {}) }];
   });
   return {
     id: workflow.id, title: workflow.title, ...(workAgentId ? { workAgentId } : {}), ...(loopId ? { loopId } : {}),
+    ...(state.requestedBy === "human" ? { requestedBy: "human" as const } : {}),
+    ...(typeof state.latestWorkRunId === "string" && MANAGED_ID.test(state.latestWorkRunId) ? { latestWorkRunId: state.latestWorkRunId } : {}),
     ...(typeof state.phase === "string" ? { phase: state.phase } : {}), status: typeof state.status === "string" ? state.status : "unknown", tasks,
     ...(typeof state.createdAt === "string" ? { createdAt: state.createdAt } : {}),
     ...(typeof state.updatedAt === "string" ? { updatedAt: state.updatedAt } : {}),
@@ -2451,7 +2667,9 @@ function projectTaskAllocation(value: unknown): Record<string, unknown> | undefi
     return Object.fromEntries(keys.flatMap(key => typeof source[key] === "string" || typeof source[key] === "boolean" ? [[key, source[key]]] : []));
   };
   const list = (key: string, keys: string[]) => Array.isArray(allocation[key]) ? (allocation[key] as unknown[]).map(item => strings(item, keys)) : [];
-  return { schemaVersion: 1, ...strings(allocation, ["unitReason", "writeScopeReason", "parallelCandidate"]),
+  const domain = typeof allocation.domain === "string" && allocation.domain.trim() && allocation.domain.length <= 80 && !/[\u0000-\u001f\u007f]/.test(allocation.domain)
+    ? allocation.domain.trim() : undefined;
+  return { schemaVersion: 1, ...strings(allocation, ["unitReason", "writeScopeReason", "parallelCandidate"]), ...(domain ? { domain } : {}),
     profile: strings(allocation.profile, ["id", "reason"]), session: strings(allocation.session, ["strategy", "reason"]),
     readScope: Array.isArray(allocation.readScope) ? allocation.readScope.filter(item => typeof item === "string") : [],
     inputs: list("inputs", ["source", "revision", "capturedAt", "confirmed"]),
@@ -2459,7 +2677,63 @@ function projectTaskAllocation(value: unknown): Record<string, unknown> | undefi
     sharedResources: list("sharedResources", ["resource", "ownerTaskId", "confirmed", "evidence"]) };
 }
 
-function projectTaskRun(run: Record<string, unknown>, receipt?: Record<string, unknown>): import("../../protocol/messages").ProjectTaskRun {
+/** Commands the worker received for one task, from managed loop records only: the accepted request, then additions. */
+function projectTaskCommands(state: Record<string, unknown>, task: { id: string; description?: string }, runs: readonly import("../../protocol/messages").ProjectTaskRun[]): import("../../protocol/messages").ProjectTaskCommand[] {
+  const ended = state.status === "completed" || state.status === "cancelled" || state.status === "failed" || state.status === "runtime-error";
+  const firstWork = runs.find(run => run.role === "work");
+  const sender = state.requestedBy === "human" ? "human" as const : typeof state.parentStatePath === "string" ? "main" as const : undefined;
+  const commands: import("../../protocol/messages").ProjectTaskCommand[] = [];
+  if (typeof task.description === "string") {
+    commands.push({ kind: "request", text: task.description, ...(sender ? { sender } : {}),
+      ...(typeof state.createdAt === "string" ? { at: state.createdAt } : {}),
+      // Delivery is recorded only once a Work run exists; before that the request is accepted and waiting.
+      status: firstWork ? "delivered" : ended ? "undelivered" : "queued", ...(firstWork ? { runId: firstWork.runId } : {}) });
+  }
+  for (const value of Array.isArray(state.steering) ? state.steering : []) {
+    const item = readRecordOrUndefined(value);
+    if (!item || item.taskId !== task.id || typeof item.message !== "string") continue;
+    const delivered = item.status === "delivered";
+    commands.push({ kind: "addition", text: item.message,
+      ...(item.actor === "human" || item.actor === "ai" ? { sender: item.actor } : {}),
+      ...(typeof item.createdAt === "string" ? { at: item.createdAt } : {}),
+      status: delivered ? "delivered" : ended ? "undelivered" : "queued",
+      ...(delivered && typeof item.continuationRunId === "string" ? { runId: item.continuationRunId } : {}) });
+  }
+  return commands;
+}
+
+/** Only the known editable domain fields leave the host. */
+export function projectDomains(value: Record<string, unknown>): ProjectDomains {
+  const change = (record: unknown) => {
+    const source = readRecordOrUndefined(record);
+    return { actor: source?.actor === "human" ? "human" as const : "ai" as const,
+      at: typeof source?.at === "string" ? source.at : "", source: typeof source?.source === "string" ? source.source : "" };
+  };
+  const domains = (Array.isArray(value.domains) ? value.domains : []).flatMap(item => {
+    const domain = readRecordOrUndefined(item);
+    if (!domain || typeof domain.id !== "string" || !/^domain-[0-9a-f]{12}$/.test(domain.id) || typeof domain.name !== "string") return [];
+    return [{ id: domain.id, name: domain.name, ...(domain.provisional === true ? { provisional: true } : {}), aliases: Array.isArray(domain.aliases) ? domain.aliases.filter((alias): alias is string => typeof alias === "string") : [],
+      createdBy: change(domain.createdBy), nameSetBy: change(domain.nameSetBy) }];
+  });
+  const assignments = Object.fromEntries(Object.entries(readRecordOrUndefined(value.assignments) ?? {}).flatMap(([agentId, item]) => {
+    const assignment = readRecordOrUndefined(item);
+    if (!MANAGED_ID.test(agentId) || !assignment || !(assignment.domainId === null || domains.some(domain => domain.id === assignment.domainId))) return [];
+    return [[agentId, { domainId: assignment.domainId as string | null, setBy: change(assignment.setBy) }]];
+  }));
+  const removedWorkers = Object.fromEntries(Object.entries(readRecordOrUndefined(value.removedWorkers) ?? {}).flatMap(([agentId, item]) =>
+    MANAGED_ID.test(agentId) && readRecordOrUndefined(item) ? [[agentId, { removedBy: change(readRecordOrUndefined(item)!.removedBy) }]] : []));
+  return { revision: Number.isSafeInteger(value.revision) ? value.revision as number : 0, domains, assignments, removedWorkers };
+}
+
+/** A result's summary line: its first prose line (a heading such as "Summary" says little), else its first heading. */
+export function resultSummaryLine(text: string): string | undefined {
+  const lines = text.split(/\r?\n/).map(line => line.trim()).filter(Boolean);
+  const prose = lines.find(line => !/^(#{1,6}\s|```|~~~|\||-{3,}$|\*{3,}$|_{3,}$)/.test(line));
+  const line = prose ?? lines[0]?.replace(/^#+\s*/, "");
+  return line?.replace(/^(?:[-*+]|\d+[.)])\s+/, "").trim() || undefined;
+}
+
+function projectTaskRun(run: Record<string, unknown>, receipt?: Record<string, unknown>, expectedWorkRunId?: string): import("../../protocol/messages").ProjectTaskRun {
   const options = readRecordOrUndefined(run.executionOptions);
   const fields = Object.fromEntries(["parentRunId", "acceptedAt", "startedAt", "finishedAt", "updatedAt", "workProfile"].flatMap(key => typeof run[key] === "string" ? [[key, run[key]]] : []));
   const tokens = readRecordOrUndefined(run.tokenUsage);
@@ -2469,11 +2743,32 @@ function projectTaskRun(run: Record<string, unknown>, receipt?: Record<string, u
   const handoff = readRecordOrUndefined(run.handoffBinding);
   const error = readRecordOrUndefined(run.error);
   const checks = readRecordOrUndefined(receipt?.tests);
-  const boundReceipt = receipt?.runId === run.runId && receipt?.requestHash === (run.receiptRequestHash ?? run.requestHash) && receipt?.outcome === "completed";
+  const expectedHash = run.receiptRequestHash ?? run.requestHash;
+  const boundReceipt = run.role === "work" && receipt?.runId === run.runId && receipt?.requestHash === expectedHash
+    && ["completed", "implemented"].includes(String(receipt?.outcome));
+  const verifiedWorkRunId = expectedWorkRunId ?? run.verifiedWorkRunId;
+  const rawFindings = Array.isArray(receipt?.findings) ? receipt.findings : undefined;
+  const findings = rawFindings?.flatMap(value => {
+    const finding = readRecordOrUndefined(value);
+    if (!finding || ["id", "path", "location", "problem", "evidence", "correction"].some(key => typeof finding[key] !== "string")
+      || !finding.id || !finding.problem || !finding.evidence || !finding.correction) return [];
+    return [{ id: String(finding.id), path: String(finding.path), location: String(finding.location),
+      problem: String(finding.problem), evidence: String(finding.evidence), correction: String(finding.correction) }];
+  });
+  // Recorded Verification is distinct from Work own checks and must identify the exact inspected Work run.
+  const boundVerification = run.role === "verification" && receipt?.schemaVersion === "0.1.0" && receipt?.kind === "verification-receipt"
+    && receipt?.runId === run.runId && typeof expectedHash === "string" && expectedHash.length > 0 && receipt?.verifiedRequestHash === expectedHash
+    && typeof verifiedWorkRunId === "string" && receipt?.verifiedWorkRunId === verifiedWorkRunId
+    && (run.verifiedWorkRunId === undefined || run.verifiedWorkRunId === verifiedWorkRunId)
+    && findings && findings.length === rawFindings?.length
+    && (receipt?.decision === "pass" ? findings.length === 0 : receipt?.decision === "fail" && findings.length > 0);
   return { agentId: String(run.agentId), runId: String(run.runId), role: run.role === "verification" ? "verification" : "work", status: typeof run.status === "string" ? run.status : "unknown",
     ...fields, ...(typeof options?.model === "string" ? { model: options.model } : {}),
+    // Without a recorded model the run used its provider's default; the provider still identifies it.
+    ...(typeof run.provider === "string" && run.provider ? { provider: run.provider } : {}),
     ...(Number.isInteger(run.attempt) ? { attempt: Number(run.attempt) } : {}),
-    ...(boundReceipt ? { receipt: { outcome: "completed", ...(typeof checks?.run === "boolean" ? { checksRun: checks.run } : {}), ...(typeof checks?.reason === "string" ? { checks: checks.reason } : {}) } } : {}),
+    ...(boundReceipt ? { receipt: { outcome: String(receipt?.outcome), ...(typeof checks?.run === "boolean" ? { checksRun: checks.run } : {}), ...(typeof checks?.reason === "string" ? { checks: checks.reason } : {}), ...(Array.isArray(receipt?.changedPaths) ? { changedPaths: receipt.changedPaths.filter((path): path is string => typeof path === "string") } : {}) } } : {}),
+    ...(boundVerification ? { verification: { decision: receipt?.decision as "pass" | "fail", verifiedWorkRunId: String(verifiedWorkRunId), findings: findings! } } : {}),
     ...(usage ? { usage: usage as Record<string, number | null> } : {}),
     ...(context ? { context: context as Record<string, string | number | boolean | null> } : {}),
     ...(handoff ? { handoff: { ...(typeof handoff.slot === "string" ? { slot: handoff.slot } : {}), ...(Number.isInteger(handoff.epoch) ? { epoch: Number(handoff.epoch) } : {}) } } : {}),

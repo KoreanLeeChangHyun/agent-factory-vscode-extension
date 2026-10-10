@@ -55,6 +55,12 @@ const clientMessageTypes = new Set([
   "contract.open",
   "contracts.request",
   "project.tasks.request",
+  "domain.create",
+  "domain.rename",
+  "domain.assign",
+  "worker.command",
+  "worker.stop",
+  "worker.remove",
   "project.task.open",
   "control.center.open",
   "conversations.request",
@@ -334,11 +340,50 @@ export function parseClientMessage(value: unknown): ClientMessage | undefined {
       if (typeof value.workflowId !== "string" || !/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(value.workflowId)
           || typeof value.taskId !== "string" || !/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(value.taskId)) return undefined;
       return { type: value.type, workflowId: value.workflowId, taskId: value.taskId };
+    case "domain.create":
+    case "domain.rename":
+    case "domain.assign": {
+      // The plugin validates again under its lock; this rejects malformed edits before they leave the webview.
+      const revision = value.revision;
+      if (typeof revision !== "number" || !Number.isSafeInteger(revision) || revision < 0) return undefined;
+      const name = (candidate: unknown) => typeof candidate === "string" && candidate.length > 0 && candidate.length <= 80 && candidate === candidate.trim()
+        && !/[\u0000-\u001f\u007f]/.test(candidate);
+      const domainId = (candidate: unknown) => typeof candidate === "string" && /^domain-[0-9a-f]{12}$/.test(candidate);
+      if (value.type === "domain.create" && value.placeholder === true && value.name === undefined) return { type: value.type, placeholder: true, revision };
+      if (value.type === "domain.create") return name(value.name) && value.placeholder === undefined ? { type: value.type, name: value.name as string, revision } : undefined;
+      if (value.type === "domain.rename") return domainId(value.domainId) && name(value.name)
+        ? { type: value.type, domainId: value.domainId as string, name: value.name as string, revision } : undefined;
+      if (!isRuntimeId(value.agentId) || !(value.domainId === null || domainId(value.domainId))) return undefined;
+      return { type: value.type, agentId: value.agentId as string, domainId: value.domainId as string | null, revision };
+    }
+    case "worker.command": {
+      // Natural-language instruction for a worker, never a shell command line; the host binds the exact session.
+      if (!isRuntimeId(value.agentId) || typeof value.text !== "string" || !value.text.trim() || value.text.length > 20_000
+          || typeof value.commandId !== "string" || !/^[A-Za-z0-9-]{8,64}$/.test(value.commandId)
+          || (value.loopId !== undefined && !isRuntimeId(value.loopId)) || (value.runId !== undefined && !isRuntimeId(value.runId))) return undefined;
+      // A rework names the ended task it revises; it cannot also target a running loop or run.
+      const rework = value.rework;
+      if (rework !== undefined && (!isRecord(rework) || !isRuntimeId(rework.workflowId) || !isRuntimeId(rework.taskId)
+        || value.loopId !== undefined || value.runId !== undefined)) return undefined;
+      return { type: value.type, agentId: value.agentId as string, text: value.text, commandId: value.commandId,
+        ...(typeof value.loopId === "string" ? { loopId: value.loopId } : {}), ...(typeof value.runId === "string" ? { runId: value.runId } : {}),
+        ...(isRecord(rework) ? { rework: { workflowId: rework.workflowId as string, taskId: rework.taskId as string } } : {}) };
+    }
+    case "worker.stop":
+      if (!isRuntimeId(value.agentId) || !isRuntimeId(value.loopId) || !isRuntimeId(value.workflowId) || !isRuntimeId(value.taskId)) return undefined;
+      return { type: value.type, agentId: value.agentId as string, loopId: value.loopId as string, workflowId: value.workflowId as string, taskId: value.taskId as string };
+    case "worker.remove":
+      if (!isRuntimeId(value.agentId) || typeof value.revision !== "number" || !Number.isSafeInteger(value.revision) || value.revision < 0) return undefined;
+      return { type: value.type, agentId: value.agentId as string, revision: value.revision };
     case "project.task.open":
       if (typeof value.workflowId !== "string" || !/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(value.workflowId)
           || typeof value.taskId !== "string" || !/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(value.taskId)
-          || !["chat", "run", "records", "feedback"].includes(String(value.target))) return undefined;
-      return { type: value.type, workflowId: value.workflowId, taskId: value.taskId, target: value.target as "chat" | "run" | "records" | "feedback" };
+          || !["chat", "run", "records", "feedback", "result"].includes(String(value.target))) return undefined;
+      if ((value.target === "result" || value.target === "run" && (value.agentId !== undefined || value.runId !== undefined)) && (typeof value.agentId !== "string" || !/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(value.agentId)
+          || typeof value.runId !== "string" || !/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(value.runId))) return undefined;
+      return { type: value.type, workflowId: value.workflowId, taskId: value.taskId,
+        target: value.target as "chat" | "run" | "records" | "feedback" | "result",
+        ...((value.target === "result" || value.target === "run" && value.agentId !== undefined) ? { agentId: value.agentId as string, runId: value.runId as string } : {}) };
     case "composer.settings":
       if (
         (value.businessMode !== undefined && !BUSINESS_MODES.includes(value.businessMode as BusinessMode)) ||

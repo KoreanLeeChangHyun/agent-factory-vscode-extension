@@ -32,6 +32,10 @@ export interface ExecutionCapabilities {
   readonly roleDirectExceptions?: boolean;
   /** Optional allocation evidence is validated and retained in taskBinding. */
   readonly taskAllocation?: boolean;
+  /** Allocation evidence also accepts an optional `domain` work-area name. */
+  readonly taskDomain?: boolean;
+  /** domains.py keeps the shared editable project domain list; loop start links the allocation domain. */
+  readonly projectDomains?: boolean;
   /** A stopped loop reports `failureClass`; Main is then told what to do for each class. */
   readonly failureClass?: boolean;
   /** A loop stopped on its revision limit carries a structured `pause`; the task panel then offers the Human's decision. */

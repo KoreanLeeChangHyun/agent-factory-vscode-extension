@@ -35,25 +35,67 @@ export interface ProjectTaskEntry {
   readonly loopId?: string;
   readonly workAgentId?: string;
   readonly phase?: string;
+  /** "human" when the Human sent this request from the control center; absent for Main dispatch. */
+  readonly requestedBy?: "human";
+  /** The loop's latest Work run: the only run a running-task addition may target. */
+  readonly latestWorkRunId?: string;
   readonly tasks: readonly ProjectTaskDetail[];
+}
+/** One command delivered (or waiting) for a worker, from the loop's managed records only. */
+export interface ProjectTaskCommand {
+  readonly kind: "request" | "addition";
+  readonly text: string;
+  /** Known sender only: human (recorded actor or control center request) or main (Main's dispatch). */
+  readonly sender?: "human" | "main" | "ai";
+  readonly at?: string;
+  /** queued: accepted, waiting for the next safe Work turn; delivered: sent with runId; undelivered: the task ended first. */
+  readonly status: "queued" | "delivered" | "undelivered";
+  readonly runId?: string;
 }
 
 export interface ProjectTaskDetail {
   readonly id: string;
   readonly title: string;
+  /** Work area recorded in Main's allocation; absent means unclassified. */
+  readonly domain?: string;
   readonly description?: string;
   readonly completionCriteria?: string;
   readonly workStatus?: string;
+  readonly workAgentId?: string;
+  readonly verificationAgentId?: string;
+  readonly integration?: readonly { readonly repository: string; readonly phase?: string; readonly mergeCommit?: string }[];
+  readonly verificationDisposition?: "not-requested" | "human-skipped";
   readonly verificationStatus?: string;
   readonly allocation?: Readonly<Record<string, unknown>>;
   readonly runs?: readonly ProjectTaskRun[];
+  readonly commands?: readonly ProjectTaskCommand[];
 }
+/** Who changed an editable domain record, when, and the evidence (a Main run/loop or the control center). */
+export interface ProjectDomainChange { readonly actor: "human" | "ai"; readonly at: string; readonly source: string }
+/** The project's shared, editable domain list and worker memberships (plugin domains.py). Execution evidence is separate. */
+export interface ProjectDomains {
+  readonly revision: number;
+  /** The domain the last edit created or changed, when the edit reports one. */
+  readonly changedDomainId?: string;
+  /** Workers the Human removed from the worker list; their records stay readable in task views. */
+  readonly removedWorkers?: Readonly<Record<string, { readonly removedBy: ProjectDomainChange }>>;
+  /** provisional: created by "new domain" with the placeholder name and not yet renamed; never matched by name. */
+  readonly domains: readonly { readonly id: string; readonly name: string; readonly provisional?: boolean; readonly aliases: readonly string[]; readonly createdBy: ProjectDomainChange; readonly nameSetBy: ProjectDomainChange }[];
+  readonly assignments: Readonly<Record<string, { readonly domainId: string | null; readonly setBy: ProjectDomainChange }>>;
+}
+export type ProjectDomainEdit =
+  | { readonly type: "domain.create"; readonly name: string; readonly revision: number }
+  | { readonly type: "domain.create"; readonly placeholder: true; readonly revision: number }
+  | { readonly type: "domain.rename"; readonly domainId: string; readonly name: string; readonly revision: number }
+  | { readonly type: "domain.assign"; readonly agentId: string; readonly domainId: string | null; readonly revision: number };
 export interface ProjectTaskRun {
   readonly agentId: string;
   readonly runId: string;
   readonly role: "work" | "verification";
   readonly status: string;
   readonly model?: string;
+  /** Provider that executed the run (claude, codex, agy); identifies a run whose model is the provider default. */
+  readonly provider?: string;
   readonly workProfile?: string;
   readonly parentRunId?: string;
   readonly acceptedAt?: string;
@@ -61,7 +103,13 @@ export interface ProjectTaskRun {
   readonly finishedAt?: string;
   readonly updatedAt?: string;
   readonly attempt?: number;
-  readonly receipt?: { readonly outcome: string; readonly checksRun?: boolean; readonly checks?: string };
+  readonly receipt?: { readonly outcome: string; readonly checksRun?: boolean; readonly checks?: string; readonly changedPaths?: readonly string[] };
+  readonly verification?: {
+    readonly decision: "pass" | "fail";
+    readonly verifiedWorkRunId: string;
+    readonly findings: readonly { readonly id: string; readonly path: string; readonly location: string; readonly problem: string; readonly evidence: string; readonly correction: string }[];
+  };
+  readonly result?: { readonly availability: "recorded" | "missing" | "error"; readonly summary?: string; readonly error?: string };
   readonly usage?: Readonly<Record<string, number | null>>;
   readonly context?: Readonly<Record<string, string | number | boolean | null>>;
   readonly handoff?: { readonly slot?: string; readonly epoch?: number };
@@ -105,7 +153,13 @@ export type ClientMessage =
   | { readonly type: "contract.open"; readonly id: string }
   | { readonly type: "contracts.request" }
   | { readonly type: "project.tasks.request" }
-  | { readonly type: "project.task.open"; readonly workflowId: string; readonly taskId: string; readonly target: "chat" | "run" | "records" | "feedback" }
+  | ProjectDomainEdit
+  | { readonly type: "worker.command"; readonly agentId: string; readonly text: string; readonly commandId: string; readonly loopId?: string; readonly runId?: string;
+      /** Rework of this ended task: always a new task in the worker's session, never an addition to a running one. */
+      readonly rework?: { readonly workflowId: string; readonly taskId: string } }
+  | { readonly type: "worker.stop"; readonly agentId: string; readonly loopId: string; readonly workflowId: string; readonly taskId: string }
+  | { readonly type: "worker.remove"; readonly agentId: string; readonly revision: number }
+  | { readonly type: "project.task.open"; readonly workflowId: string; readonly taskId: string; readonly target: "chat" | "run" | "records" | "feedback" | "result"; readonly agentId?: string; readonly runId?: string }
   | { readonly type: "agent.preset"; readonly action: "save" | "apply" | "copy" | "update" | "delete" | "rename" | "default"; readonly scope: "global" | "project" | "chat"; readonly name: string; readonly newName?: string; readonly sourceName?: string }
   | { readonly type: "agent.defaults.save"; readonly scope: "global" | "project"; readonly role: import("../core/config/agent-settings").AgentRole; readonly field: "model" | "reasoningEffort" | "fast"; readonly value: string | boolean }
   | { readonly type: "agent.defaults.fast"; readonly scope: "global" | "project"; readonly role: import("../core/config/agent-settings").AgentRole; readonly model: string; readonly value: boolean }
@@ -211,7 +265,7 @@ export type HostMessage =
   | { readonly type: "usage.accounts"; readonly accounts: Readonly<Record<string, AccountUsage>> }
   | { readonly type: "agent.preset.field.result"; readonly error?: string }
   | { readonly type: "contracts.list"; readonly contracts: readonly import("../infrastructure/filesystem/contracts").ContractEntry[]; readonly error?: string }
-  | { readonly type: "project.tasks"; readonly entries: readonly ProjectTaskEntry[]; readonly error?: string }
+  | { readonly type: "project.tasks"; readonly entries: readonly ProjectTaskEntry[]; readonly error?: string; readonly domains?: ProjectDomains; readonly domainsError?: string }
   | { readonly type: "agent.preset.result"; readonly scope?: import("../core/config/agent-settings").AgentPresetScope; readonly name?: string; readonly settings?: import("../core/config/agent-settings").AgentDefaults; readonly error?: string }
   | { readonly type: "agent.defaults"; readonly settings: import("../core/config/agent-settings").AgentDefaultsSnapshot }
   | import("../infrastructure/vscode/sudo-broker").SudoChallenge

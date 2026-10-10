@@ -49,7 +49,11 @@ const dynamicSends = {
   // work-units.js: the click handlers of a loop over ["create", "merge", "refresh"].
   'static/js/chat/work-units.js { type: "worktree." + action }': ["worktree.create", "worktree.merge", "worktree.refresh"],
   // task-flow.js: target holds only the validated task-deletion target fields.
-  'static/js/chat/task-flow.js { type: "task.delete", ...target }': ["task.delete"]
+  'static/js/chat/task-flow.js { type: "task.delete", ...target }': ["task.delete"],
+  // maestro.js sendDomainEdit: `edit` is one of the three literal domain edits built by its callers.
+  'static/js/chat/maestro.js { ...edit, revision: registry().revision }': ["domain.create", "domain.rename", "domain.assign"],
+  // maestro.js workerAction: `message` is one of the literal worker actions built by the worker detail.
+  'static/js/chat/maestro.js message': ["worker.command", "worker.stop", "worker.remove"]
 };
 
 const usedDynamicSends = new Set();

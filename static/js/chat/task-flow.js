@@ -3,8 +3,7 @@ globalThis.AgentFactoryChat.taskFlow = function (host) {
   "use strict";
 
   const {
-    indexedTimeline, state, t, vscode, runStageList, selectQuestionTab, historyEmpty, runDetails,
-    runStatus, runStatusToggle, runStatusAgents,
+    indexedTimeline, state, t, vscode,
     childAgentStatusLabel, persist
   } = host;
 
@@ -425,8 +424,6 @@ globalThis.AgentFactoryChat.taskFlow = function (host) {
       persist();
     }
     taskFlowSnapshot = undefined;
-    delete document.getElementById("task-history-panel").dataset.signature;
-    delete runStageList.dataset.flowSignature;
     renderWorkLoopPanel();
   }
   function taskStopKey(flow, task) { return flow.id + "/" + (task.taskId || task.id); }
@@ -530,7 +527,6 @@ globalThis.AgentFactoryChat.taskFlow = function (host) {
     taskStopsPending.delete(key);
     if (message.error) taskStopErrors.set(key, message.error);
     else taskStopErrors.delete(key);
-    delete runStageList.dataset.flowSignature;
     renderWorkLoopPanel();
   }
   // Presentation only: preserve the task/loop status and use only this exact run's observed lifecycle.
@@ -895,7 +891,6 @@ globalThis.AgentFactoryChat.taskFlow = function (host) {
   function releaseWorkflowDecisions() {
     if (!workflowDecisionsPending.size) return;
     workflowDecisionsPending.clear();
-    delete runStageList.dataset.flowSignature;
     renderWorkLoopPanel();
   }
   // History rows share the task panel's row: a single task is that very row; a group or another
@@ -977,7 +972,6 @@ globalThis.AgentFactoryChat.taskFlow = function (host) {
       failed: "failed", "runtime-error": "failed", "needs-human-decision": "blocked", blocked: "blocked" }[status] || "pending";
   }
   function renderProjectHistory() {
-    delete document.getElementById("task-history-panel").dataset.signature;
     renderWorkLoopPanel();
   }
   function acceptedTaskAgent(agent) {
@@ -1055,6 +1049,9 @@ globalThis.AgentFactoryChat.taskFlow = function (host) {
     }
   }
   function renderWorkLoopPanel() {
+    // Task data and actions remain available to the control center; Main chat no
+    // longer renders the task status, disclosure, history, or overflow controls.
+    return;
     const allFlows = displayTaskFlows();
     const flows = visibleTaskFlows(allFlows);
     // The task panel lists only live workflows. Keep their completed stages in place:

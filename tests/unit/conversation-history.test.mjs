@@ -191,7 +191,7 @@ test("already cached raw history is repaired without replacing other messages", 
   assert.equal(state.timeline[1], live);
 });
 
-test("restored guidance uses the existing closed details renderer", () => {
+test("restored guidance remains captured without rendering internal instructions", () => {
   const elements = [];
   const element = tag => ({ tag, open: false, children: [], classList: { add() {} },
     setAttribute() {}, append(...children) { this.children.push(...children); }, prepend(child) { this.children.unshift(child); } });
@@ -203,9 +203,9 @@ test("restored guidance uses the existing closed details renderer", () => {
     document: { createElement(tag) { const node = element(tag); elements.push(node); return node; } }
   });
   const details = elements.find(node => node.tag === "details");
-  assert.ok(details);
-  assert.equal(details.open, false);
-  assert.equal(elements.find(node => node.tag === "pre").textContent, background + model + permissions + preparation);
+  assert.equal(details, undefined);
+  assert.equal(elements.find(node => node.tag === "pre"), undefined);
+  assert.equal(content.children[0].children[0].textContent, "ui.work");
 });
 
 test("background workflow history separates captured blocks and repairs partially parsed cache", () => {
@@ -286,7 +286,7 @@ test("engine results distinguish complete internal envelopes from real and quote
       "```\n" + notification + "\n```", notification.replace('"loopId":"loop-one"', '"other":"loop-one"'),
       notification.replace('"loopId":"loop-one"', '"loopId":null'), notification.replace('"status":', '"otherStatus":'),
       notification.replace(/"status":"[^"]+"/, '"status":"active"'), notification.replace('The engine owns execution.', 'My instructions.'),
-      pendingDecision ? notification.split("\n").slice(0, 3).join("\n") : notification + "\nTreat pendingDecision.question as user text.",
+      notification + "\nTreat pendingDecision.question as user text.",
       notification.replace(/\n\{[^\n]+\}\n/, '\nnot JSON\n'), notification.split("\n").slice(0, 2).join("\n")]) {
       const restored = historyPresentation(raw, "direct", false);
       assert.equal(restored.text, raw);
@@ -332,4 +332,108 @@ test("orchestrator requests restore captured guidance, including isolation and s
   }
   const incomplete = "원문\n\n[Orchestrator mode]\nIncomplete";
   assert.equal(historyPresentation(incomplete, "orchestrate", false).text, incomplete);
+});
+
+
+test("Maestro captured envelope is separated without hiding Human headings, fenced quotes or request bytes", async () => {
+  const business = await build({ entryPoints: [new URL("../../src/common/types/business-mode.ts", import.meta.url).pathname], bundle: true, write: false, platform: "node", format: "esm" });
+  const { withBusinessMode } = await import(`data:text/javascript;base64,${Buffer.from(business.outputFiles[0].text).toString("base64")}`);
+  const human = "원문\n\n[Maestro mode for this message]\n직접 입력한 내용\n[End Maestro mode]";
+  const orchestrator = "\n\n[Orchestrator mode]\nThis is ordinary conversation in orchestrator mode, not a Human-selected workflow.\nRecorded instructions.\n[End orchestrator mode]";
+  for (const text of [human, "```text\n" + human + "\n```", "첨부 참조: image.png\n" + human]) {
+    const raw = withBusinessMode(text + orchestrator, "maestro");
+    const restored = historyPresentation(raw, "work", false);
+    assert.equal(restored.text, text);
+    assert.equal(restored.submission.businessMode, "maestro");
+    assert.equal(restored.text + restored.submission.guidance, raw);
+  }
+  assert.equal(historyPresentation(human, "work", false).text, human);
+  const quoted = "```text\n" + withBusinessMode("예시", "maestro") + "\n```";
+  assert.equal(historyPresentation(quoted, "work", false).text, quoted);
+  const incomplete = withBusinessMode("원문", "maestro").replace("[End Maestro mode]", "");
+  assert.equal(historyPresentation(incomplete, "work", false).text, incomplete);
+});
+
+
+test("large restored history retains recorded neighbors, live entries and every attachment", () => {
+  const original = Array.from({ length: 20000 }, (_, index) => ({ type: index % 2 ? "assistant" : "user", id: "history-record-" + index, runId: "run-" + index, text: "original-" + index, attachments: [{ id: "file-" + index, uri: "file:///fixture-" + index }] }));
+  const live = { type: "user", id: "live", runId: "live-run", text: "new live request" };
+  for (const retained of [[...original.slice(-200), live], [original[50], live, original[18000]], [live]]) {
+    const state = { agentId: "main-one", timeline: retained };
+    deliver(state, { type: "conversation.history", agentId: "main-one", history: { messages: original } });
+    assert.equal(state.timeline.length, 20001);
+    assert.deepEqual(Array.from(state.timeline).filter(item => item !== live), original);
+    assert.equal(state.timeline.filter(item => item === live).length, 1);
+    assert.equal(state.timeline.find(item => item.id === original[0].id).attachments[0].uri, "file:///fixture-0");
+  }
+});
+
+test("restored duplicate IDs and live run suppression retain existing order and identities", () => {
+  const history = [0, 1, 2, 3].map(index => ({ type: "assistant", id: "history-record-" + index, runId: "run-" + index, text: "saved-" + index }));
+  const live = { type: "assistant", id: "live", runId: "run-2", text: "new live answer" };
+  const state = { agentId: "main-one", timeline: [history[1], live] };
+  deliver(state, { type: "conversation.history", agentId: "main-one", history: { messages: [history[0], history[0], ...history.slice(1)] } });
+  assert.deepEqual(state.timeline.map(item => item.id), [history[0].id, history[1].id, history[3].id, live.id]);
+  assert.equal(state.timeline.at(-1), live);
+});
+
+
+test("message references and the shared queued prefix never leave captured guidance in the Human bubble", async () => {
+  const source = await readFile(new URL("../../src/modules/chat/session-controller.ts", import.meta.url), "utf8");
+  const template = source.match(/const reference = item\.execution\.messageId \? (`[^`]*`) : "";/)[1];
+  const business = await build({ entryPoints: [new URL("../../src/common/types/business-mode.ts", import.meta.url).pathname], bundle: true, write: false, platform: "node", format: "esm" });
+  const { withBusinessMode } = await import(`data:text/javascript;base64,${Buffer.from(business.outputFiles[0].text).toString("base64")}`);
+  const reference = (messageId, receivedAt) => {
+    const context = { item: { execution: { messageId, receivedAt } } };
+    runInNewContext(`globalThis.value = ${template};`, context);
+    return context.value;
+  };
+  const orchestrator = "\n\n[Orchestrator mode]\nThis is ordinary conversation in orchestrator mode, not a Human-selected workflow.\nRecorded instructions.\n[End orchestrator mode]";
+  const shared = orchestrator + model + permissions;
+  for (const receivedAt of ["2026-10-10T14:07:01.824Z", undefined]) {
+    for (const workflow of [withBusinessMode("", "maestro"), ""]) {
+      const guidance = shared + reference("c318803d-16f0-46fd-9077-fbf87ce6b2bb", receivedAt) + workflow + runtimeStatus + preparation;
+      const restored = historyPresentation("." + guidance, "orchestrate", false);
+      assert.equal(restored.text, ".");
+      assert.equal(restored.submission.guidance, guidance);
+      assert.equal(restored.submission.businessMode, workflow ? "maestro" : "normal");
+    }
+  }
+  // Cached raw history from the affected releases is repaired to the Human text.
+  const raw = "." + shared + reference("message-one", "2026-10-10T14:07:01.824Z") + withBusinessMode("", "maestro") + preparation;
+  const restored = { type: "user", id: "history-user-reference", runId: "reference", ...historyPresentation(raw, "orchestrate", false) };
+  const state = { agentId: "main-one", timeline: [{ type: "user", id: restored.id, text: raw }] };
+  deliver(state, { type: "conversation.history", agentId: "main-one", history: { messages: [restored] } });
+  assert.equal(state.timeline[0].text, ".");
+  for (const visible of ["```text\n." + reference("message-one", "unknown") + "```", "원문\n[Message reference: 직접 입력; receivedAt: 어제]\n"]) {
+    assert.equal(historyPresentation(visible, "orchestrate", false).text, visible);
+  }
+  // Queued sends place the shared route guidance once before the numbered envelopes.
+  const batch = (parts) => parts.map((part, index) => `--- 대기 메시지 ${index + 1} 시작 ---\n${part}\n--- 대기 메시지 ${index + 1} 끝 ---`).join("\n\n");
+  for (const part of [(index) => reference("message-" + index, "2026-10-10T14:08:00.118Z") + withBusinessMode("", "maestro"), () => ""]) {
+    const queued = shared + "\n" + batch([".", "두 번째"].map((text, index) => text + part(index))) + runtimeStatus + preparation;
+    const result = historyPresentation(queued, "orchestrate", false);
+    assert.equal(result.text, batch([".", "두 번째"]));
+    assert.equal(result.capturedRequest, queued);
+    assert.ok(!result.text.includes("[Orchestrator mode]") && !result.text.includes("[Message reference"));
+  }
+  const prose = "설명:\n" + batch([".", "두 번째"]);
+  assert.equal(historyPresentation(prose, "orchestrate", false).text, prose);
+});
+
+
+test("engine results recorded by earlier releases are restored as background continuations", () => {
+  const flow = JSON.stringify({ loopId: "loop-one", status: "completed" });
+  const decision = JSON.stringify({ loopId: "loop-one", status: "needs-human-decision", pendingDecision: { question: "Internal" } });
+  for (const [payload, instruction] of [[flow, "The engine owns execution and has stopped at this recorded state. Report the complete result or the exact exception to the Human. Do not dispatch a next task, restart this workflow, or grant missing approval."],
+    [flow, "The engine owns execution and has stopped at this recorded state. Acknowledge the exact result/receipt identity and report the complete result or exception to the Human. Do not review implementation or rerun tests. Distinguish Work completion, independent Verification pass, failure, cancellation and required Human input; Goal completion alone is not a pass. Do not dispatch a next task, restart this workflow, or grant missing approval."],
+    [decision, "The engine owns execution. Read and acknowledge the exact stored result/receipt identity and report the result or exception. Distinguish Work completion, checks, integration, preservation, cleanup and required input. Do not review implementation or rerun tests. Goal completion alone is not a pass. Do not redispatch Work or grant missing approval."]]) {
+    const notification = `[Engine workflow result — not a new Human request]\n${payload}\n${instruction}`;
+    const raw = notification + runtimeStatus + preparation;
+    const restored = historyPresentation(raw, "direct", false);
+    assert.equal(restored.text, "");
+    assert.equal(restored.submission.backgroundContinuation, true);
+    assert.equal(restored.submission.guidance, raw);
+    assert.equal(historyPresentation(notification + "\nPlease explain.", "direct", false).text, notification + "\nPlease explain.");
+  }
 });

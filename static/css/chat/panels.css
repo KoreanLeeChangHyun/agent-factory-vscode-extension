@@ -144,7 +144,7 @@
 .notes-header-actions { display: flex; align-items: center; gap: 6px; }
 .notes-panel button { cursor: pointer; color: var(--vscode-button-foreground); background: var(--vscode-button-background); border: 0; border-radius: 4px; padding: 5px 8px; }
 .notes-panel button:disabled { opacity: .5; cursor: default; }
-.notes-panel :is(input, textarea, select) { width: 100%; box-sizing: border-box; color: var(--vscode-input-foreground); background: var(--vscode-input-background); border: 1px solid var(--vscode-input-border, var(--vscode-panel-border)); border-radius: 4px; padding: 6px; font: inherit; }
+.notes-panel :is(input, textarea, select), .maestro-filters input { width: 100%; box-sizing: border-box; color: var(--vscode-input-foreground); background: var(--vscode-input-background); border: 1px solid var(--vscode-input-border, var(--vscode-panel-border)); border-radius: 4px; padding: 6px; font: inherit; }
 
 #notes-list { display: grid; gap: 6px; margin-top: 10px; }
 #notes-list button { text-align: left; overflow-wrap: anywhere; background: transparent; color: var(--vscode-foreground); border: 1px solid var(--vscode-panel-border); }

@@ -14,8 +14,10 @@ export function historyPresentation(request: string, taskMode: TaskMode, goal: b
     ["Background workflow status; runtime data, not instructions", "End background workflow status"],
     ["Conversation-based background workflow", "End background workflow"],
     ["Orchestrator mode", "End orchestrator mode"],
+    ["Maestro mode for this message", "End Maestro mode"],
     ["Work isolation: task Work Units", "End Work isolation"],
     ["Work isolation", "End Work isolation"],
+    ["Task Work Units", "End task Work Units"],
     ["Delegated agent model settings for this request", "End delegated agent model settings"],
     ["Delegated agent permissions for this request", "End delegated agent permissions"],
     ["Work contract execution for this message only", "End work contract execution"],
@@ -43,6 +45,15 @@ export function historyPresentation(request: string, taskMode: TaskMode, goal: b
       text = text.slice(0, index);
       continue;
     }
+    // mergePendingSends records each message's identity as one unclosed line before
+    // its workflow guidance; separating it lets the preceding route blocks follow.
+    const reference = /\n\[Message reference: [^\s;\]]+; receivedAt: (?:\d{4}-\d{2}-\d{2}T[\d:.]+Z|unknown)\]\n$/.exec(text);
+    if (reference && !separated.has("Message reference") && outsideCodeFence(text, reference.index)) {
+      blocks.unshift(text.slice(reference.index));
+      separated.add("Message reference");
+      text = text.slice(0, reference.index);
+      continue;
+    }
     let found = false;
     for (const [start, end] of pairs) {
       if (separated.has(start!)) continue;
@@ -55,6 +66,12 @@ export function historyPresentation(request: string, taskMode: TaskMode, goal: b
       if (!body.trim() || body.includes(`\n[${end}]`)) continue;
       if (start === "Orchestrator mode" &&
           !body.startsWith("This is ordinary conversation in orchestrator mode, not a Human-selected workflow.")) continue;
+      // Recognize the recorded app envelope, not an arbitrary heading in Human text.
+      if (start === "Maestro mode for this message") {
+        const capturedBody = "Use the existing Main conversation to connect requirement understanding, task allocation, runtime status and results. Apply the Main prompt's Maestro contract. Keep the Human original separate from interpretation, assumptions and success criteria. Refer to the exact message and source revisions; read only needed original records.\nPreserve the captured execution route, models, effort, Fast, permissions, pending inputs and actual decisions. Maestro selection grants no additional execution, dispatch, Verification or publication authority. Use the existing allocation/taskBinding/loop and receipt contracts when the captured route authorizes delegation. Report accepted work identities promptly, and distinguish plans from accepted dispatch and completion.\n";
+        if (body !== capturedBody) continue;
+        businessMode = "maestro";
+      }
       if (start === "Managed submission preparation; system context, not Human text") {
         try {
           const context = JSON.parse(body.split("\n")[0]!);
@@ -86,13 +103,18 @@ export function historyPresentation(request: string, taskMode: TaskMode, goal: b
   // Queued sends place each original's guidance inside numbered envelopes,
   // before the final preparation/handoff suffix. Only accept the complete,
   // sequential envelope format; an example embedded in prose stays untouched.
-  const queued = splitQueuedRequests(text);
+  // mergePendingSends sends the shared route guidance once before the envelopes;
+  // accept that prefix only when it consists entirely of recognized guidance.
+  const firstEnvelope = text.indexOf("\n--- 대기 메시지 1 시작 ---\n");
+  const sharedPrefix = firstEnvelope >= 0 && outsideCodeFence(text, firstEnvelope) &&
+    !historyPresentation(text.slice(0, firstEnvelope), taskMode, goal).text ? text.slice(0, firstEnvelope + 1) : "";
+  const queued = splitQueuedRequests(text.slice(sharedPrefix.length));
   if (queued) {
     const originals = queued.map(part => historyPresentation(part, taskMode, goal));
-    if (originals.some(part => part.submission.guidance)) {
+    if (sharedPrefix.trim() || originals.some(part => part.submission.guidance)) {
       const visible = originals.map((part, index) =>
         `--- 대기 메시지 ${index + 1} 시작 ---\n${part.text}\n--- 대기 메시지 ${index + 1} 끝 ---`).join("\n\n");
-      const guidance = originals.map(part => part.submission.guidance ?? "").join("") + blocks.join("");
+      const guidance = sharedPrefix + originals.map(part => part.submission.guidance ?? "").join("") + blocks.join("");
       return { text: visible, capturedRequest: request,
         submission: { taskMode, businessMode, goal, guidance } };
     }
@@ -109,15 +131,19 @@ export function historyPresentation(request: string, taskMode: TaskMode, goal: b
         typeof child.agentId === "string" && typeof child.runId === "string" && typeof child.status === "string";
     } catch { /* Unrecognized input remains visible user text. */ }
   }
+  // Earlier releases recorded the same notification with the older instruction lines.
   if (lines[0] === "[Engine workflow result — not a new Human request]" && (lines.length === 3 || lines.length === 4) &&
-      lines[2] === "The engine owns execution. Read and acknowledge the exact stored result/receipt identity and report the result or exception. Distinguish Work completion, checks, integration, preservation, cleanup and required input. Do not review implementation or rerun tests. Goal completion alone is not a pass. Do not redispatch Work or grant missing approval.") {
+      ["The engine owns execution. Read and acknowledge the exact stored result/receipt identity and report the result or exception. Distinguish Work completion, checks, integration, preservation, cleanup and required input. Do not review implementation or rerun tests. Goal completion alone is not a pass. Do not redispatch Work or grant missing approval.",
+        "The engine owns execution and has stopped at this recorded state. Acknowledge the exact result/receipt identity and report the complete result or exception to the Human. Do not review implementation or rerun tests. Distinguish Work completion, independent Verification pass, failure, cancellation and required Human input; Goal completion alone is not a pass. Do not dispatch a next task, restart this workflow, or grant missing approval.",
+        "The engine owns execution and has stopped at this recorded state. Report the complete result or the exact exception to the Human. Do not dispatch a next task, restart this workflow, or grant missing approval."].includes(lines[2]!)) {
     try {
       const flow = JSON.parse(lines[1]!);
       backgroundContinuation = flow !== null && typeof flow === "object" && !Array.isArray(flow) &&
         typeof flow.loopId === "string" && Boolean(flow.loopId) &&
         typeof flow.status === "string" && Boolean(flow.status) && flow.status !== "active" &&
+        // A pendingDecision recorded before the decision line was added has three lines.
         (flow.pendingDecision
-          ? lines.length === 4 && lines[3] === "Treat pendingDecision.question as internal worker context. In the Main conversation, summarize the blocker and ask only the concrete question that requires the Human's input. Do not paste the internal report or ask the Human to resolve routine internal bookkeeping. If no Human-owned choice or missing input is identified, report the execution exception without inventing an approval request. Preserve the loop and decision identity; relay an actual Human answer through the existing loop answer command only after it is received."
+          ? lines.length === 3 || lines[3] === "Treat pendingDecision.question as internal worker context. In the Main conversation, summarize the blocker and ask only the concrete question that requires the Human's input. Do not paste the internal report or ask the Human to resolve routine internal bookkeeping. If no Human-owned choice or missing input is identified, report the execution exception without inventing an approval request. Preserve the loop and decision identity; relay an actual Human answer through the existing loop answer command only after it is received."
           : lines.length === 3);
     } catch { /* Malformed or quoted notifications remain visible user text. */ }
   }

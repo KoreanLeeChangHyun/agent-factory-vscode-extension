@@ -209,4 +209,68 @@ async function checkPendingQueueHeader(page) {
   }
   console.log('Queue header: '+cases+' language/count/viewport/loading/disclosure combinations passed.');
 }
-module.exports = { checkComposerRendering, checkPendingQueueHeader };
+// Status line and composer share one set of edges; toggles and icon buttons follow one shared rule each.
+async function checkComposerStatusLine(page) {
+  await page.goto(new URL('/?lang=ko', page.url()).href);
+  const post = message => page.evaluate(data => window.dispatchEvent(new MessageEvent('message', { data })), message);
+  const capability = { model: true, reasoning: true, fast: true, workIsolation: true, taskModes: ['direct', 'orchestrate', 'work'] };
+  await post({ type: 'host.initialize', panelId: 'status-line', role: 'main', runtimeAvailable: true, botsEnabled: false, botsAvailable: false, companionAvailable: false, capabilities: { submit: capability, send: capability } });
+  const sends = () => page.evaluate(() => window.sentMessages.filter(message => message.type === 'chat.send'));
+  await page.locator('#prompt').fill('현재 작업');
+  await page.locator('#send-button').click();
+  await post({ type: 'run.state', running: true });
+  await post({ ...(await sends()).at(-1), type: 'chat.started' });
+  await post({ type: 'run.observed', status: 'running' });
+  assert.equal(await page.locator('#run-status-label').textContent(), '첫 응답 대기', 'Without a queue the line keeps the run phase');
+  for (const text of ['다음 메시지', '그다음 메시지']) {
+    await page.locator('#prompt').fill(text);
+    await page.locator('#send-button').click();
+    await post({ type: 'chat.pending', id: (await sends()).at(-1).id });
+  }
+  await page.mouse.move(1, 1);
+  await page.locator('#prompt').blur();
+  for (const width of [795, 360]) {
+    await page.setViewportSize({ width, height: 700 });
+    await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+    const geometry = await page.evaluate(() => {
+      const box = selector => { const r = document.querySelector(selector).getBoundingClientRect(); return { left: r.left, right: r.right, top: r.top, bottom: r.bottom, mid: (r.top + r.bottom) / 2 }; };
+      const chevron = document.querySelector('#pending-queue-toggle svg path').getBoundingClientRect();
+      return { composer: box('.composer'), prompt: box('#prompt'), dot: box('#agent-progress .run-status-pulse'), label: box('#run-status-label'), elapsed: box('#run-elapsed'), count: box('#pending-queue-label'), chevronRight: chevron.right };
+    });
+    const context = JSON.stringify({ width, geometry });
+    assert.equal(await page.locator('#run-status-label').textContent(), '앞 메시지 처리 중', 'The line names why messages wait');
+    assert.equal(await page.locator('#pending-queue-label').textContent(), '남은 메시지 2건', 'The count reads as remaining messages');
+    for (const part of ['label', 'elapsed', 'count']) assert.ok(Math.abs(geometry[part].mid - geometry.dot.mid) <= 1, part + ' shares the dot line ' + context);
+    assert.ok(Math.abs(geometry.dot.left - (geometry.prompt.left + 4)) <= 1, 'Dot starts on the prompt text edge ' + context);
+    assert.ok(Math.abs(geometry.chevronRight - (geometry.prompt.right - 4)) <= 2, 'Queued count ends on the prompt text edge ' + context);
+    assert.ok(geometry.count.bottom <= geometry.composer.top && geometry.composer.top - geometry.label.bottom <= 8, 'Status line sits just above the composer ' + context);
+  }
+  await page.setViewportSize({ width: 795, height: 700 });
+  // Let the send-to-stop colour transition finish before comparing surfaces.
+  await page.waitForTimeout(300);
+  const accent = await page.evaluate(() => { const probe = document.createElement('i'); probe.style.color = 'var(--af-color-accent)'; document.body.append(probe); const value = getComputedStyle(probe).color; probe.remove(); return value; });
+  const styles = await page.evaluate(() => {
+    const read = selector => { const node = document.querySelector(selector); const style = getComputedStyle(node); const r = node.getBoundingClientRect(); return { color: style.color, background: style.backgroundColor, border: style.borderTopColor, width: r.width, height: r.height, pressed: node.getAttribute('aria-pressed') }; };
+    return { label: read('#run-status-label'), count: read('#pending-queue-toggle'), composer: read('.composer'),
+      icons: ['#conversation-clear-button', '#question-button', '#submission-button', '#send-button'].map(read),
+      toggles: ['#orchestrate-mode-button', '#work-isolation-button', '#auto-scroll-button'].map(read) };
+  });
+  assert.notEqual(styles.composer.border, accent, 'A running composer has no accent border');
+  assert.notEqual(styles.count.color, accent, 'The queued count stays neutral');
+  assert.equal(await page.locator('.astra-stars, .astra-star').count(), 0, 'The composer has no decorative layer');
+  assert.equal(await page.locator('#send-button').evaluate(node => node.classList.contains('is-running')), true, 'Empty composer shows stop');
+  assert.equal(new Set(styles.icons.map(icon => icon.width + 'x' + icon.height)).size, 1, 'Icon buttons share one size ' + JSON.stringify(styles.icons));
+  assert.equal(new Set(styles.icons.map(icon => icon.background)).size, 1, 'Clear, question, submit and stop share one surface ' + JSON.stringify(styles.icons));
+  assert.ok(styles.toggles.some(toggle => toggle.pressed === 'true') && styles.toggles.some(toggle => toggle.pressed === 'false'), 'Fixture covers both toggle states');
+  assert.equal(new Set(styles.toggles.map(toggle => toggle.background + '|' + toggle.height)).size, 1, 'On and off chips share one surface ' + JSON.stringify(styles.toggles));
+  for (const toggle of styles.toggles) assert.notEqual(toggle.color, accent, 'Toggle chips do not use the accent');
+  await page.locator('#pending-queue-toggle').click();
+  const list = await page.locator('#pending-message-queue').boundingBox(), toggle = await page.locator('#pending-queue-toggle').boundingBox(), composer = await page.locator('.composer').boundingBox();
+  assert.ok(list.y >= toggle.y + toggle.height - 1 && list.y + list.height <= composer.y, 'Queue list opens between the status line and composer');
+  assert.ok(Math.abs(list.x - composer.x) <= 1 && Math.abs(list.width - composer.width) <= 1, 'Queue list spans the composer width');
+  assert.match(await page.locator('#pending-message-queue').textContent(), /다음 메시지[\s\S]*그다음 메시지/);
+  await page.locator('#pending-queue-toggle').click();
+  if (process.env.AF_RENDERING_ARTIFACT_DIR) await page.locator('.composer-region').screenshot({ path: require('node:path').join(process.env.AF_RENDERING_ARTIFACT_DIR, 'composer-status-line-795.png') });
+  console.log('Composer status line: one line, shared edges, neutral colour, shared toggles and icon buttons passed.');
+}
+module.exports = { checkComposerRendering, checkPendingQueueHeader, checkComposerStatusLine };

@@ -9,15 +9,35 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <link rel="stylesheet" href="{{styleUri}}" />
     <link rel="stylesheet" href="{{chatStyleBaseUri}}/chat/controls.css" />
+    <link rel="stylesheet" href="{{chatStyleBaseUri}}/chat/panels.css" />
+    <link rel="stylesheet" href="{{chatStyleBaseUri}}/chat/settings.css" />
     <link rel="stylesheet" href="{{chatStyleBaseUri}}/chat/maestro.css" />
   </head>
   <body>
-        <section id="maestro-center" class="maestro-center" aria-label="Control center" data-i18n-aria-label="maestro.center">
-          <header><h2 data-i18n="maestro.center">Control center</h2><button id="maestro-refresh" type="button" data-i18n="maestro.refresh">Refresh</button></header>
-          <div class="maestro-filters"><label><span data-i18n="maestro.scope">Conversation</span><select id="maestro-scope"></select></label><label><span data-i18n="maestro.status">Status</span><select id="maestro-status"></select></label><label><span data-i18n="maestro.search">Find task</span><input id="maestro-search" type="search" /></label></div>
-          <p id="maestro-observation" role="status"></p><div id="maestro-overview" class="maestro-overview"></div>
-          <div class="maestro-workspace"><nav id="maestro-tasks" aria-label="Tasks" data-i18n-aria-label="maestro.tasks"></nav><article id="maestro-detail" tabindex="-1"></article></div>
-        </section>
+    <main id="maestro-center" class="maestro-center" aria-label="Control center" data-i18n-aria-label="maestro.center">
+      <header class="maestro-header">
+        <h1 class="maestro-title" data-i18n="maestro.center">Control center</h1>
+        <div class="maestro-views" role="tablist" aria-label="View" data-i18n-aria-label="maestro.view">
+          <button id="maestro-workers-view" type="button" role="tab" aria-selected="true" aria-controls="maestro-tasks"><span data-i18n="maestro.workers">Workers</span><span id="maestro-workers-count" class="maestro-tab-count" aria-live="polite"></span></button>
+          <button id="maestro-tasks-view" type="button" role="tab" aria-selected="false" aria-controls="maestro-tasks" tabindex="-1" data-i18n="maestro.tasks">Tasks</button>
+        </div>
+        <button id="maestro-supervision" class="maestro-button" type="button" aria-disabled="true" data-pending-command="supervision-report" data-i18n="maestro.supervisionReport" title="Available once the supervision report command is connected" data-i18n-title="maestro.supervisionPending">Supervision report</button>
+        <button id="maestro-refresh" class="maestro-icon-button" type="button" aria-label="Refresh" title="Refresh" data-i18n-aria-label="maestro.refresh" data-i18n-title="maestro.refresh"><svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="M13 8a5 5 0 1 1-1.5-3.5M13 2.5v3h-3" /></svg></button>
+      </header>
+      <div class="maestro-filters" role="search">
+        <span class="maestro-search"><svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="M7 12A5 5 0 1 0 7 2a5 5 0 0 0 0 10zM10.5 10.5L14 14" /></svg><input id="maestro-search" type="search" aria-label="Search" placeholder="Search" data-i18n-aria-label="maestro.search" data-i18n-placeholder="maestro.searchPlaceholder" /></span>
+        <div class="maestro-filter-group" role="group" aria-label="Filters" data-i18n-aria-label="maestro.filters">
+          <span class="maestro-select"><select id="maestro-status" aria-label="Status" data-i18n-aria-label="maestro.status"></select><svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="M4 6l4 4 4-4" /></svg></span>
+          <span class="maestro-select"><select id="maestro-scope" aria-label="Conversation" data-i18n-aria-label="maestro.scope"></select><svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="M4 6l4 4 4-4" /></svg></span>
+          <span id="maestro-domain-filter" class="maestro-select" hidden><select id="maestro-domain" aria-label="Domain" data-i18n-aria-label="maestro.domain"></select><svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="M4 6l4 4 4-4" /></svg></span>
+        </div>
+        <button id="maestro-domain-add" class="maestro-button maestro-add" type="button" hidden><svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="M8 3v10M3 8h10" /></svg><span data-i18n="maestro.domainAdd">New domain</span></button>
+      </div>
+      <div id="maestro-workspace" class="maestro-workspace" data-layout="list">
+        <nav id="maestro-tasks" class="maestro-list" aria-label="Workers" data-i18n-aria-label="maestro.workers"></nav>
+        <article id="maestro-detail" class="maestro-detail" tabindex="-1" hidden></article>
+      </div>
+    </main>
     <script nonce="{{nonce}}" src="{{localizationScriptUri}}"></script>
     <script nonce="{{nonce}}" src="{{chatModuleBaseUri}}/chat/maestro.js"></script>
     <script nonce="{{nonce}}" src="{{chatModuleBaseUri}}/control-center.js"></script>

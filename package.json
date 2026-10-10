@@ -25,6 +25,7 @@
     "onCommand:agentFactory.mainChat.clearConversation",
     "onCommand:agentFactory.loadingAnimations.preview",
     "onWebviewPanel:agentFactory.mainChat",
+    "onWebviewPanel:agentFactory.controlCenter",
     "onView:agentFactory.agents"
   ],
   "main": "./dist/extension.js",

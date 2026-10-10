@@ -10,6 +10,8 @@
   let lastPersistedState;
   let composerLayoutFrame;
   let timelineRenderFrame;
+  let previewFrame;
+  const pendingPreviews = new Set();
   document.addEventListener("visibilitychange", function () {
     if (!document.hidden) scheduleTimelineRender();
     else persist();
@@ -99,13 +101,8 @@
   const questionList = document.getElementById("question-list");
   const questionTabs = [...questionMenu.querySelectorAll("[data-question-tab]")];
   const factoryBot = document.getElementById("factory-bot");
-  const runStatus = document.getElementById("run-status");
-  const runStatusToggle = document.getElementById("run-status-toggle");
   const runStatusLabel = document.getElementById("run-status-label");
   const runElapsed = document.getElementById("run-elapsed");
-  const runStatusAgents = document.getElementById("run-status-agents");
-  const runDetails = document.getElementById("run-details");
-  const runStageList = document.getElementById("run-stage-list");
   const attachmentList = document.getElementById("attachment-list");
   const chatWorkUnits = globalThis.AgentFactoryChat.workUnits({
     openSetting, closeSettingMenu, vscode, handleSettingMenuKeydown, t, promptSurface, prompt,
@@ -322,8 +319,7 @@
     if (target) vscode.postMessage({ type: "control.center.open", workflowId: target.dataset.maestroWorkflow, taskId: target.dataset.maestroTask });
   });
   const chatTaskFlow = globalThis.AgentFactoryChat.taskFlow({
-    indexedTimeline, state, t, vscode, runStageList, selectQuestionTab: chatNavigation.selectQuestionTab, historyEmpty, runDetails,
-    runStatus, runStatusToggle, runStatusAgents,
+    indexedTimeline, state, t, vscode,
     persist, childAgentStatusLabel: chatAgents.childAgentStatusLabel
   });
   let contractListMessage;
@@ -404,16 +400,6 @@
     }
   }
   if (restoreImages.length) vscode.postMessage({ type: "attachments.restore", attachments: restoreImages });
-
-  runStatusToggle.addEventListener("click", function () {
-    state.runPanelExpanded = !state.runPanelExpanded;
-    state.runPanelUserChoice = true;
-    chatTaskFlow.renderWorkLoopPanel();
-    if (state.runPanelExpanded && state.role === "main") {
-      vscode.postMessage({ type: "agents.request" });
-    }
-    persist();
-  });
 
   let syntaxThemeClass = document.body.className;
   new MutationObserver(function () {
@@ -784,7 +770,7 @@
       if (!statusSettings.hidden) { event.preventDefault(); chatStatusBar.closeStatusSettings(); return; }
       if (document.getElementById("conversation-reader").open) return;
       const history = document.querySelector(".task-history[open]") || document.getElementById("task-history");
-      if (history.open) {
+      if (history?.open) {
         event.preventDefault();
         history.open = false;
         history.querySelector("summary").focus();
@@ -818,7 +804,7 @@
 
   document.addEventListener("click", function (event) {
     const history = document.getElementById("task-history");
-    if (!event.target.closest("#task-history")) history.open = false;
+    if (history && !event.target.closest("#task-history")) history.open = false;
     const link = event.target.closest(".markdown-body a");
     if (link) {
       event.preventDefault();
@@ -1264,7 +1250,7 @@
       case "composer.reference":
         prompt.value = [prompt.value, message.text].filter(Boolean).join("\n\n");
         state.draft = prompt.value;
-        resizePrompt(); persist(false); prompt.focus();
+        resizePrompt(); updateSendButton(); persist(false); prompt.focus();
         break;
       case "project.tasks":
         if (!message.error) state.projectTasks = Array.isArray(message.entries) ? message.entries : [];
@@ -1298,15 +1284,50 @@
             // A cached history user does not prove its answer was cached too.
             // Insert missing history beside its recorded neighbors, preserving
             // the ordering of live entries and already restored messages.
-            for (let index = 0; index < restored.length; index += 1) {
-              const item = restored[index];
-              if (knownIds.has(item.id) || knownRuns.has(item.runId)) continue;
-              const following = restored.slice(index + 1).find(next => knownIds.has(next.id));
-              const preceding = restored.slice(0, index).reverse().find(previous => knownIds.has(previous.id));
-              const position = following ? state.timeline.findIndex(entry => entry.id === following.id)
-                : preceding ? state.timeline.findIndex(entry => entry.id === preceding.id) + 1 : 0;
-              state.timeline.splice(position, 0, item);
-              knownIds.add(item.id);
+            if (new Set(restored.map(item => item.id)).size === restored.length) {
+              // Link existing records once and insert beside recorded anchors.
+              // Searching/copying the remaining history per message is quadratic.
+              const head = {};
+              let tail = head;
+              const nodes = new Map();
+              for (const item of state.timeline) {
+                const node = { item, previous: tail };
+                tail.next = node; tail = node;
+                if (!nodes.has(item.id)) nodes.set(item.id, node);
+              }
+              const following = [];
+              let next;
+              for (let index = restored.length - 1; index >= 0; index--) {
+                following[index] = next;
+                if (nodes.has(restored[index].id)) next = nodes.get(restored[index].id);
+              }
+              let preceding;
+              for (let index = 0; index < restored.length; index++) {
+                const item = restored[index];
+                if (knownIds.has(item.id)) { preceding = nodes.get(item.id); continue; }
+                if (knownRuns.has(item.runId)) continue;
+                const before = following[index];
+                const previous = before ? before.previous : preceding || head;
+                const node = { item, previous, next: previous.next };
+                if (node.next) node.next.previous = node;
+                previous.next = node;
+                nodes.set(item.id, node); knownIds.add(item.id); preceding = node;
+              }
+              const merged = [];
+              for (let node = head.next; node; node = node.next) merged.push(node.item);
+              state.timeline = merged;
+            } else {
+              // Preserve the legacy ordering contract for duplicate record IDs.
+              for (let index = 0; index < restored.length; index += 1) {
+                const item = restored[index];
+                if (knownIds.has(item.id) || knownRuns.has(item.runId)) continue;
+                const following = restored.slice(index + 1).find(next => knownIds.has(next.id));
+                const preceding = restored.slice(0, index).reverse().find(previous => knownIds.has(previous.id));
+                const position = following ? state.timeline.findIndex(entry => entry.id === following.id)
+                  : preceding ? state.timeline.findIndex(entry => entry.id === preceding.id) + 1 : 0;
+                state.timeline.splice(position, 0, item);
+                knownIds.add(item.id);
+              }
             }
             // Repair raw or partially separated history only when the exact
             // captured request matches. Live messages remain untouched.
@@ -1449,7 +1470,10 @@
             renderRunStatus();
           }
           const key = message.runId + "\u0000" + message.stream + "\u0000" + message.id;
-          const entry = state.timeline.find(function (item) { return item.streaming && item.streamKey === key; });
+          const index = indexedTimeline();
+          const candidate = index.streams.get(key);
+          const entry = candidate && state.timeline[candidate.position] === candidate.event && candidate.event.streaming ? candidate.event : undefined;
+          if (candidate && !entry) index.streams.delete(key);
           if (entry) {
             entry.text += message.text;
             schedulePreviewRender(entry);
@@ -1821,7 +1845,7 @@
   function indexedTimeline() {
     let index = timelineIndexes.get(state.timeline);
     if (!index || index.length > state.timeline.length) {
-      index = { id: ++nextTimelineIndex, length: 0, activities: new Map(), positions: new Map(), questions: [], latestTurn: undefined, flows: new Map(), flowRevision: 0 };
+      index = { id: ++nextTimelineIndex, length: 0, activities: new Map(), positions: new Map(), streams: new Map(), questions: [], latestTurn: undefined, flows: new Map(), flowRevision: 0 };
       timelineIndexes.set(state.timeline, index);
     }
     // Existing entries keep their type/turn identity; ingestion replaces the array
@@ -1830,6 +1854,7 @@
       const event = state.timeline[index.length];
       const type = event.type;
       if (!index.positions.has(event.id)) index.positions.set(event.id, index.length);
+      if (event.streaming && event.streamKey) index.streams.set(event.streamKey, { event, position: index.length });
       if (type === "user" && event.submission?.backgroundContinuation === true && event.text === "") continue;
       if (type === "assistant") {
         const text = event.text || "";
@@ -1860,16 +1885,20 @@
       const entry = state.timeline[index];
       if (!entry.streaming || entry.runId !== complete.runId || entry.phase !== complete.phase) continue;
       const partial = normalize(entry.text);
-      if (partial && full.startsWith(partial)) return index;
+      if (partial && full.startsWith(partial)) {
+        timelineIndexes.get(state.timeline)?.streams.delete(entry.streamKey);
+        return index;
+      }
       if (complete.phase === "final") return -1;
     }
     return -1;
   }
 
   // Growing previews re-render only their own content once per frame instead of the whole timeline.
-  const pendingPreviews = new Set();
-  let previewFrame;
   function schedulePreviewRender(entry) {
+    // Visibility restoration renders current timeline text; hidden previews do
+    // not need a second queue retaining superseded message objects.
+    if (document.hidden) return;
     pendingPreviews.add(entry);
     if (previewFrame !== undefined || document.hidden) return;
     previewFrame = requestAnimationFrame(function () {
@@ -1879,7 +1908,7 @@
         const element = messageElements.get(item.id);
         const key = element && messageRenderKeys.get(element);
         const content = element && element.querySelector(":scope > .message-content");
-        if (!content || !key || !state.timeline.includes(item)) {
+        if (!content || !key || state.timeline[indexedTimeline().positions.get(item.id)] !== item) {
           scheduleTimelineRender();
           continue;
         }
@@ -2069,10 +2098,10 @@
     return { taskMode: execution.taskMode, businessMode: execution.businessMode, goal: execution.goal === true };
   }
 
-  function renderSubmission(content, submission, messageId) {
+  function renderSubmission(content, submission) {
     if (!submission || typeof submission !== "object") return;
     const actions = { work: t("ui.work"), plan: t("ui.plan"), verification: t("ui.verification"), "plan-work": t("ui.plan.work.f294a9"), "work-verification": t("ui.work.verification.6a0009"), "plan-work-verification": t("ui.plan.work.verification.d02a66") };
-    const workflows = { maestro: "Maestro", contract: t("ui.contract"), interview: t("ui.interview"), planning: t("ui.planning"), design: t("ui.design"), migration: t("ui.migration"), lessons: t("ui.lessons"), pipeline: t("ui.pipeline") };
+    const workflows = { contract: t("ui.contract"), interview: t("ui.interview"), planning: t("ui.planning"), design: t("ui.design"), migration: t("ui.migration"), lessons: t("ui.lessons"), pipeline: t("ui.pipeline") };
     const labels = [Object.hasOwn(workflows, submission.businessMode) ? workflows[submission.businessMode] : undefined, Object.hasOwn(actions, submission.taskMode) ? actions[submission.taskMode] : undefined, submission.goal === true ? t("ui.goal") : undefined].filter(Boolean);
     if (submission.backgroundContinuation === true) labels.unshift(t("ui.background.continuation.label"));
     if (labels.length) {
@@ -2086,31 +2115,7 @@
       }
       content.prepend(metadata);
     }
-    // Missing historical guidance is unknown; never reconstruct it from today's templates.
-    if (typeof submission.guidance === "string" && submission.guidance.trim()) {
-      content.classList.add("has-message-guidance");
-      const details = document.createElement("details");
-      details.className = "message-guidance";
-      if (messageId) {
-        details.open = state.guidanceExpanded.includes(messageId);
-        details.addEventListener("toggle", function () {
-          if (!details.isConnected || details.open === state.guidanceExpanded.includes(messageId)) return;
-          state.guidanceExpanded = state.guidanceExpanded.filter(id => id !== messageId);
-          if (details.open) state.guidanceExpanded.push(messageId);
-          persist();
-        });
-      }
-      const summary = document.createElement("summary");
-      summary.setAttribute("aria-label", t("ui.view.delivered.guidance"));
-      summary.title = t("ui.view.delivered.guidance");
-      summary.append(createModeIcon("m8.5 5 7 7-7 7", "submission-chevron"));
-      const note = document.createElement("p");
-      note.textContent = t("ui.application.added.guidance.for.this.request.this.is.not.the.full.provider.prompt");
-      const guidance = document.createElement("pre");
-      guidance.textContent = submission.guidance;
-      details.append(summary, note, guidance);
-      content.append(details);
-    }
+    // Captured guidance remains in submission records; conversation displays Human text only.
   }
 
   function scheduleTimelineRender() {
@@ -2125,6 +2130,9 @@
     cancelAnimationFrame(timelineRenderFrame);
     timelineRenderFrame = undefined;
     if (document.hidden) return;
+    cancelAnimationFrame(previewFrame);
+    previewFrame = undefined;
+    pendingPreviews.clear();
     cancelAnimationFrame(autoScrollFrame);
     const shouldFollowLatest = state.autoScroll && followLatest;
     const existingMessages = messageElements;
@@ -2484,7 +2492,6 @@
     document.getElementById("agent-progress").hidden = !state.running && !phase;
     document.getElementById("agent-progress").dataset.feedback = phase || "";
     runElapsed.hidden = !state.running || phase === "checking";
-    runStatus.hidden = state.role !== "main";
     const progressing = state.running && state.runExecutionStatus === "running" &&
       (!phase || ["awaiting", "waiting", "streaming", "response"].includes(phase)) && !state.pendingDecisionRunId && !state.cancellationRequested;
     document.querySelector(".composer").classList.toggle("is-progressing", progressing);
@@ -2507,6 +2514,12 @@
       const label = t("feedback." + phase);
       runStatusLabel.textContent = label;
       runStatusLabel.title = label + " · " + (localizedText(state.runProgress, state.runProgressLocalization) || t("ui.working"));
+    }
+    // With messages waiting, the line names why they wait; the queued count sits at the end of the same line.
+    if (pending.some(item => !item.rejected) && !state.cancellationRequested && !state.pendingDecisionRunId &&
+      (!phase || ["awaiting", "waiting", "streaming", "response"].includes(phase))) {
+      runStatusLabel.title = t("feedback.queueBehind") + " · " + runStatusLabel.title;
+      runStatusLabel.textContent = t("feedback.queueBehind");
     }
     runElapsed.textContent = formatElapsed(elapsed);
     const elapsedItem = statusBar.querySelector('[data-item-id="elapsed"]');
@@ -2781,7 +2794,6 @@
     fastModeButton.setAttribute("aria-label", state.fastMode ? t("ui.fast.mode.on") : t("ui.fast.mode.off"));
     fastModeButton.title = state.fastMode ? t("ui.fast.mode.on") : t("ui.fast.mode.off");
     fastModeValue.textContent = state.fastMode ? t("ui.on") : t("ui.off");
-    promptSurface.classList.toggle("is-astra", /(?:^|[-/])astra(?:$|-)/i.test(chatAgentSettings.effectiveAgentValue("main", "model")));
     const selectedRun = state.role !== "main" ? state.capturedRun || {} : undefined;
     const modelText = selectedRun ? (selectedRun.model || t("flow.model.unavailable")) : (chatAgentSettings.effectiveAgentValue("main", "model") ? chatAgentSettings.modelOptionLabel(chatAgentSettings.effectiveAgentValue("main", "model")) : t("ui.default")) + " · " + reasoningDisplayLabel(chatAgentSettings.effectiveAgentValue("main", "reasoningEffort"));
     if (modelLabel.textContent !== modelText) modelLabel.textContent = modelText;
@@ -2994,7 +3006,8 @@
     const menu = settingMenu(openSettingId);
     menu.hidden = true;
     if (openSettingId === "submission") {
-      document.getElementById("task-history").open = false;
+      const history = document.getElementById("task-history");
+      if (history) history.open = false;
     }
     button.setAttribute("aria-expanded", "false");
     openSettingId = undefined;
@@ -3057,6 +3070,17 @@
     return unchanged ? previous : snapshot;
   }
 
+  // Select the existing restoration window from the tail. Full history stays in
+  // state.timeline and the runtime; do not scan it for every draft/status save.
+  function persistedTimeline() {
+    const events = [];
+    for (let index = state.timeline.length - 1; index >= 0 && events.length < 200; index--) {
+      const event = state.timeline[index];
+      if (!event.streaming) events.push(event);
+    }
+    return events.reverse();
+  }
+
   function persistNow() {
     const next = persistenceSnapshot({
       shortcuts: { ...chatShortcuts.shortcuts },
@@ -3092,7 +3116,7 @@
         return persisted;
       }),
       taskFlows: chatTaskFlow.currentTaskFlows().slice(-100),
-      timeline: state.timeline.filter(function (event) { return !event.streaming; }).slice(-200).map(function (event) {
+      timeline: persistedTimeline().map(function (event) {
         if (!Array.isArray(event.attachments)) return event;
         return {
           ...event,
@@ -3126,8 +3150,6 @@
       runProgress: state.runProgress,
       runProgressLocalization: state.runProgressLocalization,
       runStartedAt: state.runStartedAt,
-      runPanelExpanded: state.runPanelExpanded,
-      runPanelUserChoice: state.runPanelUserChoice,
       workUnits: state.workUnits,
       childAgents: state.childAgents,
       workflows: state.workflows

@@ -472,3 +472,21 @@ test("unavailable project refresh reports an error rather than clearing recorded
   assert.equal(message.type,"project.tasks");
   assert.match(message.error,/unavailable/);
 });
+
+
+test("original result navigation validates both recorded agent and run without opening Main", async () => {
+  const f=fixture(), target=managed();f.manager.panels.set(target.state.panelId,target);
+  const entry={id:"flow-result",tasks:[{id:"task-result",runs:[{role:"work",agentId:"worker-exact",runId:"run-result",result:{availability:"recorded"}}]}]};
+  f.manager.controlCenterRuntime=async()=>({available:true,client:{async listProjectTasks(){return [entry];},async projectTaskRecords(){return [{name:"work · run-result · result.md",path:"/managed/worker-exact/run-result/result.md"}];}}});
+  const oldOpen=vscode.workspace.openTextDocument, oldShow=vscode.window.showTextDocument;
+  const opened=[];vscode.workspace.openTextDocument=async uri=>uri;vscode.window.showTextDocument=async document=>opened.push(document.fsPath);
+  const request={type:"project.task.open",workflowId:"flow-result",taskId:"task-result",target:"result",agentId:"worker-exact",runId:"run-result"};
+  try {
+    await f.manager.handleMessage(target,request);assert.deepEqual(opened,["/managed/worker-exact/run-result/result.md"]);
+    assert.equal(target.panel.reveals,0);
+    await assert.rejects(f.manager.handleMessage(target,{...request,agentId:"other-worker"}),/unavailable/);
+    await assert.rejects(f.manager.handleMessage(target,{...request,runId:"other-run"}),/unavailable/);
+    entry.tasks[0].runs[0].result.availability="error";
+    await assert.rejects(f.manager.handleMessage(target,request),/unavailable/);assert.equal(opened.length,1);
+  } finally {vscode.workspace.openTextDocument=oldOpen;vscode.window.showTextDocument=oldShow;}
+});

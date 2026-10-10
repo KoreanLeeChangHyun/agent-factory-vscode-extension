@@ -605,7 +605,10 @@ async function checkTaskFlow(page, { panelOnly = false } = {}) {
   await page.locator('#task-history > summary').click();
   await page.evaluate(() => window.postMessage({ type: 'agents.list', agents: [], workflows: [] }, '*'));
   await page.evaluate(() => { window.dispatchEvent(new Event('pagehide')); sessionStorage.setItem('submission-restoration-fixture', JSON.stringify(window.saved)); });
+  const recordedWorkflows = await page.evaluate(() => window.saved.workflows);
   await page.reload();
+  // A reopened chat receives authoritative loop records from Host; stale engine cache is not revived.
+  await page.evaluate(workflows => window.postMessage({ type: 'agents.list', agents: [], workflows, workflowsComplete: true }, '*'), recordedWorkflows);
   await sixHistory.waitFor({ state: 'attached' });
   assert.equal(await sixSteps.count(), 0, 'Reload does not revive a terminal workflow from its pending stages');
   assert.deepEqual(await sixHistory.locator('.task-flow-step').evaluateAll(items => items.map(item => item.dataset.status)), ['completed', 'failed', 'pending', 'pending', 'pending', 'pending']);
@@ -644,7 +647,9 @@ async function checkTaskFlow(page, { panelOnly = false } = {}) {
   await page.evaluate(six => window.postMessage({ type: 'agents.list', agents: [], workflows: [six] }, '*'), six);
   await page.waitForFunction(() => document.querySelector('#task-history-list [data-flow-id="six-flow"]'));
   await page.evaluate(() => { window.dispatchEvent(new Event('pagehide')); sessionStorage.setItem('submission-restoration-fixture', JSON.stringify(window.saved)); });
+  const completedWorkflows = await page.evaluate(() => window.saved.workflows);
   await page.reload();
+  await page.evaluate(workflows => window.postMessage({ type: 'agents.list', agents: [], workflows, workflowsComplete: true }, '*'), completedWorkflows);
   await page.waitForFunction(() => document.querySelector('#task-history-list [data-flow-id="six-flow"]'));
   const completedSix = page.locator('#task-history-list [data-flow-id="six-flow"]');
   assert.equal(await page.locator('.task-history-entries > li > [data-history-id="six-flow"]').count(), 1,
@@ -682,7 +687,7 @@ async function checkTaskFlow(page, { panelOnly = false } = {}) {
       await page.waitForTimeout(100);
       const boxes = await page.evaluate(() => {
         const box = selector => { const r = document.querySelector(selector).getBoundingClientRect(); return {x:r.x,right:r.right,bottom:r.bottom,y:r.y}; };
-        return {bot:box('#factory-bot'),flow:box('#run-status-toggle'),progress:box('#agent-progress'),composer:box('.composer'),history:box('#workflow-history')};
+        return {bot:box('#factory-bot'),flow:box('#run-status-toggle'),progress:box('#agent-progress'),composer:box('.composer'),history:box('#workflow-history'),feedback:document.querySelector('#agent-progress').dataset.feedback,headerWidth:document.querySelector('#run-status').style.getPropertyValue('--workflow-header-width'),dock:box('.agent-progress-dock')};
       });
       if (bot) {
         assert.ok(boxes.bot.x >= 0 && boxes.bot.right <= size.width,'Bot fits viewport');
@@ -690,7 +695,7 @@ async function checkTaskFlow(page, { panelOnly = false } = {}) {
         assert.ok(Math.abs(boxes.history.right - boxes.composer.right) <= 2, 'Workflow header stays right-aligned with the composer '+JSON.stringify({size,running,boxes}));
       }
       if(running) {
-        assert.ok(boxes.progress.right <= boxes.flow.x+1,'Loading stays left of workflow '+JSON.stringify({size,bot,running,boxes}));
+        assert.ok(boxes.progress.right <= boxes.flow.x+1 || boxes.progress.bottom <= boxes.flow.y+1,'Loading stays left of or above workflow '+JSON.stringify({size,bot,running,boxes}));
         assert.ok(Math.abs(boxes.progress.x-boxes.composer.x)<=1,'Loading stays at left edge');
       }
       assert.ok(boxes.flow.x>=0 && boxes.flow.right<=size.width,'Workflow fits with and without bot');

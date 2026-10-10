@@ -72,46 +72,12 @@
                 <span class="run-status-meta" aria-hidden="true"><span id="run-elapsed">0s</span></span>
               </span>
             </div>
-        </div><div class="composer-status-column">
-<div class="composer-status-row">
-          <div id="run-status" class="run-status" role="status" aria-live="polite" hidden>
-            <button id="run-status-toggle" class="run-status-toggle" type="button" aria-expanded="false" aria-controls="run-details">
-              <span class="run-status-pulse" aria-hidden="true"></span>
-              <span id="run-status-title" data-i18n="ui.task.workflow">Task workflow</span>
-              <span id="run-status-agents" class="run-status-agents" aria-hidden="true"></span>
-              <svg class="run-status-chevron" viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="m4 10 4-4 4 4"></path></svg>
-            </button>
-
-            <div id="workflow-history" class="workflow-history">
-              <button id="workflow-history-toggle" type="button" class="history-action history-overflow" aria-label="Contracts / Task history" aria-haspopup="menu" aria-expanded="false" aria-controls="workflow-history-items">⋯</button>
-              <div id="workflow-history-items" class="workflow-history-items">
-                <details id="task-history" class="task-history" hidden>
-                  <summary class="history-action" role="button" title="Task history" aria-label="Task history" data-i18n-title="flow.history" data-i18n-aria-label="flow.history" aria-controls="task-history-list">
-                    <span data-i18n="flow.history">Task history</span>
-                  </summary>
-                  <div id="task-history-list" class="task-history-list">
-                    <div class="history-tabs" role="tablist" aria-label="Task history" data-i18n-aria-label="flow.history">
-                      <button id="history-tab-tasks" type="button" role="tab" aria-selected="true" aria-controls="task-history-panel" data-history-tab="tasks" data-i18n="flow.history">Task history</button>
-                      <button id="history-tab-contracts" type="button" role="tab" aria-selected="false" aria-controls="contract-list-list" tabindex="-1" data-history-tab="contracts" data-i18n="contracts.title">Contracts</button>
-                    </div>
-                    <div id="task-history-panel" class="history-tab-panel" role="tabpanel" aria-labelledby="history-tab-tasks" tabindex="-1"></div>
-                    <div id="contract-list-list" class="history-tab-panel" role="tabpanel" aria-labelledby="history-tab-contracts" tabindex="-1" hidden></div>
-                  </div>
-                </details>
-              </div>
-            </div>
-            <button id="pending-queue-toggle" class="pending-queue-toggle" type="button" aria-expanded="false" aria-controls="pending-message-queue" hidden>
-              <span id="pending-queue-label">Queued 0</span>
-              <svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="m4 6 4 4 4-4"></path></svg>
-            </button>
-            <section id="run-details" class="run-details" aria-label="Work and verification details" hidden data-i18n-aria-label="ui.work.and.verification.details">
-              <div id="run-stage-list" class="run-stage-list"></div>
-            </section>
-          </div>
-          <p id="input-feedback" class="input-feedback" role="alert" hidden></p>
-        </div>
+        </div><p id="input-feedback" class="input-feedback" role="alert" hidden></p>
+        <button id="pending-queue-toggle" class="pending-queue-toggle" type="button" aria-expanded="false" aria-controls="pending-message-queue" hidden>
+          <span id="pending-queue-label">Queued 0</span>
+          <svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="m4 6 4 4 4-4"></path></svg>
+        </button>
         <section id="pending-message-queue" aria-label="Queued messages" hidden data-i18n-aria-label="ui.queued.messages"></section>
-        </div>
 
         </div>
         <div class="composer">
@@ -122,32 +88,6 @@
 
           <div id="attachment-list" class="attachment-list" aria-label="Attachments" data-i18n-aria-label="ui.attachments"></div>
           <div class="prompt-surface">
-            <div class="astra-stars" aria-hidden="true">
-              <span class="astra-star"></span>
-              <span class="astra-star"></span>
-              <span class="astra-star"></span>
-              <span class="astra-star"></span>
-              <span class="astra-star"></span>
-              <span class="astra-star"></span>
-              <span class="astra-star"></span>
-              <span class="astra-star"></span>
-              <span class="astra-star"></span>
-              <span class="astra-star"></span>
-              <span class="astra-star"></span>
-              <span class="astra-star"></span>
-              <span class="astra-star"></span>
-              <span class="astra-star"></span>
-              <span class="astra-star"></span>
-              <span class="astra-star"></span>
-              <span class="astra-star"></span>
-              <span class="astra-star"></span>
-              <span class="astra-star"></span>
-              <span class="astra-star"></span>
-              <span class="astra-star"></span>
-              <span class="astra-star"></span>
-              <span class="astra-star"></span>
-              <span class="astra-star"></span>
-            </div>
             <textarea
               id="prompt"
               rows="1"
@@ -247,7 +187,7 @@
                   <circle cx="12" cy="3" r="1"></circle>
                 </svg>
               </button>
-              <button id="send-button" class="send-button" type="button" title="Send (Enter)" aria-label="Send message" data-i18n-title="ui.send.enter" data-i18n-aria-label="ui.send.message">
+              <button id="send-button" class="send-button circular-action" type="button" title="Send (Enter)" aria-label="Send message" data-i18n-title="ui.send.enter" data-i18n-aria-label="ui.send.message">
                 <svg id="send-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M12 19V5M6.5 10.5 12 5l5.5 5.5"></path></svg>
                 <svg id="goal-send-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false" hidden><circle cx="12" cy="12" r="9"></circle><circle cx="12" cy="12" r="4"></circle><circle cx="12" cy="12" r="1"></circle></svg>
                 <svg id="stop-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false" hidden><rect x="7" y="7" width="10" height="10" rx="1"></rect></svg>

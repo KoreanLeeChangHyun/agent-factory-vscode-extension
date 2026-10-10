@@ -6,13 +6,15 @@ import { readChatSource } from "../support/chat-source.mjs";
 const script = await readChatSource();
 const handlers = script.slice(script.indexOf('      case "chat.assistant":'), script.indexOf('      case "bots.updated":'))
   + script.slice(script.indexOf('      case "chat.delta":'), script.indexOf('      case "bots.updated":', script.indexOf('      case "chat.delta":')));
-const helpers = script.slice(script.indexOf("  // A complete message supersedes"), script.indexOf("  function upsertActivity("))
+const helpers = script.slice(script.indexOf("  function indexedTimeline("), script.indexOf("  // A complete message supersedes"))
+  + script.slice(script.indexOf("  // A complete message supersedes"), script.indexOf("  function upsertActivity("))
   + script.slice(script.indexOf("  function isDuplicateCancellation("), script.indexOf("  function appendNotice("));
 
 function harness() {
   let id = 0;
   const context = {
     state: { timeline: [] }, renders: 0, frames: [],
+    timelineIndexes: new WeakMap(), nextTimelineIndex: 0, pendingPreviews: new Set(), previewFrame: undefined, taskFlowParseCache: new WeakMap(),
     document: { hidden: false }, requestAnimationFrame(callback) { context.frames.push(callback); return context.frames.length; },
     messageElements: new Map(), messageRenderKeys: new Map(), eventVersion: () => 1, followLatest: false,
     assistantDisplayText: value => value, localizedText: value => value,
@@ -112,7 +114,26 @@ test("growing previews re-render only their own content once per frame", () => {
   assert.deepEqual(rendered.slice(1), ["Intro\n\n**Hello** more"]);
 });
 
-test("live previews are never persisted", () => {
-  const persistence = script.slice(script.indexOf("      timeline: state.timeline.filter("), script.indexOf(".slice(-200)", script.indexOf("      timeline: state.timeline.filter(")));
-  assert.match(persistence, /!event\.streaming/);
+test("restoration selects the same last 200 complete messages without scanning older history", () => {
+  const source = script.slice(script.indexOf("  function persistedTimeline()"), script.indexOf("  function persistNow()"));
+  const events = Array.from({ length: 20000 }, (_, index) => ({ id: "record-" + index, text: "complete-" + index }));
+  events.push({ id: "preview", text: "live", streaming: true });
+  let visited = 0;
+  const timeline = new Proxy(events, { get(target, key) { if (/^\d+$/.test(String(key))) visited++; return Reflect.get(target, key); } });
+  const result = runInNewContext(source + "\npersistedTimeline();", { state: { timeline } });
+  assert.deepEqual(Array.from(result), events.slice(-201, -1));
+  assert.equal(visited, 201);
+});
+
+test("hidden streaming keeps all text without retaining completed preview references", () => {
+  const { context, send } = harness();
+  context.document.hidden = true;
+  for (let index = 0; index < 100; index++) {
+    send({ type: "chat.delta", runId: "hidden", stream: "commentary", id: "hidden-" + index, text: "Message " });
+    send({ type: "chat.delta", runId: "hidden", stream: "commentary", id: "hidden-" + index, text: String(index) });
+    send({ type: "chat.assistant", runId: "hidden", phase: "commentary", text: "Message " + index });
+  }
+  assert.equal(context.pendingPreviews.size, 0);
+  assert.equal(context.state.timeline.length, 100);
+  assert.equal(context.state.timeline.at(-1).text, "Message 99");
 });

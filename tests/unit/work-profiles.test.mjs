@@ -430,3 +430,42 @@ test("allocation evidence guidance requires an explicit installed runtime capabi
   }
   assert.doesNotMatch(orchestratorModeGuidance(true, true, true, true), /--allocation-file/);
 });
+
+test("Main is told about the optional allocation domain only when the runtime accepts it", async () => {
+  const { ChatSessionController, orchestratorModeGuidance } = await importTypeScript("src/modules/chat/session-controller.ts");
+  assert.match(orchestratorModeGuidance(true, true, true, true, true, true), /optional allocation domain/);
+  assert.match(orchestratorModeGuidance(true, true, true, true, true, true), /not a profile, role or model/);
+  assert.doesNotMatch(orchestratorModeGuidance(true, true, true, true, true, false), /allocation domain/);
+  assert.doesNotMatch(orchestratorModeGuidance(true, true, true, true, false, true), /allocation domain/, "No domain without allocation support");
+  const events = { onBound() {}, onRunningChanged() {}, onAssistantText() {}, onProgress() {}, onActivity() {}, onUsage() {}, onError() {} };
+  for (const [taskAllocation, taskDomain, expected] of [[true, true, true], [true, false, false], [true, undefined, false], [false, true, false]]) {
+    const sent = [];
+    const runtime = { async capabilities() { return { submit: { taskAllocation, taskDomain }, send: {} }; },
+      async activeRun() {}, async send(agentId, text) { sent.push(text); return { agentId, runId: "run-one" }; },
+      async updates() { return { cursor: 0, updates: [] }; }, async status() { return { status: "completed" }; },
+      async result() { return { status: "completed", text: "done" }; } };
+    const controller = new ChatSessionController(runtime, events, "main-existing", { pollIntervalMs: 0 });
+    await controller.send("Implement assigned change", [], { taskMode: "orchestrate" });
+    assert.equal(sent[0].includes("optional allocation domain"), expected);
+  }
+});
+
+test("Main reads and reuses the shared domain list only when the runtime provides it", async () => {
+  const { ChatSessionController, orchestratorModeGuidance } = await importTypeScript("src/modules/chat/session-controller.ts");
+  const full = orchestratorModeGuidance(true, true, true, true, true, true, true);
+  assert.match(full, /domains\.py list/);
+  assert.match(full, /never rename or move them/);
+  assert.doesNotMatch(orchestratorModeGuidance(true, true, true, true, true, true, false), /domains\.py/);
+  assert.doesNotMatch(orchestratorModeGuidance(true, true, true, true, true, false, true), /domains\.py/, "No list guidance without the domain field");
+  const events = { onBound() {}, onRunningChanged() {}, onAssistantText() {}, onProgress() {}, onActivity() {}, onUsage() {}, onError() {} };
+  for (const [projectDomains, expected] of [[true, true], [false, false], [undefined, false]]) {
+    const sent = [];
+    const runtime = { async capabilities() { return { submit: { taskAllocation: true, taskDomain: true, projectDomains }, send: {} }; },
+      async activeRun() {}, async send(agentId, text) { sent.push(text); return { agentId, runId: "run-one" }; },
+      async updates() { return { cursor: 0, updates: [] }; }, async status() { return { status: "completed" }; },
+      async result() { return { status: "completed", text: "done" }; } };
+    const controller = new ChatSessionController(runtime, events, "main-existing", { pollIntervalMs: 0 });
+    await controller.send("Implement assigned change", [], { taskMode: "orchestrate" });
+    assert.equal(sent[0].includes("domains.py list"), expected);
+  }
+});

@@ -7,7 +7,7 @@ import { localCompanionAvailable } from "../../modules/chat/bot-build-policy";
 import { restoreCompanion, interactCompanion } from "../../modules/chat/companion";
 import { workUnitContextText, workUnitBranch } from "./work-unit-context";
 import { unitGit, validateUnitBranch, directBranchEvidence } from "./work-unit-git";
-import { ControlCenterWindows } from "./control-center-window";
+import { ControlCenterWindows, restoredControlCenterRoot } from "./control-center-window";
 import { openContractPanel } from "./contract-panel";
 import { listContracts } from "../filesystem/contracts";
 import { readAgentDefaults, updateAgentPresetField, updateAgentPresetFastMode, useAgentPreset, ensureAgentPresets, watchAgentSets } from "./agent-settings-store";
@@ -21,7 +21,7 @@ import { fileURLToPath } from "node:url";
 import { readCliTheme } from "../agent-factory/cli-theme";
 import { randomUUID, createHash } from "node:crypto";
 import { constants as fsConstants, existsSync } from "node:fs";
-import { open as openFile, realpath, unlink } from "node:fs/promises";
+import { open as openFile, realpath, stat, unlink } from "node:fs/promises";
 import { readGitBranch } from "./git-branch";
 import { NoteStore } from "./note-store";
 import { RunningTitle, shouldShowTabLoading } from "./running-title";
@@ -390,13 +390,59 @@ export class ChatPanelManager implements vscode.Disposable {
     const selected = state ?? this.findActivePanel()?.state;
     const root = selected?.projectRoot ?? vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
     if (!root) throw new Error(localize("ui.no.workspace"));
-    this.controlCenters ??= new ControlCenterWindows(this.templates, async projectRoot => {
+    await this.controlCenterWindows().open(root, selection);
+  }
+
+  /** Rebind a control center tab VS Code restored; an unknown or missing project closes it instead of guessing. */
+  public async reviveControlCenter(panel: vscode.WebviewPanel, serializedState: unknown): Promise<void> {
+    const root = restoredControlCenterRoot(serializedState, (vscode.workspace.workspaceFolders ?? []).map(folder => folder.uri.fsPath));
+    const exists = root ? await stat(root).then(value => value.isDirectory(), () => false) : false;
+    if (!root || !exists) { panel.dispose(); return; }
+    await this.controlCenterWindows().revive(root, panel);
+  }
+
+  private controlCenterWindows(): ControlCenterWindows {
+    return this.controlCenters ??= new ControlCenterWindows(this.templates, async projectRoot => {
       const connection = await this.controlCenterRuntime(projectRoot);
       if (!connection.available) throw new Error(connection.diagnostic);
       if (!connection.client.listProjectTasks) throw new Error("Project task records are unavailable in this runtime");
       return connection.client.listProjectTasks();
-    }, (projectRoot, action) => this.openProjectTask(projectRoot, action));
-    await this.controlCenters.open(root, selection);
+    }, (projectRoot, action) => this.openProjectTask(projectRoot, action), async projectRoot => {
+      const connection = await this.controlCenterRuntime(projectRoot);
+      if (!connection.available) throw new Error(connection.diagnostic);
+      return connection.client.listProjectDomains?.();
+    }, (projectRoot, edit) => this.editProjectDomains(projectRoot, edit), {
+      command: async (projectRoot, action) => {
+        const client = await this.controlCenterClient(projectRoot);
+        if (!client.sendWorkerCommand) throw Object.assign(new Error("Worker commands are unavailable in this runtime"), { code: "worker_control_unavailable" });
+        return client.sendWorkerCommand(action.agentId, action.text, action.commandId, { loopId: action.loopId, runId: action.runId, rework: action.rework });
+      },
+      stop: async (projectRoot, action) => {
+        const client = await this.controlCenterClient(projectRoot);
+        if (!client.stopWorkerTask) throw Object.assign(new Error("Force stop is unavailable in this runtime"), { code: "worker_control_unavailable" });
+        await client.stopWorkerTask(action.agentId, action.loopId, action.workflowId, action.taskId);
+        return {};
+      },
+      remove: async (projectRoot, action) => {
+        const client = await this.controlCenterClient(projectRoot);
+        if (!client.removeWorker) throw Object.assign(new Error("Worker removal is unavailable in this runtime"), { code: "worker_control_unavailable" });
+        await client.removeWorker(action.agentId, action.revision);
+        return {};
+      }
+    });
+  }
+
+  private async controlCenterClient(projectRoot: string) {
+    const connection = await this.controlCenterRuntime(projectRoot);
+    if (!connection.available) throw new Error(connection.diagnostic);
+    return connection.client;
+  }
+
+  private async editProjectDomains(projectRoot: string, edit: import("../../protocol/messages").ProjectDomainEdit): Promise<import("../../protocol/messages").ProjectDomains> {
+    const connection = await this.controlCenterRuntime(projectRoot);
+    if (!connection.available) throw new Error(connection.diagnostic);
+    if (!connection.client.editProjectDomains) throw new Error("Project domains are unavailable in this runtime");
+    return connection.client.editProjectDomains(edit);
   }
 
   private async controlCenterRuntime(projectRoot: string): Promise<RuntimeConnection> {
@@ -410,6 +456,15 @@ export class ChatPanelManager implements vscode.Disposable {
     const entry = (await connection.client.listProjectTasks?.())?.find(value => value.id === message.workflowId);
     const task = entry?.tasks.find(value => value.id === message.taskId);
     if (!entry || !task) throw new Error("Task record is no longer available");
+    if (message.target === "result") {
+      const run = task.runs?.find(value => value.agentId === message.agentId && value.runId === message.runId);
+      if (!run || run.result?.availability !== "recorded") throw new Error("The recorded result is unavailable");
+      const records = await connection.client.projectTaskRecords?.(entry.id, task.id) ?? [];
+      const result = records.find(value => value.name === `${run.role} · ${run.runId} · result.md`);
+      if (!result) throw new Error("The recorded result is unavailable");
+      await vscode.window.showTextDocument(await vscode.workspace.openTextDocument(vscode.Uri.file(result.path)), { preview: true });
+      return;
+    }
     if (message.target === "records") {
       const records = await connection.client.projectTaskRecords?.(entry.id, task.id) ?? [];
       const selected = await vscode.window.showQuickPick(records.map(record => ({ label: record.name, path: record.path })), { title: localize("maestro.records") });
@@ -428,7 +483,9 @@ export class ChatPanelManager implements vscode.Disposable {
       if (owner.composerReady) await this.post(owner.panel, { type: "composer.reference", text });
       else (owner.composerReferences ??= []).push(text);
     } else if (message.target === "run") {
-      const run = task.runs?.find(value => value.role === "work") ?? task.runs?.[0];
+      const run = message.agentId ? task.runs?.find(value => value.agentId === message.agentId && value.runId === message.runId)
+        : task.runs?.find(value => value.role === "work") ?? task.runs?.[0];
+      if (!run) throw new Error("The recorded run is unavailable");
       if (run) await this.openChildAgent(owner, run.agentId, run.runId);
     }
   }
@@ -1395,6 +1452,20 @@ export class ChatPanelManager implements vscode.Disposable {
         await this.openControlCenter(managed.state, selection);
         return;
       }
+      case "domain.create":
+      case "domain.rename":
+      case "domain.assign": {
+        // Domain edits come from the control center; the same Human edit path serves any webview of this project.
+        const root = managed.state.projectRoot ?? vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+        if (!root) throw new Error(localize("ui.no.workspace"));
+        await this.editProjectDomains(root, message);
+        return;
+      }
+      case "worker.command":
+      case "worker.stop":
+      case "worker.remove":
+        // Worker control belongs to the control center tab, which confirms and binds the exact worker; chat tabs ignore it.
+        return;
       case "project.task.open": {
         const root = managed.state.projectRoot ?? vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
         if (!root) throw new Error(localize("ui.no.workspace"));

@@ -17,8 +17,9 @@ const { checkAstraStars } = require('./astra-stars.cjs');
 const { checkOneShotComposer } = require('./one-shot-composer.cjs');
 const { checkMessageSubmission, checkMessageLayout } = require('./message-submission.cjs');
 const { checkActivityRows } = require('./activity-rows.cjs');
+const { checkTaskStripRemoval } = require('./task-strip-removal.cjs');
 
-const root = path.resolve(__dirname, '../..');
+const root = process.env.CHAT_INSTALLED_FIXTURE_ROOT || path.resolve(__dirname, '../..');
 const longCommand = Array.from({ length: 8 }, (_, index) => 'echo ' + index).join('\n');
 const diff = [
   'diff --git a/example.py b/example.py', '--- a/example.py', '+++ b/example.py',
@@ -71,7 +72,12 @@ async function main() {
         return;
       }
       response.setHeader('Content-Type', target.endsWith('.css') ? 'text/css' : target.endsWith('.svg') ? 'image/svg+xml' : target.endsWith('.png') ? 'image/png' : 'text/javascript');
-      response.end(fs.readFileSync(target));
+      let source = fs.readFileSync(target);
+      if (url.pathname === '/static/js/chat.js' && process.argv.includes('--chat-performance-only')) {
+        if (process.env.CHAT_PERFORMANCE_BASELINE) source = fs.readFileSync(process.env.CHAT_PERFORMANCE_BASELINE);
+        source = Buffer.from(source.toString().replace(/\}\)\(\);\s*$/, 'window.performanceChat = { state, persistNow, renderTimeline, indexedTimeline, messageElements, messageViewStates, pendingPreviews };\n})();'));
+      }
+      response.end(source);
     } else response.writeHead(404).end();
   });
   try {
@@ -99,6 +105,27 @@ async function main() {
     await page.goto('http://127.0.0.1:' + server.address().port);
     // A startup exception (e.g. a TDZ access) stops chat.js entirely; fail here instead of timing out in a later check.
     assert.deepEqual(pageErrors, [], 'chat.js threw during startup');
+    if (process.argv.includes('--status-placement-only')) {
+      await require('./status-placement.cjs').checkStatusPlacement(page);
+      assert.deepEqual(pageErrors, []);
+      return;
+    }
+    if (process.argv.includes('--model-label-only')) {
+      await require('./model-label.cjs').checkModelLabel(page);
+      assert.deepEqual(pageErrors, []);
+      return;
+    }
+    if (process.argv.includes('--chat-performance-only')) {
+      await require('./chat-performance.cjs').checkChatPerformance(page);
+      assert.deepEqual(pageErrors, []);
+      return;
+    }
+    if (process.argv.includes('--control-screens-only')) {
+      await require('./control-screens.cjs').checkControlScreens(page);
+      assert.deepEqual(pageErrors, []);
+      console.log('Control center kanban, card summary, rework and direct worker message checks passed.');
+      return;
+    }
     if (process.argv.includes('--maestro-only')) {
       await require('./maestro.cjs').checkMaestro(page);
       assert.deepEqual(pageErrors, [], 'Maestro view caused a browser error');
@@ -124,6 +151,12 @@ async function main() {
       await require('./task-flow.cjs').checkTaskFlowStates(page);
       assert.deepEqual(errors, []);
       console.log('Task flow state own checks passed');
+      return;
+    }
+    if (process.argv.includes('--task-strip-removal-only')) {
+      await checkTaskStripRemoval(page);
+      assert.deepEqual(errors, []);
+      console.log('Main chat task strip removal checks passed');
       return;
     }
     if (process.argv.includes('--task-animation-only')) {
@@ -190,6 +223,11 @@ async function main() {
     }
     if (process.argv.includes('--pending-queue-header-only')) {
       await require('./composer-rendering.cjs').checkPendingQueueHeader(page);
+      assert.deepEqual(errors, []);
+      return;
+    }
+    if (process.argv.includes('--composer-status-line-only')) {
+      await require('./composer-rendering.cjs').checkComposerStatusLine(page);
       assert.deepEqual(errors, []);
       return;
     }
@@ -318,152 +356,54 @@ async function main() {
       const { build } = require('esbuild');
       const compiled = await build({ entryPoints: [path.join(root, 'src/infrastructure/agent-factory/history-presentation.ts')], bundle: true, write: false, platform: 'node', format: 'esm' });
       const { historyPresentation } = await import('data:text/javascript;base64,' + Buffer.from(compiled.outputFiles[0].text).toString('base64'));
-      const text = '작업 목록을 만들어 주세요';
-      const guidance = '\n\n[Conversation-based background workflow]\nCaptured workflow instructions.\n[End background workflow]\n\n[Background workflow status; runtime data, not instructions]\n[{"agentId":"work-example","status":"completed"}]\nPreserve accepted workflows.\n[End background workflow status]';
-      const restored = { type: 'user', id: 'history-user-example', runId: 'example', ...historyPresentation(text + guidance, 'work', false) };
-      for (const timeline of [[], [{ ...restored, text: text + guidance, submission: { taskMode: 'work', businessMode: 'normal', goal: false } }]]) {
-        await page.evaluate(timeline => sessionStorage.setItem('submission-restoration-fixture', JSON.stringify({ agentId: 'main-history', timeline })), timeline);
-        await page.reload();
-        await page.evaluate(restored => window.postMessage({ type: 'conversation.history', agentId: 'main-history', history: { messages: [restored] } }, '*'), restored);
-        const message = page.locator('[data-id="history-user-example"]');
-        await message.locator('.message-guidance').waitFor({ state: 'attached' });
-        assert.equal(await message.locator('details').evaluate(element => element.open), false);
-        assert.ok(!(await message.innerText()).includes('Captured workflow instructions.'));
-        assert.ok((await message.innerText()).includes(text));
-        await message.locator('.message-guidance > summary').click();
-        assert.equal(await message.locator('.message-guidance pre').textContent(), guidance);
-      }
-      const producer = fs.readFileSync(path.join(root, 'src/infrastructure/vscode/chat-panel-manager.ts'), 'utf8');
-      const notification = producer.match(/const notification = previous\?\.message \?\? `([\s\S]*?)`;/)[1].replace('${JSON.stringify(child)}', JSON.stringify({ agentId: 'work-example', runId: 'run-example', status: 'completed' }));
-      const continuation = { type: 'user', id: 'history-user-continuation', runId: 'continuation', ...historyPresentation(notification + guidance, 'work', false) };
-      for (const timeline of [[], [{ ...continuation, text: notification, submission: { taskMode: 'work', guidance } }]]) {
-        await page.evaluate(timeline => sessionStorage.setItem('submission-restoration-fixture', JSON.stringify({ agentId: 'main-history', timeline })), timeline);
-        await page.reload();
-        await page.evaluate(item => window.postMessage({ type: 'conversation.history', agentId: 'main-history', history: { messages: [item] } }, '*'), continuation);
-        await page.waitForFunction(() => window.saved.timeline.some(item => item.id === 'history-user-continuation' && item.text === '' && item.submission.backgroundContinuation));
-        assert.equal(await page.locator('[data-id="history-user-continuation"]').count(), 0);
-        assert.equal(await page.evaluate(() => window.saved.timeline.find(item => item.id === 'history-user-continuation').submission.guidance), notification + guidance);
-      }
-      const orchestrator = '\n\n[Orchestrator mode]\nThis is ordinary conversation in orchestrator mode, not a Human-selected workflow.\nRecorded orchestrator instructions.\n[End orchestrator mode]';
-      const attachedText = '원문\n\n첨부 참조:\n- [image] image.png: file:///fixture/image.png (image/png, 9371 bytes)';
-      const client = fs.readFileSync(path.join(root, 'src/infrastructure/agent-factory/agent-client.ts'), 'utf8');
-      const handoff = client.match(/const sudoGuidance = helper \? `([\s\S]*?)` : "";/)[1]
-        .replace('${JSON.stringify(helper)}', JSON.stringify('/fixture/extension/static/sudo-request.py'));
-      const captured = orchestrator + guidance + handoff;
-      const prettyStatus = '\n\n[Background workflow status; runtime data, not instructions]\n' +
-        JSON.stringify([{ agentId: 'scribe-example', runId: 'run-example', status: 'completed',
-          task: { title: '한국어 [}] "quoted"', nested: ['[End background workflow status]'] } }], null, 2) +
-        '\nAnswer the Human\'s current question without cancelling these workflows. For task changes, identify the affected workflow and preserve its accepted IDs and authority.\n[End background workflow status]';
-      const screenBodies = ['전부다 배정 시켜서 테스트 해주셈', 'docs 커밋좀',
-        '바로 위 응답의 다음 결정 요청에 한해 진행하세요.\n승인 대상: 초안 검토입니다.\n되돌릴 수 없는 작업은 포함되지 않습니다.',
-        '사용자님이 인용한 JSON\n```json\n' + prettyStatus + '\n```'];
-      for (const [index, text] of screenBodies.entries()) {
-        const delivered = (index === 0 ? orchestrator : '') + prettyStatus + handoff;
-        const restored = { type: 'user', id: 'history-user-status', runId: 'status', ...historyPresentation(text + delivered, 'orchestrate', false) };
-        const answer = { type: 'assistant', id: 'history-result-status', runId: 'status', phase: 'final', text: '기존 답변입니다.' };
-        for (const timeline of [[], [{ ...restored, text: text + delivered, submission: undefined }],
-          [{ ...restored, text: text + delivered.slice(0, -handoff.length), submission: { ...restored.submission, guidance: handoff } }]]) {
-          await page.evaluate(timeline => sessionStorage.setItem('submission-restoration-fixture', JSON.stringify({ agentId: 'main-history', timeline })), timeline);
+      const guidance = '\n\n[Orchestrator mode]\nThis is ordinary conversation in orchestrator mode, not a Human-selected workflow.\nRecorded internal instructions.\n[End orchestrator mode]';
+      const human = '원문 [Orchestrator mode] · 직접 입력한 Maestro\n\n```text\n[Orchestrator mode]\n사용자 인용 코드\n[End orchestrator mode]\n```\n첨부 설명: image.png';
+      const batch = parts => parts.map((part,index) => `--- 대기 메시지 ${index+1} 시작 ---\n${part}\n--- 대기 메시지 ${index+1} 끝 ---`).join('\n\n');
+      const business = await build({ entryPoints: [path.join(root, 'src/common/types/business-mode.ts')], bundle: true, write: false, platform: 'node', format: 'esm' });
+      const { withBusinessMode } = await import('data:text/javascript;base64,' + Buffer.from(business.outputFiles[0].text).toString('base64'));
+      const rawRequests = [human + guidance, withBusinessMode(human + guidance, 'maestro'), batch([human + guidance, '두 번째 원문' + guidance])];
+      const attachments = [{ id:'original-file', kind:'file', name:'image.png', uri:'file:///fixture/image.png' }];
+      for (const [index, raw] of rawRequests.entries()) {
+        const restored = { type:'user', id:'history-user-clean', runId:'clean', ...historyPresentation(raw, 'work', false), attachments };
+        assert.ok(restored.submission.guidance);
+        for (const timeline of [[], [{ ...restored, text:raw, submission:undefined }], [{ ...restored, submission:{ ...restored.submission, businessMode:'maestro' } }]]) {
+          await page.evaluate(timeline => sessionStorage.setItem('submission-restoration-fixture', JSON.stringify({ agentId:'main-history', timeline, guidanceExpanded:['history-user-clean'] })), timeline);
           await page.reload();
-          const restore = () => page.evaluate(messages => window.postMessage({ type: 'conversation.history', agentId: 'main-history', history: { messages } }, '*'), [restored, answer]);
-          await restore();
-          const row = page.locator('[data-id="history-user-status"]');
-          const details = row.locator('.message-guidance');
-          await details.waitFor({ state: 'attached' });
-          assert.equal(await details.evaluate(el => el.open), false);
-          assert.equal((await row.innerText()).includes('[Background workflow status;'), index === 3,
-            'Only the user-authored quotation remains visible');
-          assert.ok((await row.innerText()).includes(text.split('\n')[0]));
-          assert.equal(await details.locator('pre').textContent(), delivered);
-          await details.locator('summary').click();
-          assert.equal(await details.evaluate(el => el.open), true);
-          await page.waitForFunction(() => window.saved.guidanceExpanded?.includes('history-user-status'));
+          await page.evaluate(item => window.postMessage({ type:'conversation.history', agentId:'main-history', history:{messages:[item]} }, '*'), restored);
+          await page.waitForFunction(text => window.saved.timeline.find(item => item.id === 'history-user-clean')?.text === text, restored.text);
+          const row = page.locator('[data-id="history-user-clean"]');
+          await row.waitFor();
+          assert.equal(await row.locator('.message-guidance').count(), 0);
+          assert.ok((await row.innerText()).includes('사용자 인용 코드'));
+          assert.ok((await row.innerText()).includes('직접 입력한 Maestro'));
+          assert.ok(!(await row.innerText()).includes('Recorded internal instructions.'));
+          assert.ok(!(await row.locator('.message-submission').innerText()).includes('Maestro'));
+          assert.equal(await row.locator('.history-reference').innerText(), 'image.png');
+          assert.equal(await row.locator('.history-reference').getAttribute('title'), attachments[0].uri);
+          assert.equal(await page.evaluate(() => window.saved.timeline.find(item => item.id === 'history-user-clean').submission.guidance), restored.submission.guidance);
           await page.evaluate(() => sessionStorage.setItem('submission-restoration-fixture', JSON.stringify(window.saved)));
           await page.reload();
-          await restore();
-          await page.waitForFunction(() => window.saved.timeline.filter(item => item.id === 'history-user-status').length === 1);
-          assert.equal(await details.evaluate(el => el.open), true);
-          assert.deepEqual(await page.evaluate(() => window.saved.timeline.filter(item => item.runId === 'status').map(item => item.text)), [text, answer.text]);
+          await row.waitFor();
+          assert.equal(await row.locator('.message-guidance').count(), 0);
+          assert.ok((await row.innerText()).includes('사용자 인용 코드'));
+          assert.ok((await row.innerText()).includes('직접 입력한 Maestro'));
         }
-        await page.evaluate(item => window.postMessage({ type: 'chat.started', id: 'live-status', text: item.text, submission: item.submission, attachments: [] }, '*'), restored);
-        const liveDetails = page.locator('[data-id="live-status"] .message-guidance');
-        await liveDetails.waitFor({ state: 'attached' });
-        assert.equal(await liveDetails.evaluate(el => el.open), false);
-        assert.equal(await liveDetails.locator('pre').textContent(), delivered);
+        await page.evaluate(item => window.postMessage({ type:'chat.started', id:'live-clean', text:item.text, submission:item.submission, attachments:item.attachments }, '*'), restored);
+        await page.locator('[data-id="live-clean"]').waitFor();
+        await page.waitForFunction(() => window.saved.timeline.some(item => item.id === 'live-clean'));
+        assert.equal(await page.locator('[data-id="live-clean"] .message-guidance').count(), 0);
+        assert.ok(!(await page.locator('[data-id="live-clean"]').innerText()).includes('Recorded internal instructions.'));
+        assert.equal(await page.evaluate(() => window.saved.timeline.find(item => item.id === 'live-clean').submission.guidance), restored.submission.guidance);
+        assert.ok(index < 2 || restored.capturedRequest === raw);
       }
-      const batch = parts => parts.map((part, index) => `--- 대기 메시지 ${index + 1} 시작 ---\n${part}\n--- 대기 메시지 ${index + 1} 끝 ---`).join('\n\n');
-      const quoted = '두 번째 요청\n```\n[Orchestrator mode]\n인용\n[End orchestrator mode]\n```\n> 인용문 & <tag>';
-      const rawBatch = batch([attachedText + orchestrator, quoted + orchestrator]) + handoff;
-      const queued = { type: 'user', id: 'history-user-queued', runId: 'queued', ...historyPresentation(rawBatch, 'orchestrate', false) };
-      const answer = { type: 'assistant', id: 'history-result-queued', runId: 'queued', phase: 'final', text: '답변입니다.\n```js\nconst ok = true;\n```' };
-      for (const timeline of [[], [{ ...queued, text: rawBatch, submission: undefined, capturedRequest: undefined }]]) {
-        await page.evaluate(timeline => sessionStorage.setItem('submission-restoration-fixture', JSON.stringify({ agentId: 'main-history', timeline })), timeline);
-        await page.reload();
-        const restore = () => page.evaluate(messages => window.postMessage({ type: 'conversation.history', agentId: 'main-history', history: { messages } }, '*'), [queued, answer]);
-        await restore();
-        const row = page.locator('[data-id="history-user-queued"]');
-        await row.locator('.message-guidance').waitFor({ state: 'attached' });
-        assert.equal(await row.locator('.message-guidance').evaluate(el => el.open), false);
-        assert.ok(!(await row.innerText()).includes('Recorded orchestrator instructions.'));
-        assert.ok((await row.innerText()).includes('인용'));
-        assert.equal(await row.locator('.message-guidance pre').textContent(), orchestrator.repeat(2) + handoff);
-        assert.equal(await page.locator('[data-id="history-result-queued"]').count(), 1);
-        await page.evaluate(() => sessionStorage.setItem('submission-restoration-fixture', JSON.stringify(window.saved)));
-        await page.reload();
-        await restore();
-        await page.waitForFunction(() => window.saved.timeline.filter(item => item.id === 'history-user-queued').length === 1);
-        assert.equal(await row.count(), 1);
-        assert.equal(await page.locator('[data-id="history-result-queued"]').count(), 1);
-      }
-      const orchestrated = { type: 'user', id: 'history-user-orchestrator', runId: 'orchestrator', ...historyPresentation(attachedText + captured, 'orchestrate', false) };
-      const cached = [[], [{ ...orchestrated, text: attachedText + captured, submission: undefined }],
-        [{ ...orchestrated, text: attachedText + orchestrator, submission: { ...orchestrated.submission, guidance: guidance + handoff } }], [orchestrated]];
-      const saveAndReload = async () => {
-        await page.evaluate(() => sessionStorage.setItem('submission-restoration-fixture', JSON.stringify(window.saved)));
-        await page.reload();
-      };
-      for (const timeline of cached) {
-        await page.evaluate(timeline => sessionStorage.setItem('submission-restoration-fixture', JSON.stringify({ agentId: 'main-history', timeline })), timeline);
-        await page.reload();
-        await page.evaluate(item => window.postMessage({ type: 'conversation.history', agentId: 'main-history', history: { messages: [item] } }, '*'), orchestrated);
-        const row = page.locator('[data-id="history-user-orchestrator"]');
-        const details = row.locator('.message-guidance');
-        await details.waitFor({ state: 'attached' });
-        assert.equal(await details.evaluate(el => el.open), false);
-        assert.ok((await row.innerText()).includes(attachedText));
-        assert.ok(!(await row.innerText()).includes('[Orchestrator mode]'));
-        assert.ok(!(await row.innerText()).includes('[Agent Factory administrator command handoff]'));
-        assert.equal(await details.locator('pre').textContent(), captured);
-        await details.locator('summary').focus();
-        await page.keyboard.press('Enter');
-        await page.waitForFunction(() => window.saved.guidanceExpanded?.includes('history-user-orchestrator'));
-        await saveAndReload();
-        assert.equal(await details.evaluate(el => el.open), true, 'Explicit expansion survives Webview restoration');
-        await page.evaluate(item => window.postMessage({ type: 'conversation.history', agentId: 'main-history', history: { messages: [item] } }, '*'), orchestrated);
-        assert.equal(await details.evaluate(el => el.open), true, 'Host history does not reset the selection');
-        await details.locator('summary').click();
-        await page.waitForFunction(() => !window.saved.guidanceExpanded?.includes('history-user-orchestrator'));
-        await saveAndReload();
-        assert.equal(await details.evaluate(el => el.open), false, 'Explicit collapse survives Webview restoration');
-      }
-      await page.evaluate(item => window.postMessage({ type: 'chat.started', id: 'live-orchestrator', text: item.text, submission: item.submission, attachments: [] }, '*'), orchestrated);
-      const live = page.locator('[data-id="live-orchestrator"] .message-guidance');
-      await live.waitFor({ state: 'attached' });
-      assert.equal(await live.evaluate(el => el.open), false);
-      await live.locator('summary').click();
-      await page.waitForFunction(() => window.saved.guidanceExpanded?.includes('live-orchestrator'));
-      await saveAndReload();
-      assert.equal(await live.evaluate(el => el.open), true);
-      await page.evaluate(() => window.postMessage({ type: 'host.initialize', panelId: 'other-panel', agentId: 'other-agent', role: 'main', resetConversation: true }, '*'));
-      await page.waitForFunction(() => window.saved.agentId === 'other-agent' && window.saved.guidanceExpanded.length === 0);
       assert.deepEqual(errors, []);
-      console.log('Fresh and cached history hide captured workflow/status instructions until expanded.');
+      console.log('Live, cached, restored and queued messages hide internal guidance; Human quotes, attachments and captured metadata survive.');
       return;
     }
     if (process.argv.includes('--message-layout-only')) {
       await checkMessageLayout(page);
       assert.deepEqual(errors, []);
-      console.log('Long messages retain their height across narrow viewports and guidance toggles.');
+      console.log('Long messages retain their height across narrow viewports with hidden internal guidance.');
       return;
     }
     if (process.argv.includes('--markdown-image-only')) {
@@ -642,7 +582,7 @@ async function main() {
     if (process.argv.includes('--astra-stars-only')) {
       await checkAstraStars(page);
       assert.deepEqual(errors, []);
-      console.log('Astra starfield: animation, typing, responsive layout and reduced motion passed.');
+      console.log('Composer without starfield: Astra model selection, typing and responsive layout passed.');
       return;
     }
     if (process.argv.includes('--work-units-only')) {

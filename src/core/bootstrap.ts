@@ -4,6 +4,7 @@ import { createContainer } from "./container";
 import { ChatPanelSerializer } from "../infrastructure/vscode/chat-panel-serializer";
 import { LoadingAnimationGallery } from "../infrastructure/vscode/loading-animation-gallery";
 import { ArchifyEditor } from "../infrastructure/vscode/archify-editor";
+import { CONTROL_CENTER_VIEW_TYPE } from "../infrastructure/vscode/control-center-window";
 
 export function bootstrap(context: vscode.ExtensionContext): void {
   const container = createContainer(context);
@@ -30,7 +31,11 @@ export function bootstrap(context: vscode.ExtensionContext): void {
     vscode.window.registerWebviewPanelSerializer(
       container.chatPanels.viewType,
       new ChatPanelSerializer(container.chatPanels)
-    )
+    ),
+    // Restores control center tabs that were open at reload/restart; tabs the user closed are not in VS Code's layout.
+    vscode.window.registerWebviewPanelSerializer(CONTROL_CENTER_VIEW_TYPE, {
+      deserializeWebviewPanel: (panel, state) => container.chatPanels.reviveControlCenter(panel, state)
+    })
   );
   // Let a command that activated the extension open its requested chat first.
   const startup = setTimeout(() => { void container.chatPanels.openStartup().catch(error => console.warn("[Agent Factory] Startup chat could not be opened", error)); }, 0);

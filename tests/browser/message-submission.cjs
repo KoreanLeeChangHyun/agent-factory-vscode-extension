@@ -2,7 +2,7 @@ const assert = require('node:assert/strict');
 
 async function checkMessageSubmission(page) {
   const capability = { model: true, reasoning: true, fast: true, goal: true, taskModes: ['direct', 'work', 'plan-work'] };
-  await page.evaluate(capability => window.postMessage({ type: 'host.initialize', panelId: 'submission', role: 'main', runtimeAvailable: true, capabilities: { submit: capability, send: capability } }, '*'), capability);
+  await page.evaluate(capability => window.postMessage({ type: 'host.initialize', panelId: 'submission', role: 'main', runtimeAvailable: true, botsEnabled: false, botsAvailable: false, companionAvailable: false, capabilities: { submit: capability, send: capability } }, '*'), capability);
   await page.waitForFunction(() => window.saved?.panelId === 'submission');
   assert.equal(await page.locator('[data-id="user"] .message-submission').count(), 0);
   assert.equal(await page.locator('[data-id="user"] details').count(), 0);
@@ -18,17 +18,15 @@ async function checkMessageSubmission(page) {
   await message.waitFor();
   assert.equal(await message.locator('.message-submission').innerText(), 'Contract');
   assert.match(await message.innerText(), /Original contract request/);
-  assert.equal(await message.locator('details').getAttribute('open'), null);
-  await message.locator('summary').focus();
-  await page.keyboard.press('Enter');
-  assert.equal(await message.locator('details').evaluate(el => el.open), true);
-  assert.equal(await message.locator('pre').textContent(), submission.guidance);
+  assert.equal(await message.locator('.message-guidance').count(), 0);
+  assert.ok(!(await message.innerText()).includes(submission.guidance));
   assert.equal(await message.locator('script').count(), 0);
   for (const [id, metadata, expected] of [
     ['ordinary-submission', { taskMode: 'direct', businessMode: 'normal', goal: false }, ''],
     ['goal-submission', { taskMode: 'direct', businessMode: 'normal', goal: true }, 'Goal'],
     ['action-submission', { taskMode: 'plan-work', businessMode: 'normal', goal: false }, 'Plan → Work'],
-    ['legacy-submission', undefined, '']
+    ['legacy-submission', undefined, ''],
+    ['maestro-submission', { taskMode: 'work', businessMode: 'maestro', goal: true, guidance: 'INTERNAL MAESTRO' }, 'Work\nGoal']
   ]) {
     await page.evaluate(({ id, metadata }) => window.postMessage({ type: 'chat.started', id, text: id, attachments: [], submission: metadata }, '*'), { id, metadata });
     const row = page.locator(`[data-id="${id}"]`);
@@ -45,22 +43,17 @@ async function checkMessageSubmission(page) {
     await page.setViewportSize({ width, height: 740 });
     const plainBox = await page.locator('[data-id="ordinary-submission"]').boundingBox();
     const compactBox = await compact.boundingBox();
-    const toggleBox = await compact.locator('summary').boundingBox();
-    assert.equal(compactBox.height, plainBox.height, 'Collapsed guidance must not add a row');
-    assert.ok(toggleBox.y >= compactBox.y && toggleBox.y + toggleBox.height <= compactBox.y + compactBox.height);
-    assert.ok(toggleBox.x + toggleBox.width <= compactBox.x + compactBox.width);
+    assert.equal(compactBox.height, plainBox.height, 'Internal guidance must not add a row');
+    assert.equal(await compact.locator('.message-guidance').count(), 0);
   }
-  await compact.locator('summary').click();
-  assert.equal(await compact.locator('pre').isVisible(), true);
-  await compact.locator('summary').click();
-  assert.equal(await compact.locator('pre').isVisible(), false);
   assert.deepEqual(saved.timeline.find(item => item.id === sent.id).submission, submission);
   await page.evaluate(saved => sessionStorage.setItem("submission-restoration-fixture", JSON.stringify(saved)), saved);
   await page.reload();
   await message.waitFor();
   assert.equal(await message.locator('.message-submission').innerText(), 'Contract');
-  assert.equal(await message.locator('pre').textContent(), submission.guidance);
-  assert.equal(await message.locator('details').evaluate(el => el.open), true, 'The saved expansion survives reload');
+  assert.equal(await message.locator('.message-guidance').count(), 0);
+  assert.deepEqual(await page.evaluate(id => window.saved.timeline.find(item => item.id === id).submission, sent.id), submission);
+  assert.ok(!(await page.locator('[data-id="maestro-submission"]').innerText()).includes('Maestro'));
   assert.equal(await page.locator('[data-id="legacy-submission"] .message-submission').count(), 0);
 }
 module.exports = { checkMessageSubmission };
@@ -76,15 +69,15 @@ async function checkMessageLayout(page) {
   await page.locator('[data-id="layout-long"]').waitFor({ state: 'attached' });
   for (const width of [795, 360]) {
     await page.setViewportSize({ width, height: 420 });
-    for (const open of [false, true, false]) {
-      await page.locator('[data-id="layout-long"] details').evaluate((el, value) => { el.open = value; }, open);
+    {
+      assert.equal(await page.locator('[data-id="layout-long"] .message-guidance').count(), 0);
       const collisions = await page.locator('#timeline > .message').evaluateAll(messages => messages.flatMap((message, index) => {
         const box = message.getBoundingClientRect();
         const content = message.querySelector('.message-content').getBoundingClientRect();
         const next = messages[index + 1]?.getBoundingClientRect();
         return content.bottom > box.bottom + 1 || (next && content.bottom > next.top + 1) ? [message.dataset.id] : [];
       }));
-      assert.deepEqual(collisions, [], `Messages must retain their content height: width=${width}, expanded=${open}`);
+      assert.deepEqual(collisions, [], `Messages must retain their content height: width=${width}`);
     }
   }
 }

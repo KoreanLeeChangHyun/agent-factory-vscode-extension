@@ -11,8 +11,8 @@ globalThis.AgentFactoryChat.history = function (host) {
   const taskHistory = document.getElementById("task-history");
   const historyTabs = Array.from(document.querySelectorAll("#task-history-list [role=tab]"));
   let historyTab = "tasks";
-  taskHistory.querySelector("summary").addEventListener("keydown", handleHistoryKeydown);
-  taskHistory.addEventListener("toggle", function () {
+  taskHistory?.querySelector("summary")?.addEventListener("keydown", handleHistoryKeydown);
+  taskHistory?.addEventListener("toggle", function () {
     if (this.open) requestHistory(historyTab);
     positionTaskHistory();
   });
@@ -29,6 +29,7 @@ globalThis.AgentFactoryChat.history = function (host) {
     });
   }
   function selectHistoryTab(name, focus = false) {
+    if (!taskHistory) return;
     if (!historyTabs.some(tab => tab.dataset.historyTab === name)) return;
     const changed = historyTab !== name;
     historyTab = name;
@@ -51,22 +52,20 @@ globalThis.AgentFactoryChat.history = function (host) {
   }
   window.addEventListener("resize", positionTaskHistory);
   const layoutObserver = new ResizeObserver(positionTaskHistory);
-  layoutObserver.observe(document.getElementById("run-status"));
-  layoutObserver.observe(document.getElementById("agent-progress"));
-  layoutObserver.observe(document.getElementById("pending-queue-toggle"));
-  layoutObserver.observe(document.getElementById("workflow-history-items"));
+  for (const element of [document.getElementById("run-status"), document.getElementById("agent-progress"),
+    document.getElementById("pending-queue-toggle"), document.getElementById("workflow-history-items")]) if (element) layoutObserver.observe(element);
 
   const actions = document.getElementById("workflow-history");
   const overflow = document.getElementById("workflow-history-toggle");
-  overflow.addEventListener("click", () => {
+  overflow?.addEventListener("click", () => {
     const open = actions.classList.toggle("is-open");
     overflow.setAttribute("aria-expanded", String(open));
     positionTaskHistory();
   });
   document.addEventListener("click", event => {
-    if (!actions.contains(event.target)) closeHistoryMenu();
+    if (actions && !actions.contains(event.target)) closeHistoryMenu();
   });
-  actions.addEventListener("keydown", event => {
+  actions?.addEventListener("keydown", event => {
     if (event.key === "Escape") {
       event.preventDefault();
       event.stopPropagation();
@@ -82,6 +81,7 @@ globalThis.AgentFactoryChat.history = function (host) {
     if (target) { event.preventDefault(); target.focus(); }
   }
   function closeHistoryMenu() {
+    if (!actions || !overflow) return;
     actions.classList.remove("is-open");
     overflow.setAttribute("aria-expanded", "false");
   }
@@ -199,6 +199,7 @@ globalThis.AgentFactoryChat.history = function (host) {
   }
 
   function positionTaskHistory() {
+    if (!taskHistory) return;
     const status = document.getElementById("run-status");
     const actions = document.getElementById("workflow-history");
     document.getElementById("workflow-history-toggle").setAttribute("aria-label", t("contracts.title") + " / " + t("flow.history"));

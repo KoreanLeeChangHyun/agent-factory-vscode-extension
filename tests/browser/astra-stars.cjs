@@ -1,7 +1,6 @@
 const assert = require('node:assert/strict');
-const fs = require('node:fs');
-const path = require('node:path');
 
+// The composer has no decorative starfield for any model; selecting an Astra model changes only the model label.
 async function checkAstraStars(page) {
   const emit = async value => {
     await page.evaluate(value => window.postMessage(value, '*'), value);
@@ -11,53 +10,23 @@ async function checkAstraStars(page) {
   await emit({ type: 'host.initialize', panelId: 'star-preview', role: 'main', runtimeAvailable: true, capabilities: { submit: capability, send: capability } });
   await emit({ type: 'models.list', models: ['gpt-6-astra', 'gpt-5.6-sol'] });
   await page.locator('#model-button').click();
-  // The model control is now a picker button with an option list, not a native select.
   const mainRow = page.locator('#model-menu .agent-model-row[data-agent-role="main"]');
   await mainRow.locator('button[data-field="model"]').click();
   await mainRow.locator('.model-picker-option[data-value="gpt-6-astra"]').click();
   await page.keyboard.press('Escape');
-  await page.locator('#prompt').fill('');
-  assert.equal(await page.locator('.astra-stars').isVisible(), true);
-  assert.equal(await page.locator('.astra-stars').getAttribute('aria-hidden'), 'true');
-  assert.equal(await page.locator('.astra-stars').evaluate(node => getComputedStyle(node).pointerEvents), 'none');
-  const artifacts = path.resolve(__dirname, '../../../docs/artifact/evidence/astra-stars');
-  fs.mkdirSync(artifacts, { recursive: true });
+  await page.waitForFunction(() => document.getElementById('model-label').textContent.startsWith('gpt-6-astra'));
+  assert.equal(await page.locator('.astra-stars, .astra-star').count(), 0, 'No starfield markup');
+  assert.equal(await page.locator('.prompt-surface').evaluate(node => node.classList.contains('is-astra')), false);
   for (const width of [795, 320]) {
     await page.setViewportSize({ width, height: 740 });
-    const shots = [];
-    for (const time of [0, 1800]) {
-      await page.locator('.astra-star').evaluateAll((stars, time) => {
-        for (const star of stars) for (const animation of star.getAnimations()) {
-          animation.pause(); animation.currentTime = time;
-        }
-      }, time);
-      shots.push(await page.locator('.composer').screenshot({ path: path.join(artifacts, `stars-${width}-${time}.png`), animations: 'allow' }));
-    }
-    assert.equal(shots[0].equals(shots[1]), false, 'Stars must visibly twinkle');
+    const surfaces = await page.locator('.composer, .prompt-surface').evaluateAll(nodes => nodes.map(node => getComputedStyle(node).backgroundImage));
+    assert.deepEqual(surfaces, ['none', 'none'], 'Composer surfaces carry no decorative background at ' + width);
     assert.equal(await page.locator('.composer').evaluate(node => node.scrollWidth <= node.clientWidth + 1), true, 'Composer controls stay inside the composer at ' + width);
   }
   await page.setViewportSize({ width: 795, height: 740 });
   await page.locator('#prompt').click();
   await page.keyboard.type('A clear space for your next idea.');
   assert.equal(await page.locator('#prompt').inputValue(), 'A clear space for your next idea.');
-  await page.waitForFunction(() => Number(getComputedStyle(document.querySelector('.astra-stars')).opacity) < .15);
-  await page.locator('.composer').screenshot({ path: path.join(artifacts, 'typing.png') });
   await page.locator('#prompt').fill('');
-  await page.emulateMedia({ reducedMotion: 'reduce' });
-  assert.equal(await page.locator('.astra-star').first().evaluate(node => getComputedStyle(node).animationName), 'none');
-  await page.evaluate(() => {
-    document.documentElement.style.setProperty('--vscode-foreground', '#303743');
-    document.documentElement.style.setProperty('--vscode-editor-background', '#ffffff');
-    document.documentElement.style.setProperty('--vscode-editorWidget-background', '#f4f5f8');
-  });
-  await page.locator('.composer').screenshot({ path: path.join(artifacts, 'light-reduced-motion.png') });
-  await page.emulateMedia({ forcedColors: 'active' });
-  assert.equal(await page.locator('.astra-stars').isVisible(), false);
-  await page.emulateMedia({ forcedColors: 'none' });
-  await page.locator('#model-button').click();
-  await mainRow.locator('button[data-field="model"]').click();
-  await mainRow.locator('.model-picker-option[data-value="gpt-5.6-sol"]').click();
-  await page.keyboard.press('Escape');
-  assert.equal(await page.locator('.astra-stars').isVisible(), false);
 }
 module.exports = { checkAstraStars };

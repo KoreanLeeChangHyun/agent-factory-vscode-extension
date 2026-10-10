@@ -252,7 +252,7 @@ async function checkRenderingFeedback(page) {
     assert.ok(bounds.x >= 0 && bounds.x + bounds.width <= width);
     assert.equal(await progress.evaluate(node => node.classList.contains('is-progressing')), false);
     const labelBounds = await label.boundingBox();
-    const controlsBounds = await page.locator('.maestro-controls').boundingBox();
+    const controlsBounds = await page.locator('.composer').boundingBox();
     if (controlsBounds) assert.ok(labelBounds.y + labelBounds.height <= controlsBounds.y, 'Feedback is not covered by existing controls');
     assert.equal(await label.evaluate(node => node.scrollWidth <= node.clientWidth), true, 'The feedback label fits without horizontal clipping');
     assert.ok(bounds.y >= 0 && bounds.y + bounds.height <= 740, 'Waiting feedback is visible even beside the empty transcript');
