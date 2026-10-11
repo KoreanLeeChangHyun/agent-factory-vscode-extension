@@ -32,7 +32,7 @@ test('task-flow aggregation reuses unchanged histories and invalidates all input
   assert.equal(context.getFlows().length, 0);
 });
 
-const activeSelection = source.slice(source.indexOf('  function displayTaskFlows()'), source.indexOf('  // A logical task has ended'));
+const activeSelection = source.slice(source.indexOf('  function displayTaskFlows()'), source.indexOf('  function unfinishedFlow('));
 test('only terminal workflow states leave the active workflow panel', () => {
   const context = { state: { childAgents: [] }, currentTaskFlows: () => [], acceptedTaskAgent: () => true };
   runInNewContext(activeSelection + '\nglobalThis.display = displayTaskFlows; globalThis.ended = workflowEnded;', context);
@@ -114,7 +114,7 @@ test('confirmed deletion removes both stages and stale snapshots, keeps Main pro
 
 const slotSource = source.slice(source.indexOf('  function liveTaskStatus('), source.indexOf('  function summarizeTaskFlow('))
   + source.slice(source.indexOf('  function taskDismissKey('), source.indexOf('  function finishTaskStop('))
-  + source.slice(source.indexOf('  function workflowEnded('), source.indexOf('  // A logical task has ended'));
+  + source.slice(source.indexOf('  function workflowEnded('), source.indexOf('  function unfinishedFlow('));
 function slotView(state) {
   const element = tag => ({ tag, className: '', dataset: {}, attributes: {}, children: [],
     get childElementCount() { return this.children.length; },
