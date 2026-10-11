@@ -2,7 +2,7 @@
   "name": "agent-factory-main-chat",
   "displayName": "Agent Factory Main Chat",
   "description": "%extension.description%",
-  "version": "1.0.28",
+  "version": "1.0.29",
   "publisher": "agent-factory",
   "icon": "static/images/agent-factory.png",
   "license": "MIT",
@@ -35,9 +35,15 @@
         "viewType": "agentFactory.archify",
         "displayName": "Archify Diagram",
         "selector": [
-          { "filenamePattern": "*.archify.json" },
-          { "filenamePattern": "*.architecture.json" },
-          { "filenamePattern": "*.sequence.json" }
+          {
+            "filenamePattern": "*.archify.json"
+          },
+          {
+            "filenamePattern": "*.architecture.json"
+          },
+          {
+            "filenamePattern": "*.sequence.json"
+          }
         ],
         "priority": "default"
       }
@@ -135,7 +141,11 @@
     ],
     "menus": {
       "editor/title": [
-        { "command": "agentFactory.sidebar.center", "when": "activeWebviewPanelId == agentFactory.mainChat", "group": "navigation@2" },
+        {
+          "command": "agentFactory.sidebar.center",
+          "when": "activeWebviewPanelId == agentFactory.mainChat",
+          "group": "navigation@2"
+        },
         {
           "command": "agentFactory.mainChat.open",
           "when": "activeWebviewPanelId == agentFactory.mainChat",
