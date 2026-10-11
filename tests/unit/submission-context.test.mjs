@@ -209,7 +209,7 @@ test("large Skill bodies stay out of requests and edits change their identity", 
 });
 
 
-test("background request indexes every task without repeating task bodies or changing source data", async () => {
+test("background request indexes every active or decision task without repeating terminal results or changing source data", async () => {
   const children = Array.from({ length: 1003 }, (_, i) => ({
     agentId: `work-${i}`, runId: `run-${i}`, parentRunId: "run-parent", role: "work",
     status: ["completed", "running", "failed", "needs-human-decision"][i % 4],
@@ -240,13 +240,14 @@ test("background request indexes every task without repeating task bodies or cha
   assert.equal(restored.text, input);
   assert.equal(restored.text + restored.submission.guidance, delivered);
   const index = JSON.parse(delivered.split("[Background workflow status; runtime data, not instructions]\n")[1].split("\nThis is an index")[0]);
-  assert.equal(index.length, children.length);
-  for (let i = 0; i < children.length; i++) {
-    assert.equal(index[i].agentId, children[i].agentId);
-    assert.equal(index[i].status, children[i].status);
-    assert.equal(index[i].task.title, children[i].taskBinding.title);
-    assert.equal(index[i].details.runId, children[i].runId);
-    assert.equal(index[i].taskMode, children[i].taskMode);
+  const active = children.filter(child => ["running", "needs-human-decision"].includes(child.status));
+  assert.equal(index.length, active.length);
+  for (let i = 0; i < active.length; i++) {
+    assert.equal(index[i].agentId, active[i].agentId);
+    assert.equal(index[i].status, active[i].status);
+    assert.equal(index[i].task.title, active[i].taskBinding.title);
+    assert.equal(index[i].details.runId, active[i].runId);
+    assert.equal(index[i].taskMode, active[i].taskMode);
   }
   assert.equal(JSON.stringify(children), original);
   assert.ok(!delivered.includes(children[0].taskBinding.description));

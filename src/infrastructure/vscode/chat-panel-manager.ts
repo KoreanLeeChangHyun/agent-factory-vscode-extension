@@ -1506,6 +1506,7 @@ export class ChatPanelManager implements vscode.Disposable {
       case "worker.stop":
       case "worker.remove":
       case "worker.handoff":
+      case "worker.order":
       case "supervision.request":
       case "handoff.models.request":
         // Worker control belongs to the control center tab, which confirms and binds the exact worker; chat tabs ignore it.

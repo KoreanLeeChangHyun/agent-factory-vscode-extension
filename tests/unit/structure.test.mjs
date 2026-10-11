@@ -234,16 +234,16 @@ test("composer settings persist and Goal is scoped to one submission", function 
   assert.match(chatScript, /model: state\.model,[\s\S]*reasoning: state\.reasoning,[\s\S]*fastMode: state\.fastMode,[\s\S]*goalMode: false/);
 });
 
-test("running state appears above the composer as an expandable work loop panel", function () {
-  const runStatusIndex = template.indexOf('id="run-status"');
+test("running state appears above the composer in the accessible progress dock", function () {
+  const runStatusIndex = template.indexOf('id="agent-progress"');
   const composerIndex = template.indexOf('class="composer"');
   assert.ok(runStatusIndex > 0);
   assert.ok(runStatusIndex < composerIndex);
   assert.match(template, /role="status"/);
   assert.match(template, /id="run-elapsed"/);
-  assert.match(template, /id="run-status-toggle"[^>]*aria-controls="run-details"/);
-  assert.match(template, /id="run-details"[^>]*aria-label="Work and verification details"/);
-  assert.match(template, /id="run-stage-list"/);
+  assert.match(template, /class="composer-topline"><div class="agent-progress-dock"/);
+  assert.match(template, /id="agent-progress"[^>]*aria-live="polite"[^>]*hidden/);
+  assert.match(template, /id="run-status-label"/);
   // The composer send button is the single Main stop control; the task panel has no duplicate.
   assert.doesNotMatch(template, /id="run-stop-button"/);
   assert.match(chatScript, /aria-busy/);
@@ -270,9 +270,8 @@ test("running state appears above the composer as an expandable work loop panel"
   assert.match(chatStyles, /prefers-reduced-motion: reduce\)[^@]*\.run-status-pulse::before, \.run-status-pulse::after \{ content: none !important; animation: none !important; \}/);
   assert.doesNotMatch(chatStyles, /\.run-status::after/);
   assert.doesNotMatch(chatStyles, /\.message-running/);
-  assert.match(chatScript, /state\.runPanelExpanded = !state\.runPanelExpanded/);
-  assert.match(chatScript, /function createRunStage\(agent\)/);
-  assert.match(chatScript, /type: "agent\.open", agentId: agent\.agentId/);
+  assert.match(chatScript, /runPanelExpanded: saved\?\.runPanelExpanded === true/);
+  assert.match(chatScript, /function renderWorkLoopPanel\(\)\s*\{[\s\S]*?return;/);
 });
 
 test("runtime status stays in the loader while concrete activity updates the timeline", function () {

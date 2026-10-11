@@ -118,7 +118,7 @@ test("a revision-limit pause reaches the flow only as the runtime's structured s
 });
 
 test("the decision view offers exactly continue and stop and both sides add the same three revisions", async () => {
-  const view = between("  function createRevisionLimitDecision(", "  function createTaskHistoryEntry(");
+  const view = between("  function createRevisionLimitDecision(", "  function releaseWorkflowDecisions(");
   assert.deepEqual([...view.matchAll(/for \(const decision of (\[[^\]]+\])\)/g)].map(match => JSON.parse(match[1])), [["continue", "stop"]]);
   assert.match(view, /type: "workflow\.decision", workAgentId: flow\.workAgentId, loopId: flow\.loopId, decision \}/);
   assert.doesNotMatch(view, /skip|finish/i, "accepting a failed Verification stays an explicit runtime command");

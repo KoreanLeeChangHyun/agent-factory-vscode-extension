@@ -5,7 +5,7 @@ const path = require('node:path');
 // The status line above the composer starts on the prompt text edge, sits just above the composer,
 // and clears on its own once a run ends with nothing left to do.
 async function checkStatusPlacement(page) {
-  const artifacts = path.resolve(__dirname, '../../../docs/artifact/main-chat-composer-design');
+  const artifacts = path.resolve(__dirname, '../../../docs/artifact/preview/maestro-screen-draft');
   await page.evaluate(() => sessionStorage.setItem('submission-restoration-fixture', JSON.stringify({
     panelId: 'placement', role: 'main', uiLanguage: 'ko', model: 'gpt-6-astra', reasoning: 'high', draft: '', timeline: []
   })));

@@ -91,13 +91,13 @@ async function checkHistoryControls(page) {
       await page.waitForFunction(() => window.saved.historyNextBefore === undefined);
       const retained = await page.evaluate(async () => {
         const seen = new Map();
-        do {
+        for (;;) {
           for (const node of document.querySelectorAll('#timeline .message')) seen.set(node.dataset.id, node.querySelector('.message-content').textContent.trim());
           const next = document.querySelector('.history-pages button:last-child');
           if (next.disabled) break;
           next.click();
           await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
-        } while (true);
+        }
         return Object.fromEntries(seen);
       });
       assert.equal(Object.keys(retained).length, 402, 'Every retained and newly loaded message remains reachable');

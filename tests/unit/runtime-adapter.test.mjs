@@ -350,8 +350,8 @@ raise SystemExit(2)
 `);
   const client = new AgentFactoryClient(script, root);
   assert.deepEqual(await client.capabilities(), {
-    submit: { model: true, reasoning: false, fast: false, goal: false, roleDirectExceptions: false, taskAllocation: false, taskDomain: false, projectDomains: false, images: undefined, taskModes: [] },
-    send: { model: false, reasoning: false, fast: false, goal: false, sessionProvider: "claude", roleDirectExceptions: false, taskAllocation: false, taskDomain: false, projectDomains: false, images: undefined, taskModes: [] }
+    submit: { model: true, reasoning: false, fast: false, goal: false, roleDirectExceptions: false, taskAllocation: false, taskDomain: false, projectDomains: false, modelRecommendation: false, providerHandoff: false, images: undefined, taskModes: [] },
+    send: { model: false, reasoning: false, fast: false, goal: false, sessionProvider: "claude", roleDirectExceptions: false, taskAllocation: false, taskDomain: false, projectDomains: false, modelRecommendation: false, providerHandoff: false, images: undefined, taskModes: [] }
   });
   const compatible = new AgentFactoryClient("/unused/exec.py", root);
   compatible.command = async () => ({
