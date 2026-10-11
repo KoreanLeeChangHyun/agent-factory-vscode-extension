@@ -19,7 +19,8 @@ results in VS Code.
   update when a CLI is newly detected or its path changes) or `manual` (only when you
   click **Update now** in **Settings → General**).
 - Set `agentFactory.mainChat.codexPath`, `claudePath` or `antigravityPath` when a CLI is
-  not found automatically.
+  not found automatically, and `agentFactory.mainChat.pythonPath` to choose the Python
+  3.10+ interpreter.
 
 ## 2. Core features
 
@@ -72,9 +73,13 @@ results in VS Code.
   to Verification for another check. A passing result completes the verification
   stage; unresolved findings remain visible.
 - Each new message defaults to **orchestrator mode**: Main converses, plans and routes,
-  and delegates every change and research task to Work, using the light Work model for
-  bounded, already-decided changes and the heavy one otherwise. In **worker mode** Main
-  implements directly.
+  and delegates every change and research task to a Work profile: **Expert** (`work`),
+  **Worker** (`workLight`) for bounded, already-decided changes, **Explorer** for
+  read-only research and **Scribe** for documents. In **direct mode** Main implements
+  directly.
+- Main can recommend a Work model by task type from the project's `model-affinity.json`
+  table, choosing only detected models and keeping any model you specified. Without a
+  table, no recommendation is made.
 
   ```mermaid
   flowchart LR
@@ -119,41 +124,63 @@ results in VS Code.
 - When you request consolidation, turn supported lessons into reusable project
   rules. Lesson records remain evidence; they do not automatically become accepted
   Specifications or trigger background changes.
+- The runtime keeps observed facts for each run (tool failures, failed runs, rework,
+  failed Verification and your corrections) and queues the run for lesson writing.
 
 ## 3. Chat workspace
 
 ### 3.1. Message actions
 
-- Each message is handled directly by Main by default. Open the submit menu to
+- An ordinary send goes to Main in the chat's current mode: **Orchestrate** is on by
+  default, and turning it off switches the chat to direct mode. Open the submit menu to
   choose an action for that message only:
 
-  | Group | Actions |
+  | Group | Actions (default shortcut) |
   | --- | --- |
-  | Document | Document · Main, Document migration, Lessons learned to rules |
-  | Task workflow | Contract, Interview, Planning, Design |
-  | Delegated execution | Work, Plan, Verification, Plan · Work, Work · Verification, Plan · Work · Verification |
+  | Document · Main | Planning (`Alt+Shift+P`), Interview (`Alt+Shift+I`), Document migration (`Alt+Shift+M`), Lessons learned to rules (`Alt+Shift+L`) |
+  | Task workflow | Contract (`Alt+Shift+C`), Work (`Alt+Shift+W`), Work–Verification (`Alt+Shift+V`) |
+  | Deployment | Create deployment pipeline (`Alt+Shift+D`) |
+  | Goal | Goal (`Alt+Shift+G`) |
 
-- **Goal** and **Fast** toggles apply to the next message when the runtime supports them.
+- **Isolation** runs delegated work in its own worktree and merges it automatically;
+  when off, delegated work uses the shared checkout. **Fast** is chosen in the model menu.
+  Both depend on runtime support.
 - Messages sent while Main is running wait in the chat's queue and are sent in order.
 - Attach files, folders, or images to a message.
 
 ### 3.2. Chats, agents, and notes
 
-- Each Main chat opens in its own editor tab. The **Agents** sidebar lists chats and
-  their Work and Verification agents; group, rename, archive, and restore them.
-- Earlier conversation history loads page by page, and live assistant previews
-  appear while a run streams.
+- Each Main chat opens in its own editor tab. Opening a chat that is already open
+  focuses its existing tab instead of creating a duplicate. When a window reopens with
+  a restored chat tab, startup does not open a second tab for the same chat.
+- The **Agents** sidebar lists chats and their Work and Verification agents. Group,
+  rename, or permanently delete them with their conversation and execution records, and
+  restore previously archived agents.
+- Earlier conversation history loads 50 runs at a time with **Load earlier messages**.
+  Long conversations render a window of 200 events with **Earlier** and **Later**
+  controls, and live assistant previews appear while a run streams.
+- Instruction blocks that Agent Factory adds to a submitted message (execution mode,
+  orchestrator, isolation, delegated model and permission guidance) are hidden from the
+  displayed message.
+- **Settings → General** chooses whether startup restores the last chat or opens a new
+  one, notifications for completed, failed and response-needed work (optionally only
+  while you view another screen, with sound), and a **Periodic documents check** (off,
+  daily or weekly) that reviews `docs/` read-only while idle and reports the result.
 - **Notes** keep global or workspace notes in folders beside the chat.
 - Customize keyboard shortcuts in **Settings → Keyboard shortcuts**.
 
 ### 3.3. Status bar
 
 - Choose and reorder the items shown below the chat with
-  `agentFactory.mainChat.statusItems`: run status, active agents, project, Git branch,
-  context remaining, and queued messages.
-- Claude runs also report context usage and weekly usage and remaining.
-- 5-hour usage and remaining (`fiveHour`, `fiveHourRemaining`) are available for both Codex
-  and Claude runs when the provider reports the 5-hour limit.
+  `agentFactory.mainChat.statusItems`. The default set is run status, active agents,
+  project, Git branch, context remaining, and queued messages.
+- Other items cover the agent, role, runtime, model, reasoning, Fast, Goal and its token,
+  time and budget use, task, execution mode, elapsed time, context use, 5-hour and weekly
+  usage with remaining amounts and reset times, and the total number of agents.
+- An item appears only when its data is available for the current run.
+- The run status line above the message box keeps running, queued, failed and
+  response-needed states visible. Completed, ended and cancelled states disappear
+  after a few seconds.
 
 ### 3.4. Work Units
 
@@ -166,7 +193,30 @@ results in VS Code.
 - When you work directly on `main` or `master`, a notice suggests creating a Work
   Unit. Turn it off with `agentFactory.workUnits.warnDefaultBranch`.
 
-### 3.5. Companion bots
+### 3.5. Control Center
+
+- Run **Control Center** from the chat title bar or the **Agents** view to open one
+  control tab per project beside the chat. Opening it again focuses the existing tab.
+- **Workers** lists each worker with its title, status and task history, grouped by
+  domain and by attention, in progress, the last 24 hours and earlier. Create, rename
+  and assign domains, and drag workers to reorder them.
+- **Tasks** shows a board with Waiting, Running, Verifying, Decision needed · Blocked,
+  Completed and Failed · Cancelled columns; Unconfirmed appears when it has records.
+  Search tasks, workers and results, and filter by status, conversation and domain.
+- A task's detail shows its request and interpretation, success criteria, write
+  boundary, dependencies, sources, result, artifacts, own checks and recorded
+  Verification, and opens its request, result, records or session. **Add feedback
+  reference** inserts a reference to the task into the Main chat's message box.
+- Talk to a worker directly with **Instruction to this worker**: it adds an instruction
+  to the running task, or starts a new task in the same session when the worker is idle.
+  **Rework instruction** starts a linked task in the worker's session when it is not busy.
+  **Force stop** and **Remove worker** ask for confirmation.
+- **Provider handoff** moves the current task to a new session on another detected model,
+  with a reason, after confirmation. **Supervision report** classifies unfinished tasks as
+  on track, delayed, stuck or decision-needed and lists alerts and records that could not
+  be read.
+
+### 3.6. Companion bots
 
 - Choose **Lumi** or **Factory Bot** as the companion shown above the message box in
   all chats, and talk to it from the input box.
@@ -177,45 +227,31 @@ results in VS Code.
 
 ## 4. Agent settings
 
-### 4.1. Scope and inheritance
+### 4.1. Roles and sets
 
-- Open the chat's **Agent settings** panel to edit **Project** or **This chat**.
-  Main, Work, light Work and Verification each have model, reasoning and supported
-  Fast controls. The panel opens on **This chat**.
-- Manage **Global agent settings** in the full settings window opened by the
-  settings button. Provider-specific model options remain available.
-- A project copies the current global settings once when first initialized.
-  A new chat copies the current project settings once when created. Each copy is
-  saved independently: global edits leave existing projects unchanged, and project
-  edits leave existing chats unchanged.
-- Existing explicit choices are preserved during the initial migration. Missing
-  values are filled once, and saved chats retain their settings after a restart.
+- Each chat's **Agent settings** panel has model, reasoning and supported Fast controls
+  for the Orchestrator (`main`), Expert (`work`), Worker (`workLight`), Explorer
+  (`explore`), Scribe (`scribe`) and Validator (`verification`). Explorer and Scribe start
+  from the Worker setting.
+- A chat keeps its own settings or applies a saved set. Set selection is unavailable once
+  the conversation is bound to a model provider.
+- Manage sets in **Settings → Agents**. Built-in sets (Codex, Claude, Antigravity,
+  Agent Factory and Super Factory) cannot be changed or deleted; duplicate one to
+  customize it. Custom sets can be renamed, updated or deleted, and **Use as project
+  default** chooses the set that supplies the project's default settings.
 
 ### 4.2. Storage and submitted messages
 
-| Scope | Storage |
-| --- | --- |
-| Chat | Persisted chat state |
-| Project | Active runtime workspace folder's `.vscode/settings.json` |
-| Global | VS Code User settings |
-
-- Model and reasoning settings use `agentFactory.agents.<role>.model` and
-  `agentFactory.agents.<role>.reasoningEffort`, where `<role>` is `main`, `work`,
-  `workLight` or `verification`. Fast preferences are stored per role and model.
+- All sets live in one library in the extension's global storage (`agent-sets-v3.json`).
+  Earlier `agentFactory.agents.<role>.model` and `agentFactory.agents.<role>.reasoningEffort`
+  values and project or global presets are read once for migration and are no longer
+  written.
 - The extension uses the first workspace folder as its runtime project.
 - Each submitted message, including queued messages, captures that chat's saved
   model, reasoning and Fast settings. Provider and session compatibility checks
   still apply to changes in the current chat.
 
-### 4.3. Presets
-
-- Save, apply, rename or delete named sets independently in each scope. Applying
-  a project or global set changes only that scope. Each scope retains its Default
-  set; custom sets are copied into newly initialized child scopes.
-- On first use, unset global models are initialized from detected runtimes.
-  Explicit settings are preserved.
-
-### 4.4. Model selection and sessions
+### 4.3. Model selection and sessions
 
 - The model picker groups models by vendor tabs (**OpenAI**, **Anthropic**, **Google**)
   and by runtime (Codex, Claude Code, Antigravity) within each vendor. In a started
@@ -228,14 +264,14 @@ results in VS Code.
   a catalog yet, no Claude models are listed.
 - Start a new chat or clear the current conversation before switching between
   Codex and Claude.
-- Every execution mode works with Claude. Plan runs in Claude's plan mode and
-  continues in the same session.
+- Every execution route works with Claude. Plan steps run in Claude's plan mode and
+  continue in the same session.
 - Context usage is shown after each Claude turn.
 - When the Antigravity CLI (`agy`) is signed in, its subscription models are also listed.
   `gemini-*` models appear by base ID and take the reasoning level as effort; other
   families appear as `antigravity/<id>`. Antigravity runs are text-only.
 
-### 4.5. Execution permissions
+### 4.4. Execution permissions
 
 - Extension permissions map to Claude tool permissions as follows. These modes
   do not provide an OS sandbox.
