@@ -1,7 +1,7 @@
 const assert = require('node:assert/strict');
 const path = require('node:path');
-// Control center: the kanban's five working columns, the card summary, rework of an ended task and the kept places
-// for supervision report and provider handoff. Runs on the /center fixture page served by chat-rendering.cjs.
+// Control center: the kanban's five working columns, the card summary, rework of an ended task, the supervision
+// report and provider handoff. Runs on the /center fixture page served by chat-rendering.cjs.
 async function checkControlScreens(chatPage) {
   const page = await chatPage.context().browser().newPage({ viewport: { width: 1280, height: 860 } });
   const errors = []; page.on('pageerror', error => errors.push(error.message));
@@ -28,12 +28,38 @@ async function checkControlScreens(chatPage) {
       runs: [work('worker-run', 'completed', { runId: 'run-old', receipt: { outcome: 'completed' } })] })];
   await post({ type: 'project.tasks', entries });
 
-  // Kept places: visible, focusable and inert until their commands exist.
+  // Supervision report: one request per click; verdicts in the order the reader acts, codes in words.
   const supervision = page.locator('#maestro-supervision');
-  assert.equal(await supervision.getAttribute('aria-disabled'), 'true');
   assert.equal(await supervision.textContent(), '감독 보고');
-  assert.match(await supervision.getAttribute('title'), /연결되면/);
-  await supervision.click({ force: true });
+  await supervision.click();
+  assert.equal((await sent('supervision.request')).length, 1);
+  assert.equal(await page.locator('#maestro-detail').getAttribute('data-view'), 'supervision');
+  assert.match(await page.locator('#maestro-detail').textContent(), /확인 중…/);
+  const verdict = (loopId, taskId, title, verdict, state, reasons, extra = {}) => ({ loopId, taskId, title, verdict, state, reasons, elapsedSeconds: 7200, idleSeconds: 3900, nextAction: 'runtime text', ...extra });
+  await post({ type: 'supervision.report', report: { observedAt: at(0), settings: { delayMinutes: 20, stuckMinutes: 60 }, alerts: [], errors: ['TypeError: one unreadable loop'], verdicts: [
+    verdict('loop-flow-run', 'task-run', 'Running task', 'normal', 'running', [], { idleSeconds: 30 }),
+    verdict('loop-flow-old', 'task-x', 'Stopped task', 'stuck', 'blocked', ['loop-stopped:environment:failed']),
+    verdict('loop-flow-check', 'task-check', 'Checked task', 'delayed', 'running', ['repeated-error:dispatch_failedx3']),
+    verdict('loop-flow-decide', 'task-decide', 'Decision task', 'decision-needed', 'waiting-decision', ['decision-pending'], { decisionId: 'decision-1' })] } });
+  const items = page.locator('.maestro-supervision-item');
+  assert.deepEqual(await items.evaluateAll(values => values.map(value => value.dataset.verdict)), ['decision-needed', 'stuck', 'delayed', 'normal']);
+  assert.deepEqual(await page.locator('.maestro-supervision-counts .maestro-state').allTextContents(), ['결정 필요 1', '정체 1', '지연 1', '정상 진행 1']);
+  assert.match(await items.nth(1).textContent(), /정체.*막힘 · 경과 2시간 · 활동 없음 1.1시간 · 실행 정지 \(environment · failed\)/);
+  assert.match(await items.nth(2).textContent(), /같은 오류 3회 반복 \(dispatch_failed\)/);
+  assert.equal(await items.nth(0).locator('.maestro-freshness').getAttribute('title'), 'runtime text', 'The runtime next action stays available');
+  assert.match(await page.locator('#maestro-detail').textContent(), /읽지 못한 기록TypeError: one unreadable loop/);
+  // Decision needed: answered in the task's Main conversation, where the existing decision card lives.
+  await items.nth(0).getByRole('button', { name: '결정 응답 열기' }).click();
+  assert.deepEqual((await sent('project.task.open')).at(-1), { type: 'project.task.open', workflowId: 'flow-decide', taskId: 'task-decide', target: 'chat' });
+  if (process.env.CONTROL_SCREENS_EVIDENCE) await page.screenshot({ path: path.join(process.env.CONTROL_SCREENS_EVIDENCE, 'after-fixture-supervision.png') });
+  await page.getByRole('button', { name: '다시 확인' }).click();
+  assert.equal((await sent('supervision.request')).length, 2);
+  await post({ type: 'supervision.report', error: 'operation_records.py unavailable' });
+  assert.match(await page.locator('#maestro-detail [role="alert"]').textContent(), /감독 보고를 읽지 못했습니다: operation_records.py unavailable/);
+  assert.equal(await items.count(), 4, 'A failed refresh keeps the last report');
+  // A verdict title opens its task.
+  await items.nth(3).locator('.maestro-supervision-title').click();
+  assert.equal(await page.locator('#maestro-detail').getAttribute('data-task-id'), 'task-run');
 
   // Kanban: waiting, running, check, decision, completed, then ended; each task in exactly one column.
   await page.locator('#maestro-tasks-view').click();
@@ -96,9 +122,6 @@ async function checkControlScreens(chatPage) {
   // Direct message to a running worker: an addition bound to its exact loop and run.
   await page.locator('#maestro-workers-view').click();
   await page.locator('[data-select-worker="worker-run"]').click();
-  const handoff = page.locator('#maestro-detail [data-pending-command="provider-switch"]');
-  assert.equal(await handoff.getAttribute('aria-disabled'), 'true');
-  await handoff.click({ force: true });
   await page.locator('#maestro-command-input').fill('테스트도 함께 확인하십시오.');
   await page.locator('#maestro-detail .maestro-command-form button[type="submit"]').first().click();
   request = (await sent('worker.command')).at(-1);
@@ -106,9 +129,42 @@ async function checkControlScreens(chatPage) {
   assert.equal(request.loopId, 'loop-flow-run');
   assert.equal(request.rework, undefined);
   await post({ type: 'worker.result', action: 'worker.command', agentId: 'worker-run', commandId: request.commandId, result: { mode: 'addition', loopId: 'loop-flow-run', runId: 'run-worker-run' } });
-  // Kept places never send anything.
-  assert.deepEqual((await page.evaluate(() => window.sentMessages)).filter(value => !['client.ready', 'worker.command', 'project.tasks.request'].includes(value.type)), []);
   if (process.env.CONTROL_SCREENS_EVIDENCE) await page.screenshot({ path: path.join(process.env.CONTROL_SCREENS_EVIDENCE, 'after-fixture-worker-message.png') });
+
+  // Provider handoff: a detected model other than the current one, a reason, then loop.py handoff through the host.
+  const handoff = page.locator('#maestro-detail [data-handoff-worker="worker-run"]');
+  assert.equal(await handoff.textContent(), '공급자 이관');
+  await handoff.click();
+  assert.equal((await sent('handoff.models.request')).length, 1);
+  assert.match(await page.locator('#maestro-handoff-model').textContent(), /감지된 모델 확인 중/);
+  await post({ type: 'handoff.models', models: [{ id: 'model-worker-run', provider: 'codex' }, { id: 'claude-opus-5-5', provider: 'claude' }, { id: 'gpt-6-luna', provider: 'codex' }] });
+  assert.deepEqual(await page.locator('#maestro-handoff-model option').allTextContents(), ['claude-opus-5-5 · claude', 'gpt-6-luna · codex'], 'The current model is not offered');
+  assert.deepEqual(await page.locator('#maestro-handoff-task option').allTextContents(), ['Running task · 실행 중'], 'Only this worker\'s unfinished loop can move');
+  const handoffSend = page.locator('.maestro-handoff-form button[type="submit"]');
+  await handoffSend.click();
+  assert.equal((await sent('worker.handoff')).length, 0, 'A reason is required');
+  await page.locator('#maestro-handoff-model').selectOption('claude-opus-5-5');
+  await page.locator('#maestro-handoff-reason').fill('공급자 한도 소진');
+  await handoffSend.click();
+  assert.deepEqual((await sent('worker.handoff')).at(-1), { type: 'worker.handoff', agentId: 'worker-run', loopId: 'loop-flow-run', toModel: 'claude-opus-5-5', reason: '공급자 한도 소진' });
+  assert.equal(await page.locator('#maestro-detail [data-handoff-worker="worker-run"]').textContent(), '이관 중…');
+  if (process.env.CONTROL_SCREENS_EVIDENCE) await page.screenshot({ path: path.join(process.env.CONTROL_SCREENS_EVIDENCE, 'after-fixture-handoff-form.png') });
+  // A refusal is shown on the worker; success closes the form and the recorded handoff appears after the refresh.
+  await post({ type: 'worker.result', action: 'worker.handoff', agentId: 'worker-run', error: 'Answer or close the pending decision before a handoff', code: 'decision_pending' });
+  assert.match(await page.locator('.maestro-worker-notice').textContent(), /실패: Answer or close the pending decision/);
+  assert.equal(await page.locator('#maestro-handoff-reason').inputValue(), '공급자 한도 소진', 'The typed reason survives a refusal');
+  await handoffSend.click();
+  await post({ type: 'worker.result', action: 'worker.handoff', agentId: 'worker-run', result: { id: 'handoff-1', toAgentId: 'work-handoff-1' } });
+  assert.equal(await page.locator('.maestro-handoff-form').count(), 0);
+  const handedOff = entries.map(entry => entry.id !== 'flow-run' ? entry : { ...entry, handoffs: [{ id: 'handoff-1', taskId: 'task-run', fromAgentId: 'worker-run', toAgentId: 'work-handoff-1',
+    fromProvider: 'codex', toProvider: 'claude', fromModel: 'model-worker-run', toModel: 'claude-opus-5-5', reason: '공급자 한도 소진', actor: 'human', createdAt: at(0) }] });
+  await post({ type: 'project.tasks', entries: handedOff });
+  const record = page.locator('.maestro-handoffs [data-handoff-id="handoff-1"]');
+  assert.match(await record.textContent(), /내보냄.*사용자.*model-worker-run · codex → claude-opus-5-5 · claude.*Running task · worker-run → work-handoff-1.*공급자 한도 소진/);
+  if (process.env.CONTROL_SCREENS_EVIDENCE) await page.screenshot({ path: path.join(process.env.CONTROL_SCREENS_EVIDENCE, 'after-fixture-handoff-record.png') });
+  // A worker with only ended tasks has nothing to move.
+  await page.locator('[data-select-worker="worker-done"]').click();
+  assert.equal(await page.locator('#maestro-detail [data-handoff-worker="worker-done"]').isDisabled(), true);
   assert.deepEqual(errors, []);
   await page.close();
 }

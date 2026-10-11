@@ -25,13 +25,21 @@ export function restoredControlCenterRoot(state: unknown, folders: readonly stri
 }
 type Selection = { readonly workflowId: string; readonly taskId: string };
 type TaskAction = Extract<ClientMessage, { type: "project.task.open" }>;
-type WorkerAction = Extract<ClientMessage, { type: "worker.command" | "worker.stop" | "worker.remove" }>;
+type WorkerAction = Extract<ClientMessage, { type: "worker.command" | "worker.stop" | "worker.remove" | "worker.handoff" }>;
 /** Host operations behind the worker actions; each re-checks the exact project, worker, loop and run. */
 export interface WorkerControl {
   command(root: string, action: Extract<WorkerAction, { type: "worker.command" }>): Promise<unknown>;
   stop(root: string, action: Extract<WorkerAction, { type: "worker.stop" }>): Promise<unknown>;
   remove(root: string, action: Extract<WorkerAction, { type: "worker.remove" }>): Promise<unknown>;
+  handoff?(root: string, action: Extract<WorkerAction, { type: "worker.handoff" }>, reference: string): Promise<unknown>;
+  /** Read-only supervision verdicts of the project's unfinished loops. */
+  supervise?(root: string): Promise<unknown>;
+  /** Detected models a handoff may target. */
+  models?(root: string): Promise<readonly { readonly id: string; readonly provider: string }[]>;
 }
+/** Where the control center keeps each project's worker display order (VS Code storage, never the project's records). */
+export const WORKER_ORDER_KEY = "agentFactory.controlCenter.workerOrder";
+type OrderStore = Pick<vscode.Memento, "get" | "update">;
 interface Center {
   readonly panel: vscode.WebviewPanel;
   readonly subscriptions: vscode.Disposable[];
@@ -55,8 +63,11 @@ export class ControlCenterWindows implements vscode.Disposable {
     private readonly openTask: (root: string, action: TaskAction) => Promise<void>,
     private readonly readDomains: (root: string) => Promise<ProjectDomains | undefined> = async () => undefined,
     private readonly editDomains?: (root: string, edit: ProjectDomainEdit) => Promise<ProjectDomains>,
-    private readonly workers?: WorkerControl
+    private readonly workers?: WorkerControl,
+    private readonly orderStore?: OrderStore
   ) {}
+  /** Order saves are applied one after another so a later drop never loses to an earlier write. */
+  private orderWrite: Promise<void> = Promise.resolve();
   /** One worker action at a time per project and worker: repeated clicks never start a second stop, send or removal. */
   private readonly workerActions = new Set<string>();
 
@@ -123,7 +134,10 @@ export class ControlCenterWindows implements vscode.Disposable {
       } else if (message.type === "project.tasks.request") void this.refresh(root, center);
       else if (message.type === "project.task.open") void this.openTask(root, message).catch(error => this.notice(center, error));
       else if (message.type === "domain.create" || message.type === "domain.rename" || message.type === "domain.assign") void this.editDomain(root, center, message);
-      else if (message.type === "worker.command" || message.type === "worker.stop" || message.type === "worker.remove") void this.workerAction(root, center, message);
+      else if (message.type === "worker.command" || message.type === "worker.stop" || message.type === "worker.remove" || message.type === "worker.handoff") void this.workerAction(root, center, message);
+      else if (message.type === "supervision.request") void this.supervise(root, center);
+      else if (message.type === "handoff.models.request") void this.handoffModels(root, center);
+      else if (message.type === "worker.order") void this.saveWorkerOrder(root, center, message.order);
     }));
     try {
       panel.webview.html = await this.templates.render(panel.webview, "control-center.html");
@@ -166,12 +180,20 @@ export class ControlCenterWindows implements vscode.Disposable {
       if (!this.workers) throw Object.assign(new Error("Worker control is unavailable in this runtime"), { code: "worker_control_unavailable" });
       // Stopping and removing change real records, so the Human confirms the exact worker and task first.
       if (action.type !== "worker.command") {
-        const prompt = action.type === "worker.stop" ? localize("maestro.confirmStop", action.agentId, action.taskId) : localize("maestro.confirmRemove", action.agentId);
-        const accept = localize(action.type === "worker.stop" ? "maestro.forceStop" : "maestro.removeWorker");
+        const prompt = action.type === "worker.stop" ? localize("maestro.confirmStop", action.agentId, action.taskId)
+          : action.type === "worker.handoff" ? localize("maestro.confirmHandoff", action.agentId, action.loopId, action.toModel) : localize("maestro.confirmRemove", action.agentId);
+        const accept = localize(action.type === "worker.stop" ? "maestro.forceStop" : action.type === "worker.handoff" ? "maestro.providerSwitch" : "maestro.removeWorker");
         if (await vscode.window.showWarningMessage(prompt, { modal: true }, accept) !== accept) { await reply({ cancelled: true }); return; }
       }
-      const result = action.type === "worker.command" ? await this.workers.command(root, action)
-        : action.type === "worker.stop" ? await this.workers.stop(root, action) : await this.workers.remove(root, action);
+      let result: unknown;
+      if (action.type === "worker.command") result = await this.workers.command(root, action);
+      else if (action.type === "worker.stop") result = await this.workers.stop(root, action);
+      else if (action.type === "worker.remove") result = await this.workers.remove(root, action);
+      else {
+        if (!this.workers.handoff) throw Object.assign(new Error("Provider handoff is unavailable in this runtime"), { code: "worker_control_unavailable" });
+        // The Human's click in this tab is the authorization; the reference names the exact screen action.
+        result = await this.workers.handoff(root, action, `control-center:${action.agentId}:${action.loopId}:handoff:${Date.now()}`);
+      }
       await reply({ result });
     } catch (error) {
       const code = error && typeof error === "object" && typeof (error as { code?: unknown }).code === "string" ? (error as { code: string }).code : "";
@@ -183,6 +205,51 @@ export class ControlCenterWindows implements vscode.Disposable {
     }
   }
 
+  /** Supervision is read on request only; a failure returns to the tab as a display error. */
+  private async supervise(root: string, center: Center): Promise<void> {
+    let message: Record<string, unknown>;
+    try {
+      if (!this.workers?.supervise) throw new Error("Supervision is unavailable in this runtime");
+      message = { type: "supervision.report", report: await this.workers.supervise(root) };
+    } catch (error) {
+      message = { type: "supervision.report", error: error && typeof error === "object" && typeof (error as { message?: unknown }).message === "string" ? (error as { message: string }).message : String(error) };
+    }
+    if (!center.closed) await Promise.resolve(center.panel.webview.postMessage(message)).catch(() => false);
+  }
+
+  private async handoffModels(root: string, center: Center): Promise<void> {
+    let message: Record<string, unknown>;
+    try {
+      message = { type: "handoff.models", models: this.workers?.models ? await this.workers.models(root) : [] };
+    } catch (error) { message = { type: "handoff.models", models: [], error: String(error) }; }
+    if (!center.closed) await Promise.resolve(center.panel.webview.postMessage(message)).catch(() => false);
+  }
+
+  /** Saved display order of one project's workers; anything malformed reads as no saved order. */
+  private workerOrder(root: string): string[] {
+    const saved = this.orderStore?.get<Record<string, unknown>>(WORKER_ORDER_KEY)?.[root];
+    return Array.isArray(saved) ? saved.filter((id, index): id is string => typeof id === "string" && saved.indexOf(id) === index) : [];
+  }
+
+  /** Stores the order the tab sent (already validated) and returns what is now saved, or the kept order with the error. */
+  private saveWorkerOrder(root: string, center: Center, order: readonly string[]): Promise<void> {
+    const write = this.orderWrite.then(async () => {
+      let reply: Record<string, unknown>;
+      try {
+        if (!this.orderStore) throw new Error("Worker order storage is unavailable in this runtime");
+        const all = this.orderStore.get<Record<string, unknown>>(WORKER_ORDER_KEY);
+        await this.orderStore.update(WORKER_ORDER_KEY, { ...(all && typeof all === "object" && !Array.isArray(all) ? all : {}), [root]: [...order] });
+        reply = { type: "worker.order.result", order: this.workerOrder(root) };
+      } catch (error) {
+        reply = { type: "worker.order.result", order: this.workerOrder(root),
+          error: error && typeof error === "object" && typeof (error as { message?: unknown }).message === "string" ? (error as { message: string }).message : String(error) };
+      }
+      if (!center.closed) await Promise.resolve(center.panel.webview.postMessage(reply)).catch(() => false);
+    });
+    this.orderWrite = write.catch(() => undefined);
+    return write;
+  }
+
   private async refresh(root: string, center: Center, changed = false): Promise<void> {
     if (center.refreshing && changed) center.refreshQueued = true;
     if (center.closed || !center.ready || center.refreshing) return;
@@ -191,7 +258,7 @@ export class ControlCenterWindows implements vscode.Disposable {
       const entries = await this.readTasks(root);
       // Domains are optional display data: a failed read keeps the task list and reports the domain error separately.
       const domains = await this.readDomains(root).then(value => ({ domains: value }), (error: unknown) => ({ domainsError: String(error) }));
-      if (!center.closed) await center.panel.webview.postMessage({ type: "project.tasks", entries, ...domains });
+      if (!center.closed) await center.panel.webview.postMessage({ type: "project.tasks", entries, ...domains, ...(this.orderStore ? { workerOrder: this.workerOrder(root) } : {}) });
     } catch (error) {
       if (!center.closed) await Promise.resolve(center.panel.webview.postMessage({ type: "project.tasks", entries: [], error: String(error) })).catch(() => false);
     } finally {

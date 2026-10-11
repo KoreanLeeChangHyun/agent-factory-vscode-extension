@@ -93,9 +93,10 @@
 }
 .maestro-domain-field { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; }
 .maestro-domain-field .maestro-select { flex: 0 1 220px; }
-.maestro-domain-field select { box-sizing: border-box; width: 100%; height: 26px; padding: 0 28px 0 8px; border: 1px solid var(--vscode-dropdown-border, var(--vscode-panel-border, #ffffff20)); border-radius: 5px; color: var(--vscode-dropdown-foreground, var(--vscode-foreground)); background: var(--vscode-dropdown-background, var(--vscode-editor-background)); font: inherit; font-size: 12px; appearance: none; cursor: pointer; }
-.maestro-domain-field select:focus-visible { outline: 1px solid var(--vscode-focusBorder); outline-offset: -1px; }
-.maestro-domain-field select:disabled { opacity: .55; cursor: default; }
+.maestro-handoff-form > .maestro-select { grid-column: 1 / -1; }
+:is(.maestro-domain-field, .maestro-handoff-form) select { box-sizing: border-box; width: 100%; height: 26px; padding: 0 28px 0 8px; border: 1px solid var(--vscode-dropdown-border, var(--vscode-panel-border, #ffffff20)); border-radius: 5px; color: var(--vscode-dropdown-foreground, var(--vscode-foreground)); background: var(--vscode-dropdown-background, var(--vscode-editor-background)); font: inherit; font-size: 12px; appearance: none; cursor: pointer; }
+:is(.maestro-domain-field, .maestro-handoff-form) select:focus-visible { outline: 1px solid var(--vscode-focusBorder); outline-offset: -1px; }
+:is(.maestro-domain-field, .maestro-handoff-form) select:disabled { opacity: .55; cursor: default; }
 .maestro-domain-basis { color: var(--vscode-descriptionForeground); font-size: 11px; }
 @media (forced-colors: active) { .maestro-domain-field select { appearance: auto; } .maestro-domain-field .maestro-select > svg { display: none; } }
 .maestro-worker-toggle { margin-top: 2px; padding-inline-start: 22px; font-family: var(--vscode-editor-font-family, monospace); font-weight: 400; color: var(--vscode-foreground); }
@@ -113,6 +114,19 @@
 .maestro-command-form textarea:focus-visible { outline: 1px solid var(--vscode-focusBorder, var(--af-color-accent)); outline-offset: -1px; }
 .maestro-command-target { grid-column: 1; margin: 0; }
 .maestro-command-form > button { grid-column: 2; }
+.maestro-handoff-form { padding-top: 4px; }
+.maestro-handoff-form > h4 { grid-column: 1 / -1; margin: 0; font-size: 12px; }
+.maestro-handoff-form textarea { min-height: 44px; }
+/* Supervision report: one row per verdict, text first; the dot reuses the task status colours, no coloured borders. */
+.maestro-supervision-counts { display: flex; flex-wrap: wrap; gap: 4px 14px; margin: 0; }
+.maestro-supervision-list { display: grid; gap: 0; margin: 0; padding: 0; list-style: none; }
+.maestro-supervision-item { display: grid; gap: 3px; padding: 7px 0; border-bottom: 1px solid var(--maestro-separator); }
+.maestro-supervision-item:last-child { border-bottom: 0; }
+.maestro-supervision-item > .maestro-button { justify-self: start; }
+.maestro-supervision-head { display: flex; align-items: baseline; gap: 10px; min-width: 0; }
+.maestro-supervision-head > .maestro-state { flex: 0 0 auto; }
+.maestro-supervision-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: start; }
+.maestro-supervision-item > .maestro-freshness { margin: 0; }
 .maestro-button.maestro-danger { color: var(--vscode-errorForeground, #f85149); }
 .maestro-running-task { display: flex; align-items: center; gap: 8px; min-width: 0; }
 .maestro-running-task > .maestro-worker-task { flex: 1 1 auto; }
@@ -145,7 +159,7 @@
 .maestro-card-meta, .maestro-card-footer { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; min-width: 0; font-size: 11px; }
 .maestro-card-footer { justify-content: space-between; }
 .maestro-card .maestro-identity, .maestro-unassigned, .maestro-card-result { min-width: 0; overflow: hidden; color: var(--vscode-descriptionForeground); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
-.maestro-unclassified, .maestro-unassigned { color: var(--vscode-descriptionForeground); font-style: italic; }
+.maestro-membership-required, .maestro-unassigned { color: var(--vscode-descriptionForeground); font-style: italic; }
 .maestro-card .maestro-time { padding: 0; }
 @media (forced-colors: active) { .maestro-card[aria-current="true"] { forced-color-adjust: none; color: HighlightText; background: Highlight; box-shadow: none; } .maestro-card[aria-current="true"] * { color: HighlightText; } }
 .vscode-high-contrast .maestro-card[aria-current="true"] { outline: 1px dashed var(--vscode-contrastActiveBorder, var(--vscode-focusBorder)); outline-offset: -1px; }
@@ -299,34 +313,64 @@
 .maestro-list.is-dragging .maestro-domain-toggle[data-drop-target] { outline: 1px dashed color-mix(in srgb, var(--vscode-focusBorder, var(--af-color-accent)) 55%, transparent); outline-offset: -1px; }
 .maestro-domain-toggle.is-drop-target { outline: 1px solid var(--vscode-focusBorder, var(--af-color-accent)) !important; background: var(--maestro-selection); color: var(--vscode-foreground); }
 @media (forced-colors: active) { .maestro-domain-toggle.is-drop-target { outline-color: Highlight !important; } }
+/* Reordering inside a group: a grip names the movable row; the place it will take is a 2px focus-colour line above or
+   below the row under the pointer, and the row being moved dims. No coloured borders or backgrounds otherwise. */
+.maestro-worker-grip { flex: none; width: 16px; height: 22px; padding: 0; border-radius: 4px; color: var(--vscode-descriptionForeground); opacity: .55; cursor: grab; }
+.maestro-worker-grip svg { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 2.2; stroke-linecap: round; }
+.maestro-worker-row:hover .maestro-worker-grip:enabled, .maestro-worker-grip:enabled:focus-visible { opacity: 1; color: var(--vscode-foreground); }
+.maestro-worker-grip:enabled:active { cursor: grabbing; }
+.maestro-worker-grip:disabled { opacity: .25; cursor: default; }
+.maestro-worker-grip:focus-visible { outline: 1px solid var(--vscode-focusBorder, var(--af-color-accent)); outline-offset: 1px; }
+.maestro-worker-row.is-drag-source { opacity: .5; }
+/* A worker still needing a domain: why, then the domain menu, on its own line under the row. */
+.maestro-worker-row > .maestro-worker-membership { grid-row: 3; grid-column: 1 / -1; display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; margin: 3px 0 0; font-size: 11px; }
+.maestro-worker-membership > .maestro-membership-note { color: var(--vscode-descriptionForeground); }
+.maestro-worker-membership > .maestro-select { flex: 0 1 16em; min-width: 0; }
+.maestro-worker-membership select { box-sizing: border-box; width: 100%; height: 24px; padding: 0 26px 0 8px; border: 1px solid var(--vscode-dropdown-border, var(--vscode-panel-border, #ffffff20)); border-radius: 5px; color: var(--vscode-dropdown-foreground, var(--vscode-foreground)); background: var(--vscode-dropdown-background, var(--vscode-editor-background)); font: inherit; font-size: 12px; appearance: none; cursor: pointer; }
+.maestro-worker-membership select:focus-visible { outline: 1px solid var(--vscode-focusBorder); outline-offset: -1px; }
+.maestro-worker-membership select:disabled { opacity: .55; cursor: default; }
+/* Narrow editors: the handle moves under the history and remove controls so the columns keep their width. */
+@media (max-width: 480px) {
+  .maestro-worker-row > .maestro-worker-history { display: grid; grid-template-columns: max-content max-content; justify-items: end; row-gap: 0; }
+  .maestro-worker-history > .maestro-worker-grip { grid-column: 1 / -1; height: 16px; }
+}
+.maestro-worker-row.is-reorder-target[data-drop-position="before"] { box-shadow: inset 0 2px 0 var(--vscode-focusBorder, var(--af-color-accent)); }
+.maestro-worker-row.is-reorder-target[data-drop-position="after"] { box-shadow: inset 0 -2px 0 var(--vscode-focusBorder, var(--af-color-accent)); }
+/* The selected row keeps its accent bar while it is a drop target. */
+.maestro-worker-row.is-reorder-target[aria-current="true"][data-drop-position="before"] { box-shadow: inset 2px 0 0 var(--af-color-accent), inset 0 2px 0 var(--vscode-focusBorder, var(--af-color-accent)); }
+.maestro-worker-row.is-reorder-target[aria-current="true"][data-drop-position="after"] { box-shadow: inset 2px 0 0 var(--af-color-accent), inset 0 -2px 0 var(--vscode-focusBorder, var(--af-color-accent)); }
+@media (forced-colors: active) {
+  .maestro-worker-row.is-reorder-target[data-drop-position="before"] { box-shadow: none; border-top: 2px solid Highlight; }
+  .maestro-worker-row.is-reorder-target[data-drop-position="after"] { box-shadow: none; border-bottom: 2px solid Highlight; }
+}
 /* Worker view: one row per worker in four aligned columns — worker | title | status | history.
    The title takes the free width; worker is capped and the status/history columns keep their content width. */
-.maestro-list.is-workers { grid-template-columns: fit-content(32%) minmax(0, 1fr) max-content max-content; column-gap: 12px; }
+.maestro-list.is-workers { grid-template-columns: fit-content(32%) minmax(min(6em, 22%), 1fr) max-content max-content; column-gap: 12px; }
 .maestro-worker-head { display: grid; grid-template-columns: subgrid; grid-column: 1 / -1; padding: 6px 8px 4px; position: sticky; top: 0; z-index: 1;
   border-bottom: 1px solid var(--maestro-separator); background: var(--af-chat-background); color: var(--vscode-descriptionForeground); font-size: 11px; font-weight: 600; }
 .maestro-worker-head > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .maestro-list.is-workers > .maestro-worker-row { grid-template-rows: auto; row-gap: 0; padding-block: 6px; }
 .maestro-worker-row > * { grid-row: 1; min-width: 0; }
-.maestro-worker-row > .maestro-worker-cell { grid-column: 1; display: flex; align-items: center; gap: 6px; }
+.maestro-worker-row > .maestro-worker-cell { grid-column: 1; display: flex; align-items: center; gap: 6px; min-width: 8ch; }
 .maestro-worker-row > .maestro-worker-title { grid-column: 2; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .maestro-worker-row > .maestro-worker-status { grid-column: 3; }
 .maestro-worker-row > .maestro-worker-history { grid-column: 4; justify-self: end; }
 .maestro-worker-title.is-empty { color: var(--vscode-descriptionForeground); font-style: italic; }
-.maestro-worker-select { min-width: 0; padding: 0; border: 0; color: inherit; background: transparent; font: inherit; font-family: var(--vscode-editor-font-family, monospace); font-size: 12px; font-weight: 600; text-align: start; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: pointer; }
-.maestro-worker-select:focus-visible, .maestro-history-button:focus-visible { outline: 1px solid var(--vscode-focusBorder, var(--af-color-accent)); outline-offset: 1px; }
+.maestro-worker-model { min-width: 0; padding: 0; border: 0; color: inherit; background: transparent; font: inherit; font-family: var(--vscode-editor-font-family, monospace); font-size: 12px; font-weight: 600; text-align: start; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: pointer; }
+.maestro-worker-model:focus-visible, .maestro-worker-select:focus-visible, .maestro-history-button:focus-visible, .maestro-worker-remove:focus-visible { outline: 1px solid var(--vscode-focusBorder, var(--af-color-accent)); outline-offset: 1px; }
 .maestro-worker-cell > .maestro-role { flex: none; }
 .maestro-history-button { min-height: 22px; padding: 1px 8px; font-size: 11px; white-space: nowrap; }
-.maestro-worker-row[data-running="true"] .maestro-worker-select::after { content: ""; display: inline-block; width: 6px; height: 6px; margin-inline-start: 6px; border-radius: 50%; vertical-align: middle; background: var(--vscode-textLink-foreground, var(--af-color-accent)); }
+.maestro-worker-row[data-running="true"] .maestro-worker-model::after { content: ""; display: inline-block; width: 6px; height: 6px; margin-inline-start: 6px; border-radius: 50%; vertical-align: middle; background: var(--vscode-textLink-foreground, var(--af-color-accent)); }
 /* Narrow editors keep the four columns in the same order; only their content narrows (role tag goes under the name). */
 @media (max-width: 480px) {
-  .maestro-list.is-workers { grid-template-columns: fit-content(30%) minmax(0, 1fr) max-content max-content; column-gap: 8px; }
+  .maestro-list.is-workers { grid-template-columns: fit-content(30%) minmax(min(4em, 20%), 1fr) max-content max-content; column-gap: 6px; }
   /* Narrow: the role stays first on its own line above the model, so the order role → model is kept. */
   .maestro-worker-row > .maestro-worker-cell { flex-wrap: wrap; row-gap: 2px; }
   .maestro-worker-row .maestro-state { font-size: 10px; gap: 4px; }
   .maestro-history-button { padding: 1px 6px; }
 }
 /* A worker is named by its model (monospace, like other identities); an unrecorded model reads as a quiet placeholder. */
-.maestro-worker-select.is-unset, .maestro-detail-title h2.is-unset { color: var(--vscode-descriptionForeground); font-family: inherit; font-weight: 400; font-style: italic; }
+.maestro-worker-model.is-unset, .maestro-detail-title h2.is-unset { color: var(--vscode-descriptionForeground); font-family: inherit; font-weight: 400; font-style: italic; }
 .maestro-worker-id { margin: 0; }
 /* Title column: the assignment purpose, after the narrower work area when one is recorded. */
 .maestro-worker-area { display: inline-block; max-width: 100%; box-sizing: border-box; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; vertical-align: bottom; margin-inline-end: 6px; padding: 0 5px; border: 1px solid var(--maestro-separator); border-radius: 4px; color: var(--vscode-descriptionForeground); font-size: 11px; }
@@ -342,15 +386,41 @@
 .maestro-worker-kind::after { content: " ·"; }
 .maestro-worker-line > .maestro-worker-task { grid-column: 2; padding: 0; font-size: 11px; }
 .maestro-worker-outcome { grid-column: 2; display: flex; align-items: center; gap: 6px; min-width: 0; }
-.maestro-worker-outcome > :is(.maestro-state, .maestro-worker-original) { flex: none; }
+.maestro-worker-outcome > :is(.maestro-state, .maestro-worker-docs) { flex: none; }
 .maestro-worker-for { flex: 0 1 auto; max-width: 40%; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--vscode-foreground); }
 .maestro-worker-summary { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--vscode-descriptionForeground); }
 .maestro-worker-summary.is-empty { font-style: italic; }
-.maestro-worker-original { padding: 0; font-size: 11px; white-space: nowrap; }
-.maestro-worker-original:focus-visible { outline: 1px solid var(--vscode-focusBorder, var(--af-color-accent)); outline-offset: 1px; }
+/* The model opens its session: an identity that underlines like a link on hover; disabled when no session can open. */
+.maestro-worker-model:enabled:is(:hover, :focus-visible) { text-decoration: underline; color: var(--vscode-textLink-foreground, var(--af-color-accent)); }
+.maestro-worker-model { display: inline-flex; align-items: center; }
+.maestro-model-label { min-width: 4.5ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.maestro-open-glyph { flex: none; width: 11px; height: 11px; margin-inline-start: 4px; vertical-align: -1px; fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; opacity: .55; }
+.maestro-worker-model:enabled:is(:hover, :focus-visible) .maestro-open-glyph { opacity: 1; }
+.maestro-worker-history-item { display: flex; flex-wrap: wrap; align-items: center; column-gap: 8px; min-width: 0; }
+.maestro-worker-history-item > .maestro-worker-task { flex: 1 1 14em; min-width: 0; }
+.maestro-worker-history-item > .maestro-worker-docs { flex: none; }
+.maestro-worker-model:disabled { cursor: default; }
+/* The title opens the worker detail; it keeps the cell's single-line text look. */
+.maestro-worker-select { display: block; width: 100%; min-width: 0; padding: 0; border: 0; color: inherit; background: transparent; font: inherit; text-align: start; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: pointer; }
+.maestro-worker-select:hover .maestro-worker-purpose { text-decoration: underline; }
+.maestro-worker-history { display: flex; align-items: center; gap: 2px; }
+.maestro-worker-remove { width: 22px; height: 22px; border-radius: 6px; }
+.maestro-worker-remove svg { width: 14px; height: 14px; }
+.maestro-worker-remove:enabled:hover { color: var(--vscode-errorForeground); background: var(--vscode-toolbar-hoverBackground, rgba(128, 128, 128, .15)); }
+.maestro-worker-remove:disabled { opacity: .4; cursor: default; }
+/* Exact-run documents at the end of each work line: request and report by name; a missing one is plain muted text. */
+.maestro-worker-docs { display: inline-flex; align-items: center; gap: 8px; margin-inline-start: auto; padding-inline-start: 8px; }
+.maestro-worker-doc { padding: 0; font-size: 11px; white-space: nowrap; }
+.maestro-worker-doc.is-missing { color: var(--vscode-descriptionForeground); opacity: .75; }
+.maestro-worker-doc:focus-visible { outline: 1px solid var(--vscode-focusBorder, var(--af-color-accent)); outline-offset: 1px; }
 @media (max-width: 480px) {
   /* The title may take two lines here so the purpose stays readable; the four cells then share their top line. */
   .maestro-list.is-workers > .maestro-worker-row { align-items: start; }
-  .maestro-worker-row > .maestro-worker-title { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; white-space: normal; overflow-wrap: anywhere; }
+  .maestro-worker-row > .maestro-worker-title { white-space: normal; }
+  .maestro-worker-select { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; white-space: normal; overflow-wrap: anywhere; }
+  .maestro-worker-docs { gap: 6px; }
+  /* Narrow: a long state may wrap and the worker cell keeps a small floor, so no column overflows. */
+  .maestro-worker-row > .maestro-worker-status .maestro-state { white-space: normal; }
+  .maestro-worker-row > .maestro-worker-cell { min-width: 7ch; }
   .maestro-worker-row > .maestro-worker-work { column-gap: 6px; }
 }

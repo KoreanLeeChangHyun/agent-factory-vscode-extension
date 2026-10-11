@@ -61,6 +61,10 @@ const clientMessageTypes = new Set([
   "worker.command",
   "worker.stop",
   "worker.remove",
+  "worker.handoff",
+  "supervision.request",
+  "handoff.models.request",
+  "worker.order",
   "project.task.open",
   "control.center.open",
   "conversations.request",
@@ -349,12 +353,12 @@ export function parseClientMessage(value: unknown): ClientMessage | undefined {
       const name = (candidate: unknown) => typeof candidate === "string" && candidate.length > 0 && candidate.length <= 80 && candidate === candidate.trim()
         && !/[\u0000-\u001f\u007f]/.test(candidate);
       const domainId = (candidate: unknown) => typeof candidate === "string" && /^domain-[0-9a-f]{12}$/.test(candidate);
-      if (value.type === "domain.create" && value.placeholder === true && value.name === undefined) return { type: value.type, placeholder: true, revision };
+      // A new domain always has a real name, and a worker is only ever placed in a domain (no unclassified choice).
       if (value.type === "domain.create") return name(value.name) && value.placeholder === undefined ? { type: value.type, name: value.name as string, revision } : undefined;
       if (value.type === "domain.rename") return domainId(value.domainId) && name(value.name)
         ? { type: value.type, domainId: value.domainId as string, name: value.name as string, revision } : undefined;
-      if (!isRuntimeId(value.agentId) || !(value.domainId === null || domainId(value.domainId))) return undefined;
-      return { type: value.type, agentId: value.agentId as string, domainId: value.domainId as string | null, revision };
+      if (!isRuntimeId(value.agentId) || !domainId(value.domainId)) return undefined;
+      return { type: value.type, agentId: value.agentId as string, domainId: value.domainId as string, revision };
     }
     case "worker.command": {
       // Natural-language instruction for a worker, never a shell command line; the host binds the exact session.
@@ -372,18 +376,33 @@ export function parseClientMessage(value: unknown): ClientMessage | undefined {
     case "worker.stop":
       if (!isRuntimeId(value.agentId) || !isRuntimeId(value.loopId) || !isRuntimeId(value.workflowId) || !isRuntimeId(value.taskId)) return undefined;
       return { type: value.type, agentId: value.agentId as string, loopId: value.loopId as string, workflowId: value.workflowId as string, taskId: value.taskId as string };
+    case "worker.handoff":
+      // The model is a provider identifier the host checks against its detected catalog; the reason is recorded text.
+      if (!isRuntimeId(value.agentId) || !isRuntimeId(value.loopId) || typeof value.toModel !== "string"
+          || !/^[A-Za-z0-9][A-Za-z0-9._:/[\]-]{0,127}$/.test(value.toModel) || typeof value.reason !== "string"
+          || !value.reason.trim() || value.reason.length > 2_000) return undefined;
+      return { type: value.type, agentId: value.agentId as string, loopId: value.loopId as string, toModel: value.toModel, reason: value.reason.trim() };
+    case "supervision.request":
+    case "handoff.models.request":
+      return { type: value.type };
+    case "worker.order": {
+      // Agent IDs only, each once; the host keeps this list as display data and never acts on it.
+      const order = value.order;
+      if (!Array.isArray(order) || order.length > 10_000 || !order.every(isRuntimeId) || new Set(order).size !== order.length) return undefined;
+      return { type: value.type, order: [...order] };
+    }
     case "worker.remove":
       if (!isRuntimeId(value.agentId) || typeof value.revision !== "number" || !Number.isSafeInteger(value.revision) || value.revision < 0) return undefined;
       return { type: value.type, agentId: value.agentId as string, revision: value.revision };
     case "project.task.open":
       if (typeof value.workflowId !== "string" || !/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(value.workflowId)
           || typeof value.taskId !== "string" || !/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(value.taskId)
-          || !["chat", "run", "records", "feedback", "result"].includes(String(value.target))) return undefined;
-      if ((value.target === "result" || value.target === "run" && (value.agentId !== undefined || value.runId !== undefined)) && (typeof value.agentId !== "string" || !/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(value.agentId)
+          || !["chat", "run", "records", "feedback", "result", "request"].includes(String(value.target))) return undefined;
+      if ((value.target === "result" || value.target === "request" || value.target === "run" && (value.agentId !== undefined || value.runId !== undefined)) && (typeof value.agentId !== "string" || !/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(value.agentId)
           || typeof value.runId !== "string" || !/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(value.runId))) return undefined;
       return { type: value.type, workflowId: value.workflowId, taskId: value.taskId,
-        target: value.target as "chat" | "run" | "records" | "feedback" | "result",
-        ...((value.target === "result" || value.target === "run" && value.agentId !== undefined) ? { agentId: value.agentId as string, runId: value.runId as string } : {}) };
+        target: value.target as "chat" | "run" | "records" | "feedback" | "result" | "request",
+        ...((value.target === "result" || value.target === "request" || value.target === "run" && value.agentId !== undefined) ? { agentId: value.agentId as string, runId: value.runId as string } : {}) };
     case "composer.settings":
       if (
         (value.businessMode !== undefined && !BUSINESS_MODES.includes(value.businessMode as BusinessMode)) ||

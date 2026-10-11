@@ -53,7 +53,7 @@ const dynamicSends = {
   // maestro.js sendDomainEdit: `edit` is one of the three literal domain edits built by its callers.
   'static/js/chat/maestro.js { ...edit, revision: registry().revision }': ["domain.create", "domain.rename", "domain.assign"],
   // maestro.js workerAction: `message` is one of the literal worker actions built by the worker detail.
-  'static/js/chat/maestro.js message': ["worker.command", "worker.stop", "worker.remove"]
+  'static/js/chat/maestro.js message': ["worker.command", "worker.stop", "worker.remove", "worker.handoff"]
 };
 
 const usedDynamicSends = new Set();

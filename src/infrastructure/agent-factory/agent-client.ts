@@ -237,6 +237,8 @@ export interface AgentRuntimeClient {
   sendWorkerCommand?(agentId: string, text: string, commandId: string, expected?: WorkerCommandTarget): Promise<WorkerCommandResult>;
   stopWorkerTask?(agentId: string, loopId: string, workflowId: string, taskId: string): Promise<Record<string, unknown>>;
   removeWorker?(agentId: string, revision: number): Promise<ProjectDomains>;
+  handoffWorker?(agentId: string, loopId: string, toModel: string, reason: string, reference: string): Promise<Record<string, unknown>>;
+  superviseProject?(): Promise<Record<string, unknown>>;
   projectTaskRecords?(workflowId: string, taskId: string): Promise<readonly { readonly name: string; readonly path: string }[]>;
 }
 
@@ -329,6 +331,8 @@ export class AgentFactoryClient implements AgentRuntimeClient {
         taskAllocation: record.taskAllocation === true,
         taskDomain: record.taskDomain === true,
         projectDomains: record.projectDomains === true,
+        modelRecommendation: record.modelRecommendation === true,
+        providerHandoff: record.providerHandoff === true,
         // Missing image metadata means an older runtime contract; an explicit
         // false is a provider limitation (or an unavailable provider CLI).
         images: typeof record.images === "boolean" ? record.images : undefined,
@@ -1299,12 +1303,19 @@ When a command needs sudo and the Human has requested it, use python3 ${JSON.str
               try {
                 const text = await this.readManagedResult(run.resultPath, agentId, runId);
                 const summary = resultSummaryLine(text);
-                result = { availability: "recorded", ...(summary ? { summary: truncate(summary, 240) } : {}) };
+                const highlight = resultHighlight(text);
+                result = { availability: "recorded", ...(summary ? { summary: truncate(summary, 240) } : {}), ...(highlight ? { highlight: truncate(highlight, 160) } : {}) };
               } catch (error) {
                 result = isMissingFile(error) ? { availability: "missing" } : { availability: "error", error: String(error) };
               }
             }
-            runs.push({ ...projected, ...(result ? { result } : {}) });
+            // The request this run received; only its presence is projected, the text opens from the exact run.
+            const requestPath = await this.managedPath(agentId, "runs", runId, "request.md");
+            const request = await lstat(requestPath).then(() => ({ availability: "recorded" as const }), error => {
+              if (isMissingFile(error)) return { availability: "missing" as const };
+              throw error;
+            });
+            runs.push({ ...projected, ...(result ? { result } : {}), request });
           }
           const workspace = readRecordOrUndefined(readRecordOrUndefined(state?.taskWorkspaces)?.[task.id]);
           const integration = Array.isArray(workspace?.repositories) ? workspace.repositories.flatMap(value => {
@@ -1332,9 +1343,10 @@ When a command needs sudo and the Human has requested it, use python3 ${JSON.str
   /** Control-center edits are the Human's (actor human); the plugin protects them from later Main writes. */
   public async editProjectDomains(edit: ProjectDomainEdit): Promise<ProjectDomains> {
     const write = ["--actor", "human", "--source", "control-center", "--expected-revision", String(edit.revision)];
-    const command = edit.type === "domain.create" ? ["create", ...write, ...("placeholder" in edit ? ["--placeholder"] : ["--name", edit.name])]
+    // Only the real-domain calls: create with a name, rename, assign to a listed domain (no --placeholder/--unclassified).
+    const command = edit.type === "domain.create" ? ["create", ...write, "--name", edit.name]
       : edit.type === "domain.rename" ? ["rename", ...write, "--domain-id", edit.domainId, "--name", edit.name]
-        : ["assign", ...write, "--agent", edit.agentId, ...(edit.domainId === null ? ["--unclassified"] : ["--domain-id", edit.domainId])];
+        : ["assign", ...write, "--agent", edit.agentId, "--domain-id", edit.domainId];
     const result = await this.domainsCommand(command);
     const changed = typeof result.domainId === "string" && /^domain-[0-9a-f]{12}$/.test(result.domainId) ? { changedDomainId: result.domainId } : {};
     return { ...projectDomains(readRecord(result.domains, "project domains")), ...changed };
@@ -1446,7 +1458,7 @@ When a command needs sudo and the Human has requested it, use python3 ${JSON.str
   }
 
   /** Run loop.py for a worker with the loop's own parent Main run and policy, verified to lie inside this project's records. */
-  private async controlLoopCommand(agentId: string, loopId: string | undefined, state: Record<string, unknown>, command: "steer" | "stop-task" | "start", extra: readonly string[]): Promise<Record<string, unknown>> {
+  private async controlLoopCommand(agentId: string, loopId: string | undefined, state: Record<string, unknown>, command: "steer" | "stop-task" | "start" | "handoff", extra: readonly string[]): Promise<Record<string, unknown>> {
     const location = await this.location();
     const environment: Record<string, string | undefined> = { ...pluginRuntimeEnvironment(this.developmentRoot) };
     // Only this loop's own parent and policy apply; never ones inherited from the extension host's environment.
@@ -1475,6 +1487,42 @@ When a command needs sudo and the Human has requested it, use python3 ${JSON.str
         { code: typeof failure?.code === "string" ? failure.code : "worker_control_failed" });
     }
     return value;
+  }
+
+  /**
+   * The Human moves the current Work task of one loop to a new session on another provider or model. The loop must
+   * belong to this worker and not have ended; the plugin stops the current Work run first and records the handoff.
+   */
+  public async handoffWorker(agentId: string, loopId: string, toModel: string, reason: string, reference: string): Promise<Record<string, unknown>> {
+    if (!MANAGED_ID.test(agentId) || !MANAGED_ID.test(loopId)) throw new Error("Invalid worker identity");
+    const loop = (await this.workerLoops(agentId)).find(value => value.id === loopId);
+    if (!loop || ["completed", "cancelled"].includes(String(loop.state.status))) {
+      throw Object.assign(new Error("This worker has no running or stopped task in that loop"), { code: "worker_handoff_scope" });
+    }
+    // A new session ID for the receiving side; the earlier session and its records stay unchanged.
+    const stamp = new Date().toISOString().replace(/[-:]/g, "").replace("T", "-").slice(0, 15);
+    const toAgent = `work-handoff-${stamp}-${randomUUID().slice(0, 8)}`;
+    const result = await this.controlLoopCommand(agentId, loopId, loop.state, "handoff", ["--actor", "human",
+      "--authorization-reference", reference, "--decision-evidence", "Human selected Provider handoff in the control center",
+      "--to-agent", toAgent, "--to-model", toModel, "--reason", reason]);
+    this.projectTaskCache.deleteWhere(() => true);
+    return readRecordOrUndefined(result.handoff) ?? { toAgentId: toAgent, toModel };
+  }
+
+  /** Read-only supervision verdicts of every unfinished loop; --dry-run appends no report. */
+  public async superviseProject(): Promise<Record<string, unknown>> {
+    const location = await this.location();
+    const output = await runBoundedProcess(this.pythonCommand, [join(dirname(this.execPath), "operation_records.py"), "supervise",
+      "--project-root", this.projectRoot, "--runtime-home", location.home, "--project-id", location.projectId, "--dry-run"],
+    COMMAND_TIMEOUT_MS, MAX_PROCESS_OUTPUT_BYTES, pluginRuntimeEnvironment(this.developmentRoot));
+    let value: Record<string, unknown> | undefined;
+    try { value = readRecordOrUndefined(JSON.parse(output.stdout)); } catch { value = undefined; }
+    const failure = readRecordOrUndefined(value?.error);
+    if (output.exitCode !== 0 || !value || value.kind !== "supervision") {
+      throw Object.assign(new Error(typeof failure?.message === "string" ? failure.message : output.stderr.trim() || `exit code ${output.exitCode}`),
+        { code: typeof failure?.code === "string" ? failure.code : "supervision_failed" });
+    }
+    return projectSupervision(value);
   }
 
   private async domainsCommand(command: readonly string[]): Promise<Record<string, unknown>> {
@@ -2630,7 +2678,7 @@ function projectTaskEntry(state: Record<string, unknown>, workAgentId?: string, 
     const assignedVerification = task.verificationAgentId ?? state.verificationAgentId;
     const allocation = projectTaskAllocation(task.allocation);
     return [{ id: task.id, title: task.title,
-      // The work area Main recorded at assignment; absent means unclassified and is never inferred.
+      // The work area Main recorded at assignment; absent means none was recorded, and it is never inferred.
       ...(typeof allocation?.domain === "string" ? { domain: allocation.domain } : {}),
       ...(typeof task.description === "string" ? { description: task.description } : {}),
       ...(typeof task.completionCriteria === "string" ? { completionCriteria: task.completionCriteria } : {}),
@@ -2648,6 +2696,7 @@ function projectTaskEntry(state: Record<string, unknown>, workAgentId?: string, 
     id: workflow.id, title: workflow.title, ...(workAgentId ? { workAgentId } : {}), ...(loopId ? { loopId } : {}),
     ...(state.requestedBy === "human" ? { requestedBy: "human" as const } : {}),
     ...(typeof state.latestWorkRunId === "string" && MANAGED_ID.test(state.latestWorkRunId) ? { latestWorkRunId: state.latestWorkRunId } : {}),
+    ...(Array.isArray(state.handoffs) && state.handoffs.length ? { handoffs: projectTaskHandoffs(state.handoffs) } : {}),
     ...(typeof state.phase === "string" ? { phase: state.phase } : {}), status: typeof state.status === "string" ? state.status : "unknown", tasks,
     ...(typeof state.createdAt === "string" ? { createdAt: state.createdAt } : {}),
     ...(typeof state.updatedAt === "string" ? { updatedAt: state.updatedAt } : {}),
@@ -2655,6 +2704,35 @@ function projectTaskEntry(state: Record<string, unknown>, workAgentId?: string, 
     ...(contract && typeof contract.id === "string" && contract.id
       ? { contract: { id: contract.id, ...(Number.isInteger(contract.version) ? { version: contract.version as number } : {}) } } : {})
   };
+}
+
+/** Handoff facts for display; the authorization reference, evidence and bundle stay in the loop record. */
+function projectTaskHandoffs(values: readonly unknown[]): import("../../protocol/messages").ProjectTaskHandoff[] {
+  return values.flatMap(value => {
+    const record = readRecordOrUndefined(value);
+    if (!record || typeof record.id !== "string" || typeof record.fromAgentId !== "string" || typeof record.toAgentId !== "string") return [];
+    const text = (key: string) => typeof record[key] === "string" && record[key] ? { [key]: (record[key] as string).slice(0, 2_000) } : {};
+    return [{ id: record.id, fromAgentId: record.fromAgentId, toAgentId: record.toAgentId,
+      ...text("taskId"), ...text("fromProvider"), ...text("toProvider"), ...text("fromModel"), ...text("toModel"),
+      ...text("reason"), ...text("actor"), ...text("createdAt"), ...text("toRunId") }];
+  });
+}
+
+/** Supervision verdicts for display: known fields only, never state paths. */
+function projectSupervision(value: Record<string, unknown>): Record<string, unknown> {
+  const row = (item: unknown) => {
+    const record = readRecordOrUndefined(item);
+    if (!record) return [];
+    const pick = Object.fromEntries(["loopId", "taskId", "title", "verdict", "state", "loopStatus", "phase", "decisionId", "nextAction", "trigger", "reportedAt"]
+      .flatMap(key => typeof record[key] === "string" ? [[key, record[key]]] : []));
+    const seconds = Object.fromEntries(["elapsedSeconds", "idleSeconds", "waitingSeconds"]
+      .flatMap(key => typeof record[key] === "number" ? [[key, record[key]]] : []));
+    return [{ ...pick, ...seconds, reasons: Array.isArray(record.reasons) ? record.reasons.filter(reason => typeof reason === "string") : [] }];
+  };
+  const list = (key: string) => Array.isArray(value[key]) ? (value[key] as unknown[]).flatMap(row) : [];
+  return { observedAt: typeof value.observedAt === "string" ? value.observedAt : undefined,
+    settings: readRecordOrUndefined(value.settings) ?? {}, verdicts: list("verdicts"), alerts: list("alerts"),
+    errors: Array.isArray(value.errors) ? value.errors.flatMap(item => typeof readRecordOrUndefined(item)?.error === "string" ? [String(readRecordOrUndefined(item)!.error)] : []) : [] };
 }
 
 /** Only known allocation fields leave the host, never private run payloads or credentials. */
@@ -2723,6 +2801,34 @@ export function projectDomains(value: Record<string, unknown>): ProjectDomains {
   const removedWorkers = Object.fromEntries(Object.entries(readRecordOrUndefined(value.removedWorkers) ?? {}).flatMap(([agentId, item]) =>
     MANAGED_ID.test(agentId) && readRecordOrUndefined(item) ? [[agentId, { removedBy: change(readRecordOrUndefined(item)!.removedBy) }]] : []));
   return { revision: Number.isSafeInteger(value.revision) ? value.revision as number : 0, domains, assignments, removedWorkers };
+}
+
+/**
+ * The report's outcome in one short line, by rule only: sentences that state an output, a value, a count or a remaining
+ * problem win over narration ("I ran the command"), boilerplate about lessons, audits and Verification is skipped, and long
+ * inline code (a command) is dropped since the full report stays one click away. Words and numbers are only removed,
+ * never added or rewritten. Undefined when no sentence states such an outcome; the caller then falls back.
+ */
+export function resultHighlight(text: string): string | undefined {
+  // The outcome is stated near the top: the first two prose paragraphs, each line its own sentence source.
+  const paragraphs = text.split(/\r?\n\s*\r?\n/).map(block => block.split(/\r?\n/).map(line => line.trim())
+    .filter(line => line && !/^(#{1,6}\s|```|~~~|\||-{3,}$|>)/.test(line)).map(line => line.replace(/^(?:[-*+]|\d+[.)])\s+/, "")))
+    .filter(lines => lines.length).slice(0, 2);
+  const sentences = paragraphs.flat().flatMap(line => line.replace(/\[([^\]]+)\]\([^)]*\)/g, "$1").split(/(?<=[.!?。])\s+/))
+    .map(value => value.trim()).filter(value => value.length >= 6 && value.length <= 200).slice(0, 8);
+  const boilerplate = /lesson|교훈|audit|감사|Verification|검증은 요청|Goal 사용량|tokens|변경 경로는 없|changedPaths|작업트리 변경은 보존|사용자님 결정은 없|run-local|occurrence/i;
+  const outcome = /(출력|stdout|stderr|결과는|결과가|종료 코드|exit code|통과|실패|성공|오류|남은|미해결|미확인|확인하지 못|\d+\s*(회|건|개|개의|%|초|분|행|명|줄|파일|tests?|passed|failed))/i;
+  const scored = sentences.map((sentence, index) => {
+    if (boilerplate.test(sentence)) return { sentence, index, score: -1 };
+    const value = /`[^`]{1,24}`|\d/.test(sentence) ? 2 : 0;
+    return { sentence, index, score: (outcome.test(sentence) ? 2 : 0) + value };
+  }).filter(item => item.score >= 3);
+  if (!scored.length) return undefined;
+  const best = scored.sort((left, right) => right.score - left.score || left.index - right.index)[0]!.sentence;
+  // Drop long inline code (commands) with the particle that tied it to the sentence; short code keeps its text.
+  const line = best.replace(/`([^`]{25,})`\s*(?:의|를|을|로|으로|에서)?\s*/g, "").replace(/`([^`]*)`/g, "$1")
+    .replace(/\*\*|__/g, "").replace(/\(\s*\)/g, "").replace(/^(사용자님|Dear user)[,，]\s*/, "").replace(/\s+/g, " ").trim().replace(/^[:：·,，;\s]+/, "");
+  return line.length >= 6 ? line : undefined;
 }
 
 /** A result's summary line: its first prose line (a heading such as "Summary" says little), else its first heading. */

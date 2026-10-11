@@ -153,9 +153,9 @@
   transition: border-color 140ms ease;
 }
 
-/* Focus is one of the few accent uses; a mixed 1px border, no glow ring. */
+/* Focus uses the project blue accent (as before 6fb18a8, without the glow ring). */
 .composer:focus-within {
-  border-color: color-mix(in srgb, var(--af-color-accent) 45%, var(--vscode-panel-border, var(--vscode-input-border, #454545)));
+  border-color: color-mix(in srgb, var(--af-color-accent) 78%, var(--vscode-panel-border, var(--vscode-input-border, #454545)));
 }
 
 .utility-list-menu[hidden] {
@@ -251,15 +251,16 @@
   font-size: 20px;
 }
 
-/* Send is the only filled action and uses the neutral foreground, not the accent; stop and disabled use the shared icon surface below. */
+/* Send is the only filled action and keeps the project blue accent (as before 6fb18a8); stop and disabled use the shared
+   neutral icon surface below, so an unavailable send never reads as ready. */
 .composer-actions .send-button:enabled:not(.is-running) {
-  color: var(--af-chat-background, var(--vscode-editor-background));
-  background: var(--vscode-foreground);
+  color: #ffffff;
+  background: var(--af-color-accent);
 }
 
 .composer-actions .send-button:enabled:not(.is-running):hover {
-  color: var(--af-chat-background, var(--vscode-editor-background));
-  background: color-mix(in srgb, var(--vscode-foreground) 82%, transparent);
+  color: #ffffff;
+  background: var(--af-color-accent-hover);
 }
 
 .setting-button,
@@ -335,8 +336,11 @@
 .mode-button.toggle-control[aria-pressed="true"] { color: var(--vscode-foreground); }
 .mode-button.toggle-control .toggle-icon rect { fill: none; stroke: currentColor; }
 .mode-button.toggle-control .toggle-thumb { fill: currentColor; }
-.mode-button.toggle-control[aria-pressed="true"] .toggle-icon rect { fill: currentColor; }
-.mode-button.toggle-control[aria-pressed="true"] .toggle-thumb { fill: var(--af-chat-background, var(--vscode-editor-background)); }
+/* An "on" switch fills its track with the project blue; "off" stays an outlined neutral track, and the thumb position and
+   aria-pressed still carry the state without colour. */
+.mode-button.toggle-control[aria-pressed="true"] .toggle-icon rect { fill: var(--af-color-accent); stroke: var(--af-color-accent); }
+.mode-button.toggle-control[aria-pressed="true"] .toggle-thumb { fill: #ffffff; }
+.composer-actions :is(.mode-button, .setting-button, button.circular-action):focus-visible { outline: 1px solid var(--vscode-focusBorder, var(--af-color-accent)); outline-offset: 1px; }
 .mode-button.toggle-control:disabled { opacity: 0.5; cursor: default; }
 
 .drop-overlay {
@@ -482,7 +486,7 @@
   stroke-linejoin: round;
   color: var(--vscode-descriptionForeground);
 }
-.toggle-control .scroll-state-icon[data-state="following"] { color: currentColor; }
+.toggle-control .scroll-state-icon[data-state="following"] { color: var(--af-color-accent); }
 .toggle-control .scroll-state-icon[hidden] { display: none; }
 
 .task-history:not([open]) > .task-history-list { display: none; }
@@ -633,3 +637,106 @@
 
 /* A feedback row needs an in-flow status header after the composer tabs are removed. */
 .composer-topline:has(.agent-progress-dock > #agent-progress[data-feedback]:not([data-feedback=""]):not([hidden])) .composer-status-row > .run-status:not(.is-expanded) { position: static; }
+
+/* Restored from dea8805 (removed in 6fb18a8): the Astra starfield, unchanged in look and conditions. */
+/* The constellation fills the composer, behind its text and controls. */
+.composer { position: relative; isolation: isolate; }
+.prompt-surface { position: static; }
+.prompt-surface #prompt, .composer > .attachment-list { position: relative; z-index: 1; }
+.astra-stars {
+  display: none;
+  position: absolute;
+  inset: 1px;
+  border-radius: inherit;
+  overflow: hidden;
+  pointer-events: none;
+  color: color-mix(in srgb, var(--vscode-foreground) 82%, #a9baff);
+  opacity: .8;
+  transition: opacity .35s ease;
+  mask-image: linear-gradient(180deg, #000, #000 50%, transparent 92%);
+}
+.is-astra .astra-stars { display: block; }
+.prompt-surface:has(#prompt:not(:placeholder-shown)) .astra-stars { opacity: .12; }
+.astra-stars::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background:
+    radial-gradient(circle at 9% 71%, currentColor 0 .4px, transparent 1px),
+    radial-gradient(circle at 31% 28%, currentColor 0 .4px, transparent 1px),
+    radial-gradient(circle at 35% 62%, currentColor 0 .5px, transparent 1px),
+    radial-gradient(circle at 54% 19%, currentColor 0 .4px, transparent 1px),
+    radial-gradient(circle at 59% 57%, currentColor 0 .4px, transparent 1px),
+    radial-gradient(circle at 66% 35%, currentColor 0 .5px, transparent 1px),
+    radial-gradient(circle at 79% 56%, currentColor 0 .4px, transparent 1px),
+    radial-gradient(circle at 92% 42%, currentColor 0 .5px, transparent 1px);
+  opacity: .24;
+}
+.astra-stars::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(ellipse at 67% 28%, #718fff0a, transparent 58%);
+}
+.astra-star {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  border-radius: 50%;
+  background: currentColor;
+  opacity: .38;
+}
+.astra-star:nth-child(4n + 1) {
+  opacity: .55;
+  box-shadow: 0 0 2px color-mix(in srgb, currentColor 15%, transparent);
+  animation: astra-glint 4.6s ease-in-out infinite;
+}
+.astra-star:nth-child(1) { left: 4%; top: 57%; width: 1px; height: 1px; animation-duration: 4.6s; animation-delay: -1.7s; }
+.astra-star:nth-child(2) { left: 12%; top: 37%; width: 1.2px; height: 1.2px; }
+.astra-star:nth-child(3) { left: 18%; top: 68%; width: 0.8px; height: 0.8px; }
+.astra-star:nth-child(4) { left: 25%; top: 18%; width: 1px; height: 1px; }
+.astra-star:nth-child(5) { left: 29%; top: 49%; width: 1.4px; height: 1.4px; animation-duration: 5.7s; animation-delay: -8.5s; }
+.astra-star:nth-child(6) { left: 34%; top: 74%; width: 0.8px; height: 0.8px; }
+.astra-star:nth-child(7) { left: 39%; top: 32%; width: 1px; height: 1px; }
+.astra-star:nth-child(8) { left: 44%; top: 58%; width: 0.7px; height: 0.7px; }
+.astra-star:nth-child(9) { left: 49%; top: 12%; width: 1.6px; height: 1.6px; animation-duration: 3.8s; animation-delay: -6.3s; }
+.astra-star:nth-child(10) { left: 52%; top: 43%; width: 1px; height: 1px; }
+.astra-star:nth-child(11) { left: 57%; top: 70%; width: 0.8px; height: 0.8px; }
+.astra-star:nth-child(12) { left: 61%; top: 25%; width: 1.2px; height: 1.2px; }
+.astra-star:nth-child(13) { left: 65%; top: 52%; width: 0.7px; height: 0.7px; animation-duration: 6.1s; animation-delay: -4.1s; }
+.astra-star:nth-child(14) { left: 68%; top: 9%; width: 0.8px; height: 0.8px; }
+.astra-star:nth-child(15) { left: 73%; top: 38%; width: 1.7px; height: 1.7px; }
+.astra-star:nth-child(16) { left: 77%; top: 66%; width: 1px; height: 1px; }
+.astra-star:nth-child(17) { left: 81%; top: 19%; width: 0.8px; height: 0.8px; animation-duration: 4.3s; animation-delay: -1.9s; }
+.astra-star:nth-child(18) { left: 85%; top: 49%; width: 1.3px; height: 1.3px; }
+.astra-star:nth-child(19) { left: 89%; top: 29%; width: 0.7px; height: 0.7px; }
+.astra-star:nth-child(20) { left: 94%; top: 61%; width: 1.1px; height: 1.1px; }
+.astra-star:nth-child(21) { left: 97%; top: 13%; width: 1px; height: 1px; animation-duration: 5.2s; animation-delay: -8.7s; }
+.astra-star:nth-child(22) { left: 22%; top: 59%; width: 0.7px; height: 0.7px; }
+.astra-star:nth-child(23) { left: 46%; top: 79%; width: 0.8px; height: 0.8px; }
+.astra-star:nth-child(24) { left: 70%; top: 76%; width: 0.7px; height: 0.7px; }
+.astra-star:nth-child(15) { animation: astra-glint 5.4s ease-in-out -2.8s infinite; }
+@keyframes astra-glint {
+  0%, 65%, 100% {
+    opacity: .28;
+    box-shadow: 0 0 2px transparent;
+  }
+  30% {
+    opacity: .75;
+    box-shadow: 0 0 3px color-mix(in srgb, currentColor 25%, transparent);
+  }
+  45% {
+    opacity: .45;
+    box-shadow: 0 0 2px color-mix(in srgb, currentColor 15%, transparent);
+  }
+}
+@media (max-width: 480px) {
+  .astra-star:nth-child(3n) { display: none; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .astra-star { animation: none !important; }
+  .astra-stars { transition: none; }
+}
+@media (forced-colors: active) {
+  .is-astra .astra-stars { display: none; }
+}

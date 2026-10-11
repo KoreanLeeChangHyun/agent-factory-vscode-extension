@@ -474,6 +474,25 @@ test("unavailable project refresh reports an error rather than clearing recorded
 });
 
 
+test("work request navigation opens the exact recorded run's request.md and says when it is missing", async () => {
+  const f=fixture(), target=managed();f.manager.panels.set(target.state.panelId,target);
+  const entry={id:"flow-request",tasks:[{id:"task-request",runs:[{role:"work",agentId:"worker-exact",runId:"run-one",request:{availability:"recorded"},result:{availability:"recorded"}},
+    {role:"work",agentId:"worker-exact",runId:"run-two",request:{availability:"missing"}}]}]};
+  f.manager.controlCenterRuntime=async()=>({available:true,client:{async listProjectTasks(){return [entry];},async projectTaskRecords(){return [
+    {name:"work · run-one · request.md",path:"/managed/worker-exact/run-one/request.md"},{name:"work · run-one · result.md",path:"/managed/worker-exact/run-one/result.md"}];}}});
+  const oldOpen=vscode.workspace.openTextDocument, oldShow=vscode.window.showTextDocument;
+  const opened=[];vscode.workspace.openTextDocument=async uri=>uri;vscode.window.showTextDocument=async document=>opened.push(document.fsPath);
+  const request={type:"project.task.open",workflowId:"flow-request",taskId:"task-request",target:"request",agentId:"worker-exact",runId:"run-one"};
+  try {
+    await f.manager.handleMessage(target,request);
+    await f.manager.handleMessage(target,{...request,target:"result"});
+    assert.deepEqual(opened,["/managed/worker-exact/run-one/request.md","/managed/worker-exact/run-one/result.md"],"Request and report are separate documents of the same run");
+    await assert.rejects(f.manager.handleMessage(target,{...request,runId:"run-two"}),/recorded request is unavailable/);
+    await assert.rejects(f.manager.handleMessage(target,{...request,agentId:"other-worker"}),/recorded request is unavailable/);
+    assert.equal(opened.length,2);assert.equal(target.panel.reveals,0);
+  } finally {vscode.workspace.openTextDocument=oldOpen;vscode.window.showTextDocument=oldShow;}
+});
+
 test("original result navigation validates both recorded agent and run without opening Main", async () => {
   const f=fixture(), target=managed();f.manager.panels.set(target.state.panelId,target);
   const entry={id:"flow-result",tasks:[{id:"task-result",runs:[{role:"work",agentId:"worker-exact",runId:"run-result",result:{availability:"recorded"}}]}]};

@@ -8,7 +8,7 @@ async function checkModelLabel(page) {
     console.log(JSON.stringify({stage:'restored',timeline:timeline.length,label}));
     assert.equal(label,'gpt-6-astra · high');
     assert.equal(await page.locator('#prompt').inputValue(),'Original draft');
-    assert.equal(await page.locator('.prompt-surface').evaluate(el=>el.classList.contains('is-astra')),false);
+    assert.equal(await page.locator('.prompt-surface').evaluate(el=>el.classList.contains('is-astra')),true,'A restored Astra Main model shows the starfield');
   }
   const capability={model:true,reasoning:true,fast:true,taskModes:['direct','orchestrate']};
   await page.evaluate(capability=>window.postMessage({type:'host.initialize',panelId:'model-label',role:'main',model:'gpt-5.6-sol',reasoning:'medium',runtimeAvailable:true,capabilities:{submit:capability,send:capability}},'*'),capability);
@@ -22,11 +22,11 @@ async function checkModelLabel(page) {
   await main.locator('input[data-field="reasoningEffort"]').fill('3');
   await page.waitForFunction(()=>document.getElementById('model-label').textContent==='gpt-6-astra · high');
   await page.keyboard.press('Escape');
-  assert.equal(await page.locator('.astra-stars, .astra-star').count(),0);
+  assert.equal(await page.locator('.astra-star').count(),24);assert.equal(await page.locator('.astra-stars').isVisible(),true);
   await page.evaluate(()=>sessionStorage.setItem('submission-restoration-fixture',JSON.stringify(window.saved)));
   await page.reload();
   await page.waitForFunction(()=>document.getElementById('model-label').textContent==='gpt-6-astra · high');
   assert.equal(await page.locator('#prompt').inputValue(),'Original draft');
-  console.log('Model label: empty/restored chat, Host initialization, model/effort selection, reload, draft preservation and no starfield passed.');
+  console.log('Model label: empty/restored chat, Host initialization, model/effort selection, reload, draft preservation and the Astra starfield passed.');
 }
 module.exports={checkModelLabel};

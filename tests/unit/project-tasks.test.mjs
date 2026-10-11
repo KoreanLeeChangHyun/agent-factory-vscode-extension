@@ -65,6 +65,7 @@ test("control center projects accepted allocation, bound receipt and observed us
   await writeFile(join(runDir,"state.json"),JSON.stringify(state));
   await writeFile(join(runDir,"receipt.json"),JSON.stringify({runId:"run-center",requestHash:"hash-exact",outcome:"completed",tests:{run:true,reason:"Own checks"},changedPaths:["src/main.ts",99]}));
   await writeFile(join(runDir,"result.md"), "Implemented actual runtime connection.\n\nRemaining: GUI check.\n");
+  await writeFile(join(runDir,"request.md"), "# Goal\nIntegrate.\n");
   const verifyDir=join(agentsRoot,"verifier","runs","run-verifying");await mkdir(verifyDir,{recursive:true});
   const verificationState={agentId:"verifier",runId:"run-verifying",role:"verification",status:"completed",requestHash:"verify-hash",verifiedWorkRunId:"run-center",taskBinding:{workflowId:"flow-center",taskId:"task-center"}};
   const verificationReceipt={schemaVersion:"0.1.0",kind:"verification-receipt",runId:"run-verifying",verifiedWorkRunId:"run-center",verifiedRequestHash:"verify-hash",decision:"fail",findings:[{id:"finding-one",path:"src/view.ts",location:"result link",problem:"Wrong target",evidence:"Recorded source mismatch",correction:"Bind exact run",secret:"DO_NOT_PROJECT"}],secret:"DO_NOT_PROJECT"};
@@ -78,7 +79,18 @@ test("control center projects accepted allocation, bound receipt and observed us
   assert.equal(run.result.summary,"Implemented actual runtime connection.");
   // The summary is the first prose line; a bare heading such as "Summary" is used only when nothing else exists.
   const {resultSummaryLine}=await importTypeScript("src/infrastructure/agent-factory/agent-client.ts");
+  // Outcome line: a stated value/count/remaining problem wins over narration; boilerplate and long commands are dropped;
+  // nothing is added. Without a stated outcome it is undefined so the list falls back to the first sentence.
+  const {resultHighlight}=await importTypeScript("src/infrastructure/agent-factory/agent-client.ts");
+  assert.equal(resultHighlight("작업 B의 계산 명령을 실행했습니다. 표준 출력은 `55`, 종료 코드는 `0`입니다. 교훈 조회 결과 기록은 없었습니다. 별도 Verification은 요청되지 않았습니다."),"표준 출력은 55, 종료 코드는 0입니다.");
+  assert.equal(resultHighlight("작업 A의 `python3 -c 'print(sum(range(1, 6)))'` 실행 결과는 stdout `15`, 종료 코드 `0`입니다. 기존 작업트리 변경은 보존했습니다."),"작업 A의 실행 결과는 stdout 15, 종료 코드 0입니다.");
+  assert.equal(resultHighlight("48개 고유 사례를 각각 3회 실행하여 본시험 144회가 모두 통과했습니다. 수행 시간은 약 16분입니다."),"48개 고유 사례를 각각 3회 실행하여 본시험 144회가 모두 통과했습니다.");
+  assert.equal(resultHighlight("작업을 마쳤습니다. 별도 Verification은 요청되지 않았습니다. lesson audit missing은 비어 있습니다."),undefined,"No stated outcome: no highlight");
+  assert.equal(resultHighlight("## 결론\n\n기능을 정리했습니다.\n\n| 범주 | 실행 |\n|---|---|\n| A | 18/18 통과 |\n"),undefined,"Tables and later sections are not mined");
+  assert.equal(resultHighlight("문서: `docs/a.md`, `docs/b.md`\n: 제안 10개와 금지 항목 3개를 담았습니다."),"제안 10개와 금지 항목 3개를 담았습니다.","Leading punctuation is not kept");
+  assert.equal(resultHighlight("남은 문제: 설치본에는 operation_records.py가 없어 2건이 실패합니다."),"남은 문제: 설치본에는 operation_records.py가 없어 2건이 실패합니다.");
   for (const [text,expected] of [["## Summary\n\n- **Done:** wired the list.\n","**Done:** wired the list."],["# Result only\n","Result only"],["| a | b |\n\nPlain line\n","Plain line"],["\n\n",undefined]]) assert.equal(resultSummaryLine(text),expected);
+  assert.deepEqual(run.request,{availability:"recorded"},"The run's request.md is projected by presence only");
   assert.equal(run.model,"fixed-model");assert.equal(run.provider,"claude","The provider identifies a run whose model is the provider default");
   assert.equal(run.result.availability,"recorded");
   assert.deepEqual(run.receipt.changedPaths,["src/main.ts"]);
@@ -116,6 +128,7 @@ test("worker projection distinguishes assigned missing runs, missing results, re
   assert.equal(tasks[0].workAgentId,"worker");assert.deepEqual(tasks[0].runs,[]);
   assert.equal(tasks[2].workAgentId,undefined);assert.equal(tasks[1].verificationDisposition,"not-requested");
   assert.equal(tasks[1].runs[0].result.availability,"missing");
+  assert.equal(tasks[1].runs[0].request.availability,"missing","A run without request.md says so");
   assert.deepEqual(tasks[1].integration,[{repository:"extension",phase:"integrated",mergeCommit:"merge-exact"}]);
   await writeFile(join(runDir,"result.md"),"");client.projectTaskCache.deleteWhere(()=>true);
   const emptyResult=(await client.listProjectTasks())[0].tasks[1].runs[0].result;
@@ -167,35 +180,37 @@ test("project domains are read and edited through the plugin's domains.py as the
         { id: "bad id", name: "dropped" }],
       assignments: { "work-a": { domainId: "domain-aaaaaaaaaaaa", setBy: { actor: "human", at: "t", source: "control-center" } }, "../bad": { domainId: null, setBy: {} }, "work-b": { domainId: "domain-ffffffffffff", setBy: {} } } };
     if (argv.includes("--name") && argv[argv.indexOf("--name") + 1] === "taken") { console.log(JSON.stringify({ kind: "error", error: { code: "domain_name_taken", message: "already exists" } })); process.exit(1); }
-    console.log(JSON.stringify({ kind: "project-domains-result", ...(argv.includes("--placeholder") ? { domainId: "domain-cccccccccccc" } : {}), domains: store }));`);
+    console.log(JSON.stringify({ kind: "project-domains-result", ...(argv[0] === "create" ? { domainId: "domain-cccccccccccc" } : {}), domains: store }));`);
   const listed = await client.listProjectDomains();
   assert.deepEqual(listed, { revision: 2, domains: [{ id: "domain-aaaaaaaaaaaa", name: "UI", aliases: ["ui old"],
     createdBy: { actor: "ai", at: "t", source: "loop one" }, nameSetBy: { actor: "human", at: "t", source: "control-center" } }],
   assignments: { "work-a": { domainId: "domain-aaaaaaaaaaaa", setBy: { actor: "human", at: "t", source: "control-center" } } }, removedWorkers: {} }, "Only known, valid fields leave the host");
-  await client.editProjectDomains({ type: "domain.create", name: "Docs", revision: 2 });
+  const created = await client.editProjectDomains({ type: "domain.create", name: "Docs", revision: 2 });
+  assert.equal(created.changedDomainId, "domain-cccccccccccc", "The created domain is reported so a worker can be placed in it");
   await client.editProjectDomains({ type: "domain.rename", domainId: "domain-aaaaaaaaaaaa", name: "UI shell", revision: 3 });
-  await client.editProjectDomains({ type: "domain.assign", agentId: "work-a", domainId: null, revision: 4 });
-  const created = await client.editProjectDomains({ type: "domain.create", placeholder: true, revision: 5 });
-  assert.equal(created.changedDomainId, "domain-cccccccccccc", "The created domain is reported so its rename field can open");
+  await client.editProjectDomains({ type: "domain.assign", agentId: "work-a", domainId: "domain-aaaaaaaaaaaa", revision: 4 });
   await assert.rejects(client.editProjectDomains({ type: "domain.create", name: "taken", revision: 5 }), error => error.message === "already exists" && error.code === "domain_name_taken");
   const calls = (await readFile(log, "utf8")).trim().split("\n").map(line => JSON.parse(line));
   const scope = ["--project-root", root, "--runtime-home", join(root, "home"), "--project-id", "project-test"];
   assert.deepEqual(calls[0], ["list", ...scope]);
   assert.deepEqual(calls[1], ["create", ...scope, "--actor", "human", "--source", "control-center", "--expected-revision", "2", "--name", "Docs"]);
   assert.deepEqual(calls[2], ["rename", ...scope, "--actor", "human", "--source", "control-center", "--expected-revision", "3", "--domain-id", "domain-aaaaaaaaaaaa", "--name", "UI shell"]);
-  assert.deepEqual(calls[3], ["assign", ...scope, "--actor", "human", "--source", "control-center", "--expected-revision", "4", "--agent", "work-a", "--unclassified"]);
-  assert.deepEqual(calls[4], ["create", ...scope, "--actor", "human", "--source", "control-center", "--expected-revision", "5", "--placeholder"]);
+  assert.deepEqual(calls[3], ["assign", ...scope, "--actor", "human", "--source", "control-center", "--expected-revision", "4", "--agent", "work-a", "--domain-id", "domain-aaaaaaaaaaaa"]);
+  // Only the real-domain calls are made: no --placeholder or --unclassified ever reaches domains.py.
+  assert.equal(calls.flat().some(argument => ["--placeholder", "--unclassified"].includes(argument)), false);
 });
 
 test("domain edits are validated before they reach the host", async () => {
   const { parseClientMessage } = await importTypeScript("src/protocol/validator.ts");
-  const ok = [{ type: "domain.create", name: "extension UI", revision: 0 }, { type: "domain.create", placeholder: true, revision: 2 }, { type: "domain.rename", domainId: "domain-0123456789ab", name: "UI", revision: 3 },
-    { type: "domain.assign", agentId: "work-a", domainId: "domain-0123456789ab", revision: 1 }, { type: "domain.assign", agentId: "work-a", domainId: null, revision: 1 }];
+  const ok = [{ type: "domain.create", name: "extension UI", revision: 0 }, { type: "domain.rename", domainId: "domain-0123456789ab", name: "UI", revision: 3 },
+    { type: "domain.assign", agentId: "work-a", domainId: "domain-0123456789ab", revision: 1 }];
   for (const message of ok) assert.deepEqual(parseClientMessage({ ...message, extra: 1 }), message);
   for (const message of [{ type: "domain.create", name: "", revision: 0 }, { type: "domain.create", name: " padded", revision: 0 }, { type: "domain.create", name: "a\nb", revision: 0 },
     { type: "domain.create", name: "x".repeat(81), revision: 0 }, { type: "domain.create", placeholder: true, name: "x", revision: 0 }, { type: "domain.create", placeholder: "yes", revision: 0 }, { type: "domain.create", name: "x", revision: -1 }, { type: "domain.create", name: "x" },
     { type: "domain.rename", domainId: "../x", name: "x", revision: 0 }, { type: "domain.assign", agentId: "../bad", domainId: null, revision: 0 },
-    { type: "domain.assign", agentId: "work-a", domainId: "other", revision: 0 }, { type: "domain.assign", agentId: "work-a", revision: 0 }]) {
+    { type: "domain.assign", agentId: "work-a", domainId: "other", revision: 0 }, { type: "domain.assign", agentId: "work-a", revision: 0 },
+    // A worker always belongs to a named domain: no unnamed (placeholder) domain and no "unclassified" (null) placement.
+    { type: "domain.create", placeholder: true, revision: 2 }, { type: "domain.assign", agentId: "work-a", domainId: null, revision: 1 }]) {
     assert.equal(parseClientMessage(message), undefined, JSON.stringify(message));
   }
 });
@@ -321,4 +336,46 @@ test("a rework starts a new same-session task linked to the ended task and never
   await assert.rejects(client.sendWorkerCommand("worker-a", "x", "cmd-00000013", { rework: { workflowId: "flow-done", taskId: "task-done" } }), error => error.code === "worker_rework_scope");
   await assert.rejects(client.sendWorkerCommand("worker-a", "x", "cmd-00000014", { loopId: "loop-old", rework: { workflowId: "flow-old", taskId: "task-old" } }));
   assert.equal((await calls()).length, count);
+});
+
+test("provider handoff runs loop.py handoff as the Human for an unfinished loop; supervision is a dry run with display fields only", async t => {
+  const { AgentFactoryClient } = await importTypeScript("src/infrastructure/agent-factory/agent-client.ts");
+  const root = await mkdtemp(join(tmpdir(), "af-worker-handoff-")); t.after(() => rm(root, { recursive: true, force: true }));
+  const agentsRoot = join(root, "agents"), log = join(root, "calls.jsonl");
+  const loop = (status, extra = {}) => ({ status, createdAt: "2026-10-10T00:00:00Z", latestWorkRunId: "run-a", execution: { taskBinding: { workflowId: "flow-a", taskId: "task-a" } },
+    workflow: { id: "flow-a", title: "Brief", tasks: [{ id: "task-a", title: "Task A", workAgentId: "worker-a", workStatus: "running" }] }, ...extra });
+  await writeLoop(agentsRoot, "worker-a", "loop-a", loop("runtime-error", { handoffs: [{ id: "handoff-0", taskId: "task-a", fromAgentId: "worker-0", toAgentId: "worker-a", fromProvider: "codex", toProvider: "codex",
+    fromModel: "m0", toModel: "m1", reason: "earlier", actor: "human", createdAt: "2026-10-09T00:00:00Z", authorizationReference: "secret-ref", decisionEvidence: "e", bundlePath: "/x" }] }));
+  await writeLoop(agentsRoot, "worker-a", "loop-done", loop("completed", { workflow: { id: "flow-done", title: "Done", tasks: [{ id: "task-d", title: "Done", workAgentId: "worker-a", workStatus: "completed" }] } }));
+  const fake = `const fs=require("node:fs");const argv=process.argv.slice(2);fs.appendFileSync(${JSON.stringify(log)},JSON.stringify({script:require("node:path").basename(process.argv[1]),argv})+"\\n");
+    if(argv[0]==="supervise"){console.log(JSON.stringify({kind:"supervision",schemaVersion:1,observedAt:"t",settings:{delayMinutes:20,stuckMinutes:60},alerts:[],errors:[{source:"/p",error:"E"}],
+      verdicts:[{loopId:"loop-a",taskId:"task-a",title:"Task A",verdict:"stuck",state:"blocked",reasons:["no-progress",3],elapsedSeconds:10,idleSeconds:5,waitingSeconds:null,nextAction:"inspect",statePath:"/secret/state.json",line:"x"}]}));}
+    else console.log(JSON.stringify({kind:"loop",status:"active",handoff:{id:"handoff-1",toAgentId:argv[argv.indexOf("--to-agent")+1],toModel:argv[argv.indexOf("--to-model")+1]}}));`;
+  for (const name of ["loop.py", "operation_records.py"]) await writeFile(join(root, name), fake);
+  const client = new AgentFactoryClient(join(root, "exec.py"), root, process.execPath);
+  client.location = async () => ({ home: root, projectId: "project-test", agentsRoot });
+  const calls = async () => (await readFile(log, "utf8").catch(() => "")).trim().split("\n").filter(Boolean).map(line => JSON.parse(line));
+  const scope = ["--project-root", root, "--runtime-home", root, "--project-id", "project-test"];
+  // A stopped (runtime-error) loop can move; the new session ID is generated and never reuses the worker's.
+  const result = await client.handoffWorker("worker-a", "loop-a", "claude-opus-5-5", "limit\nreached", "control-center:worker-a:loop-a:handoff:1");
+  const call = (await calls()).at(-1);
+  const toAgent = call.argv[call.argv.indexOf("--to-agent") + 1];
+  assert.match(toAgent, /^work-handoff-\d{8}-\d{6}-[0-9a-f]{8}$/);
+  assert.deepEqual(call.argv, ["handoff", ...scope, "--work-agent", "worker-a", "--loop-id", "loop-a", "--actor", "human",
+    "--authorization-reference", "control-center:worker-a:loop-a:handoff:1", "--decision-evidence", "Human selected Provider handoff in the control center",
+    "--to-agent", toAgent, "--to-model", "claude-opus-5-5", "--reason", "limit\nreached"]);
+  assert.deepEqual(result, { id: "handoff-1", toAgentId: toAgent, toModel: "claude-opus-5-5" });
+  const count = (await calls()).length;
+  await assert.rejects(client.handoffWorker("worker-a", "loop-done", "m", "r", "ref"), error => error.code === "worker_handoff_scope");
+  await assert.rejects(client.handoffWorker("worker-b", "loop-a", "m", "r", "ref"), error => error.code === "worker_handoff_scope");
+  assert.equal((await calls()).length, count, "Ended or foreign loops are refused before anything runs");
+  // Supervision: --dry-run, known fields only (no state path), reasons kept as strings.
+  const report = await client.superviseProject();
+  assert.deepEqual((await calls()).at(-1), { script: "operation_records.py", argv: ["supervise", ...scope, "--dry-run"] });
+  assert.deepEqual(report, { observedAt: "t", settings: { delayMinutes: 20, stuckMinutes: 60 }, alerts: [], errors: ["E"],
+    verdicts: [{ loopId: "loop-a", taskId: "task-a", title: "Task A", verdict: "stuck", state: "blocked", nextAction: "inspect", elapsedSeconds: 10, idleSeconds: 5, reasons: ["no-progress"] }] });
+  // Recorded handoffs reach the control center without their authorization details.
+  const entry = (await client.listProjectTasks()).find(value => value.loopId === "loop-a");
+  assert.deepEqual(entry.handoffs, [{ id: "handoff-0", fromAgentId: "worker-0", toAgentId: "worker-a", taskId: "task-a", fromProvider: "codex", toProvider: "codex",
+    fromModel: "m0", toModel: "m1", reason: "earlier", actor: "human", createdAt: "2026-10-09T00:00:00Z" }]);
 });

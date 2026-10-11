@@ -23,6 +23,12 @@ test('Maestro persists only the chat choice, and protocol rejects unbound naviga
   assert.equal(parseClientMessage({...rework,rework:{workflowId:'../escape',taskId:'task-one'}}),undefined);
   assert.equal(parseClientMessage({...rework,loopId:'loop-a'}),undefined);
   assert.equal(parseClientMessage({...rework,rework:'flow-one/task-one'}),undefined);
+  // A handoff names the loop, a model identifier and a non-empty reason; supervision and model reads carry nothing.
+  const handoff={type:'worker.handoff',agentId:'worker-a',loopId:'loop-a',toModel:'antigravity/gemini-3-pro',reason:' limit '};
+  assert.deepEqual(parseClientMessage(handoff),{...handoff,reason:'limit'});
+  for (const bad of [{toModel:'model; rm -rf'},{toModel:''},{reason:'  '},{reason:'x'.repeat(2001)},{loopId:'../x'}]) assert.equal(parseClientMessage({...handoff,...bad}),undefined);
+  assert.deepEqual(parseClientMessage({type:'supervision.request',extra:1}),{type:'supervision.request'});
+  assert.deepEqual(parseClientMessage({type:'handoff.models.request'}),{type:'handoff.models.request'});
 });
 
 test('control center distinguishes actual completion receipts, decisions, blocked inputs and legacy unknowns', async () => {
@@ -47,7 +53,7 @@ import { build } from 'esbuild';
 import { createRequire } from 'node:module';
 const nodeRequire = createRequire(import.meta.url);
 const centerBundle = await build({ entryPoints: ['src/infrastructure/vscode/control-center-window.ts'], bundle:true, write:false, platform:'node', format:'cjs', external:['vscode'] });
-function editorFixture({ supported = true, web = false, active = true, moveError = false, read } = {}) {
+function editorFixture({ supported = true, web = false, active = true, moveError = false, read, orderStore } = {}) {
   const panels = [], moves = [], actions = [], reads = [], timers = [];
   const groupListeners=new Set(), tabListeners=new Set();
   const mainGroup={tabs:[],viewColumn:1};const tabGroups={all:[mainGroup],
@@ -84,7 +90,7 @@ function editorFixture({ supported = true, web = false, active = true, moveError
     setInterval(callback){const timer={callback,unref(){}};timers.push(timer);return timer;},
     clearInterval(timer){timer.cleared=true;}, require:name=>name==='vscode'?vscode:nodeRequire(name) });
   const windows = new module.exports.ControlCenterWindows({localResourceRoots:[],async render(_webview,name){assert.equal(name,'control-center.html');return '<html>Center</html>'; }},
-    async root=>{reads.push(root);return read?read(root):[{id:root,tasks:[]}];},async(root,message)=>{actions.push({root,message});});
+    async root=>{reads.push(root);return read?read(root):[{id:root,tasks:[]}];},async(root,message)=>{actions.push({root,message});},undefined,undefined,undefined,orderStore);
   return {windows,panels,moves,actions,reads,timers,prompts,answer:value=>{answer=value;},
     moveTab(){const group={tabs:mainGroup.tabs.splice(0),viewColumn:2};tabGroups.all=[group];
       for(const listener of groupListeners)listener({closed:[mainGroup],opened:[group],changed:[]});}};
@@ -162,6 +168,10 @@ test('worker relationships preserve stable IDs across tasks and explicit fixture
   assert.deepEqual(parseClientMessage(request),request);
   assert.equal(parseClientMessage({...request,runId:'../other'}),undefined);
   assert.equal(parseClientMessage({...request,agentId:undefined}),undefined);
+  // The work request opens like the report: only with the exact agent and run.
+  assert.deepEqual(parseClientMessage({...request,target:'request'}),{...request,target:'request'});
+  assert.equal(parseClientMessage({...request,target:'request',runId:undefined}),undefined);
+  assert.equal(parseClientMessage({...request,target:'request',agentId:'../x'}),undefined);
 });
 
 test('worker index names the model and first assignment, lists every open task and only the newest ended one',async()=>{
@@ -195,6 +205,11 @@ test('purpose and result lines shorten recorded text by rule without adding fact
   assert.equal(purpose('주문 목록 반응형 정렬 조정을 진행하십시오.'),'주문 목록 반응형 정렬 조정');
   assert.equal(purpose('Maestro 운영 설계 Document 재작업 2 (Scribe, 교훈 작성 2단계 분리 추가)'),'Maestro 운영 설계 Document 재작업 2 (Scribe, 교훈 작성 2단계 분리 추가)','A short title is kept as recorded');
   assert.equal(purpose('Fix the import order.'),'Fix the import order');
+  // A series item keeps its own label: object of the instruction + item label; A and B stay distinct.
+  assert.equal(purpose('작업 조율 재시험 A: 독립 계산을 실행하고 결과를 반환하십시오.'),'독립 계산 재시험 A');
+  assert.equal(purpose('작업 조율 재시험 B: 독립 계산을 실행하고 결과를 반환하십시오.'),'독립 계산 재시험 B');
+  assert.equal(purpose('작업 조율 테스트 A: 독립된 계산을 실행하고 실제 결과를 Main에 반환하십시오.'),'독립된 계산 테스트 A');
+  assert.equal(purpose('Brief 1: 통제 화면 버튼 연결과 Main 지침의 자동 배분 안내 (extension, Work, 같은 세션)'),'Brief 1: 통제 화면 버튼 연결과 Main 지침의 자동 배분 안내 (extension, Work, 같은 세션)','Without a stated object the title is kept');
   assert.equal(purpose(''),'');assert.equal(purpose(undefined),'');
   assert.equal(result('48개 고유 사례를 각각 3회 실행하여 본시험 144회가 모두 통과했습니다. 기존 사례 43개를 사용했습니다.'),'48개 고유 사례를 각각 3회 실행하여 본시험 144회가 모두 통과했습니다.','Numbers come only from the record');
   assert.equal(result('사용자님, **코드 구현이 완료되었습니다.** 설치본은 그대로입니다.'),'코드 구현이 완료되었습니다.');
@@ -321,7 +336,7 @@ test('domain edits from a tab return their result to it and refresh the shared l
   const failing=new f.windows.constructor({localResourceRoots:[],async render(){return '<html>Center</html>';}},async()=>[],async()=>{},async()=>{throw new Error('store invalid');});
   await failing.open('/projects/B');const other=f.panels.at(-1);other.send({type:'client.ready'});await settle();
   assert.deepEqual(json(other.messages.filter(value=>value.type==='project.tasks').at(-1)),{type:'project.tasks',entries:[],domainsError:'Error: store invalid'},'A domain read failure keeps the task list');
-  other.send({type:'domain.assign',agentId:'work-a',domainId:null,revision:0});for(let i=0;i<5;i++)await settle();
+  other.send({type:'domain.assign',agentId:'work-a',domainId:'domain-aaaaaaaaaaaa',revision:0});for(let i=0;i<5;i++)await settle();
   assert.equal(other.messages.filter(value=>value.type==='domain.result').at(-1).code,'domains_unavailable');
   windows.dispose();failing.dispose();f.windows.dispose();
 });
@@ -382,4 +397,124 @@ test('worker actions confirm stop and removal, never run twice at once, report f
   other.send({type:'worker.command',agentId:'worker-a',text:'x',commandId:'cmd-00000003'});for(let i=0;i<6;i++)await settle();
   assert.equal(json(other.messages.filter(value=>value.type==='worker.result')).at(-1).code,'worker_control_unavailable');
   windows.dispose();none.dispose();f.windows.dispose();
+});
+
+test('provider handoff is confirmed and carries a control-center reference; supervision and models are read on request', async()=>{
+  const f=editorFixture();const json=value=>JSON.parse(JSON.stringify(value));const calls=[];
+  const control={async command(){},async stop(){},async remove(){},
+    async handoff(root,action,reference){calls.push(['handoff',root,action.agentId,action.loopId,action.toModel,action.reason,reference]);return {id:'handoff-1'};},
+    async supervise(root){calls.push(['supervise',root]);if(calls.filter(call=>call[0]==='supervise').length>1)throw new Error('supervise failed');return {verdicts:[{verdict:'stuck'}]};},
+    async models(){return [{id:'claude-opus-5-5',provider:'claude'}];}};
+  const windows=new f.windows.constructor({localResourceRoots:[],async render(){return '<html>Center</html>';}},async()=>[],async()=>{},async()=>undefined,undefined,control);
+  await windows.open('/projects/A');const panel=f.panels.at(-1);panel.send({type:'client.ready'});await settle();
+  const of=type=>json(panel.messages.filter(value=>value.type===type));
+  const action={type:'worker.handoff',agentId:'worker-a',loopId:'loop-a',toModel:'claude-opus-5-5',reason:'limit'};
+  f.answer('');
+  panel.send(action);for(let i=0;i<6;i++)await settle();
+  assert.match(f.prompts.at(-1).text,/Move the current task of worker-a \(loop loop-a\) to a new session on claude-opus-5-5\?/);
+  assert.equal(f.prompts.at(-1).options.modal,true);
+  assert.deepEqual(of('worker.result').at(-1),{type:'worker.result',action:'worker.handoff',agentId:'worker-a',cancelled:true});assert.equal(calls.length,0);
+  f.answer(undefined);
+  panel.send(action);for(let i=0;i<6;i++)await settle();
+  assert.deepEqual(f.prompts.at(-1).items,['Provider handoff']);
+  assert.deepEqual(calls.at(-1).slice(0,6),['handoff','/projects/A','worker-a','loop-a','claude-opus-5-5','limit']);
+  assert.match(calls.at(-1)[6],/^control-center:worker-a:loop-a:handoff:\d+$/);
+  assert.deepEqual(of('worker.result').at(-1).result,{id:'handoff-1'});
+  panel.send({type:'supervision.request'});for(let i=0;i<4;i++)await settle();
+  assert.deepEqual(of('supervision.report').at(-1),{type:'supervision.report',report:{verdicts:[{verdict:'stuck'}]}});
+  panel.send({type:'supervision.request'});for(let i=0;i<4;i++)await settle();
+  assert.deepEqual(of('supervision.report').at(-1),{type:'supervision.report',error:'supervise failed'});
+  panel.send({type:'handoff.models.request'});for(let i=0;i<4;i++)await settle();
+  assert.deepEqual(of('handoff.models').at(-1),{type:'handoff.models',models:[{id:'claude-opus-5-5',provider:'claude'}]});
+  windows.dispose();f.windows.dispose();
+});
+
+test('worker display order: saved IDs follow the Human, new workers lead, moves keep one entry per ID', async()=>{
+  const context={};runInNewContext(await readFile(new URL('../../static/js/chat/maestro.js',import.meta.url),'utf8'),context);
+  const {maestroArrange:arrange,maestroReorder:reorder}=context.AgentFactoryChat;
+  const json=value=>JSON.parse(JSON.stringify(value));
+  const workers=['run','twin-a','twin-b','gpt'].map(agentId=>({agentId,model:agentId.startsWith('twin')?'same-model':agentId}));
+  const ids=list=>json(list.map(worker=>worker.agentId));
+  assert.deepEqual(ids(arrange(workers,[])),['run','twin-a','twin-b','gpt'],'No saved order keeps the usual order');
+  assert.deepEqual(ids(arrange(workers,['gpt','twin-b','run','twin-a'])),['gpt','twin-b','run','twin-a']);
+  // A worker without a saved place leads; a stale saved ID is skipped; same-model workers stay distinct by ID.
+  assert.deepEqual(ids(arrange([...workers,{agentId:'new',model:'same-model'}],['stale','gpt','twin-b','run','twin-a'])),['new','gpt','twin-b','run','twin-a']);
+  const group=['run','twin-a','twin-b','gpt'];
+  assert.deepEqual(json(reorder(group,[],'gpt','run',false)),['gpt','run','twin-a','twin-b'],'Back to front');
+  assert.deepEqual(json(reorder(group,[],'run','twin-a',true)),['twin-a','run','twin-b','gpt'],'Into the middle');
+  assert.deepEqual(json(reorder(group,[],'run','gpt',true)),['twin-a','twin-b','gpt','run'],'Front to back');
+  assert.equal(reorder(group,[],'twin-a','twin-a',true),undefined,'Dropped on itself');
+  assert.equal(reorder(group,[],'twin-a','run',true),undefined,'Dropped into its own place');
+  assert.equal(reorder(group,[],'twin-a','elsewhere',true),undefined,'A target outside the group is not a reorder');
+  // Other groups' saved IDs are kept after this group; IDs of workers no longer recorded are dropped; no ID repeats.
+  const next=json(reorder(group,['other-1','gpt','gone','other-2'],'gpt','run',false,['run','twin-a','twin-b','gpt','other-1','other-2']));
+  assert.deepEqual(next,['gpt','run','twin-a','twin-b','other-1','other-2']);
+  assert.equal(new Set(next).size,next.length);
+});
+
+test('worker order message carries unique agent IDs only', async()=>{
+  const {parseClientMessage}=await importTypeScript('src/protocol/validator.ts');
+  assert.deepEqual(parseClientMessage({type:'worker.order',order:['work-a','work-b'],extra:true}),{type:'worker.order',order:['work-a','work-b']});
+  assert.deepEqual(parseClientMessage({type:'worker.order',order:[]}),{type:'worker.order',order:[]});
+  for (const order of [['work-a','work-a'],['../escape'],[1],'work-a',undefined,Array.from({length:10_001},(_,index)=>'work-'+index)]) {
+    assert.equal(parseClientMessage({type:'worker.order',order}),undefined,JSON.stringify(order)?.slice(0,40));
+  }
+});
+
+test('control center saves worker order per project in host storage and restores it on refresh and reopen', async()=>{
+  const values=new Map();let fail=false;const writes=[];
+  const orderStore={get:key=>values.get(key),async update(key,value){if(fail)throw new Error('Fixture storage failure');await settle();writes.push(value);values.set(key,value);}};
+  const {parseClientMessage}=await importTypeScript('src/protocol/validator.ts');
+  const json=value=>JSON.parse(JSON.stringify(value));
+  const f=editorFixture({orderStore});await f.windows.open('/projects/A');const panel=f.panels[0];panel.send({type:'client.ready'});await settle();await settle();
+  const tasks=()=>json(panel.messages.filter(message=>message.type==='project.tasks').at(-1));
+  assert.deepEqual(tasks().workerOrder,[],'No saved order yet');
+  // Two quick drops are written in order; the last one is kept and returned.
+  panel.send(parseClientMessage({type:'worker.order',order:['w-2','w-1']}));
+  panel.send(parseClientMessage({type:'worker.order',order:['w-3','w-2','w-1']}));
+  for (let index=0;index<6;index++) await settle();
+  const results=json(panel.messages.filter(message=>message.type==='worker.order.result'));
+  assert.deepEqual(results,[{type:'worker.order.result',order:['w-2','w-1']},{type:'worker.order.result',order:['w-3','w-2','w-1']}]);
+  assert.deepEqual(json(values.get('agentFactory.controlCenter.workerOrder')),{'/projects/A':['w-3','w-2','w-1']});
+  f.timers[0].callback();await settle();await settle();
+  assert.deepEqual(tasks().workerOrder,['w-3','w-2','w-1'],'A periodic refresh carries the saved order');
+  // A rejected (malformed) message never reaches storage.
+  assert.equal(parseClientMessage({type:'worker.order',order:['w-1','w-1']}),undefined);
+  // A failed write returns the kept order with the error.
+  fail=true;panel.send({type:'worker.order',order:['w-1']});for (let index=0;index<4;index++) await settle();
+  assert.deepEqual(json(panel.messages.at(-1)),{type:'worker.order.result',order:['w-3','w-2','w-1'],error:'Fixture storage failure'});
+  fail=false;
+  // Closing and reopening the tab restores the order; another project has its own (empty) order.
+  panel.dispose();
+  await f.windows.open('/projects/A');const reopened=f.panels.at(-1);reopened.send({type:'client.ready'});await settle();await settle();
+  assert.deepEqual(json(reopened.messages.find(message=>message.type==='project.tasks').workerOrder),['w-3','w-2','w-1']);
+  await f.windows.open('/projects/B');const other=f.panels.at(-1);other.send({type:'client.ready'});await settle();await settle();
+  assert.deepEqual(json(other.messages.find(message=>message.type==='project.tasks').workerOrder),[]);
+  other.send({type:'worker.order',order:['b-1']});for (let index=0;index<4;index++) await settle();
+  assert.deepEqual(json(values.get('agentFactory.controlCenter.workerOrder')),{'/projects/A':['w-3','w-2','w-1'],'/projects/B':['b-1']});
+  // Ordering touches no task, run or domain action.
+  assert.deepEqual(f.actions,[]);
+  f.windows.dispose();
+  // Without host storage the tab is told the order cannot be saved.
+  const bare=editorFixture();await bare.windows.open('/projects/A');bare.panels[0].send({type:'client.ready'});await settle();
+  bare.panels[0].send({type:'worker.order',order:['w-1']});for (let index=0;index<4;index++) await settle();
+  assert.match(bare.panels[0].messages.at(-1).error,/unavailable/);assert.deepEqual(json(bare.panels[0].messages.at(-1).order),[]);
+  bare.windows.dispose();
+});
+
+test('every worker belongs to a real domain: legacy and missing memberships need the Human, recorded names only suggest', async()=>{
+  const context={Intl,Date};runInNewContext(await readFile(new URL('../../static/js/chat/maestro.js',import.meta.url),'utf8'),context);
+  const membership=context.AgentFactoryChat.maestroMembership;
+  const plain=value=>JSON.parse(JSON.stringify(value));
+  const registry={revision:3,domains:[{id:'domain-aaaaaaaaaaaa',name:'Extension UI',aliases:['Extension']},{id:'domain-bbbbbbbbbbbb',name:'Docs',aliases:[]},
+    {id:'domain-cccccccccccc',name:'미분류',provisional:true,aliases:[]}],
+    assignments:{'work-placed':{domainId:'domain-bbbbbbbbbbbb',setBy:{actor:'human'}},'work-null':{domainId:null,setBy:{actor:'human'}},
+      'work-gone':{domainId:'domain-ffffffffffff',setBy:{actor:'ai'}},'work-unnamed':{domainId:'domain-cccccccccccc',setBy:{actor:'human'}}}};
+  assert.deepEqual(plain(membership(registry,'work-placed','Extension')),{state:'placed',domainId:'domain-bbbbbbbbbbbb',name:'Docs',setBy:{actor:'human'}},'A real membership wins over the record');
+  assert.deepEqual(plain(membership(registry,'work-null','Extension')),{state:'required',reason:'legacy-unclassified',suggestion:{domainId:'domain-aaaaaaaaaaaa',name:'Extension UI'}},'Legacy null is not placed; its record only suggests');
+  assert.deepEqual(plain(membership(registry,'work-gone')),{state:'required',reason:'missing-domain'},'A domain ID no longer listed is not a membership');
+  assert.deepEqual(plain(membership(registry,'work-unnamed','미분류')),{state:'required',reason:'unnamed-domain',unnamedDomainId:'domain-cccccccccccc',suggestion:{name:'미분류'}},'A legacy unnamed domain is not a real one');
+  assert.deepEqual(plain(membership(registry,'work-new',' Runtime ')),{state:'required',reason:'missing',suggestion:{name:'Runtime'}},'An unlisted recorded name is offered for creation');
+  assert.deepEqual(plain(membership(registry,'work-new')),{state:'required',reason:'missing'});
+  assert.deepEqual(plain(membership({revision:0,domains:[],assignments:{}},'work-first')),{state:'required',reason:'missing'},'With no domains yet, nothing is placed');
 });

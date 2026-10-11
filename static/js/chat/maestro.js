@@ -25,7 +25,7 @@ globalThis.AgentFactoryChat.maestroStatus = function (entry, task) {
   return "unknown";
 };
 // Worker relationships are keyed by recorded agent IDs, never by model or task title.
-// Current runtime briefs have no domain metadata; they remain unclassified.
+// A brief without domain metadata records no domain name; the worker's membership is the domain list's.
 globalThis.AgentFactoryChat.maestroWorkers = function (entries) {
   return entries.flatMap(entry => entry.tasks.flatMap(task => {
     const agents = new Set([task.workAgentId, task.verificationAgentId,
@@ -91,6 +91,13 @@ globalThis.AgentFactoryChat.maestroWorkerIndex = function (assignments, registry
 globalThis.AgentFactoryChat.maestroPurpose = function (title) {
   const text = String(title || "").replace(/\s+/g, " ").trim();
   if (!text) return "";
+  // "작업 조율 재시험 A: 독립 계산을 실행하고 …" names a series item; the task name is its object plus the item label
+  // ("독립 계산 재시험 A"), so A and B stay distinct. Only applies when the instruction names an object (을/를).
+  const series = text.match(/^(?:[^:：]{0,30}?\s)?(\S+\s+[A-Z0-9]{1,3})\s*[:：]\s*(.+)$/);
+  if (series) {
+    const object = series[2].match(/^([^,.:：]{2,30}?)[을를]\s/);
+    if (object) return object[1].trim() + " " + series[1];
+  }
   const sentences = text.split(/(?<=[.!?。])\s+/).filter(Boolean);
   const narration = sentence => /^(사용자님|The (user|Human)\b)/.test(sentence) && /(셨|했|였|습)니다[.!]?$|\b(asked|approved|requested)\b/.test(sentence);
   let head = sentences.find(sentence => !narration(sentence)) || sentences[0];
@@ -150,6 +157,39 @@ globalThis.AgentFactoryChat.maestroRelative = function (value, now, language) {
   }
   return format.format(0, "second");
 };
+// A worker's membership. Every worker belongs to one real (listed, named) domain; anything else needs the Human to pick
+// one: no entry, the legacy null ("unclassified") entry, a domain ID no longer listed, or a legacy unnamed domain.
+// The name Main recorded on the worker's task is only a suggestion here: it never counts as a membership.
+globalThis.AgentFactoryChat.maestroMembership = function (registry, agentId, recorded) {
+  const domains = registry?.domains || [];
+  const entry = agentId ? registry?.assignments?.[agentId] : undefined;
+  const domain = entry && typeof entry.domainId === "string" ? domains.find(item => item.id === entry.domainId) : undefined;
+  if (domain && !domain.provisional) return { state: "placed", domainId: domain.id, name: domain.name, setBy: entry.setBy };
+  const reason = !entry ? "missing" : entry.domainId === null || entry.domainId === undefined ? "legacy-unclassified" : domain ? "unnamed-domain" : "missing-domain";
+  const name = typeof recorded === "string" ? recorded.trim() : "";
+  const fold = value => value.split(/\s+/).filter(Boolean).join(" ").toLocaleLowerCase();
+  const linked = name && domains.find(item => !item.provisional && [item.name, ...(item.aliases || [])].some(other => fold(other) === fold(name)));
+  return { state: "required", reason, ...(domain ? { unnamedDomainId: domain.id } : {}),
+    ...(linked ? { suggestion: { domainId: linked.id, name: linked.name } } : name ? { suggestion: { name } } : {}) };
+};
+// Display order of a group's workers from the Human's saved order, by agent ID only (never by model or title).
+// Workers without a saved place (new ones) lead in their usual order; the others follow the saved order.
+globalThis.AgentFactoryChat.maestroArrange = function (workers, order) {
+  const place = new Map((Array.isArray(order) ? order : []).map((id, index) => [id, index]));
+  return [...workers.filter(worker => !place.has(worker.agentId)),
+    ...workers.filter(worker => place.has(worker.agentId)).sort((left, right) => place.get(left.agentId) - place.get(right.agentId))];
+};
+// Saved order after moving one worker before or after another worker of the same group. The group's whole shown order is
+// kept so it stays fixed; other saved IDs follow, and IDs of workers no longer recorded are dropped. Nothing moving
+// (dropped on itself or into its own place) returns undefined so nothing is saved.
+globalThis.AgentFactoryChat.maestroReorder = function (group, order, agentId, targetId, after, known) {
+  if (agentId === targetId || !group.includes(agentId) || !group.includes(targetId)) return undefined;
+  const ids = group.filter(id => id !== agentId);
+  ids.splice(ids.indexOf(targetId) + (after ? 1 : 0), 0, agentId);
+  if (ids.every((id, index) => id === group[index])) return undefined;
+  const moved = new Set(ids), recorded = known ? new Set(known) : undefined;
+  return [...ids, ...(Array.isArray(order) ? order : []).filter(id => !moved.has(id) && (!recorded || recorded.has(id)))];
+};
 globalThis.AgentFactoryChat.maestro = function (host) {
   "use strict";
   const { state, t, vscode, persist } = host;
@@ -167,8 +207,15 @@ globalThis.AgentFactoryChat.maestro = function (host) {
   const taskView = document.getElementById("maestro-tasks-view");
   const workerCount = document.getElementById("maestro-workers-count");
   const domainAdd = document.getElementById("maestro-domain-add");
-  // "New domain" creates a real, independent domain right away (provisionally named 미분류); renaming follows.
-  domainAdd?.addEventListener("click", () => sendDomainEdit({ type: "domain.create", placeholder: true }, "create"));
+  // "New domain" asks for the work area's real name first; nothing is created under a placeholder name.
+  domainAdd?.addEventListener("click", () => {
+    domainEditor = { origin: "create", value: "" }; domainEditError = undefined; renderKey = undefined; render();
+    center.querySelector("[data-domain-input=\"create\"]")?.focus();
+  });
+  // A worker placed into a domain that is created for it: the placement follows once the domain exists.
+  let placeAfterCreate;
+  // Supervision report: verdicts of unfinished loops, read once per click (operation_records.py supervise --dry-run).
+  document.getElementById("maestro-supervision")?.addEventListener("click", requestSupervision);
   const statuses = ["running", "verifying", "waiting", "blocked", "decision", "completed", "failed", "cancelled", "unknown"];
   const sections = ["attention", "active", "recent", "earlier"];
   const PROFILE_ROLES = { work: "expert", workLight: "worker", explore: "explorer", scribe: "scribe" };
@@ -178,9 +225,16 @@ globalThis.AgentFactoryChat.maestro = function (host) {
   // Worker actions in flight per worker and type; their errors stay on that worker's detail.
   let workerPending = {}, workerNotice = {};
   let dragWorker;
+  // Order saves still waiting for the host; until they return, a periodic refresh keeps the order shown on screen.
+  let orderPending = 0, orderError;
+  const workerOrder = () => Array.isArray(state.workerOrder) ? state.workerOrder : [];
   const commandDrafts = {};
   const reworkDrafts = {};
-  const domainLabel = item => item.provisional ? item.name + " · " + t("maestro.domainProvisional") : item.name;
+  // Provider handoff: the open form per worker, its typed reason, and the detected models once read.
+  const handoffOpen = {}, handoffDrafts = {};
+  let handoffModels, handoffModelsError;
+  // Supervision report: read on request only; it is not refreshed by the periodic task list.
+  let supervision;
   let renderKey;
   const node = (tag, text, className) => {
     const element = document.createElement(tag);
@@ -235,7 +289,7 @@ globalThis.AgentFactoryChat.maestro = function (host) {
   // Arrow keys walk the visible rows like a list; Enter/Space keep the native button activation.
   list.addEventListener("keydown", event => {
     if (!["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) return;
-    const items = [...list.querySelectorAll(".maestro-row:not(.maestro-worker-row), .maestro-worker-select, .maestro-history-button, .maestro-worker-work button, .maestro-card, .maestro-section-toggle")];
+    const items = [...list.querySelectorAll(".maestro-row:not(.maestro-worker-row), .maestro-worker-model, .maestro-worker-select, .maestro-history-button, .maestro-worker-remove, .maestro-worker-work button, .maestro-card, .maestro-section-toggle")].filter(item => !item.disabled);
     const index = items.indexOf(document.activeElement);
     if (index < 0) return;
     event.preventDefault();
@@ -262,12 +316,14 @@ globalThis.AgentFactoryChat.maestro = function (host) {
     const origin = domainEdit?.origin;
     domainEdit = undefined;
     domainEditError = message.error ? { origin, text: message.code === "domain_name_taken" ? t("maestro.domainTaken")
-      : message.code === "domain_conflict" ? t("maestro.domainConflict") : t("maestro.domainFailed", message.error) } : undefined;
+      : message.code === "domain_conflict" ? t("maestro.domainConflict") : message.code === "domain_name_reserved" ? t("maestro.domainReserved")
+        : message.code === "domain_membership_required" || message.code === "domain_name_required" ? t("maestro.membershipRequiredError")
+          : t("maestro.domainFailed", message.error) } : undefined;
     if (!message.error) domainEditor = undefined;
-    // A new domain opens its rename field at once; cancelling it keeps the created domain.
-    if (!message.error && origin === "create" && message.domainId) {
-      domainEditor = { origin: "rename:" + message.domainId };
-      domainFocus = domainEditor.origin;
+    // A domain created for a worker: place it once the refreshed list (with its revision) shows the new domain.
+    if (placeAfterCreate?.origin === origin) {
+      if (message.error || !message.domainId) placeAfterCreate = undefined;
+      else placeAfterCreate = { ...placeAfterCreate, domainId: message.domainId };
     }
     renderKey = undefined; render();
     if (message.error && origin) center.querySelector("[data-domain-input=\"" + origin + "\"]")?.focus();
@@ -306,11 +362,41 @@ globalThis.AgentFactoryChat.maestro = function (host) {
     return form;
   }
   function receive(message) {
+    if (Array.isArray(message.workerOrder) && !orderPending) state.workerOrder = message.workerOrder;
+    const pendingPlace = placeAfterCreate;
+    if (pendingPlace?.domainId && !domainEdit && registry()?.domains.some(item => item.id === pendingPlace.domainId)) {
+      placeAfterCreate = undefined;
+      sendDomainEdit({ type: "domain.assign", agentId: pendingPlace.agentId, domainId: pendingPlace.domainId }, pendingPlace.origin);
+    }
     loading = false;
     error = message.error;
     observedAt = error ? observedAt : Date.now();
     renderKey = undefined;
     render();
+  }
+  // Reordering changes only the display order: selection, drafts, runs and domains stay keyed by agent ID.
+  function saveWorkerOrder(order, focusId) {
+    state.workerOrder = order;
+    orderError = undefined;
+    orderPending += 1;
+    vscode.postMessage({ type: "worker.order", order });
+    persist(false);
+    renderKey = undefined; render();
+    if (focusId) list.querySelector("[data-reorder-worker=\"" + CSS.escape(focusId) + "\"]")?.focus();
+  }
+  function workerOrderResult(message) {
+    orderPending = Math.max(0, orderPending - 1);
+    // The last answer is what the host keeps; a failed save shows the kept order with its error.
+    if (!orderPending && Array.isArray(message.order)) state.workerOrder = message.order;
+    orderError = message.error ? t("maestro.orderFailed", message.error) : undefined;
+    persist(false);
+    renderKey = undefined; render();
+  }
+  function clearReorderMarks() {
+    for (const target of list.querySelectorAll(".is-reorder-target, .is-drag-source")) {
+      target.classList.remove("is-reorder-target", "is-drag-source");
+      delete target.dataset.dropPosition;
+    }
   }
   function returnToList() {
     state.centerDetailOpen = false;
@@ -531,6 +617,42 @@ globalThis.AgentFactoryChat.maestro = function (host) {
     vscode.postMessage(message);
     renderKey = undefined; render();
   }
+  // The membership menu of one worker: only listed, named domains. A worker still needing one starts on a disabled
+  // "choose" entry, so nothing is placed until the Human picks; a recorded but unlisted name can be created and used.
+  function membershipSelect(agentId, membership, origin) {
+    const select = node("select");
+    select.dataset.domainAssign = agentId;
+    select.setAttribute("aria-label", t("maestro.domainMembership", agentId));
+    if (membership.state !== "placed") {
+      const choose = node("option", t("maestro.membershipChoose")); choose.value = ""; choose.disabled = true; select.append(choose);
+    }
+    const suggested = membership.suggestion?.domainId;
+    for (const item of registry().domains.filter(item => !item.provisional).sort((left, right) => left.name.localeCompare(right.name))) {
+      const option = node("option", item.id === suggested ? t("maestro.membershipRecordedOption", item.name) : item.name);
+      option.value = item.id; select.append(option);
+    }
+    if (membership.suggestion && !suggested) {
+      const option = node("option", t("maestro.membershipCreate", membership.suggestion.name));
+      option.value = "create:" + membership.suggestion.name; select.append(option);
+    }
+    select.value = membership.state === "placed" ? membership.domainId : "";
+    select.disabled = Boolean(domainEdit) || Boolean(placeAfterCreate);
+    select.addEventListener("change", () => {
+      if (!select.value) return;
+      if (select.value.startsWith("create:")) {
+        placeAfterCreate = { agentId, origin };
+        sendDomainEdit({ type: "domain.create", name: select.value.slice(7) }, origin);
+      } else sendDomainEdit({ type: "domain.assign", agentId, domainId: select.value }, origin);
+    });
+    const wrap = node("span", undefined, "maestro-select");
+    wrap.append(select, icon("M4 6l4 4 4-4"));
+    return wrap;
+  }
+  const recordedDomain = rows => rows.map(value => value.task?.domain).find(value => typeof value === "string" && value.trim()) || "";
+  function membershipNote(membership) {
+    if (membership.state === "placed") return "";
+    return t("maestro.membershipReason." + membership.reason) + (membership.suggestion ? " · " + t("maestro.domainRecorded", membership.suggestion.name) : "");
+  }
   function renderWorkerDetail(worker, removed) {
     detail.replaceChildren();
     delete detail.dataset.workflowId; delete detail.dataset.taskId;
@@ -555,28 +677,19 @@ globalThis.AgentFactoryChat.maestro = function (host) {
     if (removed[worker.agentId]) detail.append(node("p", t("maestro.removedWorker"), "maestro-freshness"));
     // Domain membership and the two lifecycle actions; removal waits until nothing runs.
     const facts = node("dl", undefined, "maestro-facts");
+    const membership = registry() ? app.maestroMembership(registry(), worker.agentId, recordedDomain(worker.rows)) : undefined;
     const resolved = app.maestroDomain(registry(), worker.agentId, worker.latest.task);
-    const domainField = field(facts, t("maestro.domain"), resolved.name || t("maestro.unclassified"));
+    const domainField = field(facts, t("maestro.domain"), membership ? membership.name || t("maestro.membershipRequired") : resolved.name || t("maestro.membershipUnknown"));
     domainField.classList.add("maestro-domain-field");
-    if (editable()) {
-      domainField.replaceChildren();
-      const select = node("select");
-      select.dataset.domainAssign = worker.agentId;
-      select.setAttribute("aria-label", t("maestro.domainMembership", worker.agentId));
-      for (const [value, label] of [["", t("maestro.unclassified")], ...registry().domains.map(item => [item.id, domainLabel(item)])]) {
-        const option = node("option", label); option.value = value; select.append(option);
-      }
-      select.value = resolved.domainId || "";
-      select.disabled = Boolean(domainEdit);
-      select.addEventListener("change", () => sendDomainEdit({ type: "domain.assign", agentId: worker.agentId, domainId: select.value || null }, "assign"));
-      const wrap = node("span", undefined, "maestro-select");
-      wrap.append(select, icon("M4 6l4 4 4-4"));
-      domainField.append(wrap);
+    if (membership && editable()) {
+      domainField.replaceChildren(membershipSelect(worker.agentId, membership, "assign"));
       if (domainEditError?.origin === "assign") { const problem = node("span", domainEditError.text, "maestro-error"); problem.setAttribute("role", "alert"); domainField.append(problem); }
     }
-    const basis = resolved.basis === "membership" ? changeLabel(resolved.setBy) : resolved.basis === "allocation" ? t("maestro.domainRecorded", resolved.recorded) : "";
-    if (basis) domainField.append(node("span", basis, "maestro-domain-basis"));
-    if (resolved.basis === "membership" && worker.latest.task.domain) domainField.append(node("span", t("maestro.domainRecorded", worker.latest.task.domain), "maestro-domain-basis"));
+    if (membership?.state === "placed") {
+      if (changeLabel(membership.setBy)) domainField.append(node("span", changeLabel(membership.setBy), "maestro-domain-basis"));
+      if (worker.latest.task.domain) domainField.append(node("span", t("maestro.domainRecorded", worker.latest.task.domain), "maestro-domain-basis"));
+    } else if (membership) domainField.append(node("span", membershipNote(membership), "maestro-domain-basis maestro-membership-note"));
+    else if (resolved.basis === "allocation") domainField.append(node("span", t("maestro.domainRecorded", resolved.recorded), "maestro-domain-basis"));
     detail.append(facts);
     const actions = node("div", undefined, "maestro-actions");
     const removing = pending("worker.remove");
@@ -584,13 +697,24 @@ globalThis.AgentFactoryChat.maestro = function (host) {
     remove.disabled = Boolean(removing) || worker.active.length > 0 || !editable() || Boolean(removed[worker.agentId]);
     if (worker.active.length) remove.title = t("maestro.removeBlocked");
     actions.append(remove);
-    // Provider handoff (Brief A) has no host command yet: the place is kept, the action stays unavailable and says why.
-    const handoff = button(t("maestro.providerSwitch"), () => {}, "maestro-button");
-    handoff.dataset.pendingCommand = "provider-switch";
-    handoff.setAttribute("aria-disabled", "true");
-    handoff.title = t("maestro.providerSwitchPending");
+    // Provider handoff: only a loop of this worker that has not ended can move to a new session.
+    const movable = [...new Map(worker.rows.filter(value => value.entry.loopId && value.entry.workAgentId
+      && !["completed", "cancelled"].includes(value.entry.status) && (value.task.workAgentId || value.entry.workAgentId) === worker.agentId)
+      .map(value => [value.entry.loopId, value])).values()];
+    const handing = pending("worker.handoff") || movable.map(value => workerPending[value.entry.workAgentId + "/worker.handoff"]).find(Boolean);
+    const handoff = button(t(handing ? "maestro.handoffing" : "maestro.providerSwitch"), () => {
+      handoffOpen[worker.agentId] = !handoffOpen[worker.agentId];
+      if (handoffOpen[worker.agentId] && !handoffModels) vscode.postMessage({ type: "handoff.models.request" });
+      renderKey = undefined; render();
+      detail.querySelector("#maestro-handoff-model")?.focus();
+    }, "maestro-button");
+    handoff.dataset.handoffWorker = worker.agentId;
+    handoff.setAttribute("aria-expanded", String(Boolean(handoffOpen[worker.agentId])));
+    handoff.disabled = Boolean(handing) || !movable.length || Boolean(removed[worker.agentId]);
+    if (!movable.length) handoff.title = t("maestro.handoffNone");
     actions.append(handoff);
     detail.append(actions);
+    if (handoffOpen[worker.agentId] && movable.length) detail.append(handoffForm(worker, movable, Boolean(handing)));
     if (workerNotice[worker.agentId]) { const notice = node("p", workerNotice[worker.agentId], "maestro-error maestro-worker-notice"); notice.setAttribute("role", "alert"); detail.append(notice); }
     if (worker.active.length) detail.append(node("p", t("maestro.removeBlocked"), "maestro-freshness"));
     // Instruction to the worker: added to its running task, or a new task in the same session when it is idle.
@@ -642,7 +766,12 @@ globalThis.AgentFactoryChat.maestro = function (host) {
     history.append(node("h3", t("maestro.workerTasks")));
     const tasks = node("div", undefined, "maestro-links maestro-worker-tasks");
     // Running tasks are listed once, above; the history holds the rest, newest first.
-    for (const value of worker.rows.filter(row => !worker.active.includes(row))) tasks.append(workerTaskButton(worker, value));
+    // Each entry: the task (time and state) and that exact run's work request and report.
+    for (const value of worker.rows.filter(row => !worker.active.includes(row))) {
+      const entry = node("div", undefined, "maestro-worker-history-item");
+      entry.append(workerTaskButton(worker, value), workerDocuments(worker, value, value.task.runs?.find(run => run.agentId === worker.agentId && run.runId === value.run?.runId) || value.run));
+      tasks.append(entry);
+    }
     if (!tasks.children.length) tasks.append(node("p", t("maestro.noWorkerTasks"), "maestro-text"));
     history.append(tasks);
     detail.append(history);
@@ -656,6 +785,77 @@ globalThis.AgentFactoryChat.maestro = function (host) {
     if (!items.children.length) items.append(node("li", t("maestro.none"), "maestro-text"));
     commands.append(items);
     detail.append(commands);
+    const moves = handoffRecords(worker.agentId);
+    if (moves) detail.append(moves);
+  }
+  // Handoff form: the task (when several can move), a detected model other than the current one, and the reason.
+  function handoffForm(worker, movable, busy) {
+    const form = node("form", undefined, "maestro-command-form maestro-handoff-form");
+    form.append(node("h4", t("maestro.handoffTitle")));
+    const choice = (id, label, options, value) => {
+      const field = node("label", label, "maestro-command-label");
+      const select = node("select");
+      select.id = id; field.htmlFor = id;
+      for (const [optionValue, text] of options) { const option = node("option", text); option.value = optionValue; select.append(option); }
+      if (value !== undefined) select.value = value;
+      const wrap = node("span", undefined, "maestro-select");
+      wrap.append(select, icon("M4 6l4 4 4-4"));
+      form.append(field, wrap);
+      return select;
+    };
+    const draft = handoffDrafts[worker.agentId] || {};
+    const loop = choice("maestro-handoff-task", t("maestro.handoffTask"), movable.map(value => [value.entry.loopId, (value.task.title || value.task.id) + " · " + stateLabel(value.status)]), draft.loopId);
+    const models = (handoffModels || []).filter(model => model.id !== worker.model);
+    const model = choice("maestro-handoff-model", t("maestro.handoffModel"),
+      models.length ? models.map(item => [item.id, item.id + " · " + item.provider]) : [["", t(handoffModels ? "maestro.handoffNoModels" : "maestro.handoffModelsLoading")]], draft.model);
+    const reasonLabel = node("label", t("maestro.handoffReason"), "maestro-command-label");
+    const reason = node("textarea");
+    reason.id = "maestro-handoff-reason"; reasonLabel.htmlFor = reason.id;
+    reason.rows = 2; reason.maxLength = 2000; reason.placeholder = t("maestro.handoffReasonPlaceholder");
+    reason.value = draft.reason || "";
+    const keep = () => { handoffDrafts[worker.agentId] = { loopId: loop.value, model: model.value, reason: reason.value }; };
+    for (const element of [loop, model, reason]) element.addEventListener("input", keep);
+    const send = button(t(busy ? "maestro.handoffing" : "maestro.handoffSend"), () => {}, "maestro-button is-primary");
+    send.type = "submit";
+    loop.disabled = model.disabled = reason.disabled = send.disabled = busy || !models.length;
+    form.append(reasonLabel, reason);
+    if (handoffModelsError) { const problem = node("p", t("maestro.handoffModelsFailed", handoffModelsError), "maestro-error"); problem.setAttribute("role", "alert"); form.append(problem); }
+    form.append(node("p", t("maestro.handoffNote"), "maestro-freshness maestro-command-target"), send);
+    form.addEventListener("submit", event => {
+      event.preventDefault();
+      const target = movable.find(value => value.entry.loopId === loop.value);
+      if (!target || !model.value || !reason.value.trim() || send.disabled) { if (!reason.value.trim()) reason.focus(); return; }
+      keep();
+      workerAction({ type: "worker.handoff", agentId: target.entry.workAgentId, loopId: target.entry.loopId, toModel: model.value, reason: reason.value.trim() });
+    });
+    return form;
+  }
+  // Recorded handoffs from or to this worker, newest first: models, providers, the new session, reason and time.
+  function handoffRecords(agentId) {
+    const records = (state.projectTasks || []).flatMap(entry => (entry.handoffs || []).map(record => ({ ...record, entry })))
+      .filter(record => record.fromAgentId === agentId || record.toAgentId === agentId)
+      .sort((left, right) => String(right.createdAt || "").localeCompare(String(left.createdAt || "")));
+    if (!records.length) return undefined;
+    const section = node("section", undefined, "maestro-block maestro-handoffs");
+    section.append(node("h3", t("maestro.handoffs")));
+    const items = node("ul", undefined, "maestro-commands");
+    for (const record of records) {
+      const item = node("li", undefined, "maestro-command");
+      item.dataset.handoffId = record.id;
+      const meta = node("div", undefined, "maestro-command-meta");
+      meta.append(node("span", t(record.fromAgentId === agentId ? "maestro.handoffOut" : "maestro.handoffIn"), "maestro-command-kind"),
+        node("span", t(record.actor === "human" ? "maestro.senderHuman" : record.actor === "main" ? "maestro.senderMain" : "maestro.senderUnknown")),
+        timeLabel(undefined, record.createdAt));
+      const task = record.entry.tasks?.find(value => value.id === record.taskId);
+      item.append(meta,
+        node("p", t("maestro.handoffLine", [record.fromModel || t("maestro.modelUnrecorded"), record.fromProvider].filter(Boolean).join(" · "),
+          [record.toModel || t("maestro.modelUnrecorded"), record.toProvider].filter(Boolean).join(" · ")), "maestro-text"),
+        node("p", [task?.title || record.taskId, record.fromAgentId + " → " + record.toAgentId].filter(Boolean).join(" · "), "maestro-identity"));
+      if (record.reason) item.append(node("pre", record.reason, "maestro-command-text"));
+      items.append(item);
+    }
+    section.append(items);
+    return section;
   }
   function workerTaskButton(worker, value) {
     const item = button("", () => select(value.entry, value.task, worker.agentId), "maestro-worker-task");
@@ -682,6 +882,10 @@ globalThis.AgentFactoryChat.maestro = function (host) {
       persist(false);
     }
     if (message.action === "worker.remove" && !message.error && !message.cancelled && state.centerSelection?.agentId === message.agentId) state.centerDetailOpen = false;
+    // A completed handoff closes its form; the recorded handoff arrives with the next task refresh.
+    if (message.action === "worker.handoff" && !message.error && !message.cancelled) {
+      for (const agentId of Object.keys(handoffOpen)) if (handoffDrafts[agentId]?.loopId === sent?.loopId || agentId === message.agentId) { handoffOpen[agentId] = false; handoffDrafts[agentId] = undefined; }
+    }
     renderKey = undefined; render();
     return sent;
   }
@@ -784,32 +988,21 @@ globalThis.AgentFactoryChat.maestro = function (host) {
     const facts = node("dl", undefined, "maestro-facts");
     if (workers) field(facts, t("maestro.workers"), selectedAgent, "maestro-identity");
     const placedAgent = selectedAgent || run?.agentId || task.workAgentId;
+    const membership = placedAgent && registry() ? app.maestroMembership(registry(), placedAgent, task.domain) : undefined;
     const resolved = app.maestroDomain(registry(), placedAgent, task);
-    const domainField = field(facts, t("maestro.domain"), resolved.name || t("maestro.unclassified"));
+    const domainField = field(facts, t("maestro.domain"), membership ? membership.name || t("maestro.membershipRequired") : resolved.name || t("maestro.membershipUnknown"));
     domainField.classList.add("maestro-domain-field");
     // The worker's membership is editable; the accepted allocation name stays as recorded evidence.
-    if (placedAgent && editable()) {
-      domainField.replaceChildren();
-      const select = node("select");
-      select.dataset.domainAssign = placedAgent;
-      select.setAttribute("aria-label", t("maestro.domainMembership", placedAgent));
-      for (const [value, label] of [["", t("maestro.unclassified")], ...registry().domains.map(domain => [domain.id, domainLabel(domain)])]) {
-        const option = node("option", label); option.value = value; select.append(option);
-      }
-      select.value = resolved.domainId || "";
-      select.disabled = Boolean(domainEdit);
-      select.addEventListener("change", () => sendDomainEdit({ type: "domain.assign", agentId: placedAgent, domainId: select.value || null }, "assign"));
-      const wrap = node("span", undefined, "maestro-select");
-      const chevron = icon("M4 6l4 4 4-4");
-      wrap.append(select, chevron);
-      domainField.append(wrap);
+    if (membership && editable()) {
+      domainField.replaceChildren(membershipSelect(placedAgent, membership, "assign"));
       if (domainEditError?.origin === "assign") { const problem = node("span", domainEditError.text, "maestro-error"); problem.setAttribute("role", "alert"); domainField.append(problem); }
     }
-    const basis = resolved.basis === "membership" ? changeLabel(resolved.setBy)
-      : resolved.basis === "allocation" ? t("maestro.domainRecorded", resolved.recorded) : "";
-    if (basis) domainField.append(node("span", basis, "maestro-domain-basis"));
-    // The accepted allocation keeps Main's name; a changed membership does not rewrite that evidence.
-    if (resolved.basis === "membership" && task.domain) domainField.append(node("span", t("maestro.domainRecorded", task.domain), "maestro-domain-basis"));
+    if (membership?.state === "placed") {
+      if (changeLabel(membership.setBy)) domainField.append(node("span", changeLabel(membership.setBy), "maestro-domain-basis"));
+      // The accepted allocation keeps Main's name; a changed membership does not rewrite that evidence.
+      if (task.domain) domainField.append(node("span", t("maestro.domainRecorded", task.domain), "maestro-domain-basis"));
+    } else if (membership) domainField.append(node("span", membershipNote(membership), "maestro-domain-basis maestro-membership-note"));
+    else if (resolved.basis === "allocation") domainField.append(node("span", t("maestro.domainRecorded", resolved.recorded), "maestro-domain-basis"));
     field(facts, t("maestro.workState"), stateLabel(task.workStatus));
     field(facts, t("maestro.verificationState"), verificationLabel(task));
     field(facts, t("maestro.integrationState"), integrationSummary(task));
@@ -873,48 +1066,91 @@ globalThis.AgentFactoryChat.maestro = function (host) {
   // Worker row: identity first, then the latest task's title as its summary, with the worker's most urgent state.
   // One row per worker, four columns: worker | title (its latest task) | that task's state | task history.
   // The row is not a button: it holds two controls, the worker (opens its detail) and the history button.
-  function workerRowFor(worker, selected) {
+  function workerRowFor(worker, selected, place) {
     const item = node("div", undefined, "maestro-row maestro-worker-row");
     item.dataset.centerWorker = worker.agentId;
     item.setAttribute("role", "row");
     item.addEventListener("click", event => { if (!event.target.closest("button")) selectWorker(worker.agentId); });
     // Drag moves the whole worker (its membership only) to another domain; the detail's domain menu is the keyboard path.
-    // While searching or filtering some groups are hidden, so dragging waits until the full list is shown.
-    if (editable()) {
-      const filteredList = Boolean(state.centerFilter?.search || state.centerFilter?.status || state.centerFilter?.scope || state.centerFilter?.domain);
-      item.draggable = !filteredList && !domainEdit;
-      item.dataset.dragState = filteredList ? "filtered" : domainEdit ? "saving" : "ready";
-      if (filteredList) item.title = t("maestro.dragFiltered");
-      item.addEventListener("dragstart", event => {
-        dragWorker = { agentId: worker.agentId, from: worker.domain || "" };
-        event.dataTransfer.effectAllowed = "move";
-        event.dataTransfer.setData("application/x-agent-factory-worker", worker.agentId);
-        event.dataTransfer.setData("text/plain", worker.agentId);
-        list.classList.add("is-dragging");
-      });
-      item.addEventListener("dragend", () => { dragWorker = undefined; list.classList.remove("is-dragging"); for (const target of list.querySelectorAll(".is-drop-target")) target.classList.remove("is-drop-target"); });
-    }
+    // Dropped on another worker of its own group, it takes that place instead (order only; the handle's arrow keys do
+    // the same). While searching or filtering some workers are hidden, so dragging waits until the full list is shown.
+    const filteredList = Boolean(state.centerFilter?.search || state.centerFilter?.status || state.centerFilter?.scope || state.centerFilter?.domain);
+    item.draggable = !filteredList && !domainEdit;
+    item.dataset.dragState = filteredList ? "filtered" : domainEdit ? "saving" : "ready";
+    if (filteredList) item.title = t("maestro.dragFiltered");
+    item.addEventListener("dragstart", event => {
+      dragWorker = { agentId: worker.agentId, from: worker.domain || "" };
+      event.dataTransfer.effectAllowed = "move";
+      event.dataTransfer.setData("application/x-agent-factory-worker", worker.agentId);
+      event.dataTransfer.setData("text/plain", worker.agentId);
+      list.classList.add("is-dragging");
+      item.classList.add("is-drag-source");
+    });
+    // Ending without a drop (Escape, or released outside a target) changes nothing.
+    item.addEventListener("dragend", () => { dragWorker = undefined; list.classList.remove("is-dragging"); clearReorderMarks(); for (const target of list.querySelectorAll(".is-drop-target")) target.classList.remove("is-drop-target"); });
+    const sameGroup = () => dragWorker && dragWorker.from === (worker.domain || "") && place?.group.includes(dragWorker.agentId);
+    item.addEventListener("dragover", event => {
+      if (!sameGroup()) return;
+      if (dragWorker.agentId === worker.agentId) { event.preventDefault(); event.dataTransfer.dropEffect = "none"; clearReorderMarks(); item.classList.add("is-drag-source"); return; }
+      event.preventDefault();
+      event.dataTransfer.dropEffect = "move";
+      const box = item.getBoundingClientRect();
+      const position = event.clientY > box.top + box.height / 2 ? "after" : "before";
+      if (item.dataset.dropPosition === position) return;
+      for (const other of list.querySelectorAll(".is-reorder-target")) if (other !== item) { other.classList.remove("is-reorder-target"); delete other.dataset.dropPosition; }
+      item.classList.add("is-reorder-target");
+      item.dataset.dropPosition = position;
+    });
+    item.addEventListener("dragleave", event => {
+      if (item.contains(event.relatedTarget)) return;
+      item.classList.remove("is-reorder-target");
+      delete item.dataset.dropPosition;
+    });
+    item.addEventListener("drop", event => {
+      if (!sameGroup()) return;
+      event.preventDefault();
+      const moving = dragWorker, after = item.dataset.dropPosition === "after";
+      dragWorker = undefined; list.classList.remove("is-dragging"); clearReorderMarks();
+      const next = app.maestroReorder(place.group, workerOrder(), moving.agentId, worker.agentId, after, place.known);
+      if (next) saveWorkerOrder(next);
+    });
     // The worker stays marked while its detail or one of its tasks is open.
     item.setAttribute("aria-current", String(Boolean(selected?.agentId === worker.agentId && state.centerDetailOpen !== false)));
     if (worker.active.length) item.dataset.running = "true";
-    // Column 1: the worker, named by the model that runs it; the agent ID stays the link key and shows on hover/in detail.
+    // Column 1: the worker, named by the model that runs it. Clicking the model opens that worker's own session (the same
+    // "run" open the task detail uses), bound to its exact agent/run; the agent ID stays the link key, on hover and in detail.
     const who = node("span", undefined, "maestro-worker-cell");
     who.setAttribute("role", "cell");
     const label = workerName(worker);
-    const name = button(label + (worker.duplicate ? " · " + worker.duplicate : ""), () => selectWorker(worker.agentId),
-      "maestro-row-title maestro-worker-select" + (worker.model ? "" : " is-unset"));
-    name.dataset.selectWorker = worker.agentId;
-    name.title = label + " · " + worker.agentId;
-    name.setAttribute("aria-label", label + " · " + worker.agentId);
+    // The session to open: the worker's most urgent open task with a run (running before waiting), else its latest.
+    const session = worker.current.find(value => value.run) || worker.latest;
+    const sessionRun = session.task.runs?.find(run => run.agentId === worker.agentId && run.runId === session.run?.runId) || session.run;
+    const name = button(label + (worker.duplicate ? " · " + worker.duplicate : ""), () => openMessage(session.entry, session.task, "run", sessionRun),
+      "maestro-row-title maestro-worker-model" + (worker.model ? "" : " is-unset"));
+    name.dataset.openSession = worker.agentId;
+    if (sessionRun) name.dataset.sessionRun = sessionRun.runId;
+    // The host opens a session only through the recorded Main conversation; without it or a run the model says why.
+    name.disabled = !sessionRun || !session.entry.mainAgentId;
+    const sessionTitle = !sessionRun ? t("maestro.sessionNoRun") : !session.entry.mainAgentId ? t("maestro.sessionNoMain") : t("maestro.openModelSession");
+    // The same small "open" glyph the Main task flow uses for session links marks the model as clickable.
+    name.replaceChildren(node("span", name.textContent, "maestro-model-label"));
+    if (!name.disabled) { const glyph = icon("M6 3H3.5A.5.5 0 0 0 3 3.5v9a.5.5 0 0 0 .5.5h9a.5.5 0 0 0 .5-.5V10M9 3h4v4M13 3 7.5 8.5"); glyph.classList.add("maestro-open-glyph"); name.append(glyph); }
+    name.title = sessionTitle + " · " + worker.agentId + (sessionRun ? "/" + sessionRun.runId : "");
+    name.setAttribute("aria-label", sessionTitle + " · " + label + " · " + worker.agentId);
     // The recorded role (worker/expert/…) is read first, before the model; it is never guessed from the model.
     who.append(roleBadge(worker.run, worker.latest.task, worker.agentId), name);
     // Column 2: what the worker was assigned for — its first assignment, under the narrower work area when one is recorded.
+    // The title opens the worker's detail (history, commands, domain, removal).
     const title = node("span", undefined, "maestro-worker-title" + (worker.purpose ? "" : " is-empty"));
     title.setAttribute("role", "cell");
-    if (worker.responsibility) title.append(node("span", worker.responsibility, "maestro-worker-area"));
-    title.append(node("span", worker.purposeShort || t("maestro.purposeUnset"), "maestro-worker-purpose"));
+    const select = button("", () => selectWorker(worker.agentId), "maestro-worker-select");
+    select.dataset.selectWorker = worker.agentId;
+    if (worker.responsibility) select.append(node("span", worker.responsibility, "maestro-worker-area"));
+    select.append(node("span", worker.purposeShort || t("maestro.purposeUnset"), "maestro-worker-purpose"));
+    select.setAttribute("aria-label", t("maestro.openWorker", label + " · " + worker.agentId, worker.purposeShort || t("maestro.purposeUnset")));
     title.title = [worker.responsibility, worker.purpose || t("maestro.purposeUnset"),
       worker.purposeReason && t("maestro.purposeReason", worker.purposeReason)].filter(Boolean).join("\n");
+    title.append(select);
     // Column 3: the worker's state now — its most urgent open task, otherwise its latest task's end state.
     const status = node("span", undefined, "maestro-worker-status");
     status.setAttribute("role", "cell");
@@ -928,31 +1164,97 @@ globalThis.AgentFactoryChat.maestro = function (host) {
     const history = button(t("maestro.historyCount", worker.rows.length), () => selectWorker(worker.agentId, "history"), "maestro-button maestro-history-button");
     history.dataset.historyWorker = worker.agentId;
     history.setAttribute("aria-label", t("maestro.historyOpen", label + " · " + worker.agentId, worker.rows.length));
-    historyCell.append(history);
+    // Removal is the same logical removal as the detail's (host confirms; blocked while anything runs; records kept).
+    const removing = workerPending[worker.agentId + "/worker.remove"];
+    const remove = button("", () => workerAction({ type: "worker.remove", agentId: worker.agentId, revision: registry().revision }), "maestro-icon-button maestro-worker-remove");
+    remove.append(icon("M3 4.5h10M6.5 4.5V3h3v1.5M4.5 4.5l.6 8.5h5.8l.6-8.5M7 7v4M9 7v4"));
+    remove.dataset.removeWorker = worker.agentId;
+    remove.disabled = Boolean(removing) || worker.active.length > 0 || !editable() || Boolean(worker.removed);
+    const removeTitle = worker.active.length ? t("maestro.removeBlocked") : !editable() ? t("maestro.removeUnavailable") : t(removing ? "maestro.removing" : "maestro.removeWorker");
+    remove.title = removeTitle;
+    remove.setAttribute("aria-label", removeTitle + " · " + label + " · " + worker.agentId);
+    // The handle ends the row so the role → model reading order stays first. It names what moves and is the keyboard
+    // path: ↑/↓ move the worker one place within its group.
+    const grip = button("", () => {}, "maestro-icon-button maestro-worker-grip");
+    grip.dataset.reorderWorker = worker.agentId;
+    grip.append(icon("M6 4h.01M10 4h.01M6 8h.01M10 8h.01M6 12h.01M10 12h.01"));
+    const position = place ? place.group.indexOf(worker.agentId) : -1;
+    const gripLabel = filteredList ? t("maestro.dragFiltered") : t("maestro.reorderWorker", label + " · " + worker.agentId, position + 1, place?.group.length || 1);
+    grip.title = gripLabel; grip.setAttribute("aria-label", gripLabel);
+    grip.disabled = filteredList || !place || place.group.length < 2;
+    grip.addEventListener("keydown", event => {
+      if (!["ArrowUp", "ArrowDown"].includes(event.key) || event.altKey || event.ctrlKey || event.metaKey) return;
+      event.preventDefault(); event.stopPropagation();
+      const down = event.key === "ArrowDown";
+      const target = place.group[position + (down ? 1 : -1)];
+      const next = target && app.maestroReorder(place.group, workerOrder(), worker.agentId, target, down, place.known);
+      if (next) saveWorkerOrder(next, worker.agentId);
+    });
+    historyCell.append(history, remove, grip);
     item.append(who, title, status, historyCell);
     const work = workerWork(worker);
     if (work) item.append(work);
+    // A worker without a real domain says why and offers the listed domains (or its recorded name to create).
+    if (worker.membership?.state === "required") {
+      const need = node("div", undefined, "maestro-worker-membership");
+      need.dataset.membershipWorker = worker.agentId;
+      need.append(node("span", membershipNote(worker.membership), "maestro-membership-note"));
+      if (editable()) need.append(membershipSelect(worker.agentId, worker.membership, "member:" + worker.agentId));
+      if (domainEditError?.origin === "member:" + worker.agentId) { const problem = node("span", domainEditError.text, "maestro-error"); problem.setAttribute("role", "alert"); need.append(problem); }
+      item.append(need);
+    }
     return item;
   }
   function workerName(worker) {
     return worker.model || (worker.provider ? t("maestro.providerDefault", worker.provider) : t("maestro.modelUnrecorded"));
   }
-  // One compact line under the row. Completed work shows "Result · <its first result sentence>"; the task and its state are
-  // already the row's title and status, so they are not repeated. Open tasks other than the row's own are listed one
-  // line each with their state. A result from an earlier task names that task, so it never reads as the current work.
+  // Work request (request.md) and work report (result.md) of one exact agent/run, by name; a missing one says so.
+  function workerDocuments(worker, value, run) {
+    const documents = node("span", undefined, "maestro-worker-docs");
+    for (const kind of ["request", "result"]) {
+      const recorded = run?.[kind]?.availability === "recorded";
+      const name = t(kind === "request" ? "maestro.requestDoc" : "maestro.reportDoc");
+      if (recorded) {
+        const open = button(name, () => openMessage(value.entry, value.task, kind, run), "maestro-link maestro-worker-doc");
+        open.dataset.document = kind;
+        open.dataset.documentRun = run.agentId + "/" + run.runId;
+        open.title = t(kind === "request" ? "maestro.openRequest" : "maestro.openReport") + " · " + run.agentId + "/" + run.runId;
+        open.setAttribute("aria-label", t(kind === "request" ? "maestro.openRequest" : "maestro.openReport") + " · " + (value.task.title || value.task.id));
+        documents.append(open);
+      } else {
+        // A report not yet written by an open task is "not yet"; otherwise the document is honestly missing.
+        const pending = kind === "result" && ["running", "waiting", "blocked", "decision", "verifying"].includes(value.status) && run?.result?.availability !== "error";
+        const missing = node("span", t(kind === "request" ? "maestro.requestMissing" : pending ? "maestro.reportPending" : "maestro.reportMissing"), "maestro-worker-doc is-missing");
+        missing.dataset.document = kind;
+        documents.append(missing);
+      }
+    }
+    return documents;
+  }
+  // Compact lines under the row. Every open task gets a line; the row's own single open task is not repeated, only its
+  // documents. Completed work shows "Result · <its first result sentence>". A result from an earlier task names that task,
+  // so it never reads as the current work. Each line ends with that exact run's work request and work report.
   function workerWork(worker) {
     const own = value => value.task === worker.origin.task && value.entry === worker.origin.entry;
-    const current = worker.current.length === 1 && own(worker.current[0]) ? [] : worker.current;
-    if (!current.length && !worker.ended) return undefined;
+    const runOf = value => value.task.runs?.find(item => item.agentId === worker.agentId && item.runId === value.run?.runId) || value.run;
+    const ownOnly = worker.current.length === 1 && own(worker.current[0]);
+    if (!worker.current.length && !worker.ended) return undefined;
     const work = node("div", undefined, "maestro-worker-work");
     work.setAttribute("role", "cell");
     work.setAttribute("aria-colspan", "4");
-    for (const value of current) {
+    for (const value of worker.current) {
       const line = node("div", undefined, "maestro-worker-line is-current");
-      const open = workerTaskButton(worker, value);
-      open.querySelector(".maestro-worker-task-title").textContent = app.maestroPurpose(value.task.title) || value.task.id;
-      open.title = value.task.title || value.task.id;
-      line.append(node("span", t("maestro.workCurrent"), "maestro-worker-kind"), open);
+      line.dataset.lineTask = value.entry.id + "/" + value.task.id;
+      line.append(node("span", t("maestro.workCurrent"), "maestro-worker-kind"));
+      const body = node("div", undefined, "maestro-worker-outcome");
+      if (!ownOnly) {
+        const open = workerTaskButton(worker, value);
+        open.querySelector(".maestro-worker-task-title").textContent = app.maestroPurpose(value.task.title) || value.task.id;
+        open.title = value.task.title || value.task.id;
+        body.append(open);
+      }
+      body.append(workerDocuments(worker, value, runOf(value)));
+      line.append(body);
       work.append(line);
     }
     if (worker.ended) {
@@ -960,24 +1262,21 @@ globalThis.AgentFactoryChat.maestro = function (host) {
       const run = value.task.runs?.find(item => item.role === "work" && item.agentId === worker.agentId) || value.run;
       const line = node("div", undefined, "maestro-worker-line is-ended");
       line.dataset.resultTask = value.entry.id + "/" + value.task.id;
+      line.dataset.lineTask = value.entry.id + "/" + value.task.id;
       line.append(node("span", t("maestro.workResult"), "maestro-worker-kind"));
       const outcome = node("div", undefined, "maestro-worker-outcome");
       // A result of another task than the row's names that task, and its state when the row shows open work.
       if (!own(value)) outcome.append(node("span", app.maestroPurpose(value.task.title) || value.task.id, "maestro-worker-for"));
-      if (current.length || worker.current.length) outcome.append(stateBadge(value.status));
+      if (worker.current.length) outcome.append(stateBadge(value.status));
       const recorded = run?.result?.availability === "recorded";
-      const sentence = recorded ? app.maestroResultLine(run.result.summary) : "";
+      // The report's stated outcome (value, count, remaining problem) first; else its first sentence; else said missing.
+      const sentence = recorded ? run.result.highlight || app.maestroResultLine(run.result.summary) : "";
       const text = sentence || (run?.result?.availability === "error" || recorded ? resultSummary(run) : t("maestro.resultUncollected"));
       const summary = node("span", text, "maestro-worker-summary" + (sentence ? "" : " is-empty"));
       if (run?.result?.availability === "error") summary.classList.add("maestro-error");
-      summary.title = recorded && run.result.summary ? run.result.summary : text;
-      outcome.append(summary);
-      if (recorded) {
-        const original = button(t("maestro.resultOriginalShort"), () => openMessage(value.entry, value.task, "result", run), "maestro-link maestro-worker-original");
-        original.setAttribute("aria-label", t("maestro.resultOriginal") + " · " + (value.task.title || value.task.id));
-        original.title = t("maestro.resultOriginal");
-        outcome.append(original);
-      }
+      summary.title = recorded && run.result.summary ? [run.result.highlight, run.result.summary].filter(Boolean).join("\n") : text;
+      if (recorded) summary.dataset.basis = run.result.highlight ? "outcome" : sentence ? "first-sentence" : "none";
+      outcome.append(summary, workerDocuments(worker, value, run));
       line.append(outcome);
       work.append(line);
     }
@@ -1004,7 +1303,7 @@ globalThis.AgentFactoryChat.maestro = function (host) {
     const title = node("span", task.title || task.id, "maestro-card-title");
     title.title = task.title || task.id;
     const meta = node("span", undefined, "maestro-card-meta");
-    meta.append(node("span", value.domainName || t("maestro.unclassified"), value.domainName ? "maestro-domain" : "maestro-unclassified"), roleBadge(work, task));
+    meta.append(node("span", value.domainName || t("maestro.membershipRequired"), value.domainName ? "maestro-domain" : "maestro-membership-required"), roleBadge(work, task));
     const owner = node("span", agents.join(" · ") || t("maestro.unassigned"), agents.length ? "maestro-identity" : "maestro-unassigned");
     owner.title = owner.textContent;
     const result = node("span", work ? resultSummary(work) : t("maestro.executionMissing"), "maestro-card-result");
@@ -1013,7 +1312,7 @@ globalThis.AgentFactoryChat.maestro = function (host) {
     const state = stateBadge(value.status, stateLabel(value.status), t("maestro.status." + value.status));
     footer.append(state, timeLabel(work, value.at));
     card.append(title, meta, owner, result, footer);
-    card.setAttribute("aria-label", [task.title, stateLabel(value.status), value.domainName || t("maestro.unclassified"), agents.join(" ") || t("maestro.unassigned")].join(" · "));
+    card.setAttribute("aria-label", [task.title, stateLabel(value.status), value.domainName || t("maestro.membershipRequired"), agents.join(" ") || t("maestro.unassigned")].join(" · "));
     return card;
   }
   function groupHeader(key, label, count, open, extra) {
@@ -1032,7 +1331,7 @@ globalThis.AgentFactoryChat.maestro = function (host) {
     const entries = state.projectTasks || [];
     const filter = state.centerFilter || {};
     const workers = state.centerView === "workers";
-    const key = [entries, state.projectDomains, state.domainsError, state.centerSelection, state.centerFilter, state.centerView, state.centerDetailOpen, loading, error, notice, observedAt, t("maestro.center")];
+    const key = [entries, state.projectDomains, state.domainsError, state.centerSelection, state.centerFilter, state.centerView, state.centerDetailOpen, state.workerOrder, orderError, loading, error, notice, observedAt, t("maestro.center")];
     if (renderKey && key.every((value, i) => value === renderKey[i])) return;
     // Native <details> toggle events are queued; capture actual open state before a fast refresh replaces nodes.
     for (const group of detail.querySelectorAll(".maestro-group")) {
@@ -1051,6 +1350,13 @@ globalThis.AgentFactoryChat.maestro = function (host) {
     const mainIds = [...new Set(entries.map(entry => entry.mainAgentId).filter(Boolean))];
     const assignments = app.maestroWorkers(entries);
     const resolveDomain = (agentId, task) => app.maestroDomain(registry(), agentId, task);
+    // With the domain list, a worker's group is its real membership only; without it, the recorded name is shown as-is.
+    // A worker without a real membership has the empty key: the "membership required" section, never a domain.
+    const placedDomain = (agentId, recorded, task) => {
+      if (!registry()) return resolveDomain(agentId, task);
+      const membership = app.maestroMembership(registry(), agentId, recorded);
+      return membership.state === "placed" ? { key: membership.domainId, name: membership.name } : { key: "", name: "" };
+    };
     function options(element, values, value) {
       if (!element) return;
       if (element.options.length !== values.length || values.some(([id, label], index) => element.options[index]?.value !== id || element.options[index]?.textContent !== label)) {
@@ -1062,11 +1368,12 @@ globalThis.AgentFactoryChat.maestro = function (host) {
     workerView?.setAttribute("tabindex", workers ? "0" : "-1"); taskView?.setAttribute("tabindex", workers ? "-1" : "0");
     list.setAttribute("aria-label", t(workers ? "maestro.workers" : "maestro.tasks"));
     list.classList.toggle("is-workers", workers);
-    // Domains come only from Main's recorded allocation; assignments without one are listed as unclassified.
+    // Groups are the listed domains; a worker without a real membership is listed under "membership required".
     if (domain) document.getElementById("maestro-domain-filter").hidden = false;
     if (domainAdd) { domainAdd.hidden = !workers || !editable(); domainAdd.disabled = Boolean(domainEdit); }
     // Filter values are domain IDs (or a recorded name not yet in the list), so a rename keeps the filter.
-    const domainChoices = new Map((registry()?.domains || []).map(item => [item.id, item.name]));
+    // A legacy unnamed domain kept its former placeholder text; that is not a name, so it is shown as unnamed.
+    const domainChoices = new Map((registry()?.domains || []).map(item => [item.id, item.provisional ? t("maestro.domainUnnamed") : item.name]));
     const provisional = new Set((registry()?.domains || []).filter(item => item.provisional).map(item => item.id));
     options(scope, [["", t("maestro.scope") + ": " + t("maestro.all")], ...mainIds.map(id => [id, id])], filter.scope);
     options(status, [["", t("maestro.status") + ": " + t("maestro.all")], ...statuses.map(id => [id, stateLabel(id)])], filter.status);
@@ -1074,7 +1381,7 @@ globalThis.AgentFactoryChat.maestro = function (host) {
     const rows = entries.flatMap(entry => entry.tasks.map(task => {
       const latest = latestRun(task.runs);
       const owner = task.workAgentId || task.runs?.find(run => run.role === "work")?.agentId;
-      const placed = resolveDomain(owner, task);
+      const placed = placedDomain(owner, task.domain, task);
       return { entry, task, domain: placed.key, domainName: placed.name, status: app.maestroStatus(entry, task), run: latest, at: activityTime(latest) || entry.updatedAt };
     }));
     const needle = (filter.search || "").toLocaleLowerCase();
@@ -1082,24 +1389,31 @@ globalThis.AgentFactoryChat.maestro = function (host) {
       [value.task.title, value.task.id, value.entry.id, value.entry.title, value.agentId, value.domainName, value.task.domain,
         ...(value.runs || value.task.runs || []).map(run => [run.agentId, run.runId, run.model, run.result?.summary].join(" "))]
         .join(" ").toLocaleLowerCase().includes(needle));
-    const visible = rows.filter(value => matches(value) && (!filter.domain || (value.domain || "__unclassified") === filter.domain)
+    const visible = rows.filter(value => matches(value) && (!filter.domain || (value.domain || "__required") === filter.domain)
       && (!filter.status || value.status === filter.status));
     const workerRows = assignments.map(value => {
       const run = latestRun(value.runs);
-      const placed = resolveDomain(value.agentId, value.task);
+      const placed = placedDomain(value.agentId, value.task.domain, value.task);
       return { ...value, run, domain: placed.key, domainName: placed.name, status: app.maestroAssignment(value.task, run), at: activityTime(run) || value.entry.updatedAt };
     });
     for (const value of [...rows, ...workerRows]) if (value.domain && !domainChoices.has(value.domain)) domainChoices.set(value.domain, value.domainName);
     options(domain, [["", t("maestro.domain") + ": " + t("maestro.all")],
       ...[...domainChoices].sort((left, right) => left[1].localeCompare(right[1]))
-        .map(([id, name]) => [id, provisional.has(id) ? name + " · " + t("maestro.domainProvisional") : name]),
-      ...([...rows, ...workerRows].some(value => !value.domain) ? [["__unclassified", t("maestro.unclassified")]] : [])], filter.domain);
-    const workerIndex = app.maestroWorkerIndex(workerRows, registry());
+        .map(([id, name]) => [id, name]),
+      ...([...rows, ...workerRows].some(value => !value.domain) ? [["__required", t("maestro.membershipRequired")]] : [])], filter.domain);
+    // Each worker's membership, from its recorded agent ID; the recorded allocation name is only a suggestion.
+    const workerIndex = app.maestroWorkerIndex(workerRows, registry()).map(worker => {
+      if (!registry()) return worker;
+      const membership = app.maestroMembership(registry(), worker.agentId, recordedDomain(worker.rows));
+      // A worker needing a domain shows its recorded name once, in its membership line, not again as a work-area tag.
+      return { ...worker, membership, domain: membership.state === "placed" ? membership.domainId : "", domainName: membership.name || "",
+        ...(membership.state === "placed" ? {} : { responsibility: "" }) };
+    });
     const removed = registry()?.removedWorkers || {};
     // A worker is listed once, under its membership (or its latest task's domain), when any of its tasks matches.
     const visibleWorkers = workerIndex.filter(worker => !removed[worker.agentId]
       && worker.rows.some(value => matches(value) && (!filter.status || value.status === filter.status))
-      && (!filter.domain || (worker.domain || "__unclassified") === filter.domain));
+      && (!filter.domain || (worker.domain || "__required") === filter.domain));
     const shown = workers ? visibleWorkers : visible;
     const total = workers ? workerIndex.filter(worker => !removed[worker.agentId]).length : rows.length;
     if (workerCount) workerCount.textContent = workers ? String(total) : "";
@@ -1126,18 +1440,20 @@ globalThis.AgentFactoryChat.maestro = function (host) {
     const rank = value => sections.indexOf(sectionOf(value));
     // Worker view: domain → worker → assigned task and result. Status and time only order rows inside a worker;
     // they never replace the domain/worker grouping.
-    const domainGroups = workers ? [...new Set(shown.map(value => value.domain || ""))]
-      .sort((left, right) => Number(!left) - Number(!right) || Number(provisional.has(left)) - Number(provisional.has(right))
-        || (domainChoices.get(left) || "").localeCompare(domainChoices.get(right) || "")) : [];
+    // Workers still needing a domain lead (they need the Human), then named domains, then legacy unnamed ones.
+    const groupOrder = (left, right) => Number(Boolean(left)) - Number(Boolean(right)) || Number(provisional.has(left)) - Number(provisional.has(right))
+      || (domainChoices.get(left) || "").localeCompare(domainChoices.get(right) || "");
+    const domainGroups = workers ? [...new Set(shown.map(value => value.domain || ""))].sort(groupOrder) : [];
     // A new domain starts in the editor; it has no workers until one is placed in it.
+    if (workers && orderError) { const problem = node("p", orderError, "maestro-error maestro-drag-error maestro-order-error"); problem.setAttribute("role", "alert"); list.append(problem); }
     if (workers && editable()) {
       if (domainEditError?.origin === "drag") { const problem = node("p", domainEditError.text, "maestro-error maestro-domain-error maestro-drag-error"); problem.setAttribute("role", "alert"); list.append(problem); }
-      if (domainEditError?.origin === "create") { const problem = node("p", domainEditError.text, "maestro-error maestro-domain-error"); problem.setAttribute("role", "alert"); list.append(problem); }
-      for (const item of registry().domains) if (!filtered && !domainGroups.includes(item.id)) domainGroups.splice(domainGroups.indexOf("") < 0 ? domainGroups.length : domainGroups.indexOf(""), 0, item.id);
-      // The fallback group stays visible as a drop target even when every worker has a domain.
-      if (!filtered && !domainGroups.includes("")) domainGroups.push("");
-      domainGroups.sort((left, right) => Number(!left) - Number(!right) || Number(provisional.has(left)) - Number(provisional.has(right))
-        || (domainChoices.get(left) || "").localeCompare(domainChoices.get(right) || ""));
+      // A new domain is named before it exists.
+      if (domainEditor?.origin === "create") list.append(domainNameEditor("create", domainEditor.value ?? "", name => sendDomainEdit({ type: "domain.create", name }, "create")));
+      else if (domainEditError?.origin === "create") { const problem = node("p", domainEditError.text, "maestro-error maestro-domain-error"); problem.setAttribute("role", "alert"); list.append(problem); }
+      // Every listed domain stays visible (and droppable) even while empty; there is no fallback group.
+      for (const item of registry().domains) if (!filtered && !domainGroups.includes(item.id)) domainGroups.push(item.id);
+      domainGroups.sort(groupOrder);
     }
     if (workers && domainGroups.length) list.append(workerListHeader());
     for (const domainId of domainGroups) {
@@ -1145,16 +1461,19 @@ globalThis.AgentFactoryChat.maestro = function (host) {
       const domainKey = JSON.stringify(["domain", domainId]);
       const domainOpen = filtered || !state.centerCollapsed?.[domainKey];
       const domainName = domainChoices.get(domainId) || "";
-      const header = groupHeader(domainKey, domainName || t("maestro.unclassified"), members.length, domainOpen,
+      // The empty key is not a domain: it lists workers whose membership the Human still has to choose.
+      const header = groupHeader(domainKey, domainId ? domainName : t("maestro.membershipRequired"), members.length, domainOpen,
         [provisional.has(domainId) ? t("maestro.domainProvisional") : "", t("maestro.assignments", members.reduce((sum, value) => sum + value.rows.length, 0))].filter(Boolean).join(" · "));
       if (provisional.has(domainId)) header.dataset.provisional = "true";
       header.classList.add("maestro-domain-toggle");
-      header.dataset.domain = domainName || "__unclassified";
+      header.dataset.domain = domainId ? domainName : "__required";
       if (domainId) header.dataset.domainKey = domainId;
-      // Drop targets: listed domains (by ID, including empty or collapsed ones) and the fallback unclassified group.
-      const droppable = editable() && !filtered && (!domainId || registry().domains.some(item => item.id === domainId));
+      else header.dataset.membershipRequired = "true";
+      // Drop targets: listed, named domains only (by ID, including empty or collapsed ones). A legacy unnamed domain is
+      // named first; nothing can be dropped back into "membership required".
+      const droppable = editable() && !filtered && Boolean(domainId) && registry().domains.some(item => item.id === domainId && !item.provisional);
       if (droppable) {
-        header.dataset.dropTarget = domainId || "__unclassified";
+        header.dataset.dropTarget = domainId;
         header.addEventListener("dragover", event => {
           if (!dragWorker) return;
           event.preventDefault();
@@ -1168,21 +1487,21 @@ globalThis.AgentFactoryChat.maestro = function (host) {
           const moving = dragWorker; dragWorker = undefined; list.classList.remove("is-dragging");
           // Dropping on the worker's own group, or with an edit still saving, changes nothing.
           if (!moving || moving.from === domainId || domainEdit) return;
-          sendDomainEdit({ type: "domain.assign", agentId: moving.agentId, domainId: domainId || null }, "drag");
+          sendDomainEdit({ type: "domain.assign", agentId: moving.agentId, domainId }, "drag");
         });
       }
       header.disabled = filtered;
       const listed = registry()?.domains.find(item => item.id === domainId);
       if (listed) header.title = changeLabel(listed.nameSetBy);
       if (domainEditor?.origin === "rename:" + domainId) {
-        list.append(domainNameEditor("rename:" + domainId, domainEditor.value ?? domainName, name => sendDomainEdit({ type: "domain.rename", domainId, name }, "rename:" + domainId)));
+        list.append(domainNameEditor("rename:" + domainId, domainEditor.value ?? (provisional.has(domainId) ? "" : domainName), name => sendDomainEdit({ type: "domain.rename", domainId, name }, "rename:" + domainId)));
       } else if (domainEditor?.origin === "adopt:" + domainId) {
         list.append(domainNameEditor("adopt:" + domainId, domainEditor.value ?? domainName, name => sendDomainEdit({ type: "domain.create", name }, "adopt:" + domainId)));
       } else {
         list.append(header);
         // Listed domains are renamed; a recorded name not yet listed is added to the list under that name.
         if (domainId && editable()) {
-          const edit = button("", () => { domainEditor = { origin: (listed ? "rename:" : "adopt:") + domainId, value: domainName }; domainEditError = undefined; renderKey = undefined; render();
+          const edit = button("", () => { domainEditor = { origin: (listed ? "rename:" : "adopt:") + domainId, value: provisional.has(domainId) ? "" : domainName }; domainEditError = undefined; renderKey = undefined; render();
             center.querySelector("[data-domain-input]")?.focus(); }, "maestro-icon-button maestro-domain-edit");
           edit.append(icon(listed ? "M11 2.5l2.5 2.5L6 12.5H3.5V10z" : "M8 3v10M3 8h10"));
           const label = t(listed ? "maestro.domainRename" : "maestro.domainAdopt", domainName);
@@ -1194,15 +1513,20 @@ globalThis.AgentFactoryChat.maestro = function (host) {
       }
       if (!domainOpen) continue;
       // One row per worker: the worker first, then its latest task; running work leads, then the latest activity.
+      // A saved order (moved by the Human) wins over that; workers it does not name yet keep the usual order and lead.
       const sorted = members.sort((left, right) => rank(left) - rank(right) || order(left, right));
       // Two workers with the same model and purpose in one group get a running number; each row still links by agent ID.
-      const seen = new Map();
+      // The number follows the usual order, so moving a row never renumbers the workers.
+      const seen = new Map(), duplicate = new Map();
       for (const worker of sorted) {
         const key = JSON.stringify([workerName(worker), worker.purpose]);
         const count = sorted.filter(other => JSON.stringify([workerName(other), other.purpose]) === key).length;
         seen.set(key, (seen.get(key) || 0) + 1);
-        list.append(workerRowFor({ ...worker, duplicate: count > 1 ? seen.get(key) : 0 }, selected));
+        duplicate.set(worker.agentId, count > 1 ? seen.get(key) : 0);
       }
+      const arranged = app.maestroArrange(sorted, workerOrder());
+      const place = { group: arranged.map(worker => worker.agentId), known: workerIndex.map(worker => worker.agentId) };
+      for (const worker of arranged) list.append(workerRowFor({ ...worker, duplicate: duplicate.get(worker.agentId) }, selected, place));
     }
     // Task view: a kanban board with one column per recorded task state; domain and assignees are card details.
     if (!workers && shown.length) {
@@ -1233,15 +1557,18 @@ globalThis.AgentFactoryChat.maestro = function (host) {
     }
     const chosen = selected?.workflowId ? rows.find(value => value.entry.id === selected.workflowId && value.task.id === selected?.taskId) : undefined;
     const chosenWorker = workers && selected?.agentId && !selected.workflowId ? workerIndex.find(worker => worker.agentId === selected.agentId) : undefined;
+    const chosenSupervision = Boolean(selected?.supervision);
     // A task opened from the task view names no worker; the worker view shows its recorded Work agent.
     if (workers && chosen && !selected.agentId) {
       const agentId = chosen.task.workAgentId || chosen.task.runs?.[0]?.agentId || chosen.task.verificationAgentId;
       if (agentId) state.centerSelection = { ...selected, agentId };
     }
-    const open = Boolean((chosen || chosenWorker) && state.centerDetailOpen !== false);
+    const open = Boolean((chosen || chosenWorker || chosenSupervision) && state.centerDetailOpen !== false);
     workspace.dataset.layout = open ? "split" : "list";
     detail.hidden = !open;
-    if (open && chosenWorker) renderWorkerDetail(chosenWorker, removed);
+    delete detail.dataset.view;
+    if (open && chosenSupervision) renderSupervision(rows);
+    else if (open && chosenWorker) renderWorkerDetail(chosenWorker, removed);
     else renderDetail(open ? chosen.entry : undefined, open ? chosen.task : undefined, workerRows);
     detail.scrollTop = detailScroll; list.scrollTop = listScroll;
     const typing = focusInput && [...center.querySelectorAll("[data-domain-input]")].find(value => value.dataset.domainInput === focusInput);
@@ -1255,5 +1582,125 @@ globalThis.AgentFactoryChat.maestro = function (host) {
     else if (detailFocus >= 0) [...detail.querySelectorAll("button, summary")][detailFocus]?.focus();
     else if (focused === detail && open) detail.focus();
   }
-  return { render, receive, domainResult, workerResult, showNotice };
+  function requestSupervision() {
+    if (supervision?.loading) return;
+    state.centerSelection = { supervision: true };
+    state.centerDetailOpen = true;
+    supervision = { ...supervision, loading: true, error: undefined };
+    vscode.postMessage({ type: "supervision.request" });
+    renderKey = undefined; render(); persist(false);
+    detail.focus();
+  }
+  function supervisionResult(message) {
+    supervision = message.error ? { ...supervision, loading: false, error: message.error }
+      : { loading: false, report: message.report && typeof message.report === "object" ? message.report : undefined, receivedAt: Date.now() };
+    renderKey = undefined; render();
+  }
+  function handoffModelsResult(message) {
+    handoffModels = Array.isArray(message.models) ? message.models.filter(item => item && typeof item.id === "string") : [];
+    handoffModelsError = message.error;
+    renderKey = undefined; render();
+  }
+  const VERDICTS = ["decision-needed", "stuck", "delayed", "normal"];
+  // The verdict's dot reuses the task status colours: decision and delay warn, stuck is an error, normal is running work.
+  const VERDICT_DOT = { "decision-needed": "decision", stuck: "failed", delayed: "blocked", normal: "running" };
+  function durationText(seconds) {
+    if (typeof seconds !== "number") return t("maestro.unrecorded");
+    return seconds < 60 ? t("duration.seconds", Math.floor(seconds)) : seconds < 3600 ? t("flow.duration.minutes", Math.floor(seconds / 60))
+      : t("flow.duration.hours", Math.round(seconds / 360) / 10);
+  }
+  // Reason codes from the runtime, in words; an unknown code stays as recorded.
+  function reasonText(code) {
+    const [kind, ...rest] = String(code).split(":");
+    if (kind === "loop-stopped") return t("maestro.reason.loopStopped", rest.join(" · ") || t("maestro.unrecorded"));
+    if (kind === "repeated-error") { const match = /^(.*)x(\d+)$/.exec(rest.join(":")); return t("maestro.reason.repeatedError", match?.[1] || rest.join(":"), match?.[2] || "?"); }
+    if (kind === "repeated-verification-fail") return t("maestro.reason.repeatedVerificationFail", rest.join("").replace(/^x/, ""));
+    return ["decision-pending", "no-progress", "external-wait", "state-unknown"].includes(kind) ? t("maestro.reason." + kind) : String(code);
+  }
+  function opStateLabel(value) {
+    return ["assigned", "running", "waiting-external", "waiting-decision", "blocked", "execution-ended", "work-completed", "check-passed", "unknown"].includes(value)
+      ? t("maestro.opState." + value) : value || t("maestro.unrecorded");
+  }
+  function renderSupervision(rows) {
+    detail.replaceChildren();
+    delete detail.dataset.workerId; delete detail.dataset.workflowId; delete detail.dataset.taskId;
+    detail.dataset.view = "supervision";
+    const header = node("header", undefined, "maestro-detail-header");
+    const back = button("", returnToList, "maestro-icon-button maestro-close");
+    back.setAttribute("aria-label", t("maestro.returnList")); back.title = t("maestro.returnList");
+    back.append(icon("M4 4l8 8M12 4l-8 8"));
+    const titleRow = node("div", undefined, "maestro-detail-title");
+    titleRow.append(node("h2", t("maestro.supervisionReport")), back);
+    header.append(titleRow);
+    const report = supervision?.report;
+    if (report) {
+      const settings = report.settings || {};
+      const observed = node("p", t("maestro.supervisionBasis", settings.delayMinutes ?? "?", settings.stuckMinutes ?? "?"), "maestro-freshness");
+      if (report.observedAt) observed.append(" · ", timeLabel(undefined, report.observedAt));
+      header.append(observed);
+    }
+    detail.append(header);
+    const actions = node("div", undefined, "maestro-actions");
+    const again = button(t(supervision?.loading ? "maestro.supervisionLoading" : "maestro.supervisionRefresh"), requestSupervision, "maestro-button");
+    again.disabled = Boolean(supervision?.loading);
+    actions.append(again);
+    detail.append(actions);
+    if (supervision?.error) { const problem = node("p", t("maestro.supervisionFailed", supervision.error), "maestro-error"); problem.setAttribute("role", "alert"); detail.append(problem); }
+    if (!report) { if (supervision?.loading) detail.append(node("p", t("maestro.supervisionLoading"), "maestro-text")); return; }
+    const verdicts = (report.verdicts || []).slice().sort((left, right) => VERDICTS.indexOf(left.verdict) - VERDICTS.indexOf(right.verdict)
+      || (right.idleSeconds ?? -1) - (left.idleSeconds ?? -1));
+    // Counts per verdict, in the order the reader acts on them.
+    const counts = node("p", undefined, "maestro-supervision-counts");
+    for (const code of VERDICTS) {
+      const count = verdicts.filter(value => value.verdict === code).length;
+      if (count) counts.append(stateBadge(VERDICT_DOT[code], t("maestro.verdict." + code) + " " + count));
+    }
+    if (counts.children.length) detail.append(counts);
+    const section = (title, values, key) => {
+      const block = node("section", undefined, "maestro-block");
+      block.dataset.supervision = key;
+      block.append(node("h3", title));
+      const items = node("ul", undefined, "maestro-supervision-list");
+      for (const value of values) items.append(verdictItem(value, rows));
+      block.append(items);
+      detail.append(block);
+    };
+    if ((report.alerts || []).length) section(t("maestro.supervisionAlerts"), report.alerts, "alerts");
+    if (verdicts.length) section(t("maestro.supervisionVerdicts"), verdicts, "verdicts");
+    else detail.append(node("p", t("maestro.supervisionEmpty"), "maestro-text"));
+    if ((report.errors || []).length) {
+      const block = node("section", undefined, "maestro-block");
+      block.append(node("h3", t("maestro.supervisionErrors")), ...report.errors.map(text => node("p", text, "maestro-error maestro-identity")));
+      detail.append(block);
+    }
+  }
+  // One verdict: label, task, recorded state, times and reasons; the runtime's next-action text stays in the tooltip.
+  function verdictItem(value, rows) {
+    const item = node("li", undefined, "maestro-supervision-item");
+    item.dataset.verdict = value.verdict;
+    const match = rows.find(row => row.entry.loopId === value.loopId && row.task.id === value.taskId)
+      || rows.find(row => row.entry.loopId === value.loopId);
+    const head = node("div", undefined, "maestro-supervision-head");
+    const label = VERDICTS.includes(value.verdict) ? t("maestro.verdict." + value.verdict) : value.verdict;
+    const badge = stateBadge(VERDICT_DOT[value.verdict] || "unknown", label);
+    const title = match ? button(value.title || value.taskId, () => select(match.entry, match.task), "maestro-link maestro-supervision-title")
+      : node("span", value.title || value.taskId, "maestro-supervision-title");
+    title.title = value.title || value.taskId || "";
+    head.append(badge, title);
+    item.append(head);
+    const facts = [opStateLabel(value.state), t("maestro.supervisionTimes", durationText(value.elapsedSeconds), durationText(value.idleSeconds)),
+      ...(value.reasons || []).map(reasonText)];
+    const line = node("p", facts.join(" · "), "maestro-freshness");
+    if (value.nextAction) line.title = value.nextAction;
+    item.append(line);
+    if (value.verdict === "decision-needed") {
+      // The decision itself is answered where it is asked: the task's Main conversation.
+      const answer = button(t("maestro.decisionOpen"), () => openMessage(match.entry, match.task, "chat"), "maestro-button is-primary");
+      answer.disabled = !match?.entry.mainAgentId;
+      if (answer.disabled) answer.title = t("maestro.decisionUnlinked");
+      item.append(answer);
+    }
+    return item;
+  }
+  return { render, receive, domainResult, workerResult, showNotice, supervisionResult, handoffModelsResult, workerOrderResult };
 };

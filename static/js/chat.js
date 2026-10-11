@@ -267,6 +267,10 @@
     state, vscode, factoryBot, uiLocale, botDisplayName, persist, t, prompt, chatShortcuts
   });
   let elapsedTimerId;
+  // Outcomes that need no action stay briefly after a run, then the status line clears; failures and decisions remain.
+  const SETTLED_FEEDBACK = ["completed", "ended", "cancelled", "ready", "restored"];
+  const SETTLED_FEEDBACK_MS = 4000;
+  let settledFeedbackTimer;
   let followLatest = true;
   let autoScrollFrame;
   let timelineViewportHeight;
@@ -2489,6 +2493,7 @@
       ? pending.some(item => !item.rejected && !item.hostAcknowledged) ? "sending"
         : pending.some(item => !item.rejected) ? "queued" : "rejected"
       : state.chatFeedback;
+    scheduleSettledFeedback(phase);
     document.getElementById("agent-progress").hidden = !state.running && !phase;
     document.getElementById("agent-progress").dataset.feedback = phase || "";
     runElapsed.hidden = !state.running || phase === "checking";
@@ -2531,6 +2536,22 @@
     if (!elapsedTimerId && !document.hidden) {
       elapsedTimerId = window.setInterval(renderRunStatus, 1000);
     }
+  }
+
+  function scheduleSettledFeedback(phase) {
+    const settled = !state.running && SETTLED_FEEDBACK.includes(phase);
+    if (!settled || settledFeedbackTimer?.phase !== phase) {
+      clearTimeout(settledFeedbackTimer?.id);
+      settledFeedbackTimer = undefined;
+    }
+    if (!settled || settledFeedbackTimer) return;
+    settledFeedbackTimer = { phase, id: setTimeout(function () {
+      settledFeedbackTimer = undefined;
+      if (!state.running && state.chatFeedback === phase) {
+        state.chatFeedback = undefined;
+        renderRunStatus();
+      }
+    }, SETTLED_FEEDBACK_MS) };
   }
 
   function stopElapsedTimer() {
@@ -2794,6 +2815,8 @@
     fastModeButton.setAttribute("aria-label", state.fastMode ? t("ui.fast.mode.on") : t("ui.fast.mode.off"));
     fastModeButton.title = state.fastMode ? t("ui.fast.mode.on") : t("ui.fast.mode.off");
     fastModeValue.textContent = state.fastMode ? t("ui.on") : t("ui.off");
+    // The Astra starfield (restored from dea8805): shown only while the Main model is an Astra model.
+    promptSurface.classList.toggle("is-astra", /(?:^|[-/])astra(?:$|-)/i.test(chatAgentSettings.effectiveAgentValue("main", "model")));
     const selectedRun = state.role !== "main" ? state.capturedRun || {} : undefined;
     const modelText = selectedRun ? (selectedRun.model || t("flow.model.unavailable")) : (chatAgentSettings.effectiveAgentValue("main", "model") ? chatAgentSettings.modelOptionLabel(chatAgentSettings.effectiveAgentValue("main", "model")) : t("ui.default")) + " · " + reasoningDisplayLabel(chatAgentSettings.effectiveAgentValue("main", "reasoningEffort"));
     if (modelLabel.textContent !== modelText) modelLabel.textContent = modelText;

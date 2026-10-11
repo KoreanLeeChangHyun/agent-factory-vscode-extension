@@ -121,6 +121,8 @@ async function checkMaestro(page) {
   assert.deepEqual(centerErrors,[]);
   await checkWorkerNames(page, centerPost);
   assert.deepEqual(centerErrors,[]);
+  await checkWorkerReorder(page, centerPost);
+  assert.deepEqual(centerErrors,[]);
   await page.close();
 }
 module.exports={checkMaestro};
@@ -150,19 +152,21 @@ async function checkWorkers(page, post, chatPage) {
   await page.locator('#maestro-workers-view').click();await post({type:'project.tasks',entries});
   // Worker view: domain → one row per worker (its membership or latest task's domain) → the latest task as its summary.
   assert.deepEqual(await page.locator('.maestro-domain-toggle').evaluateAll(items=>items.map(item=>[item.dataset.domain,item.getAttribute('aria-expanded')])),
-    [['Extension','true'],['Runtime','true'],['__unclassified','true']]);
-  assert.equal(await page.locator('[data-domain="__unclassified"]').textContent(),'Unclassified33 assignments','Domain header counts workers and assignments');
+    [['__required','true'],['Extension','true'],['Runtime','true']],'Workers without a domain lead, under "Domain required" (no unclassified group)');
+  assert.equal(await page.locator('[data-domain="__required"]').textContent(),'Domain required33 assignments','Domain header counts workers and assignments');
   assert.equal(await page.locator('[data-section]').count(),0,'No status/time section replaces the worker grouping');
   const workersIn=domain=>page.locator('[data-domain="'+domain+'"]').evaluate(header=>{const ids=[];for(let node=header.nextElementSibling;node&&!node.classList.contains('maestro-domain-toggle');node=node.nextElementSibling)if(node.dataset.centerWorker)ids.push(node.dataset.centerWorker);return ids;});
   assert.deepEqual(await workersIn('Extension'),['worker-verifier']);
   assert.deepEqual(await workersIn('Runtime'),['worker-reused'],'A worker is listed once, under its latest task\'s domain');
-  assert.deepEqual(await workersIn('__unclassified'),['worker-decision','worker-pending','worker-stale'],'Attention, then running/waiting, then recent');
+  assert.deepEqual(await workersIn('__required'),['worker-decision','worker-pending','worker-stale'],'Attention, then running/waiting, then recent');
   assert.equal(await page.locator('[data-center-worker="worker-reused"]').count(),1,'Not repeated per task or run');
   const reused=page.locator('[data-center-worker="worker-reused"]');
   // The worker is named by the model its runs recorded; the ID stays the link key.
   assert.equal(await reused.locator('.maestro-row-title').textContent(),'fixture-model');
   assert.equal(await page.locator('[data-center-worker="worker-pending"] .maestro-row-title').textContent(),'Model not recorded','No model is invented without a run');
-  assert.equal(await reused.locator('.maestro-row-title').getAttribute('data-select-worker'),'worker-reused');
+  // The model opens the worker's own session; the title opens its detail. Both keep the exact agent ID.
+  assert.equal(await reused.locator('.maestro-row-title').getAttribute('data-open-session'),'worker-reused');
+  assert.equal(await reused.locator('.maestro-worker-select').getAttribute('data-select-worker'),'worker-reused');
   assert.equal(await reused.locator('.maestro-worker-status .maestro-state').textContent(),'Running','The row state is the open task, not a past result');
   // Four columns in one row, in this order: worker | title (assignment purpose) | state | history; the work area follows.
   assert.deepEqual(await reused.evaluate(row=>[...row.children].map(cell=>cell.className.split(' ')[0])),['maestro-worker-cell','maestro-worker-title','maestro-worker-status','maestro-worker-history','maestro-worker-work']);
@@ -170,9 +174,9 @@ async function checkWorkers(page, post, chatPage) {
   // Under the row: the open task, then one result line of the newest ended task, naming that task and its state.
   const lines=await reused.locator('.maestro-worker-line').evaluateAll(items=>items.map(item=>[item.querySelector('.maestro-worker-kind').textContent,(item.querySelector('[data-center-task]')?.dataset.centerTask||item.dataset.resultTask).split('/')[1],item.querySelector('.maestro-worker-for')?.textContent,item.querySelector('.maestro-state').textContent,item.querySelector('.maestro-worker-summary')?.textContent]));
   assert.deepEqual(lines,[['Now','assigned-two',undefined,'Running',undefined],['Result','assigned-one','Connect actual results','Completed','Preserved stable result provenance.']]);
-  await reused.locator('.maestro-worker-original').click();
+  await reused.locator('.maestro-worker-line.is-ended [data-document="result"]').click();
   assert.deepEqual(await page.evaluate(()=>window.sentMessages.filter(value=>value.target==='result').at(-1)),{type:'project.task.open',workflowId:'fixture-workers',taskId:'assigned-one',target:'result',agentId:'worker-reused',runId:'run-completed'},'The original is the ended task\'s own run');
-  assert.equal(await reused.locator('.maestro-history-button').textContent(),'History 4');
+  assert.equal(await reused.locator('.maestro-history-button').textContent(),'Tasks 4');
   assert.deepEqual(await page.locator('.maestro-worker-head [role="columnheader"]').allTextContents(),['Worker','Title','Status','History']);
   const top=await reused.evaluate(row=>[...row.children].slice(0,4).map(cell=>Math.round(cell.getBoundingClientRect().top+cell.getBoundingClientRect().height/2)));
   assert.ok(Math.max(...top)-Math.min(...top)<=4,'The four cells sit on one line: '+top);
@@ -182,7 +186,7 @@ async function checkWorkers(page, post, chatPage) {
   assert.equal(await page.locator('[data-center-worker="worker-stale"] .maestro-worker-status .maestro-state').textContent(),'Cancelled','A cancelled task does not wait for its stale decision');
   assert.equal(await page.locator('[data-center-worker="worker-stale"] .maestro-worker-summary').textContent(),'Result not collected','A missing result is said, never a success');
   assert.equal(await page.locator('.maestro-list [data-center-task]:not(.maestro-worker-work [data-center-task])').count(),0,'Tasks in the list belong to a worker\'s work area');
-  assert.deepEqual(await page.locator('#maestro-domain option').evaluateAll(options=>options.map(option=>option.value)),['','name:Extension','name:Runtime','__unclassified']);
+  assert.deepEqual(await page.locator('#maestro-domain option').evaluateAll(options=>options.map(option=>option.value)),['','name:Extension','name:Runtime','__required']);
   // Rows share one column grid: role tags and status texts start at the same x in every row.
   // Header and every row share the column lines.
   const columns=await page.locator('.maestro-worker-head, .maestro-worker-row').evaluateAll(rows=>rows.map(row=>[...row.children].map(cell=>Math.round(cell.getBoundingClientRect().left))));
@@ -232,7 +236,7 @@ async function checkWorkers(page, post, chatPage) {
   assert.deepEqual(await page.locator('.maestro-column').evaluateAll(columns=>columns.map(column=>[column.dataset.column,[...column.querySelectorAll('.maestro-card')].map(card=>card.dataset.centerTask.split('/')[1]).sort()])),
     [['waiting',['missing-run','unassigned']],['running',['assigned-two']],['verifying',['assigned-one']],['decision',['open-decision']],['completed',['missing-result']],['ended',['stale-decision']],['unknown',['error-result']]]);
   assert.equal(await page.locator('.maestro-card[aria-current="true"]').getAttribute('data-center-task'),'fixture-workers/assigned-one','Switching views keeps the selection');
-  assert.match(await page.locator('[data-center-task="fixture-workers/unassigned"]').textContent(),/Unclassified.*Unassigned/);
+  assert.match(await page.locator('[data-center-task="fixture-workers/unassigned"]').textContent(),/Domain required.*Unassigned/);
   assert.match(await page.locator('[data-center-task="fixture-workers/assigned-two"]').textContent(),/Runtime.*worker-reused/);
   assert.equal(await page.locator('[data-center-task="fixture-workers/stale-decision"] .maestro-state').textContent(),'Cancelled');
   assert.equal(await page.locator('.maestro-column[data-column="decision"] .maestro-state').textContent(),'Human decision needed');
@@ -245,7 +249,7 @@ async function checkWorkers(page, post, chatPage) {
   assert.equal(await page.getByRole('button',{name:'Back to worker',exact:true}).count(),1);
   await page.locator('#maestro-domain').selectOption('name:Runtime');assert.equal(await page.locator('.maestro-row').count(),1);
   assert.deepEqual(await page.locator('.maestro-domain-toggle').evaluateAll(items=>items.map(item=>item.dataset.domain)),['Runtime']);
-  await page.locator('#maestro-domain').selectOption('__unclassified');assert.equal(await page.locator('.maestro-row').count(),3,'Unclassified workers are listed when filtered');
+  await page.locator('#maestro-domain').selectOption('__required');assert.equal(await page.locator('.maestro-row').count(),3,'Workers needing a domain are listed when filtered');
   await page.locator('#maestro-search').fill('Extension');assert.equal(await page.locator('.maestro-row').count(),0,'Search and domain filter combine');
   await page.locator('#maestro-domain').selectOption('');assert.equal(await page.locator('.maestro-row').count(),2,'Search matches the recorded domain');
   await page.locator('#maestro-search').fill('');
@@ -312,8 +316,13 @@ async function checkDomainEditing(page, post) {
     {id:'ui-task',title:'Recorded Extension task',domain:'Extension',workAgentId:'worker-ui',workStatus:'running',runs:[{role:'work',agentId:'worker-ui',runId:'run-ui',status:'running',startedAt:new Date().toISOString()}]},
     {id:'legacy-task',title:'Legacy unclassified task',workAgentId:'worker-legacy',workStatus:'running',runs:[{role:'work',agentId:'worker-legacy',runId:'run-legacy',status:'running',startedAt:new Date().toISOString()}]},
     {id:'runtime-task',title:'Recorded Runtime task',domain:'Runtime',workAgentId:'worker-runtime',workStatus:'pending'}]}];
-  let domains={revision:3,domains:[{id:extension,name:'Extension',aliases:[],createdBy:by('ai','loop one'),nameSetBy:by('ai','loop one')}],assignments:{'worker-ui':{domainId:extension,setBy:by('ai','loop one')}}};
+  const unnamed='domain-eeeeeeeeeeee', runtime='domain-dddddddddddd';
+  // A legacy unnamed domain from the former placeholder button is kept, but nothing can be placed in it until it is named.
+  let domains={revision:3,domains:[{id:extension,name:'Extension',aliases:[],createdBy:by('ai','loop one'),nameSetBy:by('ai','loop one')},
+    {id:unnamed,name:'미분류',provisional:true,aliases:[],createdBy:by('human'),nameSetBy:by('human')}],assignments:{'worker-ui':{domainId:extension,setBy:by('ai','loop one')}}};
   const sent=()=>page.evaluate(()=>window.sentMessages.filter(value=>value.type.startsWith('domain.')));
+  const toggles=()=>page.locator('.maestro-domain-toggle').evaluateAll(items=>items.map(item=>item.dataset.domainKey||item.dataset.domain));
+  const workersIn=domain=>page.locator('[data-domain="'+domain+'"]').evaluate(header=>{const ids=[];for(let node=header.nextElementSibling;node&&!node.classList.contains('maestro-domain-toggle');node=node.nextElementSibling)if(node.dataset.centerWorker)ids.push(node.dataset.centerWorker);return ids.sort();});
   await page.locator('#maestro-workers-view').click();
   await page.locator('#maestro-search').fill('');await page.locator('#maestro-status').selectOption('');await page.locator('#maestro-scope').selectOption('');await page.locator('#maestro-domain').selectOption('');
   await post({type:'project.tasks',entries});
@@ -321,42 +330,67 @@ async function checkDomainEditing(page, post) {
   await post({type:'project.tasks',entries,domains});
   assert.equal(await page.locator('#maestro-domain-add').isVisible(),true);
   assert.equal(await page.locator('[data-domain-key="'+extension+'"]').getAttribute('data-domain'),'Extension');
-  assert.equal(await page.locator('[data-domain-key="name:Runtime"] + .maestro-domain-edit').getAttribute('aria-label'),'Add Runtime to the domain list','A recorded name not in the list can be adopted');
-  // Create: one click makes a real domain named 미분류 with no name prompt; its rename field opens afterwards.
-  const other='domain-cccccccccccc', placeholder=(id,revisionBy='human')=>({id,name:'미분류',provisional:true,aliases:[],createdBy:by(revisionBy),nameSetBy:by(revisionBy)});
+  // Only a real membership places a worker. The others (no entry; a recorded name is only a suggestion) wait in
+  // "Domain required", which is not a domain: it is not a drop target and nothing can be moved back into it.
+  assert.deepEqual(await toggles(),['__required',extension,unnamed]);
+  assert.deepEqual(await workersIn('__required'),['worker-legacy','worker-runtime']);
+  assert.equal(await page.locator('[data-domain="__required"]').getAttribute('data-membership-required'),'true');
+  assert.deepEqual(await page.locator('[data-drop-target]').evaluateAll(items=>items.map(item=>item.dataset.dropTarget)),[extension],'Only named, listed domains take drops');
+  assert.equal(await page.locator('[data-domain-key="'+unnamed+'"]').getAttribute('data-provisional'),'true');
+  // Its former placeholder text is not shown as a name; it is named from an empty field.
+  assert.equal(await page.locator('[data-domain-key="'+unnamed+'"]').getAttribute('data-domain'),'Unnamed domain');
+  assert.equal(await page.getByText('미분류',{exact:true}).count(),0,'The former placeholder text is not shown');
+  assert.equal(await page.locator('[data-domain-key="'+unnamed+'"] + .maestro-domain-edit').getAttribute('aria-label'),'Rename Unnamed domain','A legacy unnamed domain can be named');
+  await page.locator('[data-domain-key="'+unnamed+'"] + .maestro-domain-edit').click();
+  assert.equal(await page.locator('[data-domain-input="rename:'+unnamed+'"]').inputValue(),'');
+  await page.locator('[data-domain-input="rename:'+unnamed+'"]').press('Escape');
+  assert.equal(await page.getByText('Unclassified',{exact:true}).count(),0,'No unclassified group or label');
+  // Each worker needing a domain says why and offers only real domains; nothing is preselected.
+  const memberSelect=agent=>page.locator('[data-membership-worker="'+agent+'"] select');
+  assert.match(await page.locator('[data-membership-worker="worker-runtime"]').textContent(),/No domain chosen yet · From the assignment record: Runtime/);
+  assert.deepEqual(await memberSelect('worker-runtime').evaluate(select=>[select.value,[...select.options].map(option=>[option.value,option.textContent,option.disabled])]),
+    ['',[['','Choose a domain…',true],[extension,'Extension',false],['create:Runtime','Create “Runtime” and place here',false]]]);
+  assert.deepEqual(await memberSelect('worker-legacy').evaluate(select=>[...select.options].map(option=>option.value)),['',extension]);
+  // The domain line fits a narrow editor too.
+  for (const width of [1100,320]) {
+    await page.setViewportSize({width,height:760});
+    assert.ok(await page.locator('#maestro-tasks').evaluate(element=>element.scrollWidth<=element.clientWidth+1),width+': no horizontal overflow');
+    const fit=await page.locator('.maestro-worker-membership select').evaluateAll(items=>items.map(item=>{const box=item.getBoundingClientRect(),row=item.closest('.maestro-worker-row').getBoundingClientRect();return box.width>40&&box.right<=row.right+1;}));
+    assert.ok(fit.length===2&&fit.every(Boolean),width+': domain menus inside their rows '+JSON.stringify(fit));
+    if (process.env.PERFORMER_DND_EVIDENCE) await page.screenshot({path:path.join(process.env.PERFORMER_DND_EVIDENCE,'performer-dnd-20261010-201415-membership-required-'+width+'.png')});
+  }
+  await page.setViewportSize({width:1100,height:760});
+  // Create: the name comes first; an empty name or Escape creates nothing.
   await page.locator('#maestro-domain-add').click();
-  assert.deepEqual((await sent()).at(-1),{type:'domain.create',placeholder:true,revision:3});
-  assert.equal(await page.locator('.maestro-domain-editor').count(),0,'No name is asked before creating');
-  assert.equal(await page.locator('#maestro-domain-add').isDisabled(),true,'A second click waits for the first');
-  await page.locator('#maestro-domain-add').click({force:true});assert.equal((await sent()).length,1);
+  const createInput=page.locator('[data-domain-input="create"]');
+  assert.equal(await page.evaluate(()=>document.activeElement.dataset.domainInput),'create');
+  await createInput.press('Enter');assert.match(await page.locator('.maestro-domain-editor').textContent(),/Enter a name/);
+  await createInput.press('Escape');assert.equal(await page.locator('.maestro-domain-editor').count(),0);
+  assert.equal((await sent()).length,0,'Nothing is created before it has a name');
+  await page.locator('#maestro-domain-add').click();
+  await createInput.fill('미분류');await createInput.press('Enter');
+  assert.deepEqual((await sent()).at(-1),{type:'domain.create',name:'미분류',revision:3});
+  assert.equal(await createInput.isDisabled(),true,'One edit at a time');
+  await post({type:'domain.result',edit:'domain.create',error:'does not name a work area',code:'domain_name_reserved'});
+  assert.match(await page.locator('.maestro-domain-editor [role="alert"]').textContent(),/real work area/,'A catch-all name is refused by the plugin and said so');
+  await createInput.fill('Docs');await createInput.press('Enter');
   await post({type:'domain.result',edit:'domain.create',error:'Domains changed',code:'domain_conflict'});
-  assert.match(await page.locator('.maestro-list > [role="alert"]').textContent(),/changed meanwhile/);
-  assert.equal(await page.locator('#maestro-domain-add').isDisabled(),false);
-  await page.locator('#maestro-domain-add').click();
-  domains={...domains,revision:4,domains:[...domains.domains,placeholder(docs)]};
+  assert.match(await page.locator('.maestro-domain-editor [role="alert"]').textContent(),/changed meanwhile/);
+  assert.equal(await createInput.inputValue(),'Docs','The typed name survives a failed save');
+  await createInput.press('Enter');
+  assert.deepEqual((await sent()).at(-1),{type:'domain.create',name:'Docs',revision:3});
+  domains={...domains,revision:4,domains:[...domains.domains,{id:docs,name:'Docs',aliases:[],createdBy:by('human'),nameSetBy:by('human')}]};
   await post({type:'domain.result',edit:'domain.create',domainId:docs});await post({type:'project.tasks',entries,domains});
-  const renameDocs=page.locator('[data-domain-input="rename:'+docs+'"]');
-  assert.equal(await renameDocs.inputValue(),'미분류');
-  assert.equal(await renameDocs.evaluate(element=>element===document.activeElement&&element.selectionStart===0&&element.selectionEnd===3),true,'The new name is selected for typing');
-  await renameDocs.press('Escape');
-  // Cancelling keeps the created domain; it is separate from the fallback group of workers without a domain.
-  assert.equal(await page.locator('[data-domain-key="'+docs+'"]').getAttribute('data-provisional'),'true');
-  assert.equal(await page.locator('[data-domain-key="'+docs+'"]').textContent(),'미분류0Name not set · 0 assignments');
-  assert.equal(await page.locator('[data-domain="__unclassified"] ~ [data-center-worker="worker-legacy"]').count(),1,'The fallback keeps its workers');
-  assert.deepEqual(await page.locator('.maestro-domain-toggle').evaluateAll(items=>items.map(item=>item.dataset.domainKey||item.dataset.domain)),['domain-aaaaaaaaaaaa','name:Runtime',docs,'__unclassified']);
-  // A second creation is another independent domain with the same provisional name.
-  await page.locator('#maestro-domain-add').click();
-  assert.deepEqual((await sent()).at(-1),{type:'domain.create',placeholder:true,revision:4});
-  domains={...domains,revision:5,domains:[...domains.domains,placeholder(other)]};
-  await post({type:'domain.result',edit:'domain.create',domainId:other});await post({type:'project.tasks',entries,domains});
-  await page.locator('[data-domain-input="rename:'+other+'"]').press('Escape');
-  assert.equal(await page.locator('[data-provisional="true"]').count(),2);
-  assert.deepEqual(await page.locator('#maestro-domain option').evaluateAll(options=>options.filter(option=>option.value.startsWith('domain-')).map(option=>option.textContent)),['Extension','미분류 · Name not set','미분류 · Name not set']);
+  assert.equal(await page.locator('.maestro-domain-editor').count(),0);
+  assert.equal(await page.locator('[data-domain-key="'+docs+'"]').textContent(),'Docs00 assignments','A new domain is listed before any worker joins it');
+  assert.deepEqual(await page.locator('[data-drop-target]').evaluateAll(items=>items.map(item=>item.dataset.dropTarget)),[docs,extension]);
   // Rename later with the usual pencil: empty and duplicate names are refused, typing survives a refresh.
   await page.locator('[data-domain-key="'+docs+'"] + .maestro-domain-edit').click();
+  const renameDocs=page.locator('[data-domain-input="rename:'+docs+'"]');
+  assert.equal(await renameDocs.inputValue(),'Docs');
   await renameDocs.fill('');await renameDocs.press('Enter');assert.match(await page.locator('.maestro-domain-editor').textContent(),/Enter a name/);
   await renameDocs.fill('Extension');await renameDocs.press('Enter');
-  assert.deepEqual((await sent()).at(-1),{type:'domain.rename',domainId:docs,name:'Extension',revision:5});
+  assert.deepEqual((await sent()).at(-1),{type:'domain.rename',domainId:docs,name:'Extension',revision:4});
   assert.equal(await renameDocs.isDisabled(),true,'One edit at a time');
   await post({type:'domain.result',edit:'domain.rename',error:'Another domain is already named Extension',code:'domain_name_taken'});
   assert.match(await page.locator('.maestro-domain-editor [role="alert"]').textContent(),/already exists/);
@@ -366,53 +400,66 @@ async function checkDomainEditing(page, post) {
   assert.equal(await page.evaluate(()=>document.activeElement.dataset.domainInput),'rename:'+docs);
   assert.equal(await renameDocs.inputValue(),'Docs site');
   await renameDocs.press('Enter');
-  assert.deepEqual((await sent()).at(-1),{type:'domain.rename',domainId:docs,name:'Docs site',revision:5});
-  domains={...domains,revision:6,domains:domains.domains.map(item=>item.id===docs?{id:docs,name:'Docs site',aliases:[],createdBy:item.createdBy,nameSetBy:by('human')}:item)};
+  assert.deepEqual((await sent()).at(-1),{type:'domain.rename',domainId:docs,name:'Docs site',revision:4});
+  domains={...domains,revision:5,domains:domains.domains.map(item=>item.id===docs?{...item,name:'Docs site',aliases:['Docs'],nameSetBy:by('human')}:item)};
   await post({type:'domain.result',edit:'domain.rename',domainId:docs});await post({type:'project.tasks',entries,domains});
   assert.equal(await page.locator('.maestro-domain-editor').count(),0);
-  assert.equal(await page.locator('[data-domain-key="'+docs+'"]').textContent(),'Docs site00 assignments','A new domain is listed before any worker joins it');
-  assert.equal(await page.locator('[data-domain-key="'+other+'"]').getAttribute('data-provisional'),'true','The other new domain is unchanged');
-  // Filter by the domain ID, then rename: the filter, collapse key and recorded task stay linked through the former name.
+  assert.equal(await page.locator('[data-domain-key="'+docs+'"]').textContent(),'Docs site00 assignments');
+  assert.equal(await page.locator('[data-domain-key="'+unnamed+'"]').getAttribute('data-provisional'),'true','The legacy unnamed domain is unchanged');
+  // Filter by the domain ID, then rename: the filter, collapse key and membership stay linked by ID.
   await page.locator('#maestro-domain').selectOption(extension);
   assert.equal(await page.locator('.maestro-row').count(),1);
   await page.locator('[data-domain-key="'+extension+'"] + .maestro-domain-edit').click();
   assert.equal(await page.locator('[data-domain-input="rename:'+extension+'"]').inputValue(),'Extension');
   await page.locator('[data-domain-input="rename:'+extension+'"]').fill('Extension UI');await page.locator('[data-domain-input="rename:'+extension+'"]').press('Enter');
-  assert.deepEqual((await sent()).at(-1),{type:'domain.rename',domainId:extension,name:'Extension UI',revision:6});
-  domains={...domains,revision:7,domains:[{...domains.domains[0],name:'Extension UI',aliases:['Extension'],nameSetBy:by('human')},...domains.domains.slice(1)],assignments:{}};
+  assert.deepEqual((await sent()).at(-1),{type:'domain.rename',domainId:extension,name:'Extension UI',revision:5});
+  domains={...domains,revision:6,domains:[{...domains.domains[0],name:'Extension UI',aliases:['Extension'],nameSetBy:by('human')},...domains.domains.slice(1)]};
   await post({type:'domain.result',edit:'domain.rename'});await post({type:'project.tasks',entries,domains});
   assert.equal(await page.locator('#maestro-domain').inputValue(),extension);
   assert.equal(await page.locator('[data-domain-key="'+extension+'"]').getAttribute('data-domain'),'Extension UI');
-  assert.equal(await page.locator('[data-center-worker="worker-ui"]').evaluate(row=>{let node=row.previousElementSibling;while(node&&!node.classList.contains('maestro-domain-toggle'))node=node.previousElementSibling;return node?.dataset.domainKey;}),extension,'The worker recorded as Extension follows the renamed domain');
+  assert.equal(await page.locator('[data-center-worker="worker-ui"]').evaluate(row=>{let node=row.previousElementSibling;while(node&&!node.classList.contains('maestro-domain-toggle'))node=node.previousElementSibling;return node?.dataset.domainKey;}),extension,'The member follows the renamed domain');
   assert.match(await page.locator('[data-domain-key="'+extension+'"]').getAttribute('title'),/Set by you/);
   await page.locator('#maestro-domain').selectOption('');
-  // Place the legacy unclassified worker from its detail; the accepted allocation is not part of the edit.
+  // Place the legacy worker from its detail: the menu starts on "choose" and offers only real domains.
   await page.locator('[data-select-worker=\"worker-legacy\"]').click();
-  assert.equal(await page.locator('[data-domain-assign="worker-legacy"]').inputValue(),'');
-  await page.locator('[data-domain-assign="worker-legacy"]').selectOption(docs);
-  assert.deepEqual((await sent()).at(-1),{type:'domain.assign',agentId:'worker-legacy',domainId:docs,revision:7});
-  domains={...domains,revision:8,assignments:{'worker-legacy':{domainId:docs,setBy:by('human')}}};
+  const legacyMenu=page.locator('#maestro-detail [data-domain-assign="worker-legacy"]');
+  assert.equal(await legacyMenu.inputValue(),'');
+  assert.deepEqual(await legacyMenu.evaluate(select=>[...select.options].map(option=>[option.value,option.disabled])),[['',true],[docs,false],[extension,false]]);
+  await legacyMenu.selectOption(docs);
+  assert.deepEqual((await sent()).at(-1),{type:'domain.assign',agentId:'worker-legacy',domainId:docs,revision:6});
+  domains={...domains,revision:7,assignments:{...domains.assignments,'worker-legacy':{domainId:docs,setBy:by('human')}}};
   await post({type:'domain.result',edit:'domain.assign'});await post({type:'project.tasks',entries,domains});
   assert.equal(await page.locator('[data-domain-key="'+docs+'"] ~ [data-center-worker]').first().getAttribute('data-center-worker'),'worker-legacy');
   assert.match(await page.locator('.maestro-domain-field').textContent(),/Set by you/);
+  assert.equal(await legacyMenu.evaluate(select=>select.options[0].value),docs,'A placed worker has no "choose" or empty entry: it only moves');
   // Move it again; a stale revision is reported and the latest list stays shown.
-  await page.locator('[data-domain-assign="worker-legacy"]').selectOption('');
+  await legacyMenu.selectOption(extension);
   await post({type:'domain.result',edit:'domain.assign',error:'Domains changed',code:'domain_conflict'});
   assert.match(await page.locator('.maestro-domain-field').textContent(),/changed meanwhile/);
   await post({type:'project.tasks',entries,domains});
-  assert.equal(await page.locator('[data-domain-assign="worker-legacy"]').inputValue(),docs);
-  // An AI membership is labelled; the recorded allocation name is shown as the basis otherwise.
-  domains={...domains,revision:9,assignments:{...domains.assignments,'worker-runtime':{domainId:extension,setBy:by('ai','loop two')}}};
+  assert.equal(await legacyMenu.inputValue(),docs);
+  // The recorded but unlisted name is created on request, then the worker is placed in it with the new revision.
+  await memberSelect('worker-runtime').selectOption('create:Runtime');
+  assert.deepEqual((await sent()).at(-1),{type:'domain.create',name:'Runtime',revision:7});
+  domains={...domains,revision:8,domains:[...domains.domains,{id:runtime,name:'Runtime',aliases:[],createdBy:by('human'),nameSetBy:by('human')}]};
+  await post({type:'domain.result',edit:'domain.create',domainId:runtime});
+  assert.equal((await sent()).at(-1).type,'domain.create','The placement waits for the refreshed list');
   await post({type:'project.tasks',entries,domains});
-  await page.locator('[data-select-worker=\"worker-runtime\"]').click();
-  assert.match(await page.locator('.maestro-domain-field').textContent(),/Set by AI/);
-  assert.match(await page.locator('.maestro-domain-field').textContent(),/From the assignment record: Runtime/,'The recorded allocation name stays visible');
+  assert.deepEqual((await sent()).at(-1),{type:'domain.assign',agentId:'worker-runtime',domainId:runtime,revision:8});
+  domains={...domains,revision:9,assignments:{...domains.assignments,'worker-runtime':{domainId:runtime,setBy:by('human')}}};
+  await post({type:'domain.result',edit:'domain.assign'});await post({type:'project.tasks',entries,domains});
+  assert.equal(await page.locator('[data-domain="__required"]').count(),0,'Once every worker has a domain the section is gone');
+  assert.equal(await page.locator('#maestro-domain option[value="__required"]').count(),0);
+  // An AI membership is labelled; the recorded allocation name stays visible as evidence.
   await page.locator('[data-select-worker=\"worker-ui\"]').click();
-  assert.match(await page.locator('.maestro-domain-field').textContent(),/From the assignment record: Extension/);
-  // The kanban shows the same display domain on each card.
+  assert.match(await page.locator('.maestro-domain-field').textContent(),/Set by AI/);
+  assert.match(await page.locator('.maestro-domain-field').textContent(),/From the assignment record: Extension/,'The recorded allocation name stays visible');
+  await page.locator('[data-select-worker=\"worker-runtime\"]').click();
+  assert.match(await page.locator('.maestro-domain-field').textContent(),/Set by you.*From the assignment record: Runtime/);
+  // The kanban shows the same membership on each card.
   await page.locator('#maestro-tasks-view').click();
   assert.match(await page.locator('.maestro-card[data-center-task="flow-domains/legacy-task"]').textContent(),/Docs site/);
-  assert.match(await page.locator('.maestro-card[data-center-task="flow-domains/runtime-task"]').textContent(),/Extension UI/);
+  assert.match(await page.locator('.maestro-card[data-center-task="flow-domains/runtime-task"]').textContent(),/Runtime/);
   await page.locator('#maestro-domain').selectOption(docs);assert.equal(await page.locator('.maestro-card').count(),1);
   await page.locator('#maestro-domain').selectOption('');await page.locator('#maestro-workers-view').click();
   // A failed domain read keeps the tasks, reports the error and turns editing off.
@@ -483,12 +530,12 @@ async function checkWorkerControl(page, post) {
   // The worker first, then its latest task; a running worker is marked.
   const row=page.locator('[data-center-worker="worker-live"]');
   assert.equal(await row.count(),1);assert.equal(await row.getAttribute('data-running'),'true');
-  assert.equal(await row.locator('.maestro-worker-title').textContent(),'Old task','The title is what the worker was first assigned');assert.equal(await row.locator('.maestro-history-button').textContent(),'History 2');
+  assert.equal(await row.locator('.maestro-worker-title').textContent(),'Old task','The title is what the worker was first assigned');assert.equal(await row.locator('.maestro-history-button').textContent(),'Tasks 2');
   // The running task is current; the finished one is labelled as the last ended task with its own result.
   assert.equal(await row.locator('.maestro-worker-line').count(),2);
   assert.match(await row.locator('.maestro-worker-line.is-current').textContent(),/^NowLive task/);
   // The result is the row's own first task, so its title is not repeated; its state shows because other work is open.
-  assert.equal(await row.locator('.maestro-worker-line.is-ended').textContent(),'ResultCompletedOld resultOriginal');
+  assert.equal(await row.locator('.maestro-worker-line.is-ended').textContent(),'ResultCompletedOld resultNo requestReport');
   await row.locator('.maestro-worker-select').click();
   const detail=page.locator('#maestro-detail');
   assert.deepEqual(await detail.locator('.maestro-running-task [data-center-task]').evaluateAll(items=>items.map(item=>item.dataset.centerTask)),['flow-live/task-live']);
@@ -613,8 +660,10 @@ async function checkWorkerDrag(page, post) {
   await post({type:'project.tasks',entries,domains});
   const before=(await sent()).length;
   assert.equal(await page.locator('[data-center-worker="coord-a"]').getAttribute('draggable'),'true');
-  // Targets are listed domains by ID (empty, provisional) and the fallback; the fallback is not the provisional 미분류.
-  assert.deepEqual(await page.locator('[data-drop-target]').evaluateAll(items=>items.map(item=>item.dataset.dropTarget)),['domain-bbbbbbbbbbbb','domain-aaaaaaaaaaaa','domain-cccccccccccc','__unclassified']);
+  // Targets are the listed, named domains by ID (also an empty one). A legacy unnamed domain and "Domain required" are not.
+  assert.deepEqual(await page.locator('[data-drop-target]').evaluateAll(items=>items.map(item=>item.dataset.dropTarget)),[empty,coord]);
+  assert.equal(await groupOf('scribe-c'),undefined,'A worker without a membership is in no domain');
+  assert.equal(await page.locator('[data-membership-required="true"]').getAttribute('data-drop-target'),null);
   // Drop on the same group, or cancel the drag: nothing is sent.
   await page.locator('[data-center-worker="coord-a"]').dragTo(page.locator('[data-drop-target="'+coord+'"]'));
   assert.equal((await sent()).length,before,'Same-group drop changes nothing');
@@ -622,21 +671,26 @@ async function checkWorkerDrag(page, post) {
   await page.locator('[data-center-worker="coord-a"]').dispatchEvent('dragend');
   assert.equal((await sent()).length,before,'A cancelled drag changes nothing');
   assert.equal(await page.locator('.is-drop-target').count(),0);
-  // Move a running worker to the unclassified fallback: only its membership changes, with the read revision.
-  await page.locator('[data-center-worker="coord-a"]').dragTo(page.locator('[data-drop-target="__unclassified"]'));
-  assert.deepEqual((await sent()).at(-1),{type:'domain.assign',agentId:'coord-a',domainId:null,revision:10});
+  // Dropped on "Domain required" or the unnamed domain, nothing is sent: a membership is never removed.
+  await page.locator('[data-center-worker="coord-a"]').dragTo(page.locator('[data-membership-required="true"]'));
+  await page.locator('[data-center-worker="coord-a"]').dragTo(page.locator('[data-domain-key="'+fresh+'"]'));
+  assert.equal((await sent()).length,before,'No drop removes or blanks a membership');
+  assert.equal(await groupOf('coord-a'),coord);
+  // Move a running worker to another real domain: only its membership changes, with the read revision.
+  await page.locator('[data-center-worker="coord-a"]').dragTo(page.locator('[data-drop-target="'+empty+'"]'));
+  assert.deepEqual((await sent()).at(-1),{type:'domain.assign',agentId:'coord-a',domainId:empty,revision:10});
   assert.equal(await page.locator('[data-center-worker="coord-b"]').getAttribute('draggable'),'false','No second move while one saves');
   assert.equal(await groupOf('coord-a'),coord,'The list waits for the saved record');
   // A failed save (conflict) keeps the original group and says so.
   await post({type:'domain.result',edit:'domain.assign',error:'Domains changed',code:'domain_conflict'});
   assert.match(await page.locator('.maestro-drag-error').textContent(),/changed meanwhile/);
   assert.equal(await groupOf('coord-a'),coord);
-  await page.locator('[data-center-worker="coord-a"]').dragTo(page.locator('[data-drop-target="__unclassified"]'));
-  domains={...domains,revision:11,assignments:{...domains.assignments,'coord-a':{domainId:null,setBy:by('human')}}};
+  await page.locator('[data-center-worker="coord-a"]').dragTo(page.locator('[data-drop-target="'+empty+'"]'));
+  domains={...domains,revision:11,assignments:{...domains.assignments,'coord-a':{domainId:empty,setBy:by('human')}}};
   await post({type:'domain.result',edit:'domain.assign'});await post({type:'project.tasks',entries,domains});
-  assert.equal(await groupOf('coord-a'),'__unclassified');
+  assert.equal(await groupOf('coord-a'),empty);
   assert.equal(await page.locator('[data-center-worker="coord-a"]').getAttribute('data-running'),'true','The running task keeps running');
-  // Back from unclassified into a collapsed, then an empty domain.
+  // Back into a collapsed domain, then the worker without a domain into a real one.
   await page.locator('[data-drop-target="'+coord+'"]').click();
   assert.equal(await page.locator('[data-drop-target="'+coord+'"]').getAttribute('aria-expanded'),'false');
   await page.locator('[data-center-worker="coord-a"]').dragTo(page.locator('[data-drop-target="'+coord+'"]'));
@@ -645,17 +699,19 @@ async function checkWorkerDrag(page, post) {
   await post({type:'domain.result',edit:'domain.assign'});await post({type:'project.tasks',entries,domains});
   await page.locator('[data-drop-target="'+coord+'"]').click();
   assert.equal(await groupOf('coord-a'),coord,'Dropped into the collapsed group');
+  assert.equal(await page.locator('[data-center-worker="scribe-c"]').getAttribute('draggable'),'true','A worker needing a domain can be dragged into one');
   await page.locator('[data-center-worker="scribe-c"]').dragTo(page.locator('[data-drop-target="'+empty+'"]'));
   assert.deepEqual((await sent()).at(-1),{type:'domain.assign',agentId:'scribe-c',domainId:empty,revision:12});
   domains={...domains,revision:13,assignments:{...domains.assignments,'scribe-c':{domainId:empty,setBy:by('human')}}};
   await post({type:'domain.result',edit:'domain.assign'});await post({type:'project.tasks',entries,domains});
   assert.equal(await groupOf('scribe-c'),empty);
+  assert.equal(await page.locator('[data-membership-required="true"]').count(),0);
   // Reload: the moved memberships come back from the saved list; selection and the worker detail still work.
   await page.evaluate(()=>sessionStorage.setItem('submission-restoration-fixture',JSON.stringify(window.saved)));
   await page.reload();await post({type:'project.tasks',entries,domains});
   assert.equal(await groupOf('scribe-c'),empty);assert.equal(await groupOf('coord-a'),coord);
   await page.locator('[data-select-worker=\"scribe-c\"]').click();
-  assert.equal(await page.locator('[data-domain-assign="scribe-c"]').inputValue(),empty,'The keyboard menu shows the dragged membership');
+  assert.equal(await page.locator('#maestro-detail [data-domain-assign="scribe-c"]').inputValue(),empty,'The keyboard menu shows the dragged membership');
   // While a search or filter hides groups, dragging is off and the menu remains.
   await page.locator('#maestro-search').fill('coord');
   assert.equal(await page.locator('[data-center-worker="coord-a"]').getAttribute('draggable'),'false');
@@ -664,7 +720,7 @@ async function checkWorkerDrag(page, post) {
   await page.locator('#maestro-search').fill('');
   if (process.env.WORKER_CONTROL_EVIDENCE) {
     await page.locator('[data-center-worker="coord-b"]').dispatchEvent('dragstart',{dataTransfer:await page.evaluateHandle(()=>new DataTransfer())});
-    await page.locator('[data-drop-target="__unclassified"]').dispatchEvent('dragover',{dataTransfer:await page.evaluateHandle(()=>new DataTransfer())});
+    await page.locator('[data-drop-target="'+empty+'"]').dispatchEvent('dragover',{dataTransfer:await page.evaluateHandle(()=>new DataTransfer())});
     await page.screenshot({path:path.join(process.env.WORKER_CONTROL_EVIDENCE,'control-center-worker-drag-20261010-005858-fixture-1100.png')});
     await page.locator('[data-center-worker="coord-b"]').dispatchEvent('dragend');
   }
@@ -725,26 +781,28 @@ async function checkWorkerNames(page, post) {
   const coordTitle='Agent Factory 작업 조율을 다양한 정상·경계·실패 조건에서 반복 시험하고, 실제 실행 증거와 남은 취약 지점을 보고하십시오. 단순 계산 반복이 아니라 실제 런타임 조율 로직을 대상으로 최소 40개 구별되는';
   const coordResult='48개 고유 사례를 각각 3회 실행하여 본시험 144회가 모두 통과했습니다. 기존 사례 43개와 실제 런타임 함수를 호출하는 보조 사례 5개를 사용했습니다. 수행 시간은 약 16분입니다.';
   const longResult='API 페이지네이션 구현과 회귀 테스트를 마쳤습니다. '+'커서 기반 조회, 정렬 안정성, 빈 페이지 처리와 기존 클라이언트 호환을 확인했습니다. '.repeat(4);
-  const task=(id,agent,title,{domain,status='completed',minutes=5,model,provider,result,reason}={})=>({id,title,...(domain?{domain}:{}),workAgentId:agent,workStatus:status,
+  const task=(id,agent,title,{domain,status='completed',minutes=5,model,provider,result,reason,request}={})=>({id,title,...(domain?{domain}:{}),workAgentId:agent,workStatus:status,
     ...(reason?{allocation:{unitReason:reason}}:{}),
     runs:[{role:'work',agentId:agent,runId:'run-'+id,status,...(model?{model}:{}),...(provider?{provider}:{}),startedAt:at(minutes+2),...(['running','pending'].includes(status)?{}:{finishedAt:at(minutes)}),
-      ...(status==='completed'?{receipt:{outcome:'completed'}}:{}),...(result?{result}:{})}],commands:[]});
-  const loop=(id,agent,tasks,status='completed')=>({id,title:id,status,loopId:'loop-'+id,workAgentId:agent,updatedAt:at(1),tasks});
+      ...(status==='completed'?{receipt:{outcome:'completed'}}:{}),...(result?{result}:{}),...(request?{request:{availability:'recorded'}}:{})}],commands:[]});
+  const loop=(id,agent,tasks,status='completed')=>({id,title:id,mainAgentId:'main-fixture',status,loopId:'loop-'+id,workAgentId:agent,updatedAt:at(1),tasks});
   const entries=[
     // Same model, different workers and purposes: never merged.
     loop('api-origin','work-api-7f3a',[task('t-api-1','work-api-7f3a','주문 조회 API 개발',{domain:'API 개발',minutes:300,model:'claude-opus-5-5',reason:'주문 API 담당 한 명이 통합합니다.',result:{availability:'recorded',summary:'**주문 조회 API** 1차 구현 완료'}})]),
-    loop('api-now','work-api-7f3a',[task('t-api-2','work-api-7f3a','주문 조회 API에 페이지네이션 추가',{domain:'API 개발',status:'running',minutes:3,model:'claude-opus-5-5'}),
+    loop('api-now','work-api-7f3a',[task('t-api-2','work-api-7f3a','주문 조회 API에 페이지네이션 추가',{domain:'API 개발',status:'running',minutes:3,model:'claude-opus-5-5',request:true}),
       task('t-api-3','work-api-7f3a','응답 캐시 헤더 정리',{domain:'API 개발',status:'pending',minutes:2})],'active'),
-    loop('api-done','work-api-7f3a',[task('t-api-4','work-api-7f3a','페이지네이션 회귀 테스트',{domain:'API 개발',minutes:30,model:'claude-opus-5-5',result:{availability:'recorded',summary:longResult}})]),
+    loop('api-done','work-api-7f3a',[task('t-api-4','work-api-7f3a','페이지네이션 회귀 테스트',{domain:'API 개발',minutes:30,model:'claude-opus-5-5',request:true,result:{availability:'recorded',summary:longResult}})]),
     loop('db','work-db-91c2',[task('t-db','work-db-91c2','고객 테이블 인덱스 설계',{domain:'DB 모델링',model:'claude-opus-5-5',result:{availability:'recorded',summary:'**인덱스** 3종 [설계안](docs/db/index.md) 작성'}})]),
     loop('bug-1','work-bug-0d11',[task('t-bug-1','work-bug-0d11','결제 실패 시 중복 주문 수정',{domain:'버그 수정',status:'failed',model:'gpt-6.1-sol'})]),
     loop('bug-2','work-bug-2b77',[task('t-bug-2','work-bug-2b77','결제 실패 시 중복 주문 수정',{domain:'버그 수정',status:'cancelled',minutes:20,model:'gpt-6.1-sol'})]),
     loop('ui','work-ui-55e0',[task('t-ui','work-ui-55e0','주문 목록 반응형 정렬 조정',{domain:'UI/UX 조정',status:'completed',provider:'claude',result:{availability:'missing'}})]),
     loop('roles','worker-roles-5b2748a4',[task('t-roles','worker-roles-5b2748a4','sandbox normalize_label 테스트 실행')]),
     // The attached case: a recorded brief title and a result whose first paragraph is several sentences (copied text).
-    loop('coord','coord-matrix-e855264c',[task('t-coord','coord-matrix-e855264c',coordTitle,{domain:'작업 조율',minutes:780,model:'gpt-6.1-sol',result:{availability:'recorded',summary:coordResult}})]),
+    loop('coord','coord-matrix-e855264c',[task('t-coord','coord-matrix-e855264c',coordTitle,{domain:'작업 조율',minutes:780,model:'gpt-6.1-sol',request:true,result:{availability:'recorded',summary:coordResult,highlight:'본시험 144회가 모두 통과했습니다.'}})]),
     loop('brief','work-brief-1a2b',[task('t-brief','work-brief-1a2b','사용자님께서 정리한 지휘자 운영 흐름에 대해 “작업배정해서 작업 진행하세요”라고 실행을 승인하셨습니다. 하나의 채팅에서 여러 세션과 작업자를 운영할 수 있는 플러그인 실행 기반을 구현하고, 특히 장시간 작업이 끝날 때까지 진전을 감찰하십시오.',{minutes:90,model:'claude-opus-5-5',result:{availability:'recorded',summary:'사용자님, 플러그인의 지휘자 실행 기반을 구현했습니다. 메시지 수신부터 보고 이벤트까지 연결했습니다.'}})]),
-    loop('long','work-long-title',[task('t-long','work-long-title','고객 문의 응답 자동 분류와 우선순위 조정 및 상담원 배정 규칙 정비를 위한 장기 개선 과제',{domain:'고객 문의 응답 자동 분류와 우선순위 조정',status:'running',minutes:1,model:'claude-opus-5-5-with-a-very-long-model-identifier'})],'active')];
+    loop('long','work-long-title',[task('t-long','work-long-title','고객 문의 응답 자동 분류와 우선순위 조정 및 상담원 배정 규칙 정비를 위한 장기 개선 과제',{domain:'고객 문의 응답 자동 분류와 우선순위 조정',status:'running',minutes:1,request:true,model:'claude-opus-5-5-with-a-very-long-model-identifier'})],'active')];
+  // A worker whose loop has no recorded Main conversation (cannot open a session).
+  delete entries.find(entry=>entry.id==='roles').mainAgentId;
   const domains={revision:20,domains:[{id:customer,name:'고객',aliases:[],createdBy:by,nameSetBy:by}],
     assignments:Object.fromEntries(['work-api-7f3a','work-db-91c2','work-bug-0d11','work-ui-55e0','work-bug-2b77','work-long-title'].map(agent=>[agent,{domainId:customer,setBy:by}])),removedWorkers:{}};
   await page.locator('#maestro-workers-view').click();
@@ -752,47 +810,88 @@ async function checkWorkerNames(page, post) {
   await post({type:'project.tasks',entries,domains});
   if (await page.locator('#maestro-workspace').getAttribute('data-layout')==='split') await page.getByRole('button',{name:'Back to list',exact:true}).click();
   const rows=await page.locator('.maestro-worker-row').evaluateAll(rows=>Object.fromEntries(rows.map(row=>[row.dataset.centerWorker,{
-    name:row.querySelector('.maestro-worker-select').textContent,area:row.querySelector('.maestro-worker-area')?.textContent,purpose:row.querySelector('.maestro-worker-purpose').textContent,
+    name:row.querySelector('.maestro-worker-model').textContent,area:row.querySelector('.maestro-worker-area')?.textContent,purpose:row.querySelector('.maestro-worker-purpose').textContent,
     state:row.querySelector('.maestro-worker-status .maestro-state').dataset.status,history:row.querySelector('.maestro-history-button').textContent,
-    full:row.querySelector('.maestro-worker-title').title,height:Math.round(row.getBoundingClientRect().height),
-    lines:[...row.querySelectorAll('.maestro-worker-line')].map(line=>[line.classList.contains('is-current')?'current':'result',line.querySelector('[data-center-task]')?.dataset.centerTask||line.dataset.resultTask,
-      line.querySelector('.maestro-worker-task-title, .maestro-worker-for')?.textContent,line.querySelector('.maestro-state')?.dataset.status,line.querySelector('.maestro-worker-summary')?.textContent,Boolean(line.querySelector('.maestro-worker-original'))])}])));
+    full:row.querySelector('.maestro-worker-title').title,height:Math.round(row.getBoundingClientRect().height-(row.querySelector('.maestro-worker-membership')?.getBoundingClientRect().height||0)),membership:Boolean(row.querySelector('.maestro-worker-membership')),
+    lines:[...row.querySelectorAll('.maestro-worker-line')].map(line=>[line.classList.contains('is-current')?'current':'result',line.dataset.lineTask,
+      line.querySelector('.maestro-worker-task-title, .maestro-worker-for')?.textContent,line.querySelector('.maestro-state')?.dataset.status,line.querySelector('.maestro-worker-summary')?.textContent,
+      [...line.querySelectorAll('[data-document]')].map(doc=>doc.dataset.document+':'+(doc.tagName==='BUTTON'?'open':doc.textContent)).join(',')])}])));
   const api=rows['work-api-7f3a'];
   // Worker column: the model; title column: the narrower area and the first assignment, not the latest request.
-  assert.deepEqual([api.name,api.area,api.purpose,api.state,api.history],['claude-opus-5-5','API 개발','주문 조회 API 개발','running','History 4']);
+  assert.deepEqual([api.name,api.area,api.purpose,api.state,api.history],['claude-opus-5-5','API 개발','주문 조회 API 개발','running','Tasks 4']);
   // Every open task is listed with its state; then one result line of the newest ended task, which is another task than
   // the row's, so it names that task and its state. Only its first sentence shows; older results stay in History.
-  assert.deepEqual(api.lines,[['current','api-now/t-api-2','주문 조회 API에 페이지네이션 추가','running',undefined,false],['current','api-now/t-api-3','응답 캐시 헤더 정리','waiting',undefined,false],
-    ['result','api-done/t-api-4','페이지네이션 회귀 테스트','completed','API 페이지네이션 구현과 회귀 테스트를 마쳤습니다.',true]]);
+  // Each line ends with that exact run's work request and work report; a missing or not-yet document says so.
+  assert.deepEqual(api.lines,[['current','api-now/t-api-2','주문 조회 API에 페이지네이션 추가','running',undefined,'request:open,result:Report not yet'],['current','api-now/t-api-3','응답 캐시 헤더 정리','waiting',undefined,'request:No request,result:Report not yet'],
+    ['result','api-done/t-api-4','페이지네이션 회귀 테스트','completed','API 페이지네이션 구현과 회귀 테스트를 마쳤습니다.','request:open,result:open']]);
   assert.equal(api.lines.some(line=>line[1]==='api-origin/t-api-1'),false,'Older results stay in History');
   // A finished single task: its title and state are the row's, so the second line is only "Result · …" (markup removed).
-  assert.deepEqual([rows['work-db-91c2'].name,rows['work-db-91c2'].purpose,rows['work-db-91c2'].lines],['claude-opus-5-5','고객 테이블 인덱스 설계',[['result','db/t-db',undefined,undefined,'인덱스 3종 설계안 작성',true]]],'Same model, separate worker');
+  assert.deepEqual([rows['work-db-91c2'].name,rows['work-db-91c2'].purpose,rows['work-db-91c2'].lines],['claude-opus-5-5','고객 테이블 인덱스 설계',[['result','db/t-db',undefined,undefined,'인덱스 3종 설계안 작성','request:No request,result:open']]],'Same model, separate worker');
   // The attached case: a short purpose instead of the brief, and the first result sentence instead of the paragraph.
   const coord=rows['coord-matrix-e855264c'];
   assert.deepEqual([coord.name,coord.area,coord.purpose,coord.state],['gpt-6.1-sol',undefined,'Agent Factory 작업 조율을 다양한 정상·경계·실패 조건에서 반복 시험','completed']);
-  assert.deepEqual(coord.lines,[['result','coord/t-coord',undefined,undefined,'48개 고유 사례를 각각 3회 실행하여 본시험 144회가 모두 통과했습니다.',true]]);
+  // The host's recorded outcome line wins over the first sentence; the first sentence stays the fallback (tooltip has both).
+  assert.deepEqual(coord.lines,[['result','coord/t-coord',undefined,undefined,'본시험 144회가 모두 통과했습니다.','request:open,result:open']]);
+  assert.deepEqual(await page.locator('[data-center-worker="coord-matrix-e855264c"] .maestro-worker-summary').evaluate(e=>[e.dataset.basis,e.title.includes('48개 고유 사례')]),['outcome',true]);
+  assert.equal(await page.locator('[data-center-worker="work-db-91c2"] .maestro-worker-summary').getAttribute('data-basis'),'first-sentence');
   assert.match(coord.full,/최소 40개 구별되는/,'The full brief stays in the tooltip');
   // A brief that opens with who approved it: the task's own clause; the result without its opening address.
   assert.deepEqual([rows['work-brief-1a2b'].purpose,rows['work-brief-1a2b'].lines[0][4]],['하나의 채팅에서 여러 세션과 작업자를 운영할 수 있는 플러그인 실행 기반 구현','플러그인의 지휘자 실행 기반을 구현했습니다.']);
   // Failure, cancellation and a missing result are said as such, never as a success; the state is not repeated.
-  assert.deepEqual(rows['work-bug-0d11'].lines,[['result','bug-1/t-bug-1',undefined,undefined,'Result not collected',false]]);
-  assert.deepEqual(rows['work-bug-2b77'].lines,[['result','bug-2/t-bug-2',undefined,undefined,'Result not collected',false]]);
+  assert.deepEqual(rows['work-bug-0d11'].lines,[['result','bug-1/t-bug-1',undefined,undefined,'Result not collected','request:No request,result:No report']]);
+  assert.deepEqual(rows['work-bug-2b77'].lines,[['result','bug-2/t-bug-2',undefined,undefined,'Result not collected','request:No request,result:No report']]);
   assert.deepEqual([rows['work-bug-0d11'].state,rows['work-bug-2b77'].state],['failed','cancelled']);
   assert.deepEqual([rows['work-ui-55e0'].name,rows['work-ui-55e0'].lines[0][4]],['claude · default model','Result not collected']);
-  // A running single task is the row itself: one line, nothing repeated under it.
-  assert.deepEqual([rows['work-long-title'].state,rows['work-long-title'].lines],['running',[]]);
-  // Compact: a finished worker is two short lines, never the brief or the result paragraph.
-  for (const agent of ['coord-matrix-e855264c','work-brief-1a2b','work-db-91c2','work-bug-0d11']) assert.ok(rows[agent].height<=56,agent+' row is two lines: '+rows[agent].height);
-  assert.ok(rows['work-long-title'].height<=36,'A running single task is one line: '+rows['work-long-title'].height);
+  // A running single task is the row itself: its line repeats no title or state, only its documents.
+  assert.deepEqual([rows['work-long-title'].state,rows['work-long-title'].lines],['running',[['current','long/t-long',undefined,undefined,undefined,'request:open,result:Report not yet']]]);
+  // Compact: a finished worker is two short lines, never the brief or the result paragraph. A worker still needing a
+  // domain has one more line for its domain menu, measured separately.
+  assert.deepEqual(Object.keys(rows).filter(agent=>rows[agent].membership).sort(),['coord-matrix-e855264c','work-brief-1a2b','worker-roles-5b2748a4'],'Only workers without a membership show the domain line');
+  for (const agent of ['coord-matrix-e855264c','work-brief-1a2b','work-db-91c2','work-bug-0d11','work-long-title']) assert.ok(rows[agent].height<=56,agent+' row is two lines: '+rows[agent].height);
   // Same model and same purpose: numbered, each row still its own worker.
   assert.deepEqual([rows['work-bug-0d11'].name,rows['work-bug-2b77'].name].sort(),['gpt-6.1-sol · 1','gpt-6.1-sol · 2']);
   assert.deepEqual([rows['worker-roles-5b2748a4'].name,rows['worker-roles-5b2748a4'].area],['Model not recorded',undefined]);
-  assert.equal(await page.locator('.maestro-worker-select').evaluateAll(items=>items.some(item=>item.textContent.includes(item.dataset.selectWorker))),false,'No row shows its agent ID as the name');
-  assert.match(await page.locator('[data-select-worker="work-api-7f3a"]').getAttribute('title'),/work-api-7f3a/,'The ID stays reachable on hover');
+  assert.equal(await page.locator('.maestro-worker-model').evaluateAll(items=>items.some(item=>item.textContent.includes(item.dataset.openSession))),false,'No row shows its agent ID as the name');
+  assert.match(await page.locator('[data-open-session="work-api-7f3a"]').getAttribute('title'),/work-api-7f3a\/run-t-api-2/,'The ID and run stay reachable on hover');
+  // The model reads as clickable: an open glyph and the "Open model session" hint; disabled models carry no glyph.
+  assert.equal(await page.locator('[data-open-session="work-api-7f3a"] .maestro-open-glyph').count(),1);
+  assert.match(await page.locator('[data-open-session="work-api-7f3a"]').getAttribute('title'),/^Open model session · /);
+  assert.equal(await page.locator('[data-open-session="worker-roles-5b2748a4"] .maestro-open-glyph').count(),0);
+  await page.locator('[data-open-session="work-db-91c2"]').focus();
+  assert.equal(await page.locator('[data-open-session="work-db-91c2"]').evaluate(e=>getComputedStyle(e).textDecorationLine),'underline','Focus shows the same cue as hover');
+  // 1. Model open: the model opens that worker's own session through the existing "run" open, by exact agent/run —
+  //    its running task first; a worker on the same model opens its own run, never another's.
+  const opened=()=>page.evaluate(()=>window.sentMessages.filter(value=>value.type==='project.task.open').at(-1));
+  await page.locator('[data-open-session="work-api-7f3a"]').click();
+  assert.deepEqual(await opened(),{type:'project.task.open',workflowId:'api-now',taskId:'t-api-2',target:'run',agentId:'work-api-7f3a',runId:'run-t-api-2'});
+  assert.equal(await page.locator('#maestro-workspace').getAttribute('data-layout'),'list','Opening the session does not open the detail');
+  await page.locator('[data-open-session="work-db-91c2"]').click();
+  assert.deepEqual(await opened(),{type:'project.task.open',workflowId:'db',taskId:'t-db',target:'run',agentId:'work-db-91c2',runId:'run-t-db'});
+  // Without a recorded Main conversation the host cannot open a session: the model says so and sends nothing.
+  const noMain=page.locator('[data-open-session="worker-roles-5b2748a4"]');
+  assert.equal(await noMain.isDisabled(),true);assert.match(await noMain.getAttribute('title'),/Main conversation not recorded/);
+  // 2. Work request and 3. work report: named separately, each opening its exact agent/run document.
+  await page.locator('[data-center-worker="work-api-7f3a"] .maestro-worker-line.is-ended [data-document="request"]').click();
+  assert.deepEqual(await opened(),{type:'project.task.open',workflowId:'api-done',taskId:'t-api-4',target:'request',agentId:'work-api-7f3a',runId:'run-t-api-4'});
+  await page.locator('[data-center-worker="work-api-7f3a"] [data-line-task="api-now/t-api-2"] [data-document="request"]').click();
+  assert.deepEqual(await opened(),{type:'project.task.open',workflowId:'api-now',taskId:'t-api-2',target:'request',agentId:'work-api-7f3a',runId:'run-t-api-2'});
+  assert.deepEqual(await page.locator('[data-center-worker="work-api-7f3a"] .maestro-worker-line.is-ended [data-document]').evaluateAll(items=>items.map(item=>[item.textContent,item.getAttribute('aria-label')])),
+    [['Request','Open work request · 페이지네이션 회귀 테스트'],['Report','Open work report · 페이지네이션 회귀 테스트']]);
+  // 4. Removal: the same logical removal as the detail's; blocked while the worker runs, sent once, host confirms.
+  const removeApi=page.locator('[data-remove-worker="work-api-7f3a"]');
+  assert.equal(await removeApi.isDisabled(),true);assert.match(await removeApi.getAttribute('title'),/Stop the running task/);
+  const removeDb=page.locator('[data-remove-worker="work-db-91c2"]');
+  assert.equal(await removeDb.isDisabled(),false);
+  await removeDb.focus();await page.keyboard.press('Enter');
+  assert.deepEqual(await page.evaluate(()=>window.sentMessages.filter(value=>value.type==='worker.remove')),[{type:'worker.remove',agentId:'work-db-91c2',revision:20}]);
+  assert.equal(await removeDb.isDisabled(),true,'One removal at a time while the host asks for confirmation');
+  // The Human cancels the host's confirmation: nothing is removed and the control is usable again.
+  await post({type:'worker.result',action:'worker.remove',agentId:'work-db-91c2',cancelled:true});
+  assert.equal(await removeDb.isDisabled(),false);assert.equal(await page.locator('[data-center-worker="work-db-91c2"]').count(),1);
   assert.match(await page.locator('[data-center-worker="work-api-7f3a"] .maestro-worker-title').getAttribute('title'),/Assignment reason: 주문 API 담당 한 명이 통합합니다\./);
   // The full result stays in the summary's tooltip and the original one click away; it opens that task's own run.
   assert.equal(await page.locator('[data-center-worker="work-api-7f3a"] .maestro-worker-summary').getAttribute('title'),longResult);
-  await page.locator('[data-center-worker="work-api-7f3a"] .maestro-worker-original').click();
+  await page.locator('[data-center-worker="work-api-7f3a"] .maestro-worker-line.is-ended [data-document="result"]').click();
   assert.deepEqual(await page.evaluate(()=>window.sentMessages.filter(value=>value.target==='result').at(-1)),{type:'project.task.open',workflowId:'api-done',taskId:'t-api-4',target:'result',agentId:'work-api-7f3a',runId:'run-t-api-4'});
   // A listed task opens its own task detail.
   await page.locator('[data-center-worker="work-api-7f3a"] [data-center-task="api-now/t-api-3"]').click();
@@ -808,6 +907,11 @@ async function checkWorkerNames(page, post) {
   assert.equal(await page.locator('#maestro-detail h2').textContent(),'claude-opus-5-5');
   assert.equal(await page.locator('#maestro-detail .maestro-worker-purpose-line').textContent(),'Assigned forAPI 개발주문 조회 API 개발');
   assert.equal(await page.locator('#maestro-detail .maestro-worker-id').textContent(),'Agent ID work-api-7f3a');
+  // Task history: each finished entry keeps its time and state and links that exact run's request and report.
+  const history=await page.locator('#maestro-detail .maestro-worker-history-item').evaluateAll(items=>items.map(item=>[item.querySelector('[data-center-task]').dataset.centerTask,item.querySelector('.maestro-state').dataset.status,Boolean(item.querySelector('.maestro-time')?.textContent),[...item.querySelectorAll('[data-document]')].map(doc=>doc.dataset.document+':'+(doc.dataset.documentRun||doc.textContent))]));
+  assert.deepEqual(history,[['api-done/t-api-4','completed',true,['request:work-api-7f3a/run-t-api-4','result:work-api-7f3a/run-t-api-4']],['api-origin/t-api-1','completed',true,['request:No request','result:work-api-7f3a/run-t-api-1']]]);
+  await page.locator('#maestro-detail .maestro-worker-history-item [data-document="request"]').first().click();
+  assert.deepEqual(await opened(),{type:'project.task.open',workflowId:'api-done',taskId:'t-api-4',target:'request',agentId:'work-api-7f3a',runId:'run-t-api-4'});
   await page.getByRole('button',{name:'Back to list',exact:true}).click();
   // Search by the agent ID, the model or the area still finds the worker.
   await page.locator('#maestro-search').fill('work-db-91c2');assert.equal(await page.locator('.maestro-worker-row').count(),1);
@@ -822,18 +926,171 @@ async function checkWorkerNames(page, post) {
         inside:[...list.querySelectorAll('.maestro-worker-row > *, .maestro-worker-work button, .maestro-worker-summary, .maestro-worker-kind, .maestro-worker-work .maestro-state')].find(cell=>box(cell).width>0&&box(cell).right>box(list).right+1)?.outerHTML.slice(0,160)??true,
         oneLine:[...list.querySelectorAll('.maestro-worker-row')].every(row=>{const first=cell=>getComputedStyle(row).alignItems==='start'?box(cell).top:box(cell).top+box(cell).height/2;const tops=[...row.children].slice(1,4).map(first);return Math.max(...tops)-Math.min(...tops)<=4;}),
         under:[...list.querySelectorAll('.maestro-worker-row')].every(row=>{const work=row.querySelector('.maestro-worker-work');return !work||box(work).top>=Math.max(...[...row.children].slice(0,4).map(cell=>box(cell).bottom))-1;}),
-        controls:[...list.querySelectorAll('.maestro-worker-original, .maestro-history-button, .maestro-worker-work .maestro-worker-task')].every(element=>box(element).width>20)};});
+        controls:[...list.querySelectorAll('.maestro-worker-doc:not(.is-missing), .maestro-worker-model, .maestro-worker-remove, .maestro-history-button, .maestro-worker-work .maestro-worker-task')].every(element=>box(element).width>20)};});
     assert.equal(layout.overflow,false,width+': no overflow');assert.ok(layout.inside===true,width+': everything inside '+layout.inside);
     for (const index of [1,2,3]) assert.equal(new Set(layout.lefts.map(value=>value[index])).size,1,width+': column '+(index+1)+' aligned');
     assert.ok(layout.oneLine&&layout.under&&layout.controls,width+': one summary line, work below it, controls usable '+JSON.stringify(layout));
+    // Request · report sit at one right edge on every work line, whatever the summary length, and never overlap it.
+    const docs=await page.locator('.maestro-worker-work .maestro-worker-docs').evaluateAll(items=>items.map(item=>{const b=item.getBoundingClientRect(),s=item.parentElement.querySelector('.maestro-worker-summary')?.getBoundingClientRect();return [Math.round(b.right),!s||s.right<=b.left+1];}));
+    assert.ok(docs.length>5&&new Set(docs.map(value=>value[0])).size===1&&docs.every(value=>value[1]),width+': documents aligned right without overlap '+JSON.stringify(docs));
     // Role first: the recorded role badge is the leftmost item of every row, before the model, at every width.
-    const roleFirst=await page.locator('.maestro-worker-row').evaluateAll(rows=>rows.map(row=>{const cell=row.querySelector('.maestro-worker-cell');const role=cell.querySelector('.maestro-role'),name=cell.querySelector('.maestro-worker-select');
+    const roleFirst=await page.locator('.maestro-worker-row').evaluateAll(rows=>rows.map(row=>{const cell=row.querySelector('.maestro-worker-cell');const role=cell.querySelector('.maestro-role'),name=cell.querySelector('.maestro-worker-model');
       const r=role.getBoundingClientRect(),n=name.getBoundingClientRect();return [cell.firstElementChild===role,r.left<=n.left+1&&(r.top<n.top-1||r.right<=n.left+1)];}));
     assert.ok(roleFirst.every(([dom,box])=>dom&&box),width+': role precedes the model '+JSON.stringify(roleFirst));
-    if (process.env.WORKER_COMPACT_EVIDENCE) await page.screenshot({path:path.join(process.env.WORKER_COMPACT_EVIDENCE,'control-center-worker-compact-20261010-142020-role-first-check-'+width+'.png'),fullPage:true});
+    if (process.env.WORKER_COMPACT_EVIDENCE) await page.screenshot({path:path.join(process.env.WORKER_COMPACT_EVIDENCE,'control-center-worker-actions-20261010-164335-check-'+width+'.png'),fullPage:true});
   }
   // Dragging still moves the worker by its ID.
   await page.setViewportSize({width:1100,height:700});
-  await page.locator('[data-center-worker="work-ui-55e0"] .maestro-worker-cell').dragTo(page.locator('[data-drop-target="__unclassified"]'));
-  assert.deepEqual(await page.evaluate(()=>window.sentMessages.filter(value=>value.type==='domain.assign').at(-1)),{type:'domain.assign',agentId:'work-ui-55e0',domainId:null,revision:20});
+  await page.locator('[data-center-worker="work-brief-1a2b"] .maestro-worker-cell').dragTo(page.locator('[data-drop-target="'+customer+'"]'));
+  assert.deepEqual(await page.evaluate(()=>window.sentMessages.filter(value=>value.type==='domain.assign').at(-1)),{type:'domain.assign',agentId:'work-brief-1a2b',domainId:customer,revision:20});
+}
+
+// Reordering workers by drag and drop (or the handle's arrow keys) changes their display order only. The order is saved
+// by agent ID through the host and restored on refresh and reopen; selection, drafts and run state stay with each ID.
+async function checkWorkerReorder(page, post) {
+  const evidence=process.env.PERFORMER_DND_EVIDENCE;
+  const shot=async name=>{ if (evidence) await page.screenshot({path:path.join(evidence,'performer-dnd-20261010-201415-'+name+'.png')}); };
+  await page.setViewportSize({width:1100,height:760});
+  const now=Date.now(), at=minutes=>new Date(now-minutes*60_000).toISOString();
+  const task=(id,agent,title,{status='completed',minutes=5,model='claude-opus-5-5'}={})=>({id,title,workAgentId:agent,workStatus:status,
+    runs:[{role:'work',agentId:agent,runId:'run-'+id,status,model,startedAt:at(minutes+2),...(status==='running'?{}:{finishedAt:at(minutes)}),
+      ...(status==='completed'?{receipt:{outcome:'completed'}}:{})}],commands:[]});
+  const loop=(id,agent,tasks,status='completed')=>({id,title:id,mainAgentId:'main-order',status,loopId:'loop-'+id,workAgentId:agent,updatedAt:at(1),tasks});
+  // Two workers share a model and purpose (numbered), one runs, and all sit in one (unclassified) group.
+  let entries=[loop('o-run','perf-run',[task('t-run','perf-run','실행 중 작업',{status:'running',minutes:1})],'active'),
+    loop('o-twin-a','perf-twin-a',[task('t-twin-a','perf-twin-a','같은 목적 작업',{minutes:10})]),
+    loop('o-twin-b','perf-twin-b',[task('t-twin-b','perf-twin-b','같은 목적 작업',{minutes:20})]),
+    loop('o-gpt','perf-gpt',[task('t-gpt','perf-gpt','다른 모델 작업',{minutes:30,model:'gpt-6.1-sol'})])];
+  // Every worker belongs to one real domain, as Main places it at dispatch (the new worker below included).
+  const area='domain-0a0a0a0a0a0a', by={actor:'ai',at:at(1),source:'loop'};
+  const domains={revision:30,domains:[{id:area,name:'Order area',aliases:[],createdBy:by,nameSetBy:by}],
+    assignments:Object.fromEntries(['perf-run','perf-twin-a','perf-twin-b','perf-gpt','perf-new'].map(agent=>[agent,{domainId:area,setBy:by}])),removedWorkers:{}};
+  // The previous check left its membership save open; answer it so no edit is still saving.
+  await post({type:'domain.result',edit:'domain.assign'});
+  await page.locator('#maestro-workers-view').click();
+  await page.locator('#maestro-search').fill('');await page.locator('#maestro-status').selectOption('');await page.locator('#maestro-scope').selectOption('');await page.locator('#maestro-domain').selectOption('');
+  await post({type:'project.tasks',entries,domains,workerOrder:[]});
+  if (await page.locator('#maestro-workspace').getAttribute('data-layout')==='split') await page.getByRole('button',{name:'Back to list',exact:true}).click();
+  const shown=()=>page.locator('.maestro-worker-row').evaluateAll(rows=>rows.map(row=>row.dataset.centerWorker));
+  const orders=()=>page.evaluate(()=>window.sentMessages.filter(value=>value.type==='worker.order'));
+  const others=()=>page.evaluate(()=>window.sentMessages.filter(value=>['worker.command','worker.stop','worker.remove','worker.handoff','domain.assign','project.task.open'].includes(value.type)).length);
+  const row=agent=>page.locator('[data-center-worker="'+agent+'"]');
+  const names=()=>page.locator('.maestro-worker-row').evaluateAll(rows=>Object.fromEntries(rows.map(row=>[row.dataset.centerWorker,row.querySelector('.maestro-worker-model').textContent])));
+  assert.equal(await page.locator('[data-membership-required="true"]').count(),0,'All four workers are members of a real domain');
+  const initial=await shown();
+  assert.deepEqual(initial,['perf-run','perf-twin-a','perf-twin-b','perf-gpt'],'Without a saved order the usual order is kept');
+  const twinNames=await names();
+  assert.notEqual(twinNames['perf-twin-a'],twinNames['perf-twin-b'],'Same model and purpose are told apart');
+  // Every row has a visible handle that names the worker, its place and the keyboard path.
+  assert.equal(await page.locator('.maestro-worker-grip').count(),4);
+  assert.match(await page.locator('[data-reorder-worker="perf-gpt"]').getAttribute('aria-label'),/perf-gpt \(4 of 4\).*↑\/↓/);
+  assert.equal(await row('perf-gpt').getAttribute('draggable'),'true');
+  // Keep a selected worker with an open detail and a typed instruction; reordering must leave both as they are.
+  await page.locator('[data-select-worker="perf-twin-b"]').click();
+  await page.locator('#maestro-command-input').fill('초안 유지');
+  const before=await others();
+  // A real drag from the handle (Playwright's native drag and drop) onto the upper or lower edge of another row.
+  const drag=async (from,to,where)=>{
+    const box=await row(to).boundingBox();
+    await row(from).locator('.maestro-worker-grip').dragTo(row(to),{targetPosition:{x:box.width/2,y:where==='before'?3:box.height-3}});
+  };
+  // The state while a drag is in progress, held still for inspection: the same events the browser sends.
+  const hold=async (from,to,where)=>{
+    const data=await page.evaluateHandle(()=>new DataTransfer());
+    await row(from).dispatchEvent('dragstart',{dataTransfer:data});
+    const box=await row(to).boundingBox();
+    await row(to).dispatchEvent('dragover',{dataTransfer:data,clientX:box.x+box.width/2,clientY:where==='before'?box.y+3:box.y+box.height-3});
+    return async ()=>{ await row(from).dispatchEvent('dragend',{dataTransfer:data}); };
+  };
+  // Back → front: the last worker goes before the first.
+  let release=await hold('perf-gpt','perf-run','before');
+  assert.equal(await row('perf-run').getAttribute('data-drop-position'),'before','The insertion line shows above the target');
+  assert.equal(await page.locator('.is-reorder-target').count(),1);
+  assert.equal(await row('perf-gpt').evaluate(element=>element.classList.contains('is-drag-source')),true);
+  assert.notEqual(await row('perf-run').evaluate(element=>getComputedStyle(element).boxShadow),'none');
+  await shot('dragging-1100');
+  await release();
+  assert.equal(await page.locator('.is-reorder-target, .is-drag-source').count(),0,'Ending the drag without a drop clears the marks');
+  assert.deepEqual(await shown(),initial,'Ending the drag without a drop keeps the order');
+  await drag('perf-gpt','perf-run','before');
+  assert.deepEqual(await shown(),['perf-gpt','perf-run','perf-twin-a','perf-twin-b']);
+  assert.deepEqual((await orders()).at(-1),{type:'worker.order',order:['perf-gpt','perf-run','perf-twin-a','perf-twin-b']});
+  assert.equal(await page.locator('.is-reorder-target, .is-drag-source').count(),0,'Marks clear after the drop');
+  // Middle: the first worker goes after the second.
+  release=await hold('perf-gpt','perf-run','after');
+  assert.equal(await row('perf-run').getAttribute('data-drop-position'),'after','The insertion line shows below the target');
+  await release();
+  await drag('perf-gpt','perf-run','after');
+  assert.deepEqual(await shown(),['perf-run','perf-gpt','perf-twin-a','perf-twin-b']);
+  // Front → back: the first worker goes after the last.
+  await drag('perf-run','perf-twin-b','after');
+  assert.deepEqual(await shown(),['perf-gpt','perf-twin-a','perf-twin-b','perf-run']);
+  // Display only: selection, detail, typed draft, running mark and numbered names stay with their agent IDs.
+  assert.equal(await page.locator('#maestro-command-input').inputValue(),'초안 유지');
+  assert.equal(await page.evaluate(()=>window.saved.centerSelection.agentId),'perf-twin-b');
+  assert.equal(await row('perf-twin-b').getAttribute('aria-current'),'true');
+  assert.equal(await row('perf-run').getAttribute('data-running'),'true');
+  assert.deepEqual(await names(),twinNames,'Moving rows never renumbers same-model workers');
+  assert.equal(await others(),before,'No worker, run, domain or session message is sent by reordering');
+  // Dropping on itself, and a cancelled drag (Escape / released outside), change nothing.
+  const sentBefore=(await orders()).length;
+  release=await hold('perf-twin-a','perf-twin-a','after');
+  assert.equal(await page.locator('.is-reorder-target').count(),0,'No insertion line on the moved row itself');
+  await release();
+  await drag('perf-twin-a','perf-twin-a','after');
+  release=await hold('perf-twin-a','perf-run','before');await release();
+  assert.equal((await orders()).length,sentBefore,'Self drop and a cancelled drag send nothing');
+  assert.equal(await page.locator('.is-reorder-target, .is-drag-source').count(),0,'A cancelled drag leaves no marks');
+  assert.deepEqual(await shown(),['perf-gpt','perf-twin-a','perf-twin-b','perf-run']);
+  // Keyboard: the handle's ↑/↓ move one place and keep focus on the same worker's handle; the edges do nothing.
+  await page.locator('[data-reorder-worker="perf-run"]').focus();
+  await page.keyboard.press('ArrowUp');
+  assert.deepEqual(await shown(),['perf-gpt','perf-twin-a','perf-run','perf-twin-b']);
+  assert.equal(await page.evaluate(()=>document.activeElement.dataset.reorderWorker),'perf-run');
+  await page.keyboard.press('ArrowDown');await page.keyboard.press('ArrowDown');
+  assert.deepEqual(await shown(),['perf-gpt','perf-twin-a','perf-twin-b','perf-run'],'The last place stays last');
+  // While saves are pending, a periodic refresh carrying the older saved order does not move rows back.
+  await post({type:'project.tasks',entries,domains,workerOrder:['perf-run','perf-twin-a','perf-twin-b','perf-gpt']});
+  assert.deepEqual(await shown(),['perf-gpt','perf-twin-a','perf-twin-b','perf-run']);
+  const saved=(await orders()).at(-1).order;
+  for (const value of await orders()) if (value!==undefined) await post({type:'worker.order.result',order:saved});
+  await post({type:'project.tasks',entries,domains,workerOrder:saved});
+  assert.deepEqual(await shown(),saved,'The host order is shown after the saves return');
+  // A failed save shows the order the host kept, with the error.
+  await page.locator('[data-reorder-worker="perf-gpt"]').focus();await page.keyboard.press('ArrowDown');
+  await post({type:'worker.order.result',order:saved,error:'Fixture storage unavailable'});
+  assert.match(await page.locator('.maestro-order-error').textContent(),/could not be saved: Fixture storage unavailable/);
+  assert.deepEqual(await shown(),saved);
+  // Reopen: a new tab restores the host's saved order (here also different from the tab's own saved state).
+  await page.evaluate(()=>sessionStorage.setItem('submission-restoration-fixture',JSON.stringify({...window.saved,workerOrder:undefined})));
+  await page.reload();
+  await post({type:'project.tasks',entries,domains,workerOrder:saved});
+  if (await page.locator('#maestro-workspace').getAttribute('data-layout')==='split') await page.getByRole('button',{name:'Back to list',exact:true}).click();
+  assert.deepEqual(await shown(),saved,'The saved order returns after reopening');
+  // Added and removed workers: a new worker leads (usual order), a gone worker leaves no gap, stale IDs are ignored.
+  entries=[...entries.filter(entry=>entry.workAgentId!=='perf-twin-a'),loop('o-new','perf-new',[task('t-new','perf-new','새 작업',{minutes:0})])];
+  await post({type:'project.tasks',entries,domains,workerOrder:[...saved,'perf-stale']});
+  assert.deepEqual(await shown(),['perf-new',...saved.filter(id=>id!=='perf-twin-a')]);
+  assert.equal(new Set(await shown()).size,(await shown()).length,'No worker is listed twice');
+  await drag('perf-new','perf-run','after');
+  assert.deepEqual((await orders()).at(-1).order,['perf-gpt','perf-twin-b','perf-run','perf-new'],'The saved order drops IDs no longer recorded');
+  await post({type:'worker.order.result',order:(await orders()).at(-1).order});
+  // Narrow editor: the handle stays inside the row and dragging still works.
+  await page.setViewportSize({width:320,height:640});
+  const fit=await page.locator('.maestro-worker-row').evaluateAll(rows=>rows.map(row=>{const grip=row.querySelector('.maestro-worker-grip').getBoundingClientRect(),box=row.getBoundingClientRect();return grip.width>0&&grip.right<=box.right+1&&grip.left>=box.left-1;}));
+  assert.ok(fit.every(Boolean),'320: handles inside their rows '+JSON.stringify(fit));
+  assert.equal(await page.locator('#maestro-tasks').evaluate(element=>element.scrollWidth<=element.clientWidth+1),true,'320: no horizontal overflow');
+  release=await hold('perf-run','perf-gpt','before');
+  await shot('dragging-320');
+  await release();
+  await drag('perf-run','perf-gpt','before');
+  assert.deepEqual(await shown(),['perf-run','perf-gpt','perf-twin-b','perf-new']);
+  await post({type:'worker.order.result',order:(await orders()).at(-1).order});
+  // Filtering hides workers, so rows and handles wait until the full list is shown.
+  await page.locator('#maestro-search').fill('perf-gpt');
+  assert.equal(await row('perf-gpt').getAttribute('draggable'),'false');
+  assert.equal(await page.locator('[data-reorder-worker="perf-gpt"]').isDisabled(),true);
+  await page.locator('#maestro-search').fill('');
+  await page.setViewportSize({width:1100,height:760});
+  await shot('after-1100');
 }

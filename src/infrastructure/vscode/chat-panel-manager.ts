@@ -42,7 +42,7 @@ import { DISPATCH_ID } from "../../common/types/agent-runtime";
 import { parseClientMessage } from "../../protocol/validator";
 import type { ChatTemplateRenderer } from "./chat-template-renderer";
 import type { AccountLimits, AgentRuntimeClient } from "../agent-factory/agent-client";
-import { readProviderModels } from "../agent-factory/model-catalog";
+import { modelSelectionCatalog, readProviderModels } from "../agent-factory/model-catalog";
 import { readAntigravityUsage } from "../agent-factory/antigravity-usage";
 import { isProviderDetected, providerStatuses, type ProviderId } from "../agent-factory/provider-detection";
 import { installProviderCliVersion } from "../agent-factory/provider-cli-installer";
@@ -428,8 +428,24 @@ export class ChatPanelManager implements vscode.Disposable {
         if (!client.removeWorker) throw Object.assign(new Error("Worker removal is unavailable in this runtime"), { code: "worker_control_unavailable" });
         await client.removeWorker(action.agentId, action.revision);
         return {};
-      }
-    });
+      },
+      handoff: async (projectRoot, action, reference) => {
+        // Only a model the host currently detects can receive the task.
+        const catalog = await modelSelectionCatalog();
+        if (!catalog.candidates.some(candidate => candidate.id === action.toModel)) {
+          throw Object.assign(new Error(`Model ${action.toModel} is not among the detected models`), { code: "worker_handoff_model" });
+        }
+        const client = await this.controlCenterClient(projectRoot);
+        if (!client.handoffWorker) throw Object.assign(new Error("Provider handoff is unavailable in this runtime"), { code: "worker_control_unavailable" });
+        return client.handoffWorker(action.agentId, action.loopId, action.toModel, action.reason, reference);
+      },
+      supervise: async projectRoot => {
+        const client = await this.controlCenterClient(projectRoot);
+        if (!client.superviseProject) throw new Error("Supervision is unavailable in this runtime");
+        return client.superviseProject();
+      },
+      models: async () => (await modelSelectionCatalog()).candidates.map(candidate => ({ id: candidate.id, provider: candidate.provider }))
+    }, this.context.globalState);
   }
 
   private async controlCenterClient(projectRoot: string) {
@@ -456,13 +472,15 @@ export class ChatPanelManager implements vscode.Disposable {
     const entry = (await connection.client.listProjectTasks?.())?.find(value => value.id === message.workflowId);
     const task = entry?.tasks.find(value => value.id === message.taskId);
     if (!entry || !task) throw new Error("Task record is no longer available");
-    if (message.target === "result") {
+    // The work report (result.md) and work request (request.md) of the exact recorded agent/run, never another run's.
+    if (message.target === "result" || message.target === "request") {
+      const kind = message.target;
       const run = task.runs?.find(value => value.agentId === message.agentId && value.runId === message.runId);
-      if (!run || run.result?.availability !== "recorded") throw new Error("The recorded result is unavailable");
+      if (!run || run[kind]?.availability !== "recorded") throw new Error(`The recorded ${kind} is unavailable`);
       const records = await connection.client.projectTaskRecords?.(entry.id, task.id) ?? [];
-      const result = records.find(value => value.name === `${run.role} · ${run.runId} · result.md`);
-      if (!result) throw new Error("The recorded result is unavailable");
-      await vscode.window.showTextDocument(await vscode.workspace.openTextDocument(vscode.Uri.file(result.path)), { preview: true });
+      const document = records.find(value => value.name === `${run.role} · ${run.runId} · ${kind}.md`);
+      if (!document) throw new Error(`The recorded ${kind} is unavailable`);
+      await vscode.window.showTextDocument(await vscode.workspace.openTextDocument(vscode.Uri.file(document.path)), { preview: true });
       return;
     }
     if (message.target === "records") {
@@ -529,7 +547,22 @@ export class ChatPanelManager implements vscode.Disposable {
     const last = this.context.workspaceState?.get<string>(LAST_CHAT_KEY);
     const saved = this.savedAgents();
     const state = saved.find(entry => entry.panelId === last) ?? saved.at(-1);
+    // VS Code revives a restored chat tab only when it is shown, so an untracked tab may be this chat; opening it again duplicates the tab.
+    if (state && !this.liveDuplicate(state) && this.restoredChatTabPending()) return;
     if (state) await this.openSidebarAgent(state);
+  }
+
+  /** Whether the window layout holds a chat tab VS Code restored but has not revived into a tracked panel yet. */
+  private restoredChatTabPending(): boolean {
+    const tabs = (vscode.window.tabGroups?.all ?? []).flatMap(group => group.tabs)
+      .filter(tab => { const viewType = (tab.input as { viewType?: unknown } | undefined)?.viewType; return typeof viewType === "string" && viewType.endsWith(this.viewType); });
+    return tabs.length > [...this.panels.values()].filter(panel => !panel.disposed).length;
+  }
+
+  /** A live panel already bound to the same chat: the same panel ID, or the same Agent in the same project. */
+  private liveDuplicate(state: ChatPanelState, panel?: vscode.WebviewPanel): ManagedPanel | undefined {
+    return [...this.panels.values()].find(candidate => !candidate.disposed && candidate.panel !== panel && this.sameProject(candidate.state, state) &&
+      (candidate.state.panelId === state.panelId || Boolean(state.agentId && candidate.state.agentId === state.agentId)));
   }
 
   private generalSettings(): GeneralSettings {
@@ -741,6 +774,14 @@ export class ChatPanelManager implements vscode.Disposable {
       managed.themeTimer = setTimeout(() => { void this.refreshTheme(managed); }, 150);
     };
     subscriptions.push(watcher, watcher.onDidChange(refreshTheme), watcher.onDidCreate(refreshTheme), watcher.onDidDelete(refreshTheme));
+    // Restoration and startup can both pass their checks across the awaits above; the first bound tab keeps the chat.
+    const duplicate = this.liveDuplicate(state, panel);
+    if (duplicate) {
+      for (const subscription of subscriptions) subscription.dispose();
+      duplicate.panel.reveal(panel.viewColumn, true);
+      panel.dispose();
+      return;
+    }
     this.panels.set(state.panelId, managed);
     if (!legacyState.projectRoot && state.projectRoot && state.agentId) {
       // Old snapshots belonged to the workspace's default project. Copy their
@@ -763,7 +804,7 @@ export class ChatPanelManager implements vscode.Disposable {
         this.disposedPanels.add(panel);
         managed.lunaBot?.dispose();
         if (managed.agentRefreshTimer) clearTimeout(managed.agentRefreshTimer);
-        this.panels.delete(state.panelId);
+        if (this.panels.get(state.panelId) === managed) this.panels.delete(state.panelId);
         this.broadcastCompanion();
         this.notifyAgents();
         if (this.activePanelId === state.panelId) {
@@ -789,7 +830,7 @@ export class ChatPanelManager implements vscode.Disposable {
     try {
       panel.webview.html = await this.templates.render(panel.webview);
     } catch (error) {
-      this.panels.delete(state.panelId);
+      if (this.panels.get(state.panelId) === managed) this.panels.delete(state.panelId);
       this.broadcastCompanion();
       panel.webview.html = fallbackHtml(error);
     }
@@ -1464,6 +1505,9 @@ export class ChatPanelManager implements vscode.Disposable {
       case "worker.command":
       case "worker.stop":
       case "worker.remove":
+      case "worker.handoff":
+      case "supervision.request":
+      case "handoff.models.request":
         // Worker control belongs to the control center tab, which confirms and binds the exact worker; chat tabs ignore it.
         return;
       case "project.task.open": {

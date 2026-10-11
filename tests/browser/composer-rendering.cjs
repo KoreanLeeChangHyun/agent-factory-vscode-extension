@@ -257,13 +257,20 @@ async function checkComposerStatusLine(page) {
   });
   assert.notEqual(styles.composer.border, accent, 'A running composer has no accent border');
   assert.notEqual(styles.count.color, accent, 'The queued count stays neutral');
-  assert.equal(await page.locator('.astra-stars, .astra-star').count(), 0, 'The composer has no decorative layer');
+  assert.equal(await page.locator('.astra-stars').isVisible(), false, 'The starfield shows only for an Astra Main model');
   assert.equal(await page.locator('#send-button').evaluate(node => node.classList.contains('is-running')), true, 'Empty composer shows stop');
   assert.equal(new Set(styles.icons.map(icon => icon.width + 'x' + icon.height)).size, 1, 'Icon buttons share one size ' + JSON.stringify(styles.icons));
   assert.equal(new Set(styles.icons.map(icon => icon.background)).size, 1, 'Clear, question, submit and stop share one surface ' + JSON.stringify(styles.icons));
   assert.ok(styles.toggles.some(toggle => toggle.pressed === 'true') && styles.toggles.some(toggle => toggle.pressed === 'false'), 'Fixture covers both toggle states');
   assert.equal(new Set(styles.toggles.map(toggle => toggle.background + '|' + toggle.height)).size, 1, 'On and off chips share one surface ' + JSON.stringify(styles.toggles));
   for (const toggle of styles.toggles) assert.notEqual(toggle.color, accent, 'Toggle chips do not use the accent');
+  // An "on" switch fills its track with the project blue and an "off" track stays outlined; the thumb position and
+  // aria-pressed still carry the state, so colour is not the only cue.
+  const tracks = await page.evaluate(() => ['#orchestrate-mode-button', '#work-isolation-button', '#auto-scroll-button'].map(selector => { const node = document.querySelector(selector); const rect = node.querySelector('.toggle-icon rect'), thumb = node.querySelector('.toggle-thumb');
+    return { pressed: node.getAttribute('aria-pressed'), fill: getComputedStyle(rect).fill, thumbX: thumb.getBoundingClientRect().left - rect.getBoundingClientRect().left }; }));
+  for (const track of tracks) assert.equal(track.fill === accent, track.pressed === 'true', 'Only an on switch is blue ' + JSON.stringify(tracks));
+  const on = tracks.find(track => track.pressed === 'true'), off = tracks.find(track => track.pressed === 'false');
+  assert.ok(on.thumbX > off.thumbX, 'The thumb position differs between on and off');
   await page.locator('#pending-queue-toggle').click();
   const list = await page.locator('#pending-message-queue').boundingBox(), toggle = await page.locator('#pending-queue-toggle').boundingBox(), composer = await page.locator('.composer').boundingBox();
   assert.ok(list.y >= toggle.y + toggle.height - 1 && list.y + list.height <= composer.y, 'Queue list opens between the status line and composer');
@@ -271,6 +278,6 @@ async function checkComposerStatusLine(page) {
   assert.match(await page.locator('#pending-message-queue').textContent(), /다음 메시지[\s\S]*그다음 메시지/);
   await page.locator('#pending-queue-toggle').click();
   if (process.env.AF_RENDERING_ARTIFACT_DIR) await page.locator('.composer-region').screenshot({ path: require('node:path').join(process.env.AF_RENDERING_ARTIFACT_DIR, 'composer-status-line-795.png') });
-  console.log('Composer status line: one line, shared edges, neutral colour, shared toggles and icon buttons passed.');
+  console.log('Composer status line: one line, shared edges, neutral text, blue on-switch tracks, shared toggles and icon buttons passed.');
 }
 module.exports = { checkComposerRendering, checkPendingQueueHeader, checkComposerStatusLine };

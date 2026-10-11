@@ -36,6 +36,10 @@ export interface ExecutionCapabilities {
   readonly taskDomain?: boolean;
   /** domains.py keeps the shared editable project domain list; loop start links the allocation domain. */
   readonly projectDomains?: boolean;
+  /** Allocation taskType with a host modelCatalog file yields a recorded detected-model recommendation. */
+  readonly modelRecommendation?: boolean;
+  /** loop.py handoff moves the current Work task to a new linked session on another provider or model. */
+  readonly providerHandoff?: boolean;
   /** A stopped loop reports `failureClass`; Main is then told what to do for each class. */
   readonly failureClass?: boolean;
   /** A loop stopped on its revision limit carries a structured `pause`; the task panel then offers the Human's decision. */

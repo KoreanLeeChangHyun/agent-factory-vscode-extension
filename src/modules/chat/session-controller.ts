@@ -385,7 +385,7 @@ export class ChatSessionController {
         }
         attempted = true;
         const advertised = await this.delegationCapabilities(next[0]!.execution);
-        const merged = mergePendingSends(next, advertised.workProfile, advertised.failureClass, advertised.taskWorkspaces, advertised.workIsolation, advertised.restrictedWorkProfiles, advertised.roleDirectExceptions, advertised.taskAllocation, advertised.taskDomain, advertised.projectDomains);
+        const merged = mergePendingSends(next, advertised.workProfile, advertised.failureClass, advertised.taskWorkspaces, advertised.workIsolation, advertised.restrictedWorkProfiles, advertised.roleDirectExceptions, advertised.taskAllocation, advertised.taskDomain, advertised.projectDomains, advertised.modelRecommendation);
         if (next.length > 1) this.events.onProgress(localize("ui.submitting.0.queued.messages.as.one.request.task.mode.model.and.reasoning.use.the.first.message.settings.permissions.use.their.common.allowed.scope", next.length));
         // An older runtime rejects the unknown flag; the guidance then reports the limitation instead.
         const { workIsolation, ...withoutIsolation } = merged.execution;
@@ -441,8 +441,8 @@ export class ChatSessionController {
   }
 
   /** What the installed runtime advertises: it accepts `--work-profile` (an older one rejects the unknown flag) and reports `failureClass`. */
-  private async delegationCapabilities(execution: ExecutionOptions): Promise<{ readonly workProfile: boolean; readonly failureClass: boolean; readonly taskWorkspaces: boolean; readonly workIsolation: boolean; readonly restrictedWorkProfiles: boolean; readonly roleDirectExceptions: boolean; readonly taskAllocation: boolean; readonly taskDomain: boolean; readonly projectDomains: boolean }> {
-    const none = { workProfile: false, failureClass: false, taskWorkspaces: false, workIsolation: false, restrictedWorkProfiles: false, roleDirectExceptions: false, taskAllocation: false, taskDomain: false, projectDomains: false };
+  private async delegationCapabilities(execution: ExecutionOptions): Promise<{ readonly workProfile: boolean; readonly failureClass: boolean; readonly taskWorkspaces: boolean; readonly workIsolation: boolean; readonly restrictedWorkProfiles: boolean; readonly roleDirectExceptions: boolean; readonly taskAllocation: boolean; readonly taskDomain: boolean; readonly projectDomains: boolean; readonly modelRecommendation: boolean }> {
+    const none = { workProfile: false, failureClass: false, taskWorkspaces: false, workIsolation: false, restrictedWorkProfiles: false, roleDirectExceptions: false, taskAllocation: false, taskDomain: false, projectDomains: false, modelRecommendation: false };
     if ((execution.taskMode ?? "direct") === "direct") return none;
     // Same cached probe the dispatch itself uses; a failed probe only omits the instructions.
     try {
@@ -450,7 +450,8 @@ export class ChatSessionController {
       return { workProfile: submit.workProfile === true, failureClass: submit.failureClass === true, taskWorkspaces: submit.taskWorkspaces === true, workIsolation: submit.workIsolation === true,
         restrictedWorkProfiles: submit.workProfile === true && submit.restrictedWorkProfiles === true, roleDirectExceptions: submit.roleDirectExceptions === true, taskAllocation: submit.taskAllocation === true,
         taskDomain: submit.taskAllocation === true && submit.taskDomain === true,
-        projectDomains: submit.taskAllocation === true && submit.taskDomain === true && submit.projectDomains === true };
+        projectDomains: submit.taskAllocation === true && submit.taskDomain === true && submit.projectDomains === true,
+        modelRecommendation: submit.taskAllocation === true && submit.modelRecommendation === true };
     } catch { return none; }
   }
 
@@ -813,7 +814,7 @@ Answer the Human's current question without cancelling these workflows. For task
   }
 }
 
-function mergePendingSends(items: readonly PendingSend[], workProfileRecorded = false, failureClassReported = false, taskWorkspaces = false, workIsolation = false, restrictedProfiles = false, roleDirectExceptions = false, taskAllocation = false, taskDomain = false, projectDomains = false): Pick<PendingSend, "text" | "attachments" | "execution"> & { submissions: MessageSubmission[] } {
+function mergePendingSends(items: readonly PendingSend[], workProfileRecorded = false, failureClassReported = false, taskWorkspaces = false, workIsolation = false, restrictedProfiles = false, roleDirectExceptions = false, taskAllocation = false, taskDomain = false, projectDomains = false, modelRecommendation = false): Pick<PendingSend, "text" | "attachments" | "execution"> & { submissions: MessageSubmission[] } {
   const first = items[0]!;
   const mode = first.execution.taskMode ?? "direct";
   // Off (the default) keeps the shared checkout; only the Human's toggle selects isolated Work Units.
@@ -821,7 +822,7 @@ function mergePendingSends(items: readonly PendingSend[], workProfileRecorded = 
     : taskWorkspaces && workIsolation ? taskWorkspaceGuidance : workIsolationUnavailableGuidance;
   const modelGuidance = mode === "direct"
     ? ""
-    : (mode === "orchestrate" ? orchestratorModeGuidance(workProfileRecorded, failureClassReported, restrictedProfiles, roleDirectExceptions, taskAllocation, taskDomain, projectDomains) : backgroundWorkflowGuidance) + delegatedModelGuidance(first.execution.agentModels, workProfileRecorded) + delegatedPermissionGuidance(first.execution.agentPermissions) + isolationGuidance;
+    : (mode === "orchestrate" ? orchestratorModeGuidance(workProfileRecorded, failureClassReported, restrictedProfiles, roleDirectExceptions, taskAllocation, taskDomain, projectDomains, modelRecommendation) : backgroundWorkflowGuidance) + delegatedModelGuidance(first.execution.agentModels, workProfileRecorded) + delegatedPermissionGuidance(first.execution.agentPermissions) + isolationGuidance;
   const inspectionGuidance = first.execution.inspectionOnly ? withInspectionGuidance("") : "";
   const workflowGuidanceParts: string[] = [];
   const submissions = items.map(item => {
@@ -936,7 +937,7 @@ function delegatedPermissionGuidance(settings: ExecutionOptions["agentPermission
 }
 
 // Orchestrator mode is the default route, not an explicit dispatch request.
-export function orchestratorModeGuidance(workProfileRecorded: boolean, failureClassReported = false, restrictedProfiles = false, roleDirectExceptions = false, taskAllocation = false, taskDomain = false, projectDomains = false): string {
+export function orchestratorModeGuidance(workProfileRecorded: boolean, failureClassReported = false, restrictedProfiles = false, roleDirectExceptions = false, taskAllocation = false, taskDomain = false, projectDomains = false, modelRecommendation = false): string {
   // Only a runtime that advertises failureClass is told how to act on it; it never re-dispatches Work itself.
   const failureActions = failureClassReported
     ? " A stopped loop reports failureClass; act on it: contract - the runtime's automatic receipt recovery already ran, so report a run that still ended failed; transient - run loop.py reconcile, read the status once more, then decide; environment - stop and report the cause to the Human; human - pass the decision to the Human; provider - report the provider's message and do not dispatch again unless the Human asks. The one retry of a failed workLight attempt with the work profile applies only when its failureClass is contract or absent."
@@ -966,6 +967,8 @@ export function orchestratorModeGuidance(workProfileRecorded: boolean, failureCl
     ? " Before assignment, read the installed Agent task-dispatch.md allocation contract. Split independent outcomes with completion evidence; keep strong dependencies/shared state with one owner. Only confirmed, conflict-free inputs are parallel candidates; ordered loops stay sequential. Choose role/profile separately from model, effort, Fast and permissions: explore for investigation, workLight for settled local changes, work for uncertain design/integration/diagnosis, scribe for authorized Document consolidation, Verification only on explicit request. Prefer the existing session for same-task revisions and explain new/reuse choice. Include dependencies, input source/revision/time, read/write boundary, shared ownership and selection reasons concisely inside Scope. For a brief, write schemaVersion 1 allocation JSON in this run and pass --allocation-file FILE; for an existing task list use the selected task's allocation field instead. Existing requiredFileOperations, documentPaths and workspace remain authoritative. Never mark unconfirmed results/ownership ready. Preserve accepted allocation on revision/resume; it records judgment, grants no authority and introduces no scheduler or learned model router."
       + (taskDomain ? " Set the optional allocation domain to the short work area the outcome belongs to (for example extension UI or plugin runtime), reusing the same name for the same area; it is not a profile, role or model. Omit it when the area is unclear; the control center then shows the task as unclassified." : "")
       + (taskDomain && projectDomains ? " Before choosing it, read the project's shared domain list with the installed domains.py list --project-root PROJECT and reuse an existing domain name (or a former name) for the same work area; use a new name only when none fits. loop.py start then links the worker to that domain as your choice and reports domainLink; domains.py link --actor ai --source RUN --agent ID --name NAME does the same without a loop. The Human's domain names and worker placements win: never rename or move them, and treat domain_protected as final." : "")
+      // Automatic model allocation: the runtime recommends from the detected models; a Human-specified model always wins.
+      + (modelRecommendation ? " Set allocation taskType (research, small-change, design-diagnosis or documentation), save the preparation modelCatalog as a JSON file in this run and pass --model-catalog-file FILE; the runtime records a detected-model recommendation. A Human-specified model always wins." : "")
     : "";
   return `
 

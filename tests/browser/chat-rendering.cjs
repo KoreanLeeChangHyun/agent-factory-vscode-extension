@@ -73,7 +73,7 @@ async function main() {
       }
       response.setHeader('Content-Type', target.endsWith('.css') ? 'text/css' : target.endsWith('.svg') ? 'image/svg+xml' : target.endsWith('.png') ? 'image/png' : 'text/javascript');
       let source = fs.readFileSync(target);
-      if (url.pathname === '/static/js/chat.js' && process.argv.includes('--chat-performance-only')) {
+      if (url.pathname === '/static/js/chat.js' && (process.argv.includes('--chat-performance-only') || process.argv.includes('--conversation-scale-only'))) {
         if (process.env.CHAT_PERFORMANCE_BASELINE) source = fs.readFileSync(process.env.CHAT_PERFORMANCE_BASELINE);
         source = Buffer.from(source.toString().replace(/\}\)\(\);\s*$/, 'window.performanceChat = { state, persistNow, renderTimeline, indexedTimeline, messageElements, messageViewStates, pendingPreviews };\n})();'));
       }
@@ -117,6 +117,11 @@ async function main() {
     }
     if (process.argv.includes('--chat-performance-only')) {
       await require('./chat-performance.cjs').checkChatPerformance(page);
+      assert.deepEqual(pageErrors, []);
+      return;
+    }
+    if (process.argv.includes('--conversation-scale-only')) {
+      await require('./conversation-scale.cjs').checkConversationScale(page);
       assert.deepEqual(pageErrors, []);
       return;
     }
@@ -582,7 +587,7 @@ async function main() {
     if (process.argv.includes('--astra-stars-only')) {
       await checkAstraStars(page);
       assert.deepEqual(errors, []);
-      console.log('Composer without starfield: Astra model selection, typing and responsive layout passed.');
+      console.log('Astra starfield: visible for Astra, twinkle, typing dim, reduced motion, forced colours, other model and responsive layout passed.');
       return;
     }
     if (process.argv.includes('--work-units-only')) {

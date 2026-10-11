@@ -65,6 +65,9 @@ async function checkRenderingFeedback(page) {
   await emit({ type: 'run.state', running: true });
   await emit({ type: 'run.state', running: false });
   assert.equal(await label.textContent(), '실행 종료', 'An ended run without outcome is not labeled success');
+  // An outcome that needs no action clears after a short while instead of staying above an idle composer.
+  await page.waitForFunction(() => document.getElementById('agent-progress').hidden, null, { timeout: 6000 });
+  assert.equal(await progress.isVisible(), false, 'Settled run feedback leaves no idle status line');
   await emit({ type: 'run.state', running: true });
   await emit({ type: 'decision.pending', runId: 'decision-run', canApprove: false });
   assert.equal(await label.textContent(), '사용자님 응답 대기');
@@ -77,6 +80,9 @@ async function checkRenderingFeedback(page) {
   await emit({ type: 'run.observed', status: 'failed' });
   await emit({ type: 'run.state', running: false });
   assert.equal(await label.textContent(), '실행 실패');
+  await page.waitForTimeout(4500);
+  assert.equal(await label.textContent(), '실행 실패', 'Failure stays visible until the next action');
+  assert.equal(await progress.isVisible(), true);
   await page.locator('#prompt').fill('다시 전송할 내용');
   await page.locator('#send-button').click();
   const rejected = await last('chat.send');

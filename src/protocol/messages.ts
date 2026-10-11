@@ -39,7 +39,24 @@ export interface ProjectTaskEntry {
   readonly requestedBy?: "human";
   /** The loop's latest Work run: the only run a running-task addition may target. */
   readonly latestWorkRunId?: string;
+  /** Provider handoffs recorded in this loop, oldest first; the earlier session stays read-only. */
+  readonly handoffs?: readonly ProjectTaskHandoff[];
   readonly tasks: readonly ProjectTaskDetail[];
+}
+/** One recorded provider handoff (loop.py handoff); authorization details stay in the loop record. */
+export interface ProjectTaskHandoff {
+  readonly id: string;
+  readonly taskId?: string;
+  readonly fromAgentId: string;
+  readonly toAgentId: string;
+  readonly fromProvider?: string;
+  readonly toProvider?: string;
+  readonly fromModel?: string;
+  readonly toModel?: string;
+  readonly reason?: string;
+  readonly actor?: string;
+  readonly createdAt?: string;
+  readonly toRunId?: string;
 }
 /** One command delivered (or waiting) for a worker, from the loop's managed records only. */
 export interface ProjectTaskCommand {
@@ -79,15 +96,16 @@ export interface ProjectDomains {
   readonly changedDomainId?: string;
   /** Workers the Human removed from the worker list; their records stay readable in task views. */
   readonly removedWorkers?: Readonly<Record<string, { readonly removedBy: ProjectDomainChange }>>;
-  /** provisional: created by "new domain" with the placeholder name and not yet renamed; never matched by name. */
+  /** provisional: a legacy unnamed domain from the former placeholder "new domain"; workers in it still need a real domain. */
   readonly domains: readonly { readonly id: string; readonly name: string; readonly provisional?: boolean; readonly aliases: readonly string[]; readonly createdBy: ProjectDomainChange; readonly nameSetBy: ProjectDomainChange }[];
+  /** domainId null is legacy (the removed "unclassified" choice) and is read as a worker still needing a domain. */
   readonly assignments: Readonly<Record<string, { readonly domainId: string | null; readonly setBy: ProjectDomainChange }>>;
 }
 export type ProjectDomainEdit =
   | { readonly type: "domain.create"; readonly name: string; readonly revision: number }
-  | { readonly type: "domain.create"; readonly placeholder: true; readonly revision: number }
   | { readonly type: "domain.rename"; readonly domainId: string; readonly name: string; readonly revision: number }
-  | { readonly type: "domain.assign"; readonly agentId: string; readonly domainId: string | null; readonly revision: number };
+  /** Every worker belongs to a real domain: a placement only moves it to another listed, named domain. */
+  | { readonly type: "domain.assign"; readonly agentId: string; readonly domainId: string; readonly revision: number };
 export interface ProjectTaskRun {
   readonly agentId: string;
   readonly runId: string;
@@ -109,7 +127,10 @@ export interface ProjectTaskRun {
     readonly verifiedWorkRunId: string;
     readonly findings: readonly { readonly id: string; readonly path: string; readonly location: string; readonly problem: string; readonly evidence: string; readonly correction: string }[];
   };
-  readonly result?: { readonly availability: "recorded" | "missing" | "error"; readonly summary?: string; readonly error?: string };
+  /** highlight: the report's stated outcome (value, count, remaining problem) picked by rule; absent when none is stated. */
+  readonly result?: { readonly availability: "recorded" | "missing" | "error"; readonly summary?: string; readonly highlight?: string; readonly error?: string };
+  /** Whether this run's request.md (the work request it received) exists; opened by its exact agent/run. */
+  readonly request?: { readonly availability: "recorded" | "missing" };
   readonly usage?: Readonly<Record<string, number | null>>;
   readonly context?: Readonly<Record<string, string | number | boolean | null>>;
   readonly handoff?: { readonly slot?: string; readonly epoch?: number };
@@ -159,7 +180,15 @@ export type ClientMessage =
       readonly rework?: { readonly workflowId: string; readonly taskId: string } }
   | { readonly type: "worker.stop"; readonly agentId: string; readonly loopId: string; readonly workflowId: string; readonly taskId: string }
   | { readonly type: "worker.remove"; readonly agentId: string; readonly revision: number }
-  | { readonly type: "project.task.open"; readonly workflowId: string; readonly taskId: string; readonly target: "chat" | "run" | "records" | "feedback" | "result"; readonly agentId?: string; readonly runId?: string }
+  /** The Human moves the current Work task of this loop to a new session on the chosen detected model. */
+  | { readonly type: "worker.handoff"; readonly agentId: string; readonly loopId: string; readonly toModel: string; readonly reason: string }
+  /** Read-only supervision verdicts of unfinished loops (operation_records.py supervise --dry-run). */
+  | { readonly type: "supervision.request" }
+  /** Detected models a provider handoff may target. */
+  | { readonly type: "handoff.models.request" }
+  /** Display order of the control center's workers, by agent ID; it changes no worker, run or domain. */
+  | { readonly type: "worker.order"; readonly order: readonly string[] }
+  | { readonly type: "project.task.open"; readonly workflowId: string; readonly taskId: string; readonly target: "chat" | "run" | "records" | "feedback" | "result" | "request"; readonly agentId?: string; readonly runId?: string }
   | { readonly type: "agent.preset"; readonly action: "save" | "apply" | "copy" | "update" | "delete" | "rename" | "default"; readonly scope: "global" | "project" | "chat"; readonly name: string; readonly newName?: string; readonly sourceName?: string }
   | { readonly type: "agent.defaults.save"; readonly scope: "global" | "project"; readonly role: import("../core/config/agent-settings").AgentRole; readonly field: "model" | "reasoningEffort" | "fast"; readonly value: string | boolean }
   | { readonly type: "agent.defaults.fast"; readonly scope: "global" | "project"; readonly role: import("../core/config/agent-settings").AgentRole; readonly model: string; readonly value: boolean }
@@ -265,7 +294,7 @@ export type HostMessage =
   | { readonly type: "usage.accounts"; readonly accounts: Readonly<Record<string, AccountUsage>> }
   | { readonly type: "agent.preset.field.result"; readonly error?: string }
   | { readonly type: "contracts.list"; readonly contracts: readonly import("../infrastructure/filesystem/contracts").ContractEntry[]; readonly error?: string }
-  | { readonly type: "project.tasks"; readonly entries: readonly ProjectTaskEntry[]; readonly error?: string; readonly domains?: ProjectDomains; readonly domainsError?: string }
+  | { readonly type: "project.tasks"; readonly entries: readonly ProjectTaskEntry[]; readonly error?: string; readonly domains?: ProjectDomains; readonly domainsError?: string; readonly workerOrder?: readonly string[] }
   | { readonly type: "agent.preset.result"; readonly scope?: import("../core/config/agent-settings").AgentPresetScope; readonly name?: string; readonly settings?: import("../core/config/agent-settings").AgentDefaults; readonly error?: string }
   | { readonly type: "agent.defaults"; readonly settings: import("../core/config/agent-settings").AgentDefaultsSnapshot }
   | import("../infrastructure/vscode/sudo-broker").SudoChallenge

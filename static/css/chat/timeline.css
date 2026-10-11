@@ -186,6 +186,12 @@
   width: 100%;
   margin: 0 0 1em;
   line-height: 1.5;
+  /* Skip style/layout/paint for off-screen messages; a new message otherwise
+     restyles and relayouts the whole mounted page. Sizes are remembered once
+     rendered, and the clip margin keeps focus outlines visible. */
+  content-visibility: auto;
+  contain-intrinsic-size: auto 120px;
+  overflow-clip-margin: 4px;
 }
 
 .message-user {

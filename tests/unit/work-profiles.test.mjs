@@ -469,3 +469,14 @@ test("Main reads and reuses the shared domain list only when the runtime provide
     assert.equal(sent[0].includes("domains.py list"), expected);
   }
 });
+
+test("automatic model allocation is explained only with allocation and a runtime that records recommendations", async () => {
+  const { orchestratorModeGuidance } = await importTypeScript("src/modules/chat/session-controller.ts");
+  const added = / Set allocation taskType \(research, small-change, design-diagnosis or documentation\), save the preparation modelCatalog as a JSON file in this run and pass --model-catalog-file FILE; the runtime records a detected-model recommendation\. A Human-specified model always wins\./;
+  const guided = orchestratorModeGuidance(true, true, true, true, true, true, true, true);
+  assert.match(guided, added);
+  // The other guidance is unchanged around the one added sentence.
+  assert.equal(guided.replace(added, ""), orchestratorModeGuidance(true, true, true, true, true, true, true));
+  assert.doesNotMatch(orchestratorModeGuidance(true, true, true, true, false, false, false, true), /--model-catalog-file/, "No allocation, no taskType");
+  assert.doesNotMatch(orchestratorModeGuidance(true, true, true, true, true, true, true, false), /--model-catalog-file/);
+});
