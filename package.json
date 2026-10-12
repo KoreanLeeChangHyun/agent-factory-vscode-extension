@@ -2,7 +2,7 @@
   "name": "agent-factory-main-chat",
   "displayName": "Agent Factory Main Chat",
   "description": "%extension.description%",
-  "version": "1.0.29",
+  "version": "1.0.30",
   "publisher": "agent-factory",
   "icon": "static/images/agent-factory.png",
   "license": "MIT",
@@ -509,13 +509,19 @@
         },
         "agentFactory.conductorQueue.drivers": {
           "type": "string",
-          "enum": ["fake", "managed"],
+          "enum": [
+            "fake",
+            "managed"
+          ],
           "default": "fake",
           "description": "%agentFactory.conductorQueue.drivers.description%"
         },
         "agentFactory.conductorQueue.approval": {
           "type": "string",
-          "enum": ["bypass", "required"],
+          "enum": [
+            "bypass",
+            "required"
+          ],
           "default": "bypass",
           "description": "%agentFactory.conductorQueue.approval.description%"
         }
