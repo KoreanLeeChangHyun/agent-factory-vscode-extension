@@ -10,14 +10,15 @@ async function checkRolePools(page) {
   const project = fs.mkdtempSync(path.join(os.tmpdir(), 'af-role-project-'));
   const env = { ...process.env, AGENT_FACTORY_HOME: home, PYTHONPATH: path.join(plugin, 'runtime') };
   delete env.AGENT_FACTORY_CODEX_POOL;
-  const configured = JSON.parse(execFileSync('python3', ['-c', `import sys,json
+  let configured;
+  try { configured = JSON.parse(execFileSync('python3', ['-c', `import sys,json
 from pathlib import Path
 from storage import paths
 from tasks import domains
 r=Path(paths.resolve(sys.argv[1],create=True)['runtimeRoot'])
 d=domains.create(r,'Engineering','human','browser fixture')['domainId']
 s=domains.subdomain(r,d,'Runtime','human','browser fixture',write_scope=[])['subdomain']['id']
-print(json.dumps({'domainId':d,'subdomainId':s}))`, project], { env, encoding: 'utf8' }));
+print(json.dumps({'domainId':d,'subdomainId':s}))`, project], { env, encoding: 'utf8' })); } catch(error) { fs.rmSync(project,{recursive:true,force:true}); fs.rmSync(home,{recursive:true,force:true}); throw error; }
   const { importTypeScript } = await import('../support/import-typescript.mjs');
   const { ConductorQueueChannel } = await importTypeScript('src/infrastructure/agent-factory/conductor-queue-client.ts');
   const channel = new ConductorQueueChannel(async () => ({ executable: 'python3', args: [path.join(plugin, 'scripts/conductor_queue.py'), 'serve', '--project-root', project, '--conductor-delay', '0.02'], env }));
@@ -54,6 +55,10 @@ print(json.dumps({'domainId':d,'subdomainId':s}))`, project], { env, encoding: '
     const child = pools.areas.find(a => a.id === configured.subdomainId);
     assert.deepEqual(Object.values(child.counts).map(c => c.hired), [1, 1, 1]);
     assert.equal(await area.locator('.role-pool-groups > section').count(), 2);
+    const domainRow = page.locator(`#role-pools details[data-id="${configured.domainId}"]`);
+    await domainRow.getByLabel('서브도메인 이름').fill('Tools');
+    await domainRow.getByRole('button', { name: '서브도메인 추가', exact: true }).click(); await controls();
+    assert.ok((await channel.request('role-pools')).catalog.subdomains.some(s => s.name === 'Tools' && s.domainId === configured.domainId));
     await area.getByLabel('새 작업 기본 처리').selectOption('work-verification'); await controls();
     assert.equal((await channel.request('role-pools')).areas.find(a => a.id === configured.subdomainId).processing.route, 'work-verification');
     await area.getByLabel('작업 요청').fill('Draft survives refresh'); await sync();
