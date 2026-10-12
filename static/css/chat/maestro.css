@@ -6,7 +6,8 @@
   position: absolute;
   inset: 0;
   display: grid;
-  grid-template-rows: auto auto minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: auto minmax(0, 1fr);
   min-width: 0;
   color: var(--vscode-foreground);
   background: var(--af-chat-background);
@@ -16,10 +17,10 @@
 .maestro-center h1, .maestro-center h2, .maestro-center h3, .maestro-center h4, .maestro-center p { margin: 0; }
 .maestro-center [hidden] { display: none !important; }
 
-/* Header: title, view tabs (Main's history tab style) and an icon-only refresh like Main's utility buttons. */
-.maestro-header { display: flex; align-items: center; gap: 12px; min-width: 0; padding: 0 8px 0 12px; border-bottom: 1px solid var(--maestro-separator); }
+/* Header: title, tabs, search and actions share one line when the editor has room; controls wrap at narrow widths. */
+.maestro-header { position: relative; z-index: 2; display: flex; flex-wrap: wrap; align-items: center; gap: 0 8px; min-width: 0; padding: 0 8px 0 12px; border-bottom: 1px solid var(--maestro-separator); }
 .maestro-title { flex: 0 0 auto; font-size: 12px; font-weight: 600; white-space: nowrap; }
-.maestro-views { display: flex; flex: 1 1 auto; min-width: 0; }
+.maestro-views { display: flex; flex: 0 0 auto; min-width: 0; }
 .maestro-views button { flex: 0 0 auto; padding: 9px 10px; border: 0; border-bottom: 2px solid transparent; color: var(--vscode-descriptionForeground); background: transparent; font: inherit; font-size: 12px; cursor: pointer; white-space: nowrap; }
 .maestro-views button:hover { color: var(--vscode-foreground); }
 .maestro-views button[aria-selected="true"] { border-bottom-color: var(--vscode-focusBorder); color: var(--vscode-foreground); }
@@ -30,22 +31,24 @@
 .maestro-icon-button:hover { color: var(--vscode-foreground); border-color: color-mix(in srgb, var(--vscode-panel-border, #454545) 72%, transparent); background: color-mix(in srgb, var(--vscode-toolbar-hoverBackground) 82%, transparent); }
 .maestro-icon-button:focus-visible { outline: 1px solid var(--vscode-focusBorder); outline-offset: -1px; }
 
-/* Filters: the shared select rule in settings.css styles `.maestro-filters select`; the search field matches it. */
-/* Toolbar: search | filters (status, conversation, domain) | new domain on one row when it fits;
-   narrower editors keep search with "new domain" and give the three filters their own equal-width row. */
-.maestro-filters { display: flex; flex-wrap: nowrap; align-items: center; gap: 6px; min-width: 0; padding: 8px 12px 4px; }
-.maestro-search { position: relative; display: flex; flex: 1 1 200px; min-width: 160px; }
-.maestro-filter-group { display: flex; flex: 0 1 474px; gap: 6px; min-width: 330px; }
-.maestro-filter-group > .maestro-select { flex: 1 1 0; min-width: 0; }
-.maestro-add { display: inline-flex; flex: none; align-items: center; gap: 4px; padding-inline: 8px 10px; }
+/* Search uses the free toolbar width. Status, conversation and domain retain their native selects in one popover. */
+.maestro-search { position: relative; display: flex; flex: 1 1 120px; min-width: 120px; }
+.maestro-add { display: inline-flex; flex: 0 0 auto; align-items: center; gap: 4px; padding-inline: 8px 10px; }
 .maestro-add > svg { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; }
 .maestro-search > svg { position: absolute; left: 8px; top: 50%; width: 14px; height: 14px; transform: translateY(-50%); fill: none; stroke: var(--vscode-descriptionForeground); stroke-width: 1.5; stroke-linecap: round; pointer-events: none; }
-.maestro-filters input { box-sizing: border-box; width: 100%; min-width: 0; height: var(--settings-control-height); padding: 0 9px 0 28px; border: 1px solid var(--vscode-input-border, var(--vscode-dropdown-border, var(--vscode-panel-border, #ffffff20))); border-radius: 6px; color: var(--vscode-input-foreground, var(--vscode-foreground)); background: var(--vscode-input-background, var(--vscode-dropdown-background)); font: inherit; font-size: 12px; }
-.maestro-filters input::placeholder { color: var(--vscode-input-placeholderForeground, var(--vscode-descriptionForeground)); }
-.maestro-filters :is(input, select):focus-visible { outline: 1px solid var(--vscode-focusBorder); outline-offset: -1px; }
+.maestro-search input { box-sizing: border-box; width: 100%; min-width: 0; height: var(--settings-control-height); padding: 0 9px 0 28px; border: 1px solid var(--vscode-input-border, var(--vscode-dropdown-border, var(--vscode-panel-border, #ffffff20))); border-radius: 6px; color: var(--vscode-input-foreground, var(--vscode-foreground)); background: var(--vscode-input-background, var(--vscode-dropdown-background)); font: inherit; font-size: 12px; }
+.maestro-search input::placeholder { color: var(--vscode-input-placeholderForeground, var(--vscode-descriptionForeground)); }
+.maestro-search input:focus-visible, .maestro-filter-popover select:focus-visible { outline: 1px solid var(--vscode-focusBorder); outline-offset: -1px; }
+.maestro-filter-menu { position: relative; flex: 0 0 auto; }
+.maestro-filter-toggle { display: inline-flex; align-items: center; gap: 5px; min-height: var(--settings-control-height); white-space: nowrap; }
+.maestro-filter-count { min-width: 17px; padding: 0 4px; border-radius: 8px; color: var(--vscode-button-foreground, var(--vscode-foreground)); background: var(--vscode-button-background, var(--maestro-selection)); font-size: 11px; line-height: 16px; text-align: center; font-variant-numeric: tabular-nums; }
+.maestro-filter-count[hidden] { display: none; }
+.maestro-filter-popover { position: absolute; top: calc(100% + 6px); inset-inline-end: 0; z-index: 5; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; width: min(470px, calc(100vw - 24px)); padding: 10px; border: 1px solid var(--maestro-separator); border-radius: 7px; color: var(--vscode-foreground); background: var(--vscode-editorWidget-background, var(--vscode-editor-background)); box-shadow: 0 5px 18px color-mix(in srgb, #000 28%, transparent); }
+.maestro-filter-popover[hidden] { display: none; }
+.maestro-filter-popover > .maestro-select { min-width: 0; width: 100%; }
 .maestro-select { position: relative; flex: 0 1 170px; min-width: 110px; }
 .maestro-select > svg { position: absolute; right: 8px; top: 50%; width: 14px; height: 14px; transform: translateY(-50%); fill: none; stroke: currentColor; stroke-width: 1.4; pointer-events: none; }
-.maestro-filters .maestro-select select { padding-inline-end: 28px; background-image: none; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.maestro-filter-popover .maestro-select select { width: 100%; padding-inline-end: 28px; background-image: none; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 @media (forced-colors: active) { .maestro-select > svg { display: none; } }
 
 .maestro-error { color: var(--vscode-errorForeground); }
@@ -53,7 +56,17 @@
 
 /* The list uses the whole width until a row is opened; then list and detail share it. */
 .maestro-workspace { display: grid; grid-template-columns: minmax(0, 1fr); min-height: 0; border-top: 1px solid var(--maestro-separator); }
-.maestro-workspace[data-layout="split"] { grid-template-columns: minmax(320px, 1fr) minmax(340px, 1fr); }
+/* Split: list | draggable splitter | detail. The list's width is --maestro-list-width (set from the saved choice, clamped to
+   keep both panes usable); without a choice the panes share the width as before. */
+.maestro-workspace[data-layout="split"] { grid-template-columns: var(--maestro-list-width, minmax(320px, 3fr)) 6px minmax(340px, 2fr); }
+.maestro-splitter { position: relative; z-index: 2; width: 6px; cursor: col-resize; touch-action: none; background: transparent; }
+/* A 1px rule centred in the 6px hit area; it takes the focus colour while hovered, focused or dragged. */
+.maestro-splitter::before { content: ""; position: absolute; inset-block: 0; inset-inline: 2px; background: var(--maestro-separator); transition: background-color 120ms ease; }
+.maestro-splitter:is(:hover, :focus-visible, .is-dragging)::before { background: var(--vscode-focusBorder, var(--af-color-accent)); }
+.maestro-splitter:focus-visible { outline: none; }
+.maestro-workspace.is-resizing { user-select: none; }
+.maestro-splitter[hidden] { display: none; }
+@media (prefers-reduced-motion: reduce) { .maestro-splitter::before { transition: none; } }
 .maestro-list, .maestro-detail { min-width: 0; min-height: 0; overflow-y: auto; overflow-x: hidden; }
 
 /* One shared grid: title | role | status, then worker · result | model | time — aligned across every row. */
@@ -80,17 +93,11 @@
 .maestro-domain-editor input:focus-visible { outline: 1px solid var(--vscode-focusBorder); outline-offset: -1px; }
 .maestro-domain-error { flex-basis: 100%; font-size: 11px; }
 #maestro-domain-add { min-height: var(--settings-control-height, 28px); white-space: nowrap; }
-@media (max-width: 679px) {
-  .maestro-filters { flex-wrap: wrap; row-gap: 6px; }
-  .maestro-search { flex: 1 1 0; order: 0; }
-  .maestro-add { order: 1; }
-  .maestro-filter-group { order: 2; flex: 1 0 100%; min-width: 0; }
+@media (max-width: 600px) {
+  .maestro-filter-menu { position: static; }
+  .maestro-filter-popover { inset-inline: 12px; width: auto; }
 }
-/* Below this width three filters cannot show "Domain: All"-length labels; they wrap two per row instead of clipping. */
-@media (max-width: 379px) {
-  .maestro-filter-group { flex-wrap: wrap; }
-  .maestro-filter-group > .maestro-select { flex: 1 1 120px; }
-}
+@media (max-width: 479px) { .maestro-filter-popover { grid-template-columns: minmax(0, 1fr); } }
 .maestro-domain-field { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; }
 .maestro-domain-field .maestro-select { flex: 0 1 220px; }
 .maestro-handoff-form > .maestro-select { grid-column: 1 / -1; }
@@ -106,7 +113,7 @@
 /* Worker rows: the agent identity is the title; the latest task is its summary line. */
 .maestro-identity-title { font-family: var(--vscode-editor-font-family, monospace); font-weight: 600; }
 .maestro-detail-title h2.maestro-identity-title { font-size: 13px; overflow-wrap: anywhere; }
-.maestro-worker-row[data-running="true"] .maestro-row-title::after { content: ""; display: inline-block; width: 6px; height: 6px; margin-inline-start: 6px; border-radius: 50%; vertical-align: middle; background: var(--vscode-textLink-foreground, var(--af-color-accent)); }
+.maestro-worker-row[data-running="true"] .maestro-row-title:not(.maestro-worker-model)::after { content: ""; display: inline-block; width: 6px; height: 6px; margin-inline-start: 6px; border-radius: 50%; vertical-align: middle; background: var(--vscode-textLink-foreground, var(--af-color-accent)); }
 /* Worker detail: instruction form, running tasks with their stop, history and delivered commands. */
 .maestro-command-form { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 6px; align-items: end; }
 .maestro-command-label { grid-column: 1 / -1; color: var(--vscode-descriptionForeground); font-size: 11px; font-weight: 600; }
@@ -246,6 +253,7 @@
 .maestro-header > .maestro-button { flex: 0 0 auto; white-space: nowrap; }
 /* Card summary in the task detail: three short lines, the request clipped to one line with the full text on hover. */
 .maestro-summary dd:first-of-type { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#maestro-detail .maestro-summary dd:first-of-type { overflow: visible; white-space: normal; overflow-wrap: anywhere; }
 .maestro-facts { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 4px 16px; margin: 0; }
 .maestro-facts dt { color: var(--vscode-descriptionForeground); font-size: 11px; white-space: nowrap; }
 .maestro-facts dd { min-width: 0; margin: 0; white-space: pre-wrap; }
@@ -278,7 +286,7 @@
 /* Narrow editor splits: the opened row replaces the list and its close button returns to it. */
 @media (max-width: 759px) {
   .maestro-workspace[data-layout="split"] { grid-template-columns: minmax(0, 1fr); }
-  .maestro-workspace[data-layout="split"] > .maestro-list { display: none; }
+  .maestro-workspace[data-layout="split"] > .maestro-list, .maestro-workspace[data-layout="split"] > .maestro-splitter { display: none; }
   .maestro-detail { border-inline-start: 0; padding-inline: 12px; }
 }
 @media (max-width: 480px) {
@@ -315,25 +323,10 @@
 @media (forced-colors: active) { .maestro-domain-toggle.is-drop-target { outline-color: Highlight !important; } }
 /* Reordering inside a group: a grip names the movable row; the place it will take is a 2px focus-colour line above or
    below the row under the pointer, and the row being moved dims. No coloured borders or backgrounds otherwise. */
-.maestro-worker-grip { flex: none; width: 16px; height: 22px; padding: 0; border-radius: 4px; color: var(--vscode-descriptionForeground); opacity: .55; cursor: grab; }
-.maestro-worker-grip svg { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 2.2; stroke-linecap: round; }
-.maestro-worker-row:hover .maestro-worker-grip:enabled, .maestro-worker-grip:enabled:focus-visible { opacity: 1; color: var(--vscode-foreground); }
-.maestro-worker-grip:enabled:active { cursor: grabbing; }
-.maestro-worker-grip:disabled { opacity: .25; cursor: default; }
-.maestro-worker-grip:focus-visible { outline: 1px solid var(--vscode-focusBorder, var(--af-color-accent)); outline-offset: 1px; }
 .maestro-worker-row.is-drag-source { opacity: .5; }
 /* A worker still needing a domain: why, then the domain menu, on its own line under the row. */
-.maestro-worker-row > .maestro-worker-membership { grid-row: 3; grid-column: 1 / -1; display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; margin: 3px 0 0; font-size: 11px; }
-.maestro-worker-membership > .maestro-membership-note { color: var(--vscode-descriptionForeground); }
-.maestro-worker-membership > .maestro-select { flex: 0 1 16em; min-width: 0; }
-.maestro-worker-membership select { box-sizing: border-box; width: 100%; height: 24px; padding: 0 26px 0 8px; border: 1px solid var(--vscode-dropdown-border, var(--vscode-panel-border, #ffffff20)); border-radius: 5px; color: var(--vscode-dropdown-foreground, var(--vscode-foreground)); background: var(--vscode-dropdown-background, var(--vscode-editor-background)); font: inherit; font-size: 12px; appearance: none; cursor: pointer; }
-.maestro-worker-membership select:focus-visible { outline: 1px solid var(--vscode-focusBorder); outline-offset: -1px; }
-.maestro-worker-membership select:disabled { opacity: .55; cursor: default; }
-/* Narrow editors: the handle moves under the history and remove controls so the columns keep their width. */
-@media (max-width: 480px) {
-  .maestro-worker-row > .maestro-worker-history { display: grid; grid-template-columns: max-content max-content; justify-items: end; row-gap: 0; }
-  .maestro-worker-history > .maestro-worker-grip { grid-column: 1 / -1; height: 16px; }
-}
+/* Narrow editors: the history button, delete and drag handle stay on one line (compact), so line 1 keeps one height. */
+/* Compact worker list: applied by the list's own width (data-compact, set when it is 480px or narrower), so a list narrowed by the splitter compacts too, not only a narrow window. */
 .maestro-worker-row.is-reorder-target[data-drop-position="before"] { box-shadow: inset 0 2px 0 var(--vscode-focusBorder, var(--af-color-accent)); }
 .maestro-worker-row.is-reorder-target[data-drop-position="after"] { box-shadow: inset 0 -2px 0 var(--vscode-focusBorder, var(--af-color-accent)); }
 /* The selected row keeps its accent bar while it is a drop target. */
@@ -345,56 +338,80 @@
 }
 /* Worker view: one row per worker in four aligned columns — worker | title | status | history.
    The title takes the free width; worker is capped and the status/history columns keep their content width. */
-.maestro-list.is-workers { grid-template-columns: fit-content(32%) minmax(min(6em, 22%), 1fr) max-content max-content; column-gap: 12px; }
-.maestro-worker-head { display: grid; grid-template-columns: subgrid; grid-column: 1 / -1; padding: 6px 8px 4px; position: sticky; top: 0; z-index: 1;
-  border-bottom: 1px solid var(--maestro-separator); background: var(--af-chat-background); color: var(--vscode-descriptionForeground); font-size: 11px; font-weight: 600; }
-.maestro-worker-head > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.maestro-list.is-workers > .maestro-worker-row { grid-template-rows: auto; row-gap: 0; padding-block: 6px; }
+.maestro-list.is-workers { grid-template-columns: fit-content(32%) minmax(min(6em, 22%), 1fr) max-content; column-gap: 12px; }
+/* The column header row is not shown (user request message:b245829a): it keeps its row/columnheader names for assistive
+   technology and its subgrid column lines, but has no height, text, separator or band above the first row. */
+.maestro-worker-head { display: grid; grid-template-columns: subgrid; grid-column: 1 / -1; height: 0; margin: 0; padding: 0 8px; border: 0;
+  overflow: hidden; clip-path: inset(50%); font-size: 11px; }
+.maestro-worker-head > span { min-width: 0; overflow: hidden; white-space: nowrap; }
+.maestro-worker-head + .maestro-section-toggle { margin-top: 2px; }
+.maestro-list.is-workers > .maestro-worker-row { grid-template-rows: minmax(22px, auto) auto; row-gap: 0; padding-block: 4px; }
 .maestro-worker-row > * { grid-row: 1; min-width: 0; }
-.maestro-worker-row > .maestro-worker-cell { grid-column: 1; display: flex; align-items: center; gap: 6px; min-width: 8ch; }
+/* Every row is two true grid lines shared by all columns: line 1 holds the role, title, state and task-history
+   button; line 2 holds the model, the result and the request · report links. The worker cell keeps its own two-line grid. */
+.maestro-worker-row > .maestro-worker-cell { grid-column: 1; grid-row: 1 / span 2; align-self: stretch; display: grid; grid-template-columns: minmax(0, 1fr); grid-template-rows: 22px 18px; align-content: start; min-width: 0; }
+.maestro-worker-controls > .maestro-role { flex: 0 1 auto; min-width: 0; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.maestro-worker-controls { grid-column: 1; grid-row: 1; display: flex; align-items: center; gap: 2px; min-width: 0; }
+.maestro-worker-controls > :is(.maestro-worker-hide, .maestro-session-open) { flex: none; width: 18px; height: 18px; padding: 0; border-radius: 4px; }
+.maestro-worker-controls > [hidden] { display: none; }
+.maestro-worker-cell > .maestro-worker-model { grid-column: 1; grid-row: 2; min-width: 0; height: 18px; line-height: 18px; }
 .maestro-worker-row > .maestro-worker-title { grid-column: 2; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .maestro-worker-row > .maestro-worker-status { grid-column: 3; }
-.maestro-worker-row > .maestro-worker-history { grid-column: 4; justify-self: end; }
 .maestro-worker-title.is-empty { color: var(--vscode-descriptionForeground); font-style: italic; }
 .maestro-worker-model { min-width: 0; padding: 0; border: 0; color: inherit; background: transparent; font: inherit; font-family: var(--vscode-editor-font-family, monospace); font-size: 12px; font-weight: 600; text-align: start; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: pointer; }
 .maestro-worker-model:focus-visible, .maestro-worker-select:focus-visible, .maestro-history-button:focus-visible, .maestro-worker-remove:focus-visible { outline: 1px solid var(--vscode-focusBorder, var(--af-color-accent)); outline-offset: 1px; }
-.maestro-worker-cell > .maestro-role { flex: none; }
 .maestro-history-button { min-height: 22px; padding: 1px 8px; font-size: 11px; white-space: nowrap; }
-.maestro-worker-row[data-running="true"] .maestro-worker-model::after { content: ""; display: inline-block; width: 6px; height: 6px; margin-inline-start: 6px; border-radius: 50%; vertical-align: middle; background: var(--vscode-textLink-foreground, var(--af-color-accent)); }
-/* Narrow editors keep the four columns in the same order; only their content narrows (role tag goes under the name). */
-@media (max-width: 480px) {
-  .maestro-list.is-workers { grid-template-columns: fit-content(30%) minmax(min(4em, 20%), 1fr) max-content max-content; column-gap: 6px; }
-  /* Narrow: the role stays first on its own line above the model, so the order role → model is kept. */
-  .maestro-worker-row > .maestro-worker-cell { flex-wrap: wrap; row-gap: 2px; }
-  .maestro-worker-row .maestro-state { font-size: 10px; gap: 4px; }
-  .maestro-history-button { padding: 1px 6px; }
-}
+.maestro-worker-row[data-running="true"] .maestro-model-label::after { content: ""; display: inline-block; width: 6px; height: 6px; margin-inline-start: 6px; border-radius: 50%; vertical-align: middle; background: var(--vscode-textLink-foreground, var(--af-color-accent)); }
+/* Narrow editors keep the columns and worker controls in the same order; only their content narrows. */
+.maestro-list.is-workers[data-compact="true"] { grid-template-columns: fit-content(30%) minmax(min(4em, 20%), 1fr) max-content; column-gap: 4px; }
+/* Narrow: the role stays first on its own line above the model, so the order role → model is kept. */
+.maestro-list[data-compact="true"] .maestro-worker-row .maestro-state { font-size: 10px; gap: 4px; }
+.maestro-list[data-compact="true"] .maestro-history-button { padding: 1px 6px; }
 /* A worker is named by its model (monospace, like other identities); an unrecorded model reads as a quiet placeholder. */
 .maestro-worker-model.is-unset, .maestro-detail-title h2.is-unset { color: var(--vscode-descriptionForeground); font-family: inherit; font-weight: 400; font-style: italic; }
 .maestro-worker-id { margin: 0; }
 /* Title column: the assignment purpose, after the narrower work area when one is recorded. */
 .maestro-worker-area { display: inline-block; max-width: 100%; box-sizing: border-box; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; vertical-align: bottom; margin-inline-end: 6px; padding: 0 5px; border: 1px solid var(--maestro-separator); border-radius: 4px; color: var(--vscode-descriptionForeground); font-size: 11px; }
 .maestro-worker-title.is-empty .maestro-worker-area { font-style: normal; }
+.maestro-worker-title .maestro-worker-area { margin-inline-end: 0; line-height: 18px; }
+.maestro-worker-title .maestro-worker-area.is-empty { border-color: transparent; padding-inline: 0; font-style: italic; }
+.maestro-worker-line-main > .maestro-worker-purpose { display: block; flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.maestro-worker-line-main > .maestro-worker-purpose.is-empty { color: var(--vscode-descriptionForeground); font-style: italic; }
+/* A running worker's latest session action: the session row's glyph, then its words on one ellipsized line. */
+.maestro-activity-icon { width: 1em; height: 1em; margin-inline-end: 4px; vertical-align: -2px; fill: none; stroke: currentColor; stroke-width: 1.3; stroke-linecap: round; stroke-linejoin: round; color: var(--vscode-descriptionForeground); }
+.maestro-worker-action[data-activity-phase="failed"] .maestro-activity-icon { color: var(--vscode-errorForeground); }
 .maestro-worker-purpose-line { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px; margin: 2px 0 0; font-size: 12px; }
 .maestro-worker-purpose-line .is-empty { color: var(--vscode-descriptionForeground); font-style: italic; }
-/* Under the four columns, one compact line each: open tasks other than the row's own, then "Result · first sentence". */
+/* Lines under the row lie on the same four columns as the header and the first line (nested subgrids): kind under the
+   worker, text from the title column's start up to the status column, a state in the status column, and the run's
+   request · report from the task-history column's start. */
 .maestro-list.is-workers > .maestro-worker-row { padding-block: 5px; }
-.maestro-worker-row > .maestro-worker-work { grid-row: 2; grid-column: 1 / -1; display: grid; grid-template-columns: max-content minmax(0, 1fr); column-gap: 8px; row-gap: 0;
+.maestro-worker-row > .maestro-worker-work { grid-row: 2; grid-column: 2 / -1; display: grid; grid-template-columns: subgrid; row-gap: 0;
   margin: 1px 0 0; font-size: 11px; line-height: 18px; }
-.maestro-worker-line { display: grid; grid-template-columns: subgrid; grid-column: 1 / -1; align-items: center; min-width: 0; }
-.maestro-worker-kind { color: var(--vscode-descriptionForeground); white-space: nowrap; }
+/* Line 2 has one reference for multi-line content: every item starts on the line's first 18px text line (line-height 18px),
+   so a wrapped label (narrow "no request / no report") hangs below it instead of moving the others off the shared line. */
+.maestro-worker-line { display: grid; grid-template-columns: subgrid; grid-column: 1 / -1; align-items: start; min-width: 0; }
+.maestro-worker-line > * { min-height: 18px; line-height: 18px; }
+.maestro-worker-kind { flex: none; margin-inline-end: 4px; color: var(--vscode-descriptionForeground); white-space: nowrap; }
 .maestro-worker-kind::after { content: " ·"; }
-.maestro-worker-line > .maestro-worker-task { grid-column: 2; padding: 0; font-size: 11px; }
-.maestro-worker-outcome { grid-column: 2; display: flex; align-items: center; gap: 6px; min-width: 0; }
-.maestro-worker-outcome > :is(.maestro-state, .maestro-worker-docs) { flex: none; }
-.maestro-worker-for { flex: 0 1 auto; max-width: 40%; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--vscode-foreground); }
+.maestro-worker-row > .maestro-worker-work { line-height: 18px; }
+.maestro-worker-line-main { grid-column: 1; display: flex; align-items: center; min-width: 0; }
+.maestro-worker-line-main > .maestro-worker-task { padding: 0; font-size: 11px; }
+.maestro-worker-activity { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--vscode-descriptionForeground); }
+.maestro-worker-activity.is-active::before { content: ""; display: inline-block; width: 6px; height: 6px; margin-inline-end: 6px; border-radius: 50%; vertical-align: 1px; background: var(--vscode-textLink-foreground, var(--af-color-accent)); animation: maestro-activity-pulse 1.2s ease-in-out infinite; }
+@keyframes maestro-activity-pulse { 50% { opacity: .35; } }
+@media (prefers-reduced-motion: reduce) { .maestro-worker-activity.is-active::before { animation: none; } }
+.maestro-worker-line-state { grid-column: 2; display: flex; align-items: center; gap: 6px; min-width: 0; white-space: nowrap; }
+.maestro-worker-line > .maestro-worker-docs { grid-column: 3; justify-self: start; }
 .maestro-worker-summary { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--vscode-descriptionForeground); }
 .maestro-worker-summary.is-empty { font-style: italic; }
 /* The model opens its session: an identity that underlines like a link on hover; disabled when no session can open. */
 .maestro-worker-model:enabled:is(:hover, :focus-visible) { text-decoration: underline; color: var(--vscode-textLink-foreground, var(--af-color-accent)); }
-.maestro-worker-model { display: inline-flex; align-items: center; }
-.maestro-model-label { min-width: 4.5ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.maestro-open-glyph { flex: none; width: 11px; height: 11px; margin-inline-start: 4px; vertical-align: -1px; fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; opacity: .55; }
+.maestro-worker-model { display: flex; align-items: center; justify-content: flex-start; gap: 6px; align-self: stretch; }
+.maestro-model-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.maestro-open-glyph { flex: none; width: 11px; height: 11px; margin-inline-start: 0; vertical-align: -1px; fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; opacity: .55; }
+.maestro-session-open:enabled:is(:hover, :focus-visible) { color: var(--vscode-textLink-foreground, var(--af-color-accent)); background: var(--vscode-toolbar-hoverBackground, rgba(128, 128, 128, .12)); }
+.maestro-session-open:focus-visible { outline: 1px solid var(--vscode-focusBorder, var(--af-color-accent)); outline-offset: 1px; }
 .maestro-worker-model:enabled:is(:hover, :focus-visible) .maestro-open-glyph { opacity: 1; }
 .maestro-worker-history-item { display: flex; flex-wrap: wrap; align-items: center; column-gap: 8px; min-width: 0; }
 .maestro-worker-history-item > .maestro-worker-task { flex: 1 1 14em; min-width: 0; }
@@ -403,24 +420,264 @@
 /* The title opens the worker detail; it keeps the cell's single-line text look. */
 .maestro-worker-select { display: block; width: 100%; min-width: 0; padding: 0; border: 0; color: inherit; background: transparent; font: inherit; text-align: start; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: pointer; }
 .maestro-worker-select:hover .maestro-worker-purpose { text-decoration: underline; }
-.maestro-worker-history { display: flex; align-items: center; gap: 2px; }
 .maestro-worker-remove { width: 22px; height: 22px; border-radius: 6px; }
 .maestro-worker-remove svg { width: 14px; height: 14px; }
 .maestro-worker-remove:enabled:hover { color: var(--vscode-errorForeground); background: var(--vscode-toolbar-hoverBackground, rgba(128, 128, 128, .15)); }
 .maestro-worker-remove:disabled { opacity: .4; cursor: default; }
 /* Exact-run documents at the end of each work line: request and report by name; a missing one is plain muted text. */
-.maestro-worker-docs { display: inline-flex; align-items: center; gap: 8px; margin-inline-start: auto; padding-inline-start: 8px; }
+.maestro-worker-docs { display: inline-flex; align-items: center; gap: 8px; }
 .maestro-worker-doc { padding: 0; font-size: 11px; white-space: nowrap; }
 .maestro-worker-doc.is-missing { color: var(--vscode-descriptionForeground); opacity: .75; }
 .maestro-worker-doc:focus-visible { outline: 1px solid var(--vscode-focusBorder, var(--af-color-accent)); outline-offset: 1px; }
+/* Line 1 stays one line tall here too: the title shortens with an ellipsis (full text on hover and in the detail) and the
+state shows its short form, so every cell of the line shares one centre line. */
+.maestro-list.is-workers[data-compact="true"] > .maestro-worker-row { align-items: center; }
+.maestro-list[data-compact="true"] .maestro-worker-docs { gap: 6px; }
+/* The documents stay in the task-history column without widening it: they wrap inside it instead. */
+.maestro-list[data-compact="true"] .maestro-worker-line > :is(.maestro-worker-docs, .maestro-worker-line-state) { justify-self: stretch; contain: inline-size; flex-wrap: wrap; row-gap: 0; }
+.maestro-list[data-compact="true"] .maestro-worker-line-state { column-gap: 4px; white-space: normal; }
+/* Narrow: a line's label wraps above its task button instead of squeezing it. */
+.maestro-list[data-compact="true"] .maestro-worker-line-main { flex-wrap: wrap; }
+.maestro-list[data-compact="true"] .maestro-worker-line-main > .maestro-worker-task { flex: 1 1 100%; width: auto; }
+/* Narrow: the state keeps one line (ellipsis) so it cannot make line 1 taller. */
+.maestro-list[data-compact="true"] .maestro-worker-row > .maestro-worker-status { min-width: max-content; overflow: hidden; }
+.maestro-list[data-compact="true"] .maestro-worker-row > .maestro-worker-status .maestro-state { max-width: 100%; }
+/* The model gives way (ellipsis) before the fixed controls at every list width. */
+
+/* Worker scope: active work (running, queued, waiting for a decision, failed) or everyone. A search always covers everyone. */
+.maestro-scope-switch { display: inline-flex; flex: none; align-items: center; gap: 2px; padding: 2px; border: 1px solid var(--maestro-separator); border-radius: 6px; }
+.maestro-scope-switch[hidden] { display: none; }
+.maestro-scope-switch > button { height: 22px; padding: 0 8px; border: 0; border-radius: 4px; color: var(--vscode-descriptionForeground); background: transparent; font: inherit; font-size: 11px; white-space: nowrap; cursor: pointer; }
+.maestro-scope-switch > button[aria-pressed="true"] { color: var(--vscode-foreground); background: var(--vscode-toolbar-activeBackground, var(--maestro-selection)); }
+.maestro-scope-switch > button:hover { color: var(--vscode-foreground); }
+.maestro-scope-switch > button:focus-visible { outline: 1px solid var(--vscode-focusBorder, var(--af-color-accent)); outline-offset: -1px; }
+.maestro-scope-switch[data-searching="true"] > button { opacity: .6; }
+/* An open task's wait reason and a worker's failed loops, in quiet text (no status-coloured borders). */
+.maestro-worker-wait { color: var(--vscode-descriptionForeground); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.maestro-worker-failed { flex: none; margin-inline-start: 6px; color: var(--vscode-errorForeground, #f85149); font-size: 11px; }
+/* Team history in the worker detail: tasks with their runs, each run with trigger, state, model, time and documents. */
+/* Grid items default to their content width; long recorded titles must ellipsize inside the detail column instead of widening it. */
+.maestro-team-history > *, .maestro-worker-tasks > * { min-width: 0; max-width: 100%; }
+.maestro-team-task-head > .maestro-state { flex: none; }
+.maestro-team-history .maestro-team-group > h4 { margin: 8px 0 4px; font-size: 12px; }
+.maestro-team-task { padding: 4px 0; border-top: 1px solid var(--maestro-separator); }
+.maestro-team-task-head { display: flex; align-items: center; gap: 8px; min-width: 0; font-size: 12px; }
+.maestro-team-task-title { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.maestro-team-runs { margin: 2px 0 0; padding: 0; list-style: none; }
+.maestro-team-run { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 2px 10px; padding: 2px 0 2px 12px; font-size: 11px; }
+.maestro-team-run-meta { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 6px; min-width: 0; }
+.maestro-team-trigger { color: var(--vscode-descriptionForeground); }
+.maestro-team-only .maestro-worker-purpose { font-size: 11px; }
+/* Worker detail. Titles, purposes, targets and identities wrap to their full text in the detail; nothing there is cut to an ellipsis. */
+.maestro-detail-title h2 { overflow-wrap: anywhere; }
+#maestro-detail .maestro-role { max-width: none; white-space: normal; }
+.maestro-worker-summary-block { display: grid; gap: 4px; min-width: 0; }
+.maestro-worker-current { display: grid; gap: 2px; margin: 0; }
+.maestro-worker-current-title { font-size: 13px; font-weight: 600; line-height: 19px; overflow-wrap: anywhere; }
+.maestro-worker-summary-block .maestro-worker-kind { display: block; margin: 0; font-size: 11px; }
+.maestro-worker-summary-block .maestro-worker-kind::after { content: none; }
+.maestro-worker-summary-block > .maestro-worker-purpose-line { display: grid; gap: 2px; margin: 0; }
+.maestro-worker-summary-block .maestro-worker-area { justify-self: start; white-space: normal; overflow-wrap: anywhere; }
+.maestro-worker-purpose-text { min-width: 0; line-height: 18px; overflow-wrap: anywhere; }
+.maestro-detail-header > .maestro-worker-info { border-top: 0; }
+.maestro-detail-header > .maestro-worker-info > summary { padding: 2px 0; font-weight: 400; }
+.maestro-worker-info > p { margin: 0 0 2px; }
+#maestro-detail .maestro-worker-task { align-items: flex-start; flex-wrap: wrap; column-gap: 8px; row-gap: 0; }
+#maestro-detail .maestro-worker-task-title { flex: 1 1 14em; white-space: normal; overflow: visible; overflow-wrap: anywhere; line-height: 18px; }
+#maestro-detail .maestro-worker-task > :is(.maestro-state, .maestro-time) { line-height: 18px; }
+#maestro-detail :is(.maestro-command-target, .maestro-command > .maestro-identity) { overflow: visible; white-space: normal; overflow-wrap: anywhere; }
+#maestro-detail .maestro-command-fold > summary { white-space: normal; overflow-wrap: anywhere; }
+#maestro-detail .maestro-worker-docs { flex-wrap: wrap; row-gap: 0; }
+/* The instruction area: target above the field, then one status line beside the send button, then the delivery record. */
+.maestro-instruction .maestro-command-form > :is(.maestro-command-target, .maestro-command-footer) { grid-column: 1 / -1; margin: 0; }
+.maestro-command-footer { display: flex; align-items: center; justify-content: flex-end; gap: 8px; min-width: 0; }
+.maestro-command-footer > .maestro-button { flex: none; }
+.maestro-command-status { flex: 1 1 auto; min-width: 0; margin: 0; color: var(--vscode-descriptionForeground); font-size: 11px; overflow-wrap: anywhere; }
+.maestro-command-status[data-state="failed"] { color: var(--vscode-errorForeground, #f85149); }
+.maestro-command-status[data-state="empty"] { color: var(--vscode-editorWarning-foreground, var(--vscode-foreground)); }
+.maestro-instruction > .maestro-command-log { border-top: 0; }
+.maestro-commands, .maestro-command, .maestro-command-fold { min-width: 0; }
+/* History: one entry per task, its runs indented under it; the current group sits on a faint surface, the opened task is marked. */
+.maestro-history-entry { display: grid; gap: 2px; min-width: 0; padding: 4px 6px; border-radius: 4px; }
+.maestro-history-entry + .maestro-history-entry { margin-top: 2px; }
+.maestro-history-entry.is-current { background: color-mix(in srgb, var(--vscode-foreground) 5%, transparent); }
+.maestro-history-entry.is-selected { box-shadow: inset 0 0 0 1px var(--maestro-separator); }
+.maestro-history-entry > .maestro-worker-docs { padding-inline-start: 6px; }
+.maestro-history-entry > .maestro-team-runs { padding-inline-start: 6px; }
+.maestro-history-totals { margin: 0; }
+#maestro-detail .maestro-worker-tasks { justify-items: stretch; }
+/* Management sits last, under its own heading, apart from reading and instructing. */
+.maestro-manage { margin-top: 6px; padding-top: 10px; border-top: 1px solid var(--maestro-separator); }
+.maestro-manage > h3 { color: var(--vscode-descriptionForeground); }
+.maestro-stop-row { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 4px 8px; min-width: 0; font-size: 12px; }
+.maestro-stop-target { flex: 1 1 12em; min-width: 0; overflow-wrap: anywhere; }
+.maestro-stop-row > .maestro-button { flex: none; }
+/* The header wraps only when it must: on a narrow editor the scope switch moves to its own line under the tabs. */
+.maestro-header { flex-wrap: wrap; row-gap: 0; }
+@media (max-width: 600px) { .maestro-scope-switch { order: 9; margin: 0 0 6px; } }
+/* The same compact rules by window width, so a narrow window compacts at once (the width attribute follows a frame later). */
 @media (max-width: 480px) {
-  /* The title may take two lines here so the purpose stays readable; the four cells then share their top line. */
-  .maestro-list.is-workers > .maestro-worker-row { align-items: start; }
-  .maestro-worker-row > .maestro-worker-title { white-space: normal; }
-  .maestro-worker-select { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; white-space: normal; overflow-wrap: anywhere; }
+  .maestro-list.is-workers { grid-template-columns: fit-content(30%) minmax(min(4em, 20%), 1fr) max-content; column-gap: 4px; }
+  .maestro-worker-row .maestro-state { font-size: 10px; gap: 4px; }
+  .maestro-history-button { padding: 1px 6px; }
+  .maestro-list.is-workers > .maestro-worker-row { align-items: center; }
   .maestro-worker-docs { gap: 6px; }
-  /* Narrow: a long state may wrap and the worker cell keeps a small floor, so no column overflows. */
-  .maestro-worker-row > .maestro-worker-status .maestro-state { white-space: normal; }
-  .maestro-worker-row > .maestro-worker-cell { min-width: 7ch; }
-  .maestro-worker-row > .maestro-worker-work { column-gap: 6px; }
+  .maestro-worker-line > :is(.maestro-worker-docs, .maestro-worker-line-state) { justify-self: stretch; contain: inline-size; flex-wrap: wrap; row-gap: 0; }
+  .maestro-worker-line-state { column-gap: 4px; white-space: normal; }
+  .maestro-worker-line-main { flex-wrap: wrap; }
+  .maestro-worker-line-main > .maestro-worker-task { flex: 1 1 100%; width: auto; }
+  .maestro-worker-row > .maestro-worker-status { min-width: max-content; overflow: hidden; }
+  .maestro-worker-row > .maestro-worker-status .maestro-state { max-width: 100%; }
 }
+/* The second line's time and failed count never widen the status column (it is sized by the first line's state badge);
+   they shorten instead, so the title column keeps its room. The request · report links keep their own width. */
+.maestro-worker-line > .maestro-worker-line-state { justify-self: stretch; contain: inline-size; overflow: hidden; }
+.maestro-worker-line-state > * { flex: none; }
+.maestro-worker-line-state > .maestro-worker-failed { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* Beside the detail (split) the status column is capped: a long state shortens (its full text is the badge's tooltip and
+   the wait reason is spelled out on the second line), and an open task's "request · report not yet" wraps in its column,
+   so the title keeps readable room. Finished rows keep one line of documents. */
+.maestro-workspace[data-layout="split"] > .maestro-list.is-workers { grid-template-columns: fit-content(24%) minmax(min(6em, 22%), 1fr) fit-content(7.5em); }
+.maestro-workspace[data-layout="split"] .maestro-worker-row > .maestro-worker-status { min-width: max-content; overflow: hidden; }
+.maestro-workspace[data-layout="split"] .maestro-worker-row > .maestro-worker-status .maestro-state { max-width: 100%; }
+.maestro-workspace[data-layout="split"] .maestro-worker-row > .maestro-worker-status .maestro-state { display: block; overflow: hidden; text-overflow: ellipsis; }
+.maestro-workspace[data-layout="split"] .maestro-worker-row > .maestro-worker-status .maestro-state::before { display: inline-block; margin-inline-end: 6px; vertical-align: middle; }
+.maestro-workspace[data-layout="split"] .maestro-worker-line.is-current > .maestro-worker-docs { justify-self: stretch; contain: inline-size; flex-wrap: wrap; row-gap: 0; }
+/* Team-only rows list three files (request, report, receipt); they wrap inside the task-history column instead of widening it. */
+.maestro-team-only .maestro-worker-line > .maestro-worker-docs { justify-self: stretch; contain: inline-size; flex-wrap: wrap; row-gap: 0; }
+.maestro-request-view {
+  box-sizing: border-box;
+  width: min(48rem, calc(100vw - 32px));
+  max-height: calc(100vh - 32px);
+  overflow: auto;
+  color: var(--vscode-editor-foreground);
+  background: var(--vscode-editor-background);
+  border: 1px solid var(--vscode-panel-border);
+  padding: 16px;
+}
+.maestro-request-view::backdrop { background: var(--vscode-widget-shadow, transparent); }
+.maestro-request-view .maestro-detail-title h2 { white-space: normal; overflow-wrap: anywhere; }
+.maestro-request-view :is(h2, h3, h4, p) { margin: 0; }
+.maestro-request-view .maestro-block { display: grid; gap: 6px; padding: 10px 0; }
+.maestro-request-view :is(h3, h4) { font-size: inherit; font-weight: 600; }
+.maestro-request-text { white-space: pre-wrap; overflow-wrap: anywhere; user-select: text; }
+
+/* Three worker columns; requests and history remain in detail without an empty control column. */
+.maestro-list.is-workers,
+.maestro-list.is-workers[data-compact="true"],
+.maestro-workspace[data-layout="split"] > .maestro-list.is-workers {
+  grid-template-columns: fit-content(32%) minmax(min(4em, 20%), 1fr) minmax(7.5em, max-content);
+}
+.maestro-worker-hide svg { width: 14px; height: 14px; }
+.maestro-worker-hide:focus-visible { outline: 1px solid var(--vscode-focusBorder, var(--af-color-accent)); outline-offset: 1px; }
+/* Native checkboxes keep the status menu open for consecutive selections. All clears the union. */
+.maestro-filter-popover { position: fixed; inset-inline: auto 12px; grid-template-columns: repeat(2, minmax(0, 1fr)); width: min(470px, calc(100vw - 24px)); }
+.maestro-status-filter { grid-column: 1 / -1; border: 0; padding: 0; margin: 0; min-width: 0; }
+.maestro-status-filter legend { padding: 0; font-size: 12px; }
+.maestro-status-summary { display: block; font-size: 11px; color: var(--vscode-descriptionForeground); overflow-wrap: anywhere; }
+.maestro-status-options { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 2px 8px; }
+.maestro-status-options label, .maestro-show-hidden { display: flex; align-items: center; gap: 4px; min-width: 0; font-size: 12px; line-height: 18px; padding: 2px 0; overflow-wrap: anywhere; }
+.maestro-status-options input, .maestro-show-hidden input { flex: none; width: 13px; height: 13px; min-width: 13px; padding: 0; margin: 0; accent-color: var(--vscode-focusBorder); }
+.maestro-show-hidden { grid-column: 1 / -1; }
+.maestro-status-options input:focus-visible, .maestro-show-hidden input:focus-visible { outline: 1px solid var(--vscode-focusBorder); outline-offset: 2px; }
+@media (min-width: 480px) { .maestro-status-options { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+@media (max-height: 360px) {
+  .maestro-status-options { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .maestro-filter-popover { gap: 4px; padding: 6px; }
+  .maestro-status-options label { font-size: 11px; line-height: 15px; padding-block: 0; }
+}
+
+.maestro-status-options label > span, .maestro-show-hidden > span { min-width: 0; overflow-wrap: anywhere; }
+
+/* Reserve the full badge/time width; the flexible title yields space in compact and split lists too. */
+.maestro-worker-row > .maestro-worker-status { min-width: max-content; overflow: hidden; }
+.maestro-list.is-workers .maestro-worker-line > .maestro-worker-line-state { contain: none; }
+.maestro-worker-status .maestro-state { display: block; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.maestro-worker-status .maestro-state::before { display: inline-block; margin-inline-end: 6px; vertical-align: middle; }
+.maestro-worker-status .maestro-state[data-status="running"]::before {
+  transform-origin: center;
+  animation: maestro-status-dot-pulse 1.5s ease-in-out infinite;
+}
+@keyframes maestro-status-dot-pulse {
+  0%, 100% { opacity: .68; transform: scale(.92); }
+  50% { opacity: 1; transform: scale(1.45); }
+}
+
+/* Whole-row activity stays behind the content; open but waiting/blocked loops stay static. */
+.maestro-worker-row[data-running="true"]:has(> .maestro-worker-status [data-status="running"]) {
+  position: relative;
+  isolation: isolate;
+}
+.maestro-worker-row[data-running="true"]:has(> .maestro-worker-status [data-status="running"])::before,
+.maestro-worker-row[data-running="true"]:has(> .maestro-worker-status [data-status="running"])::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  border-radius: inherit;
+  pointer-events: none;
+}
+.maestro-worker-row[data-running="true"]:has(> .maestro-worker-status [data-status="running"])::before {
+  background: color-mix(in srgb, var(--vscode-textLink-foreground, var(--af-color-accent)) 6%, transparent);
+  animation: maestro-row-breathe 3.6s ease-in-out infinite;
+}
+.maestro-worker-row[data-running="true"]:has(> .maestro-worker-status [data-status="running"])::after {
+  background: linear-gradient(90deg, transparent 47%, color-mix(in srgb, var(--vscode-textLink-foreground, var(--af-color-accent)) 8%, transparent) 50%, transparent 53%);
+  background-size: 300% 100%;
+  animation: maestro-row-scan 4.8s linear infinite;
+}
+@keyframes maestro-row-breathe {
+  0%, 100% { opacity: .35; }
+  50% { opacity: 1; }
+}
+@keyframes maestro-row-scan {
+  from { background-position: 100% 0; }
+  to { background-position: 0% 0; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .maestro-worker-status .maestro-state[data-status="running"]::before { animation: none; opacity: 1; transform: none; }
+  .maestro-worker-row[data-running="true"]:has(> .maestro-worker-status [data-status="running"])::before { animation: none; opacity: 1; }
+  .maestro-worker-row[data-running="true"]:has(> .maestro-worker-status [data-status="running"])::after { animation: none; content: none; }
+}
+
+/* Performer assignment stays fixed while only its history scrolls. Task detail keeps its own layout. */
+.maestro-detail[data-view="worker"] { overflow: hidden; padding-bottom: 12px; gap: 12px; }
+.maestro-detail[data-view="worker"] > .maestro-detail-header { flex: none; min-width: 0; }
+.maestro-detail[data-view="worker"] > .maestro-worker-history-block { flex: 1 1 0; min-height: 0; align-content: start; overflow-y: auto; overflow-x: hidden; overscroll-behavior: contain; }
+.maestro-detail[data-view="worker"] .maestro-manage { border: 0; padding: 0; gap: 6px; }
+.maestro-detail[data-view="worker"] .maestro-manage .maestro-actions { flex-wrap: wrap; }
+.maestro-worker-assignment { margin: 0; }
+.maestro-worker-assignment dd { white-space: normal; overflow-wrap: anywhere; }
+.maestro-worker-history-block:focus-visible { outline: 1px solid var(--vscode-focusBorder, var(--af-color-accent)); outline-offset: -1px; }
+.maestro-detail[data-view="worker"] .maestro-handoff-form { max-height: 25vh; overflow-y: auto; }
+
+/* The domain header is the native drag surface; no separate grip consumes a column. */
+.maestro-domain-toggle[draggable="true"] { cursor: grab; }
+.maestro-domain-toggle[draggable="true"]:active { cursor: grabbing; }
+.maestro-domain-toggle.is-drag-source { opacity: .5; }
+.maestro-domain-toggle.is-reorder-target[data-drop-position="before"] { box-shadow: inset 0 2px 0 var(--vscode-focusBorder, var(--af-color-accent)); }
+.maestro-domain-toggle.is-reorder-target[data-drop-position="after"] { box-shadow: inset 0 -2px 0 var(--vscode-focusBorder, var(--af-color-accent)); }
+
+/* List density: keep the role/model lines and controls, with status and its time read together. */
+.maestro-list.is-workers { column-gap: 8px; }
+.maestro-list.is-workers > .maestro-worker-row { grid-template-rows: minmax(20px, auto) auto; padding-block: 2px; }
+.maestro-list.is-workers .maestro-worker-cell { grid-template-rows: 20px 18px; }
+.maestro-list.is-workers .maestro-worker-status { display: flex; align-items: center; justify-content: flex-start; gap: 4px; overflow: visible; }
+.maestro-list.is-workers .maestro-worker-status > * { flex: none; }
+.maestro-status-separator { color: var(--vscode-descriptionForeground); }
+.maestro-list.is-workers > .maestro-domain-toggle { margin-top: 4px; min-height: 24px; box-sizing: border-box; padding-block: 2px; flex-wrap: wrap; row-gap: 0; }
+.maestro-list.is-workers .maestro-domain-toggle .maestro-group-summary { margin-inline-start: 0; flex: none; overflow: visible; white-space: normal; }
+.maestro-list.is-workers .maestro-domain-toggle .maestro-count { flex: none; }
+.maestro-list.is-workers > .maestro-domain-edit { align-self: center; }
+.maestro-domain-name { min-width: 0; overflow-wrap: anywhere; }
+/* Only narrow lists wrap status/time; nothing is omitted to fit their two-line content. */
+.maestro-list.is-workers[data-narrow="true"] { grid-template-columns: fit-content(30%) minmax(0, 1fr) minmax(0, 100px); }
+.maestro-list.is-workers[data-narrow="true"] .maestro-worker-status { min-width: 0; max-width: 100%; flex-wrap: wrap; row-gap: 0; }
+.maestro-list.is-workers[data-narrow="true"] .maestro-worker-status .maestro-state { white-space: normal; overflow: visible; overflow-wrap: anywhere; }
+.maestro-list.is-workers[data-narrow="true"] .maestro-worker-status > * { min-width: 0; flex-shrink: 1; }
+
+/* The header can use the whole list width up to the separate 24px edit target and its 8px gap. */
+.maestro-list.is-workers { container-type: inline-size; }
+.maestro-list.is-workers > .maestro-domain-toggle.has-edit { width: calc(100cqw - 32px); }
+
+.maestro-list.is-workers[data-narrow="true"] .maestro-worker-status .maestro-time { white-space: normal; overflow-wrap: anywhere; }

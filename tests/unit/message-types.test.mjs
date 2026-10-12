@@ -36,7 +36,10 @@ const clientDeclarationDisagreements = [];
 /** Handled by the chat webview, absent from HostMessage. */
 const handledButNotDeclared = [];
 /** Declared in HostMessage and deliberately ignored by the chat webview. */
-const intentionallyUnhandled = [];
+const intentionallyUnhandled = [
+  {type:"request.view", source:centerSource, reason:"Readonly requests are displayed in the control center."},
+  {type:"worker.visibility.result", source:centerSource, reason:"Project visibility preferences belong to the control center."},
+];
 
 /**
  * postMessage arguments whose `type` is not a literal (a variable, a helper parameter) or that spread a
@@ -211,7 +214,7 @@ test("every chat request type is sent, validated, handled and declared under the
   const chatScripts = scripts.filter(isChatSource);
   const sendingScripts = scripts.filter(path => /\bpostMessage\b/.test(parse(path).text));
   // A new script that posts messages must be assigned to a channel before its types can be checked.
-  assert.deepEqual(difference(sendingScripts, [...chatScripts, contractSource, centerSource, archifySource]), []);
+  assert.deepEqual(difference(sendingScripts, [...chatScripts, contractSource, centerSource, "static/js/role-pools.js", archifySource]), []);
   const sent = unique([...chatScripts, centerSource].flatMap(sentTypes));
   assert.ok(sent.length > 0, "the chat webview sends no types");
   assert.deepEqual(difference(Object.keys(dynamicSends), [...usedDynamicSends]), [], "dynamicSends lists a call that no longer exists");
@@ -244,7 +247,7 @@ test("every chat request type is sent, validated, handled and declared under the
     [...difference(accepted, declared), ...difference(declared, accepted)], clientDeclarationDisagreements);
 });
 
-test("every host message type is declared and either handled by the chat webview or listed as unhandled", function () {
+test("every host message type is declared and handled by its chat or control-center webview", function () {
   const chat = parse("static/js/chat.js");
   const listener = find(chat, node => ts.isCallExpression(node) && node.expression.getText() === "window.addEventListener"
     && literals(node.arguments[0])?.[0] === "message", "the chat message listener");

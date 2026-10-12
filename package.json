@@ -501,6 +501,23 @@
           "type": "boolean",
           "default": true,
           "description": "%agentFactory.workUnits.warnDefaultBranch.description%"
+        },
+        "agentFactory.conductorQueue.enabled": {
+          "type": "boolean",
+          "default": false,
+          "description": "%agentFactory.conductorQueue.enabled.description%"
+        },
+        "agentFactory.conductorQueue.drivers": {
+          "type": "string",
+          "enum": ["fake", "managed"],
+          "default": "fake",
+          "description": "%agentFactory.conductorQueue.drivers.description%"
+        },
+        "agentFactory.conductorQueue.approval": {
+          "type": "string",
+          "enum": ["bypass", "required"],
+          "default": "bypass",
+          "description": "%agentFactory.conductorQueue.approval.description%"
         }
       }
     },

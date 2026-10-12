@@ -10,6 +10,12 @@
   --af-composer-padding: 14px;
   /* Where the prompt text starts: border, composer padding and the textarea's own 4px. Status text uses the same edges. */
   --af-composer-content-inset: calc(1px + var(--af-composer-padding) + 4px);
+  /* Status, prompt and model label share the content inset; the send circle keeps the toolbar edge. */
+  --af-composer-controls-start: var(--af-composer-content-inset);
+  --af-composer-controls-end: calc(1px + var(--af-composer-padding) - 2px);
+  /* The queue chevron path ends at x=12 of 16 plus a 0.75 round cap, so its ink stops this far inside the svg box. */
+  --af-queue-chevron-size: 14px;
+  --af-queue-chevron-inset: calc(var(--af-queue-chevron-size) * 3.25 / 16);
 }
 
 .composer-region {
@@ -202,6 +208,9 @@
   gap: 4px;
 }
 
+/* Account for the toolbar overhang instead of relying on the browser's button padding. */
+#model-button { padding-inline-start: calc(var(--af-composer-controls-start) - var(--af-composer-controls-end)); }
+
 .composer-actions-start {
   min-width: 0;
   flex-wrap: wrap;
@@ -393,8 +402,8 @@
   min-width: 0;
   min-height: 24px;
   margin: 0 0 0 auto;
-  /* The chevron ends on the prompt text's right edge, mirroring the progress dot on the left. */
-  padding: 0 calc(var(--af-composer-content-inset) - 4px) 0 4px;
+  /* The chevron's drawn edge ends where the send button ends. */
+  padding: 0 calc(var(--af-composer-controls-end) - var(--af-queue-chevron-inset)) 0 4px;
   border: 0;
   color: var(--vscode-descriptionForeground);
   background: transparent;
@@ -406,8 +415,8 @@
 .pending-queue-toggle[hidden] { display: none; }
 #pending-queue-label { min-width: 0; overflow-wrap: anywhere; }
 .pending-queue-toggle svg {
-  width: 14px;
-  height: 14px;
+  width: var(--af-queue-chevron-size);
+  height: var(--af-queue-chevron-size);
   flex: 0 0 auto;
   fill: none;
   stroke: currentColor;
@@ -555,8 +564,12 @@
 
 .deploy-controls .setting-option { width: 100%; }
 
-.agent-progress-dock { flex: 1 1 0; display: flex; align-items: center; min-width: 0; padding-inline-start: var(--af-composer-content-inset); }
+.agent-progress-dock { flex: 1 1 0; display: flex; align-items: center; min-width: 0; padding-inline-start: var(--af-composer-controls-start); }
 .agent-progress-dock:has(> #agent-progress[hidden]) { display: none; }
+/* The running dot's ripple ring is what reads as its edge; the ring's largest extent, not the dot box, starts on the shared edge. */
+@media (prefers-reduced-motion: no-preference) {
+  .agent-progress.is-progressing .run-status-pulse { margin-inline-start: calc(var(--run-status-pulse-size) * (var(--run-status-ring-scale) - 1) / 2); }
+}
 /* Status text stays neutral; the accent marks only an observed running dot and a pending decision, errors use the error colour. */
 .agent-progress { --run-status-text-color: var(--vscode-descriptionForeground); --run-status-active-color: var(--af-color-accent); --run-status-scan-color: var(--vscode-foreground); color: var(--run-status-text-color); display: flex; align-items: center; gap: 8px; min-width: 0; min-height: 24px; font-size: 12px; line-height: 16px; }
 .agent-progress[hidden] { display: none; }

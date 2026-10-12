@@ -216,20 +216,72 @@ async function checkComposerStatusLine(page) {
   const capability = { model: true, reasoning: true, fast: true, workIsolation: true, taskModes: ['direct', 'orchestrate', 'work'] };
   await post({ type: 'host.initialize', panelId: 'status-line', role: 'main', runtimeAvailable: true, botsEnabled: false, botsAvailable: false, companionAvailable: false, capabilities: { submit: capability, send: capability } });
   const sends = () => page.evaluate(() => window.sentMessages.filter(message => message.type === 'chat.send'));
+  for (const width of [795, 360, 320]) {
+    await page.setViewportSize({ width, height: 700 });
+    const idle = await page.evaluate(() => {
+      const prompt = document.querySelector('#prompt');
+      return { promptLeft: prompt.getBoundingClientRect().left + parseFloat(getComputedStyle(prompt).paddingLeft),
+        modelLeft: document.querySelector('#model-label').getBoundingClientRect().left,
+        progressHidden: document.querySelector('#agent-progress').hidden, queueHidden: document.querySelector('#pending-queue-toggle').hidden };
+    });
+    assert.equal(idle.progressHidden, true);
+    assert.equal(idle.queueHidden, true);
+    assert.ok(Math.abs(idle.promptLeft - idle.modelLeft) <= 0.25, 'Idle prompt/model alignment ' + JSON.stringify({ width, idle }));
+  }
+  await page.setViewportSize({ width: 795, height: 700 });
   await page.locator('#prompt').fill('현재 작업');
   await page.locator('#send-button').click();
   await post({ type: 'run.state', running: true });
   await post({ ...(await sends()).at(-1), type: 'chat.started' });
   await post({ type: 'run.observed', status: 'running' });
   assert.equal(await page.locator('#run-status-label').textContent(), '첫 응답 대기', 'Without a queue the line keeps the run phase');
-  for (const text of ['다음 메시지', '그다음 메시지']) {
+  // Compare visible edges: the prompt text inside the textarea padding, a running dot's widest ripple ring and the chevron's stroke cap.
+  const edges = () => page.evaluate(() => {
+    const box = selector => document.querySelector(selector).getBoundingClientRect();
+    const chevron = document.querySelector('#pending-queue-toggle:not([hidden]) svg path');
+    const prompt = document.querySelector('#prompt');
+    const promptLeft = prompt.getBoundingClientRect().left + parseFloat(getComputedStyle(prompt).paddingLeft);
+    const dot = document.querySelector('#agent-progress .run-status-pulse'), progressing = document.querySelector('#agent-progress').classList.contains('is-progressing') && matchMedia('(prefers-reduced-motion: no-preference)').matches;
+    const animation = dot.style.animation; dot.style.animation = 'none';
+    const rest = dot.getBoundingClientRect(); dot.style.animation = animation;
+    const ringScale = progressing ? parseFloat(getComputedStyle(dot).getPropertyValue('--run-status-ring-scale')) : 1;
+    const ring = progressing ? document.getAnimations().find(item => item.animationName === 'run-status-dot-ripple' && item.effect.target === dot && item.effect.pseudoElement === '::before') : null;
+    let drawnScale = null;
+    if (ring) { const time = ring.currentTime; ring.pause(); ring.currentTime = 1799; drawnScale = new DOMMatrix(getComputedStyle(dot, '::before').transform).a; ring.currentTime = time; ring.play(); }
+    const chevronRight = chevron ? chevron.getBoundingClientRect().right + parseFloat(getComputedStyle(chevron).strokeWidth) * chevron.ownerSVGElement.getBoundingClientRect().width / 16 / 2 : null;
+    return { promptLeft, dotLeft: rest.left + rest.width / 2 - rest.width * ringScale / 2, ringScale, drawnScale, modelLeft: box('#model-label').left, sendRight: box('#send-button').right, chevronRight,
+      label: document.getElementById('run-status-label').textContent, queueHidden: document.getElementById('pending-queue-toggle').hidden };
+  });
+  const aligned = async (queued, width) => {
+    await page.mouse.move(1, 1); await page.locator('#prompt').blur(); await page.waitForTimeout(250);
+    const value = await edges(), context = JSON.stringify({ queued, width, value });
+    if (value.drawnScale !== null) assert.ok(Math.abs(value.drawnScale - value.ringScale) <= 0.01, 'The ripple ring grows to the scale used for alignment ' + context);
+    assert.ok(Math.abs(value.dotLeft - value.modelLeft) <= 1, 'Dot starts on the model label edge ' + context);
+    assert.ok(Math.abs(value.promptLeft - value.modelLeft) <= 0.25, 'Prompt and model share the left edge ' + context);
+    assert.ok(Math.abs(value.dotLeft - value.promptLeft) <= 1, 'Dot and prompt share the left edge ' + context);
+    if (queued) assert.ok(Math.abs(value.chevronRight - value.sendRight) <= 1, 'Queued count ends on the send button edge ' + context);
+    else assert.equal(value.queueHidden, true, 'No queued count without queued messages ' + context);
+  };
+  for (const width of [795, 360, 320]) { await page.setViewportSize({ width, height: 700 }); await aligned(0, width); }
+  // Response phases keep the same edges as the first-response wait.
+  const runId = (await sends()).at(-1).id;
+  await post({ type: 'chat.delta', runId, id: 'status-line-delta', stream: 'commentary', text: '진행 중' });
+  assert.equal(await page.locator('#run-status-label').textContent(), '응답 수신 · 후속 결과 대기');
+  for (const width of [795, 360, 320]) { await page.setViewportSize({ width, height: 700 }); await aligned(0, width); }
+  await post({ type: 'chat.assistant', runId, text: '응답', phase: 'final' });
+  assert.equal(await page.locator('#run-status-label').textContent(), '응답 수신 · 실행 종료 확인 중');
+  for (const width of [795, 360, 320]) { await page.setViewportSize({ width, height: 700 }); await aligned(0, width); }
+  await page.setViewportSize({ width: 795, height: 700 });
+  for (const [index, text] of ['다음 메시지', '그다음 메시지'].entries()) {
     await page.locator('#prompt').fill(text);
     await page.locator('#send-button').click();
     await post({ type: 'chat.pending', id: (await sends()).at(-1).id });
+    if (index === 0) for (const width of [795, 360, 320]) { await page.setViewportSize({ width, height: 700 }); await aligned(1, width); }
   }
+  await page.setViewportSize({ width: 795, height: 700 });
   await page.mouse.move(1, 1);
   await page.locator('#prompt').blur();
-  for (const width of [795, 360]) {
+  for (const width of [795, 360, 320]) {
     await page.setViewportSize({ width, height: 700 });
     await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
     const geometry = await page.evaluate(() => {
@@ -241,10 +293,17 @@ async function checkComposerStatusLine(page) {
     assert.equal(await page.locator('#run-status-label').textContent(), '앞 메시지 처리 중', 'The line names why messages wait');
     assert.equal(await page.locator('#pending-queue-label').textContent(), '남은 메시지 2건', 'The count reads as remaining messages');
     for (const part of ['label', 'elapsed', 'count']) assert.ok(Math.abs(geometry[part].mid - geometry.dot.mid) <= 1, part + ' shares the dot line ' + context);
-    assert.ok(Math.abs(geometry.dot.left - (geometry.prompt.left + 4)) <= 1, 'Dot starts on the prompt text edge ' + context);
-    assert.ok(Math.abs(geometry.chevronRight - (geometry.prompt.right - 4)) <= 2, 'Queued count ends on the prompt text edge ' + context);
+    await aligned(2, width);
     assert.ok(geometry.count.bottom <= geometry.composer.top && geometry.composer.top - geometry.label.bottom <= 8, 'Status line sits just above the composer ' + context);
   }
+  for (const theme of ['vscode-light', 'vscode-high-contrast', 'vscode-high-contrast-light', 'vscode-dark']) {
+    await page.evaluate(theme => { document.body.className = theme; }, theme);
+    for (const width of [795, 360, 320]) { await page.setViewportSize({ width, height: 700 }); await aligned(2, width); }
+  }
+  // Without motion there is no ring, so the dot itself starts on the edge.
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  for (const width of [795, 320]) { await page.setViewportSize({ width, height: 700 }); await aligned(2, width); }
+  await page.emulateMedia({ reducedMotion: 'no-preference' });
   await page.setViewportSize({ width: 795, height: 700 });
   // Let the send-to-stop colour transition finish before comparing surfaces.
   await page.waitForTimeout(300);
@@ -277,6 +336,12 @@ async function checkComposerStatusLine(page) {
   assert.ok(Math.abs(list.x - composer.x) <= 1 && Math.abs(list.width - composer.width) <= 1, 'Queue list spans the composer width');
   assert.match(await page.locator('#pending-message-queue').textContent(), /다음 메시지[\s\S]*그다음 메시지/);
   await page.locator('#pending-queue-toggle').click();
+  // A stopped run with queued messages shows a plain dot; it starts on the same edge without the ring allowance.
+  await post({ type: 'run.observed', status: 'completed' });
+  await post({ type: 'run.state', running: false });
+  assert.equal(await page.locator('#run-status-label').textContent(), '대기열에 접수됨');
+  for (const width of [795, 360, 320]) { await page.setViewportSize({ width, height: 700 }); await aligned(2, width); }
+  await page.setViewportSize({ width: 795, height: 700 });
   if (process.env.AF_RENDERING_ARTIFACT_DIR) await page.locator('.composer-region').screenshot({ path: require('node:path').join(process.env.AF_RENDERING_ARTIFACT_DIR, 'composer-status-line-795.png') });
   console.log('Composer status line: one line, shared edges, neutral text, blue on-switch tracks, shared toggles and icon buttons passed.');
 }

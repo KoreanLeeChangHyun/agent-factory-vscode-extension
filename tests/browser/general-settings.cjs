@@ -127,8 +127,56 @@ async function checkGeneralSettings(page) {
   await claudeVersionInput.selectOption('2.1.284');
   await page.locator('[data-provider-control="claude:install-version"]').click();
   assert.deepEqual(await page.evaluate(() => window.sentMessages.at(-1)), { type: 'providers.cli.install', provider: 'claude', version: '2.1.284' });
+  // Detection and sign-in are separate: a detected CLI shows no sign-in state until the CLI itself answers for that path.
+  const authTexts = () => page.locator('#provider-settings .provider-row:visible .provider-auth-state').allTextContents();
+  const postAuth = snapshot => page.evaluate(snapshot => { window.postMessage({ type: 'providers.auth', ...snapshot }, '*'); return new Promise(requestAnimationFrame); }, snapshot);
+  assert.deepEqual(await authTexts(), ['', '']);
+  await postAuth({ checking: true, signingIn: [], auth: {} });
+  assert.deepEqual(await authTexts(), ['Checking sign-in…', 'Checking sign-in…']);
+  assert.equal(await page.locator('[data-provider-control="codex:auth-refresh"]').isDisabled(), true);
+  await postAuth({ checking: false, signingIn: [], auth: {
+    codex: { state: 'signed-in', method: 'api-key', path: '/home/user/.local/bin/codex' },
+    claude: { state: 'signed-out', path: '/opt/claude/bin/claude' },
+    antigravity: { state: 'missing' }
+  } });
+  assert.deepEqual(await authTexts(), ['Signed in · API key', 'Sign-in required']);
+  assert.deepEqual(await page.locator('#provider-settings .provider-row:visible .provider-auth-state').evaluateAll(items => items.map(item => item.dataset.authState)), ['signed-in', 'signed-out']);
+  assert.equal(await page.locator('[data-provider-control="codex:login"]').getAttribute('aria-label'), 'Sign in to Codex in the terminal');
+  // A result for another executable (path changed after the check) is never shown as this CLI's state.
+  await postAuth({ checking: false, signingIn: [], auth: {
+    codex: { state: 'signed-in', method: 'account', path: '/old/codex' },
+    claude: { state: 'unknown', reason: 'timeout', path: '/opt/claude/bin/claude' }
+  } });
+  assert.deepEqual(await authTexts(), ['', 'Cannot check']);
+  assert.equal(await page.locator('#provider-settings .provider-row:visible .provider-auth-state').nth(1).getAttribute('title'), 'Cannot check · timed out');
+  await postAuth({ checking: false, signingIn: [], auth: {
+    codex: { state: 'unknown', reason: 'error', path: '/home/user/.local/bin/codex' },
+    claude: { state: 'unknown', reason: 'unsupported', path: '/opt/claude/bin/claude' }
+  } });
+  assert.deepEqual(await authTexts(), ['Cannot check', 'Cannot check']);
+  assert.deepEqual(await page.locator('#provider-settings .provider-row:visible .provider-auth-state').evaluateAll(items => items.map(item => item.title)),
+    ['Cannot check · error', 'Cannot check · not supported by the CLI']);
+  await page.locator('[data-provider-control="codex:login"]').click();
+  assert.deepEqual(await page.evaluate(() => window.sentMessages.at(-1)), { type: 'providers.login', provider: 'codex' });
+  await postAuth({ checking: false, signingIn: ['codex'], auth: { claude: { state: 'signed-out', path: '/opt/claude/bin/claude' } } });
+  assert.deepEqual(await authTexts(), ['Signing in…', 'Sign-in required']);
+  // Re-clicking only asks the host again; the host reveals the running terminal instead of opening another.
+  await page.locator('[data-provider-control="codex:login"]').click();
+  assert.deepEqual(await page.evaluate(() => window.sentMessages.slice(-2)), [{ type: 'providers.login', provider: 'codex' }, { type: 'providers.login', provider: 'codex' }]);
+  await page.locator('[data-provider-control="claude:auth-refresh"]').click();
+  assert.deepEqual(await page.evaluate(() => window.sentMessages.at(-1)), { type: 'providers.auth.request' });
+  assert.equal(await page.locator('[data-provider-control="claude:auth-refresh"]').isDisabled(), true);
+  await postAuth({ checking: false, signingIn: [], auth: { codex: { state: 'signed-in', method: 'account', path: '/home/user/.local/bin/codex' }, claude: { state: 'signed-in', path: '/opt/claude/bin/claude' } } });
+  assert.deepEqual(await authTexts(), ['Signed in', 'Signed in']);
+  assert.equal(await page.locator('[data-provider-control="claude:auth-refresh"]').isDisabled(), false);
+  if (process.env.AF_RENDERING_ARTIFACT_DIR) {
+    require('node:fs').mkdirSync(process.env.AF_RENDERING_ARTIFACT_DIR, { recursive: true });
+    await page.locator('#status-settings').screenshot({ path: require('node:path').join(process.env.AF_RENDERING_ARTIFACT_DIR, 'providers-auth.png') });
+  }
   await page.locator('.provider-missing summary').click();
   assert.equal(await page.locator('[data-provider-control="antigravity:input"]').isVisible(), true);
+  assert.equal(await page.locator('.provider-missing .provider-auth-state').textContent(), 'No CLI');
+  assert.equal(await page.locator('[data-provider-control="antigravity:login"]').count(), 0);
   await page.locator('[data-provider-control="antigravity:pick"]').click();
   assert.deepEqual(await page.evaluate(() => window.sentMessages.at(-1)), { type: 'providers.pick', provider: 'antigravity' });
   const agyInput = page.locator('[data-provider-control="antigravity:input"]');
@@ -162,6 +210,12 @@ async function checkGeneralSettings(page) {
     const autoBox = await page.locator('[data-provider-control="codex:clear"]').boundingBox();
     assert.ok(pathBox && pickBox && autoBox);
     assert.ok(Math.abs(pathBox.y - pickBox.y) < 2 && Math.abs(pathBox.y - autoBox.y) < 2);
+    // Sign-in runs the executable in this row; its state stays on the name line, apart from detection.
+    const loginBox = await page.locator('[data-provider-control="codex:login"]').boundingBox();
+    assert.ok(loginBox && Math.abs(loginBox.y - pathBox.y) < 2 && autoBox.x + autoBox.width <= loginBox.x);
+    const nameBox = await page.locator('#provider-settings .provider-row:visible .provider-name').first().boundingBox();
+    const refreshBox = await page.locator('[data-provider-control="codex:auth-refresh"]').boundingBox();
+    assert.ok(refreshBox && Math.abs((refreshBox.y + refreshBox.height / 2) - (nameBox.y + nameBox.height / 2)) < 3);
     await page.locator('#settings-tab-general').click();
   }
   const global = Object.fromEntries(['main','work','workLight','verification'].map(role => [role,{model:'gpt-6-astra',reasoningEffort:'medium'}]));
@@ -170,7 +224,7 @@ async function checkGeneralSettings(page) {
   assert.deepEqual(await page.locator('#global-agent-settings .agent-model-row').evaluateAll(rows => rows.map(row => row.dataset.agentRole)),
     ['main', 'work', 'workLight', 'explore', 'scribe', 'verification']);
   const fs=require('node:fs'),path=require('node:path');
-  const artifactDir=path.resolve(__dirname,'../../../docs/artifact/evidence/model-settings-copy-20261004');
+  const artifactDir=process.env.AF_RENDERING_ARTIFACT_DIR||path.resolve(__dirname,'../../../docs/artifact/evidence/model-settings-copy-20261004');
   fs.mkdirSync(artifactDir,{recursive:true});
   for(const size of [{width:465,height:556},{width:721,height:402}]) {
     await page.setViewportSize(size);

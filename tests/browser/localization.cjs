@@ -54,7 +54,7 @@ async function checkLocalization(page) {
   assert.equal(await page.locator('#model-menu .agent-model-row[data-agent-role="main"] .model-picker-option[data-value="Default"]').textContent(), 'Default');
   await page.locator('#model-menu .agent-model-row[data-agent-role="main"] .model-picker-option[data-value="gpt-6-astra"]').click();
   assert.equal(await model.textContent(), 'gpt-6-astra');
-  assert.match(await page.locator('#model-menu input[data-role="main"]').getAttribute('aria-label'), /조율자 추론/);
+  assert.match(await page.locator('#model-menu input[data-role="main"]').getAttribute('aria-label'), /지휘자 추론/);
   await page.locator('#model-menu .agent-settings-close').click();
   await page.locator('#prompt').fill('Default Settings 원문 {0}');
   await emit({ type: 'chat.assistant', text: 'Settings Runtime online Default', phase: 'final', runId: 'source-run' });

@@ -85,19 +85,19 @@ async function checkControlScreens(chatPage) {
   assert.equal(await summary.locator('dd').nth(2).textContent(), '빈 상태 문구를 고쳤습니다.');
   if (process.env.CONTROL_SCREENS_EVIDENCE) await page.screenshot({ path: path.join(process.env.CONTROL_SCREENS_EVIDENCE, 'after-fixture-task-detail.png') });
 
-  // Rework: a new task in the same worker's session, linked to this ended task; the field keeps line breaks.
+  // Rework keeps the same task and binds the latest Work run; the field keeps line breaks.
   const input = page.locator('#maestro-rework-input');
-  assert.match(await page.locator('.maestro-rework .maestro-command-target').textContent(), /worker-done 세션의 새 작업/);
+  assert.match(await page.locator('.maestro-rework .maestro-command-target').textContent(), /worker-done 세션의 동일 작업/);
   await input.fill('빈 상태 문구를\n두 줄로 나누십시오.');
   await page.locator('.maestro-rework button[type="submit"]').click();
   let request = (await sent('worker.command')).at(-1);
-  assert.deepEqual({ ...request, commandId: undefined }, { type: 'worker.command', agentId: 'worker-done', text: '빈 상태 문구를\n두 줄로 나누십시오.', commandId: undefined, rework: { workflowId: 'flow-done', taskId: 'task-done' } });
+  assert.deepEqual({ ...request, commandId: undefined }, { type: 'worker.command', agentId: 'worker-done', text: '빈 상태 문구를\n두 줄로 나누십시오.', commandId: undefined, rework: { workflowId: 'flow-done', taskId: 'task-done', runId: 'run-worker-done' } });
   assert.equal(await page.locator('.maestro-rework button[type="submit"]').isDisabled(), true, 'One send at a time');
-  await post({ type: 'worker.result', action: 'worker.command', agentId: 'worker-done', commandId: request.commandId, result: { mode: 'task', loopId: 'loop-rework', rework: { workflowId: 'flow-done', taskId: 'task-done' } } });
+  await post({ type: 'worker.result', action: 'worker.command', agentId: 'worker-done', commandId: request.commandId, result: { mode: 'revision', loopId: 'loop-flow-done', runId: 'run-worker-done-A1', taskId: 'task-done', rework: { workflowId: 'flow-done', taskId: 'task-done' } } });
   const history = page.locator('.maestro-rework .maestro-command');
   assert.equal(await history.count(), 1);
   assert.match(await history.textContent(), /재작업.*사용자.*접수됨/);
-  assert.match(await history.textContent(), /loop-rework/);
+  assert.match(await history.textContent(), /run-worker-done-A1/);
   assert.equal(await input.inputValue(), '', 'The sent rework clears only its own field');
   // A refused rework keeps the text and shows why.
   await input.fill('다시');
@@ -119,18 +119,14 @@ async function checkControlScreens(chatPage) {
     assert.equal(await page.locator('.maestro-rework').count(), 0, task + ' is not ended');
   }
 
-  // Direct message to a running worker: an addition bound to its exact loop and run.
+  // Performer conversations open the existing session from the fixed header.
   await page.locator('#maestro-workers-view').click();
   await page.locator('[data-select-worker="worker-run"]').click();
-  await page.locator('#maestro-command-input').fill('테스트도 함께 확인하십시오.');
-  await page.locator('#maestro-detail .maestro-command-form button[type="submit"]').first().click();
-  request = (await sent('worker.command')).at(-1);
-  assert.equal(request.agentId, 'worker-run');
-  assert.equal(request.loopId, 'loop-flow-run');
-  assert.equal(request.rework, undefined);
-  await post({ type: 'worker.result', action: 'worker.command', agentId: 'worker-run', commandId: request.commandId, result: { mode: 'addition', loopId: 'loop-flow-run', runId: 'run-worker-run' } });
-  if (process.env.CONTROL_SCREENS_EVIDENCE) await page.screenshot({ path: path.join(process.env.CONTROL_SCREENS_EVIDENCE, 'after-fixture-worker-message.png') });
-
+  assert.equal(await page.locator('#maestro-command-input, .maestro-instruction, .maestro-command-log').count(),0);
+  const messageCount=(await sent('worker.command')).length;
+  await page.locator('#maestro-detail .maestro-detail-header [data-open-session="worker-run"]').click();
+  assert.deepEqual((await sent('project.task.open')).at(-1),{type:'project.task.open',workflowId:'flow-run',taskId:'task-run',target:'run',agentId:'worker-run',runId:'run-worker-run'});
+  assert.equal((await sent('worker.command')).length,messageCount);
   // Provider handoff: a detected model other than the current one, a reason, then loop.py handoff through the host.
   const handoff = page.locator('#maestro-detail [data-handoff-worker="worker-run"]');
   assert.equal(await handoff.textContent(), '공급자 이관');
@@ -162,7 +158,8 @@ async function checkControlScreens(chatPage) {
   const record = page.locator('.maestro-handoffs [data-handoff-id="handoff-1"]');
   assert.match(await record.textContent(), /내보냄.*사용자.*model-worker-run · codex → claude-opus-5-5 · claude.*Running task · worker-run → work-handoff-1.*공급자 한도 소진/);
   if (process.env.CONTROL_SCREENS_EVIDENCE) await page.screenshot({ path: path.join(process.env.CONTROL_SCREENS_EVIDENCE, 'after-fixture-handoff-record.png') });
-  // A worker with only ended tasks has nothing to move.
+  // A worker with only ended tasks has nothing to move; it is listed under the "all" scope, not the default active one.
+  await page.locator('#maestro-scope-all').click();
   await page.locator('[data-select-worker="worker-done"]').click();
   assert.equal(await page.locator('#maestro-detail [data-handoff-worker="worker-done"]').isDisabled(), true);
   assert.deepEqual(errors, []);

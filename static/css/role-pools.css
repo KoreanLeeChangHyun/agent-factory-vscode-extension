@@ -1,0 +1,12 @@
+.role-pools { max-height: 45vh; overflow: auto; flex-shrink: 0; padding: 8px 12px; border-bottom: 1px solid var(--vscode-panel-border); }
+.role-pools h2, .role-pools h3 { font-size: 1em; margin: 8px 0; }
+.role-pools details { padding: 5px 0 5px 12px; }
+.role-pools summary { cursor: pointer; overflow-x: auto; white-space: nowrap; }
+.role-pools summary span { margin-left: 12px; }
+.role-pools label { display: inline-flex; align-items: center; gap: 8px; margin: 4px 12px 4px 0; }
+.role-pools select { color: var(--vscode-dropdown-foreground); background: var(--vscode-dropdown-background); border: 1px solid var(--vscode-dropdown-border); padding: 4px; }
+.role-pool-groups { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.role-pools pre { overflow-x: auto; }
+.role-pools textarea { display: block; width: 100%; box-sizing: border-box; color: var(--vscode-input-foreground); background: var(--vscode-input-background); border: 1px solid var(--vscode-input-border); }
+.role-pools :focus-visible { outline: 1px solid var(--vscode-focusBorder); outline-offset: 2px; }
+@media (max-width: 600px) { .role-pool-groups { grid-template-columns: 1fr; } }

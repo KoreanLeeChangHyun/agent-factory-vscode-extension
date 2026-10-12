@@ -110,3 +110,22 @@ test("paths shorten to their names, with parent directories only where names col
   // The same path read twice is not a collision.
   assert.deepEqual(plain(rows.shortPaths(["src/a.ts"], ["src/a.ts", "src/a.ts"])), ["a.ts"]);
 });
+
+test("one activity reads as a single line in its timeline row's words, with full paths kept for the tooltip", () => {
+  const ko = (key, ...values) => AgentFactoryI18n.format(key, "ko", ...values);
+  const line = event => plain(rows.headline(event, ko));
+  const skill = line({ category: "command", phase: "completed", text: "sed -n 1,80p /home/u/.claude/skills/agent/references/task-dispatch.md" });
+  assert.equal(skill.kind, "skill");
+  assert.equal(skill.text, "스킬 읽음 agent · references/task-dispatch.md");
+  const read = line({ category: "tool", phase: "completed", text: "Read", kind: "read", target: "/runs/run-1/result.md" });
+  assert.equal(read.text, "읽음 result.md");
+  assert.match(read.full, /\/runs\/run-1\/result\.md/, "The tooltip names the full path");
+  assert.equal(line({ category: "tool", phase: "completed", text: "Reasoning", kind: "think", durationMs: 6100 }).text, "생각함 · 6.1초");
+  assert.equal(line({ category: "tool", phase: "started", text: "Reasoning", kind: "think" }).text, "생각 중");
+  const command = line({ category: "command", phase: "started", text: "python3 /plugin/scripts/domains.py list --project-root /p" });
+  assert.equal(command.kind, "run");
+  assert.match(command.text, /^실행 중 /);
+  assert.match(command.full, /domains\.py list --project-root \/p/, "The raw command stays in the full text");
+  assert.equal(line({ category: "command", phase: "failed", text: "npm test", exitCode: 1 }).text, "테스트 실패 npm test · 종료 코드 1");
+  assert.equal(rows.headline({ category: "file", phase: "started", text: "" }, ko).kind, "edit");
+});

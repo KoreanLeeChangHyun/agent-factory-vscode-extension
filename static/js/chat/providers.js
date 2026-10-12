@@ -15,6 +15,76 @@ globalThis.AgentFactoryChat.providers = function (host) {
   let missingProviderExpanded = false;
   let factoryInstallVersion = "";
   const providerInstallVersions = new Map();
+  let authSnapshot = { auth: {}, checking: false, signingIn: [] };
+  const authStates = ["signed-in", "signed-out", "unknown", "missing"];
+
+  function receiveAuth(message) {
+    const auth = {};
+    for (const id of Object.keys(providerNames)) {
+      const value = message.auth?.[id];
+      if (value && authStates.includes(value.state)) auth[id] = value;
+    }
+    authSnapshot = {
+      auth,
+      checking: message.checking === true,
+      signingIn: Array.isArray(message.signingIn) ? message.signingIn.filter(id => Object.hasOwn(providerNames, id)) : []
+    };
+    renderProviderSettings();
+  }
+
+  // Detection says whether a CLI exists; only the CLI's own answer for this exact path says whether it is signed in.
+  function authText(provider) {
+    if (!provider.detected) return { state: "missing", text: t("ui.providers.auth.missing") };
+    if (authSnapshot.signingIn.includes(provider.id)) return { state: "signing-in", text: t("ui.providers.auth.signing-in") };
+    const value = authSnapshot.auth[provider.id];
+    if (!value || value.path !== provider.path) return { state: "checking", text: authSnapshot.checking ? t("ui.providers.auth.checking") : "" };
+    if (value.state === "signed-in") return { state: value.state, text: t(value.method === "api-key" ? "ui.providers.auth.signed-in.api-key" : "ui.providers.auth.signed-in") };
+    if (value.state === "signed-out") return { state: value.state, text: t("ui.providers.auth.signed-out") };
+    if (value.state === "missing") return { state: value.state, text: t("ui.providers.auth.missing") };
+    const reason = ["unsupported", "timeout", "error"].includes(value.reason) ? value.reason : undefined;
+    return { state: "unknown", text: t("ui.providers.auth.unknown"), detail: reason ? t("ui.providers.auth.unknown." + reason) : undefined };
+  }
+
+  // The sign-in state sits beside the name and the sign-in button beside the executable it runs,
+  // so the fixed-height settings window keeps fitting every provider card.
+  function renderAuthState(provider) {
+    const group = document.createElement("span");
+    group.className = "provider-auth";
+    const { state, text, detail } = authText(provider);
+    const label = document.createElement("span");
+    label.className = "provider-auth-state";
+    label.dataset.authState = state;
+    label.textContent = text;
+    if (detail) label.title = detail;
+    group.append(label);
+    if (!provider.detected) return group;
+    const refresh = document.createElement("button");
+    refresh.type = "button";
+    refresh.className = "provider-auth-refresh";
+    refresh.dataset.providerControl = provider.id + ":auth-refresh";
+    refresh.textContent = "\u21bb";
+    refresh.title = t("ui.providers.auth.refresh.label", providerNames[provider.id]);
+    refresh.setAttribute("aria-label", refresh.title);
+    refresh.disabled = providerSnapshot.busy || authSnapshot.checking;
+    refresh.addEventListener("click", function () {
+      authSnapshot = { ...authSnapshot, checking: true };
+      renderProviderSettings();
+      vscode.postMessage({ type: "providers.auth.request" });
+    });
+    group.append(refresh);
+    return group;
+  }
+
+  function renderLogin(provider) {
+    const login = document.createElement("button");
+    login.type = "button";
+    login.dataset.providerControl = provider.id + ":login";
+    login.textContent = t("ui.providers.login");
+    login.setAttribute("aria-label", t("ui.providers.login.label", providerNames[provider.id]));
+    login.disabled = providerSnapshot.busy;
+    login.addEventListener("click", function () { vscode.postMessage({ type: "providers.login", provider: provider.id }); });
+    return login;
+  }
 
   function receiveProviders(message) {
     const providers = Array.isArray(message.providers)
@@ -117,7 +187,7 @@ globalThis.AgentFactoryChat.providers = function (host) {
       status.textContent = provider.detected
         ? t("ui.providers.detected") + " · " + t(provider.source === "configured" ? "ui.providers.source.configured" : "ui.providers.source.auto")
         : "";
-      head.append(name);
+      head.append(name, renderAuthState(provider));
       if (provider.detected) head.append(status);
       row.append(head);
       const versions = providerSnapshot.versions[provider.id];
@@ -224,6 +294,7 @@ globalThis.AgentFactoryChat.providers = function (host) {
         vscode.postMessage({ type: "providers.configure", provider: provider.id, path: "" });
       });
       edit.append(input, pick, clear);
+      if (provider.detected) edit.append(renderLogin(provider));
       row.append(edit);
       if (provider.detected) section.append(row);
       else missingList?.append(row);
@@ -239,6 +310,7 @@ globalThis.AgentFactoryChat.providers = function (host) {
 
   return {
     receiveProviders,
+    receiveAuth,
     get providerCatalog() { return providerCatalog; },
     set providerCatalog(value) { providerCatalog = value; },
     get providerVersionsRequested() { return providerVersionsRequested; },

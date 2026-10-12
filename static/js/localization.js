@@ -27,7 +27,8 @@
   "maestro.verifiedWork": {"en": "Inspected Work run", "ko": "검사 대상 Work 실행"},
   "maestro.finding": {"en": "Finding · evidence · correction", "ko": "지적 · 근거 · 수정 제안"},
   "maestro.view": {"en": "View", "ko": "보기"},
-  "maestro.workers": {"en": "Workers", "ko": "작업자"},
+  "maestro.workers": {"en": "Agents", "ko": "수행자"},
+  "maestro.subDomain": {"en": "Sub-domain", "ko": "서브 도메인"},
   "maestro.domain": {"en": "Domain", "ko": "도메인"},
   "maestro.membershipRequired": {"en": "Domain required", "ko": "소속 지정 필요"},
   "maestro.membershipUnknown": {"en": "Domain list unavailable", "ko": "소속 확인 불가"},
@@ -38,7 +39,7 @@
   "maestro.membershipReason.legacy-unclassified": {"en": "Left without a domain by an earlier version", "ko": "이전 방식에서 소속 없이 남음"},
   "maestro.membershipReason.missing-domain": {"en": "Its domain is no longer listed", "ko": "소속 분류가 목록에 없음"},
   "maestro.membershipReason.unnamed-domain": {"en": "Its domain has no name yet", "ko": "소속 분류에 이름이 없음"},
-  "maestro.membershipRequiredError": {"en": "Every worker belongs to a named domain; choose one", "ko": "모든 작업자는 이름 있는 분류에 소속되어야 합니다. 분류를 선택하십시오"},
+  "maestro.membershipRequiredError": {"en": "Every agent belongs to a named domain; choose one", "ko": "모든 수행자는 이름 있는 분류에 소속되어야 합니다. 분류를 선택하십시오"},
   "maestro.domainReserved": {"en": "Enter a name for a real work area", "ko": "실제 작업 영역을 나타내는 이름을 입력하십시오"},
   "maestro.activity": {"en": "Observed run state", "ko": "관찰된 실행 상태"},
   "maestro.workState": {"en": "Task work state", "ko": "작업 상태"},
@@ -53,17 +54,18 @@
   "maestro.issues": {"en": "Remaining issues \u00b7 see original result", "ko": "남은 문제 · 결과 원본 참조"},
   "maestro.returnList": {"en": "Back to list", "ko": "목록으로 돌아가기"},
   "maestro.taskDetail": {"en": "Show in task list", "ko": "작업 목록에서 보기"},
-  "maestro.workerDetail": {"en": "Show assigned workers", "ko": "배정 작업자 보기"},
+  "maestro.workerDetail": {"en": "Show assigned agents", "ko": "배정 수행자 보기"},
   "maestro.unassigned": {"en": "Unassigned", "ko": "미배정"},
+  "maestro.domainWorkers": {"en": "Agents {0}", "ko": "수행자 {0}"},
   "maestro.assignments": {"en": "{0} assignments", "ko": "배정 {0}건"},
-  "maestro.runIdentity": {"en": "Result source \u00b7 agent / run", "ko": "결과 출처 · 작업자 / 실행"},
+  "maestro.runIdentity": {"en": "Result source \u00b7 agent / run", "ko": "결과 출처 · 수행자 / 실행"},
   "maestro.notRequested": {"en": "Not requested", "ko": "요청되지 않음"},
   "maestro.humanSkipped": {"en": "Human skipped", "ko": "사용자 생략"},
   "maestro.executionMissing": {"en": "Run state unconfirmed", "ko": "실행 상태 미확인"},
   "maestro.refresh": {"en": "Refresh", "ko": "새로고침"},
   "maestro.center": {"en": "Control center", "ko": "컨트롤 센터"},
   "maestro.chat": {"en": "Back to chat", "ko": "채팅으로 돌아가기"},
-  "maestro.run": {"en": "Worker run", "ko": "작업자 실행"},
+  "maestro.run": {"en": "Agent run", "ko": "수행자 실행"},
   "maestro.records": {"en": "Execution records", "ko": "실행 기록"},
   "maestro.feedback": {"en": "Add feedback reference", "ko": "피드백 참조 추가"},
   "maestro.scope": {"en": "Conversation", "ko": "대화"},
@@ -90,7 +92,6 @@
   "maestro.loading": {"en": "Reading runtime records…", "ko": "런타임 기록 조회 중…"},
   "maestro.error": {"en": "Records could not be refreshed: {0}", "ko": "기록을 갱신하지 못했습니다: {0}"},
   "maestro.stale": {"en": "Saved view · Current runtime state unconfirmed", "ko": "저장된 화면 · 현재 런타임 상태 미확인"},
-  "maestro.empty": {"en": "No matching tasks", "ko": "일치하는 작업 없음"},
   "maestro.feedback.reference": {"en": "Feedback reference · time {0}\nworkflow {1} · task {2}\nruns {3}\nObserved problem: ", "ko": "피드백 참조 · 시각 {0}\nworkflow {1} · task {2}\nruns {3}\n관찰한 문제: "},
   "maestro.status.running": {"en": "Running", "ko": "실행 중"},
   "maestro.status.waiting": {"en": "Waiting", "ko": "대기"},
@@ -100,13 +101,133 @@
   "maestro.status.failed": {"en": "Failed", "ko": "실패"},
   "maestro.status.cancelled": {"en": "Cancelled", "ko": "중단"},
   "maestro.status.unknown": {"en": "Unconfirmed / Historical record", "ko": "미확인 / 과거 기록"},
+  "maestro.filterStatus.verifying": {"en": "Verifying", "ko": "검사 중"},
+  "maestro.filterStatus.completed": {"en": "Completed", "ko": "완료"},
+  "maestro.filterStatus.cancelled": {"en": "Cancelled", "ko": "취소"},
+  "maestro.filterStatus.unknown": {"en": "Unknown", "ko": "미확인"},
+  "maestro.filterStatus.decision": {"en": "Human decision pending", "ko": "사용자 결정 대기"},
+  "maestro.showHidden": {"en": "Show hidden agents", "ko": "숨긴 수행자 표시"},
+  "maestro.hideWorker": {"en": "Hide from list", "ko": "목록에서 숨기기"},
+  "maestro.showWorker": {"en": "Show in list again", "ko": "목록에 다시 표시"},
+  "maestro.hiddenWorker": {"en": "Hidden", "ko": "숨김"},
   "maestro.filters": {"en": "Filters", "ko": "필터"},
-  "maestro.dragFiltered": {"en": "Clear search and filters to drag workers between domains, or use the domain menu in the worker detail.", "ko": "작업자를 끌어 분류를 옮기려면 검색·필터를 지우거나 작업자 상세의 도메인 메뉴를 사용하십시오."},
+  "conductorQueue.board": {"en": "Conductor queue", "ko": "지휘자 큐"},
+  "conductorQueue.workers": {"en": "Agents", "ko": "수행자"},
+  "conductorQueue.conductor": {"en": "Conductor instance {0}", "ko": "지휘자 인스턴스 {0}"},
+  "conductorQueue.delegation": {"en": "{0} — {1}", "ko": "{0} — {1}"},
+  "conductorQueue.attempt": {"en": "attempt {0}", "ko": "{0}번째 시도"},
+  "conductorQueue.request": {"en": "Request {0}", "ko": "요청 {0}"},
+  "conductorQueue.relationQuestion": {"en": "Is this a follow-up to an open request or a new request? The message is kept until you choose.", "ko": "열린 요청의 후속인가요, 새 요청인가요? 선택하실 때까지 메시지는 보존됩니다."},
+  "conductorQueue.resolved": {"en": "Choice applied", "ko": "선택이 반영되었습니다"},
+  "conductorQueue.followup": {"en": "Follow-up to “{0}”", "ko": "“{0}”의 후속"},
+  "conductorQueue.newRequest": {"en": "New request", "ko": "새 요청"},
+  "conductorQueue.role.unknown": {"en": "Connecting", "ko": "연결 중"},
+  "conductorQueue.role.starting": {"en": "Starting", "ko": "시작 중"},
+  "conductorQueue.role.leader": {"en": "Connected", "ko": "연결됨"},
+  "conductorQueue.role.follower": {"en": "Connected (another window processes)", "ko": "연결됨 (다른 창이 처리)"},
+  "conductorQueue.role.disconnected": {"en": "Disconnected", "ko": "연결 끊김"},
+  "conductorQueue.noUpdates": {"en": "No updates yet", "ko": "아직 갱신 없음"},
+  "conductorQueue.lag": {"en": "Update delay {0} ms", "ko": "갱신 지연 {0}ms"},
+  "conductorQueue.reconnect": {"en": "Reconnect", "ko": "다시 연결"},
+  "conductorQueue.progress": {"en": "{0}/{1} tasks done", "ko": "작업 {0}/{1} 완료"},
+  "conductorQueue.cancel": {"en": "Cancel", "ko": "취소"},
+  "conductorQueue.approve": {"en": "Approve", "ko": "승인"},
+  "conductorQueue.ago": {"en": "{0} s ago", "ko": "{0}초 전"},
+  "conductorQueue.updated": {"en": "updated {0}", "ko": "갱신 {0}"},
+  "conductorQueue.result": {"en": "result: {0}", "ko": "결과: {0}"},
+  "conductorQueue.integrate": {"en": "Merge Work Unit", "ko": "Work Unit 병합"},
+  "conductorQueue.cleanup": {"en": "Clean up merged Work Unit", "ko": "병합된 Work Unit 정리"},
+  "conductorQueue.answer": {"en": "Send answer", "ko": "답변 전송"},
+  "conductorQueue.status.awaiting-answer": {"en": "Awaiting answer", "ko": "질문 응답 대기"},
+  "conductorQueue.status.queued-for-instance": {"en": "Waiting for an instance slot", "ko": "인스턴스 고용 대기"},
+  "conductorQueue.wait.employment-limit": {"en": "Waiting for an employment slot", "ko": "고용 상한 해제 대기"},
+  "conductorQueue.wait.dependency-failed": {"en": "Dependency failed; action required", "ko": "선행 작업 실패 · 조치 필요"},
+  "conductorQueue.intents": {"en": "{0} intents", "ko": "작업 인텐트 {0}개"},
+  "conductorQueue.parallel": {"en": "Parallel candidate", "ko": "병렬 후보"},
+  "conductorQueue.sequential": {"en": "Sequential", "ko": "순차 실행"},
+  "conductorQueue.dependencies": {"en": "Depends on {0}", "ko": "선행 작업: {0}"},
+  "conductorQueue.reason.independent-scopes": {"en": "Independent scopes", "ko": "독립된 작업 범위"},
+  "conductorQueue.reason.dependency": {"en": "Dependency order", "ko": "의존성 순서"},
+  "conductorQueue.reason.shared-write-or-resource": {"en": "Shared files or state", "ko": "공유 파일 또는 상태"},
+  "conductorQueue.workspace": {"en": "Work Unit", "ko": "작업 격리"},
+  "conductorQueue.wait.heartbeat-timeout": {"en": "Heartbeat timed out; execution retained", "ko": "하트비트 지연 · 실행 보존 중"},
+  "conductorQueue.wait.observation-unavailable": {"en": "Status temporarily unavailable", "ko": "실행 상태 조회 불가"},
+  "conductorQueue.wait.start-uncertain": {"en": "Start acknowledgement unconfirmed", "ko": "시작 접수 확인 대기"},
+  "conductorQueue.wait.termination-unconfirmed": {"en": "Waiting for process exit confirmation", "ko": "프로세스 종료 확인 대기"},
+  "conductorQueue.wait.operator-error": {"en": "Operator action failed; retained for recovery", "ko": "사용자 조치 실패 · 복구 상태 보존"},
+  "conductorQueue.wait.resource": {"en": "Waiting for resource owner", "ko": "자원 소유자 대기"},
+  "conductorQueue.wait.dependency": {"en": "Waiting for dependency", "ko": "선행 작업 대기"},
+  "conductorQueue.status.decomposed": {"en": "Separated into intents", "ko": "인텐트 분리됨"},
+  "conductorQueue.status.accepted": {"en": "Accepted", "ko": "접수됨"},
+  "conductorQueue.status.planning": {"en": "Planning", "ko": "계획 중"},
+  "conductorQueue.status.delegated": {"en": "With agents", "ko": "수행 중"},
+  "conductorQueue.status.awaiting-synthesis": {"en": "Awaiting conductor summary", "ko": "지휘자 정리 대기"},
+  "conductorQueue.status.completed": {"en": "Completed", "ko": "완료"},
+  "conductorQueue.status.cancelling": {"en": "Cancelling", "ko": "취소 중"},
+  "conductorQueue.status.cancelled": {"en": "Cancelled", "ko": "취소됨"},
+  "conductorQueue.status.awaiting-approval": {"en": "Awaiting approval", "ko": "승인 대기"},
+  "conductorQueue.status.ready": {"en": "Ready to start", "ko": "시작 대기"},
+  "conductorQueue.status.dispatched": {"en": "Dispatched", "ko": "수행자 배정됨"},
+  "conductorQueue.status.running": {"en": "Running", "ko": "실행 중"},
+  "conductorQueue.status.cancel-requested": {"en": "Cancel requested", "ko": "취소 요청됨"},
+  "conductorQueue.status.failed": {"en": "Failed", "ko": "실패"},
+  "conductorQueue.wait.approval": {"en": "waiting for approval", "ko": "승인 대기"},
+  "conductorQueue.wait.dispatch": {"en": "waiting for dispatch", "ko": "배정 대기"},
+  "conductorQueue.wait.worker-start": {"en": "waiting for the agent to start", "ko": "수행자 시작 대기"},
+  "conductorQueue.wait.cancellation": {"en": "waiting for cancellation", "ko": "취소 처리 대기"},
+  "conductorQueue.wait.question": {"en": "waiting for an answer", "ko": "질문 응답 대기"},
+  "conductorQueue.code.version-conflict": {"en": "The screen was out of date, so the newer state was kept. Check it and try again.", "ko": "화면이 최신 상태가 아니어서 최신 상태를 유지했습니다. 확인 후 다시 시도해 주십시오."},
+  "conductorQueue.code.already-terminal": {"en": "Already finished; its recorded result is kept.", "ko": "이미 끝난 항목이라 기록된 결과를 유지했습니다."},
+  "conductorQueue.code.not-awaiting-approval": {"en": "This task is not waiting for approval.", "ko": "승인 대기 중인 작업이 아닙니다."},
+  "conductorQueue.code.unknown-target": {"en": "The target no longer exists.", "ko": "대상을 찾을 수 없습니다."},
+  "conductorQueue.code.not-held": {"en": "This message was already routed.", "ko": "이미 전달된 메시지입니다."},
+  "conductorQueue.code.request_cancelled": {"en": "That request was cancelled; send this as a new request.", "ko": "취소된 요청입니다. 새 요청으로 보내 주십시오."},
+  "conductorQueue.code.notice": {"en": "Notice", "ko": "알림"},
+  "conductorQueue.unsupported": {"en": "This plugin has no conductor queue runtime (conductor_queue.py).", "ko": "현재 플러그인에는 지휘자 큐 런타임(conductor_queue.py)이 없습니다."},
+  "conductorQueue.disabled": {"en": "The conductor queue is turned off.", "ko": "지휘자 큐가 꺼져 있습니다."},
+  "conductorQueue.modelsRequired": {"en": "Managed conductor queue drivers need this chat's Conductor and Work models to be set.", "ko": "managed 지휘자 큐 드라이버에는 이 채팅의 지휘자·Work 모델 설정이 필요합니다."},
+  "conductorQueue.attachments": {"en": "Attachments are not supported in the conductor queue harness yet.", "ko": "지휘자 큐 하네스는 아직 첨부를 지원하지 않습니다."},
+  "maestro.filtersApplied": {"en": "Filters · {0} applied", "ko": "필터 · {0}개 적용"},
+  "maestro.dragFiltered": {"en": "Clear search and filters to drag agents between domains, or use the domain menu in the agent detail.", "ko": "수행자를 끌어 분류를 옮기려면 검색·필터를 지우거나 수행자 상세의 도메인 메뉴를 사용하십시오."},
   "maestro.modelUnrecorded": {"en": "Model not recorded", "ko": "모델 기록 없음"},
   "maestro.providerDefault": {"en": "{0} · default model", "ko": "{0} · 기본 모델"},
-  "maestro.purposeUnset": {"en": "Assignment purpose not recorded", "ko": "배정 목적 기록 없음"},
+  "maestro.purposeUnset": {"en": "Employment purpose not recorded", "ko": "고용 목적 기록 없음"},
   "maestro.purposeReason": {"en": "Assignment reason: {0}", "ko": "배정 근거: {0}"},
-  "maestro.assignedFor": {"en": "Assigned for", "ko": "배정 목적"},
+  "maestro.assignedFor": {"en": "Employment purpose", "ko": "고용 목적"},
+  "maestro.teamDocumentMissing": {"en": "The run {1} has no recorded {0}", "ko": "실행 {1}에 기록된 {0} 파일이 없습니다"},
+  "maestro.scopeLabel": {"en": "Agents shown", "ko": "표시할 수행자"},
+  "maestro.scopeActive": {"en": "Active · attention {0}", "ko": "진행·주의 {0}"},
+  "maestro.scopeAll": {"en": "All {0}", "ko": "전체 {0}"},
+  "maestro.scopeSearchAll": {"en": "Searching looks at every agent", "ko": "검색은 전체 수행자에서 찾습니다"},
+  "maestro.scopeActiveEmpty": {"en": "No agent is running, queued, waiting for a decision or failed.", "ko": "실행 중·대기·결정 필요·실패 상태인 수행자가 없습니다."},
+  "maestro.scopeShowAll": {"en": "Show all agents", "ko": "전체 수행자 보기"},
+  "maestro.waitHuman": {"en": "Waiting for your decision", "ko": "사용자님 결정 대기"},
+  "maestro.waitBlocked": {"en": "Blocked by an unconfirmed input", "ko": "확인되지 않은 입력으로 대기"},
+  "maestro.waitQueued": {"en": "Queued behind earlier work", "ko": "앞 작업 뒤에서 대기"},
+  "maestro.waitUncertain": {"en": "Records could not be read", "ko": "기록을 읽을 수 없음"},
+  "maestro.waitRunning": {"en": "Running", "ko": "실행 중"},
+  "maestro.teamFailed": {"en": "{0} failed", "ko": "실패 {0}"},
+  "maestro.teamOnly": {"en": "Agents without task records", "ko": "작업 기록 없는 수행자"},
+  "maestro.teamOnlyNote": {"en": "runs outside tasks", "ko": "과제 밖 실행"},
+  "maestro.teamRuns": {"en": "{0} runs", "ko": "실행 {0}회"},
+  "maestro.teamLatestRun": {"en": "Latest run · {0}", "ko": "최근 실행 · {0}"},
+  "maestro.teamHistory": {"en": "Run history (team records)", "ko": "실행 기록 (팀 기록)"},
+  "maestro.teamUnsupported": {"en": "The installed plugin has no team records yet; this history comes from the existing task records.", "ko": "설치된 plugin이 아직 팀 기록을 지원하지 않습니다. 이 이력은 기존 작업 기록입니다."},
+  "maestro.teamError": {"en": "Team records could not be read: {0}", "ko": "팀 기록을 읽지 못했습니다: {0}"},
+  "maestro.teamTotals": {"en": "{0} tasks · {1} runs", "ko": "과제 {0}개 · 실행 {1}회"},
+  "maestro.teamCurrent": {"en": "Current · {0}", "ko": "현재 · {0}"},
+  "maestro.teamPast": {"en": "History · {0}", "ko": "누적 이력 · {0}"},
+  "maestro.receiptDoc": {"en": "Receipt", "ko": "receipt"},
+  "maestro.receiptMissing": {"en": "No receipt", "ko": "receipt 없음"},
+  "maestro.trigger.initial": {"en": "First run", "ko": "첫 실행"},
+  "maestro.trigger.revision": {"en": "Revision", "ko": "수정"},
+  "maestro.trigger.steering": {"en": "Added instruction", "ko": "추가 지시"},
+  "maestro.trigger.decision-answer": {"en": "Decision answered", "ko": "결정 답변"},
+  "maestro.trigger.receipt-recovery": {"en": "Receipt recovery", "ko": "receipt 복구"},
+  "maestro.trigger.handoff": {"en": "Handoff", "ko": "이관"},
+  "maestro.trigger.verification": {"en": "Verification", "ko": "검증"},
+  "maestro.trigger.untracked": {"en": "Untracked", "ko": "추적 안 됨"},
+  "maestro.resizePanes": {"en": "Resize list and detail · Arrow keys adjust, Home restores the default width", "ko": "목록·상세 너비 조절 · 방향키로 조절, Home으로 기본 너비 복원"},
   "maestro.workCurrent": {"en": "Now", "ko": "현재"},
   "maestro.workResult": {"en": "Result", "ko": "결과"},
   "maestro.requestDoc": {"en": "Request", "ko": "요청서"},
@@ -118,41 +239,49 @@
   "maestro.reportPending": {"en": "Report not yet", "ko": "보고서 작성 전"},
   "maestro.openModelSession": {"en": "Open model session", "ko": "모델 세션 열기"},
   "maestro.sessionNoRun": {"en": "No recorded run to open", "ko": "열 수 있는 실행 기록 없음"},
-  "maestro.sessionNoMain": {"en": "Main conversation not recorded; the session cannot be opened", "ko": "Main 대화 기록이 없어 세션을 열 수 없음"},
-  "maestro.openWorker": {"en": "Open worker details · {0} · {1}", "ko": "작업자 상세 열기 · {0} · {1}"},
+  "maestro.sessionNoMain": {"en": "Conductor conversation not recorded; the session cannot be opened", "ko": "지휘자 대화 기록이 없어 세션을 열 수 없음"},
+  "maestro.openWorker": {"en": "Open agent details · {0} · {1}", "ko": "수행자 상세 열기 · {0} · {1}"},
   "maestro.removeUnavailable": {"en": "Removal unavailable: the domain list is not loaded", "ko": "삭제 불가: 분류 목록을 불러오지 못함"},
   "maestro.resultUncollected": {"en": "Result not collected", "ko": "결과 미수집"},
   "maestro.agentIdentity": {"en": "Agent ID {0}", "ko": "에이전트 ID {0}"},
-  "maestro.columnWorker": {"en": "Worker", "ko": "작업자"},
+  "maestro.columnWorker": {"en": "Agent", "ko": "수행자"},
   "maestro.columnTitle": {"en": "Title", "ko": "제목"},
   "maestro.columnStatus": {"en": "Status", "ko": "상태"},
   "maestro.columnHistory": {"en": "History", "ko": "작업내역"},
   "maestro.historyCount": {"en": "Tasks {0}", "ko": "작업내역 {0}"},
   "maestro.historyOpen": {"en": "Open the task history of {0} ({1} tasks)", "ko": "{0}의 작업내역 열기 ({1}건)"},
   "maestro.workerActionFailed": {"en": "Failed: {0}", "ko": "실패: {0}"},
-  "maestro.workerBusy": {"en": "This worker's previous action is still in progress.", "ko": "이 작업자에 대한 이전 조작이 아직 진행 중입니다."},
+  "maestro.workerBusy": {"en": "This agent's previous action is still in progress.", "ko": "이 수행자에 대한 이전 조작이 아직 진행 중입니다."},
   "maestro.confirmStop": {"en": "Force stop task {1} of {0}? The running process ends and the task is not restarted. Records and written files are kept.", "ko": "{0}의 작업 {1}을 강제 종료할까요? 실행 중인 프로세스가 종료되고 작업은 다시 시작되지 않습니다. 기록과 이미 작성된 파일은 보존됩니다."},
-  "maestro.confirmRemove": {"en": "Remove {0} from the worker list? Its tasks, runs, results and artifacts are kept and stay visible in the task view.", "ko": "{0}을 작업자 목록에서 삭제할까요? 작업·실행·결과·산출물은 보존되며 작업 보기에서 계속 볼 수 있습니다."},
+  "maestro.confirmRemove": {"en": "Remove {0} from the agent list? Its tasks, runs, results and artifacts are kept and stay visible in the task view.", "ko": "{0}을 수행자 목록에서 삭제할까요? 작업·실행·결과·산출물은 보존되며 작업 보기에서 계속 볼 수 있습니다."},
   "maestro.forceStop": {"en": "Force stop", "ko": "강제 종료"},
-  "maestro.removeWorker": {"en": "Remove worker", "ko": "작업자 삭제"},
+  "maestro.removeWorker": {"en": "Remove agent", "ko": "수행자 삭제"},
   "maestro.reorderWorker": {"en": "Move {0} ({1} of {2}): drag to another place in this group, or press ↑/↓", "ko": "{0} 순서 이동 ({2}개 중 {1}번째): 이 분류 안의 다른 자리로 끌거나 ↑/↓ 키를 누르십시오"},
-  "maestro.orderFailed": {"en": "The worker order could not be saved: {0}", "ko": "작업자 순서를 저장하지 못했습니다: {0}"},
+  "maestro.domainOrderFailed": {"en": "Could not save domain order: {0}", "ko": "분류 순서를 저장하지 못했습니다: {0}"},
+  "maestro.orderFailed": {"en": "The agent order could not be saved: {0}", "ko": "수행자 순서를 저장하지 못했습니다: {0}"},
   "maestro.stopping": {"en": "Stopping…", "ko": "종료 중…"},
   "maestro.removing": {"en": "Removing…", "ko": "삭제 중…"},
-  "maestro.removeBlocked": {"en": "Stop the running task before removing this worker.", "ko": "실행 중인 작업을 먼저 종료해야 삭제할 수 있습니다."},
-  "maestro.removedWorker": {"en": "Removed from the worker list", "ko": "작업자 목록에서 삭제됨"},
+  "maestro.removeBlocked": {"en": "Stop the running task before removing this agent.", "ko": "실행 중인 작업을 먼저 종료해야 삭제할 수 있습니다."},
+  "maestro.removedWorker": {"en": "Removed from the agent list", "ko": "수행자 목록에서 삭제됨"},
   "maestro.workerTasks": {"en": "Tasks · newest first", "ko": "작업 내역 · 최신순"},
   "maestro.runningNow": {"en": "Running now", "ko": "지금 실행 중"},
   "maestro.latestTask": {"en": "Latest task", "ko": "최근 작업"},
-  "maestro.commandTitle": {"en": "Instruction to this worker", "ko": "작업자에게 지시"},
-  "maestro.commandPlaceholder": {"en": "Instruction for this worker", "ko": "작업자에게 보낼 지시"},
+  "maestro.workHistory": {"en": "Work history · newest first", "ko": "작업 이력 · 최신순"},
+  "maestro.currentTask": {"en": "Current task", "ko": "현재 작업"},
+  "maestro.workerInfo": {"en": "Identities and assignment basis", "ko": "식별 정보·배정 근거"},
+  "maestro.manage": {"en": "Manage", "ko": "관리"},
+  "maestro.commandEmpty": {"en": "Write an instruction to send.", "ko": "보낼 지시를 입력하십시오."},
+  "maestro.commandManyRunning": {"en": "Target: {0} running tasks; no single target, so nothing can be sent", "ko": "대상: 실행 중 작업 {0}개 · 대상을 하나로 정할 수 없어 보낼 수 없습니다"},
+  "maestro.commandLog": {"en": "Delivery record · {0}", "ko": "전달 기록 · {0}"},
+  "maestro.commandTitle": {"en": "Instruction to this agent", "ko": "수행자에게 지시"},
+  "maestro.commandPlaceholder": {"en": "Instruction for this agent", "ko": "수행자에게 보낼 지시"},
   "maestro.commandSend": {"en": "Send", "ko": "보내기"},
   "maestro.commandSending": {"en": "Sending…", "ko": "보내는 중…"},
   "maestro.commandToRunning": {"en": "Target: running task {0} (addition)", "ko": "대상: 실행 중 작업 {0} (추가 지시)"},
-  "maestro.commandToIdle": {"en": "Target: new task in this worker's session", "ko": "대상: 같은 세션의 새 작업"},
+  "maestro.commandToIdle": {"en": "Target: new task in this agent's session", "ko": "대상: 같은 세션의 새 작업"},
   "maestro.commandFailed": {"en": "Not sent: {0}", "ko": "전송 실패: {0}"},
   "maestro.commandAccepted": {"en": "Accepted", "ko": "접수됨"},
-  "maestro.commands": {"en": "Commands sent to the worker", "ko": "작업자에게 전달한 명령"},
+  "maestro.commands": {"en": "Commands sent to the agent", "ko": "수행자에게 전달한 명령"},
   "maestro.commandRequest": {"en": "Task request", "ko": "작업 요청"},
   "maestro.commandAddition": {"en": "Addition", "ko": "추가 지시"},
   "maestro.commandQueued": {"en": "Waiting for delivery", "ko": "전달 대기"},
@@ -160,11 +289,11 @@
   "maestro.commandUndelivered": {"en": "Not delivered · task ended", "ko": "미전달 · 작업 종료"},
   "maestro.commandNotSent": {"en": "Not sent", "ko": "전송 안 됨"},
   "maestro.senderHuman": {"en": "You", "ko": "사용자"},
-  "maestro.senderMain": {"en": "Main", "ko": "Main"},
+  "maestro.senderMain": {"en": "Conductor", "ko": "지휘자"},
   "maestro.senderAi": {"en": "AI", "ko": "AI"},
   "maestro.senderUnknown": {"en": "Sender not recorded", "ko": "보낸 주체 기록 없음"},
   "maestro.openTask": {"en": "Open task details", "ko": "작업 상세 열기"},
-  "maestro.backToWorker": {"en": "Back to worker", "ko": "작업자로 돌아가기"},
+  "maestro.backToWorker": {"en": "Back to agent", "ko": "수행자로 돌아가기"},
   "maestro.noWorkerTasks": {"en": "No recorded tasks", "ko": "기록된 작업 없음"},
   "maestro.domainAdd": {"en": "New domain", "ko": "새 분류"},
   "maestro.domainProvisional": {"en": "Name not set", "ko": "이름 미정"},
@@ -199,9 +328,23 @@
   "maestro.reworkTitle": {"en": "Rework instruction", "ko": "재작업 지시"},
   "maestro.reworkPlaceholder": {"en": "What to change and how it will be judged done", "ko": "고칠 점과 완료 판단 기준"},
   "maestro.reworkSend": {"en": "Send rework", "ko": "재작업 보내기"},
-  "maestro.reworkTarget": {"en": "Target: new task in {0}'s session, linked to this task", "ko": "대상: {0} 세션의 새 작업 · 이 작업에 연결"},
-  "maestro.reworkBusy": {"en": "The worker is running another task. Send rework after it ends, or add to that task from the worker detail.", "ko": "작업자가 다른 작업을 실행 중입니다. 끝난 뒤 보내거나 작업자 상세에서 실행 중 작업에 추가 지시하십시오."},
-  "maestro.reworkNoWorker": {"en": "No assigned worker is recorded for this task.", "ko": "이 작업의 담당 작업자 기록이 없습니다."},
+  "maestro.reworkTarget": {"en": "Target: this task in {0}'s session", "ko": "대상: {0} 세션의 동일 작업"},
+  "request.goal": {"en": "Goal", "ko": "목표"},
+  "request.scope": {"en": "Scope", "ko": "범위"},
+  "request.completion": {"en": "Completion criteria", "ko": "완료 기준"},
+  "request.constraints": {"en": "Constraints and authority", "ko": "제약과 권한"},
+  "request.changes": {"en": "Changes for this execution", "ko": "이번 실행까지의 수정"},
+  "request.original": {"en": "Original request", "ko": "요청 원문"},
+  "request.metadata": {"en": "Recorded metadata (JSON)", "ko": "내부 기록 (JSON)"},
+  "request.close": {"en": "Close request", "ko": "요청서 닫기"},
+  "request.correctionNumber": {"en": "Correction {0}", "ko": "수정 {0}회"},
+  "request.baseRevision": {"en": "Based on request revision {0}", "ko": "기준 요청 회차 {0}"},
+  "request.attempt": {"en": "Attempt {0}", "ko": "실행 시도 {0}회"},
+  "maestro.trigger.user-revision": {"en": "Requested correction", "ko": "수정 요청"},
+  "maestro.trigger.verification-revision": {"en": "Verification repair", "ko": "검사 지적 수정"},
+  "maestro.trigger.integration-repair": {"en": "Integration repair", "ko": "통합 문제 수정"},
+  "maestro.reworkBusy": {"en": "The agent is running another task. Send rework after it ends, or add to that task from the agent detail.", "ko": "수행자가 다른 작업을 실행 중입니다. 끝난 뒤 보내거나 수행자 상세에서 실행 중 작업에 추가 지시하십시오."},
+  "maestro.reworkNoWorker": {"en": "No assigned agent is recorded for this task.", "ko": "이 작업의 담당 수행자 기록이 없습니다."},
   "maestro.reworkHistory": {"en": "Rework instructions", "ko": "재작업 지시 기록"},
   "maestro.commandRework": {"en": "Rework", "ko": "재작업"},
   "maestro.supervisionReport": {"en": "Supervision report", "ko": "감독 보고"},
@@ -235,7 +378,7 @@
   "maestro.opState.check-passed": {"en": "Verification passed", "ko": "검사 통과"},
   "maestro.opState.unknown": {"en": "Unconfirmed", "ko": "미확인"},
   "maestro.decisionOpen": {"en": "Answer in its chat", "ko": "결정 응답 열기"},
-  "maestro.decisionUnlinked": {"en": "No Main conversation is recorded for this task", "ko": "이 작업의 Main 대화 기록이 없습니다"},
+  "maestro.decisionUnlinked": {"en": "No Conductor conversation is recorded for this task", "ko": "이 작업의 지휘자 대화 기록이 없습니다"},
   "maestro.providerSwitch": {"en": "Provider handoff", "ko": "공급자 이관"},
   "maestro.handoffTitle": {"en": "Move the current task to a new session", "ko": "현재 작업을 새 세션으로 이관"},
   "maestro.handoffTask": {"en": "Task", "ko": "이관할 작업"},
@@ -248,7 +391,7 @@
   "maestro.handoffModelsLoading": {"en": "Reading detected models…", "ko": "감지된 모델 확인 중…"},
   "maestro.handoffNoModels": {"en": "No other detected model", "ko": "감지된 다른 모델이 없습니다"},
   "maestro.handoffModelsFailed": {"en": "Detected models could not be read: {0}", "ko": "감지된 모델을 읽지 못했습니다: {0}"},
-  "maestro.handoffNone": {"en": "No running or stopped task of this worker can move", "ko": "이관할 진행 중·정지 작업이 없습니다"},
+  "maestro.handoffNone": {"en": "No running or stopped task of this agent can move", "ko": "이관할 진행 중·정지 작업이 없습니다"},
   "maestro.handoffs": {"en": "Handoffs", "ko": "이관 기록"},
   "maestro.handoffOut": {"en": "Moved out", "ko": "내보냄"},
   "maestro.handoffIn": {"en": "Taken over", "ko": "넘겨받음"},
@@ -258,15 +401,15 @@
   "maestro.section.active": {"en": "In progress", "ko": "진행 중"},
   "maestro.section.recent": {"en": "Last 24 hours", "ko": "최근 24시간"},
   "maestro.section.earlier": {"en": "Earlier", "ko": "이전 기록"},
-  "maestro.otherAssignments": {"en": "Other assignments of this worker \u00b7 {0}", "ko": "이 작업자의 다른 배정 · {0}건"},
+  "maestro.otherAssignments": {"en": "Other assignments of this agent \u00b7 {0}", "ko": "이 수행자의 다른 배정 · {0}건"},
   "maestro.identity": {"en": "Record identities", "ko": "기록 식별자"},
   "maestro.countAssignments": {"en": "{0} of {1} assignments", "ko": "배정 {1}건 중 {0}건"},
-  "maestro.countWorkers": {"en": "{0} of {1} workers", "ko": "작업자 {1}명 중 {0}명"},
+  "maestro.countWorkers": {"en": "{0} of {1} agents", "ko": "수행자 {1}명 중 {0}명"},
   "maestro.countTasks": {"en": "{0} of {1} tasks", "ko": "작업 {1}건 중 {0}건"},
   "maestro.observedRelative": {"en": "Read {0}", "ko": "{0} 조회"},
   "maestro.noRecords": {"en": "No task records in this project yet", "ko": "이 프로젝트에 작업 기록이 아직 없습니다"},
   "maestro.clearFilters": {"en": "Clear filters", "ko": "필터 지우기"},
-  "maestro.searchPlaceholder": {"en": "Search tasks, workers and results", "ko": "작업·작업자·결과 검색"},
+  "maestro.searchPlaceholder": {"en": "Search tasks, agents and results", "ko": "작업·수행자·결과 검색"},
 
   "feedback.sending": {"en":"Confirming submission", "ko":"전송 확인 중"},
   "feedback.checking": {"en":"Checking execution state", "ko":"실행 상태 확인 중"},
@@ -356,8 +499,8 @@
   "claude.plugin.warning": {"en": "The Agent Factory Claude Code plugin could not be installed or updated; Codex features are unaffected. {0}", "ko": "Agent Factory Claude Code 플러그인을 설치하거나 갱신하지 못했습니다. Codex 기능에는 영향이 없습니다. {0}"},
   "sudo.unavailable": {"en":"Administrator command handoff is unavailable: {0}", "ko":"관리자 명령 전달을 사용할 수 없습니다: {0}"},
   "ui.hero.tagline": {"en":"Plan, build and verify with your agent team.", "ko":"에이전트 팀과 함께 기획하고, 만들고, 검증하세요."},
-  "ui.hero.main": {"en":"Main", "ko":"메인"},
-  "ui.hero.flow": {"en":"Main → Work → Verification", "ko":"메인 → 작업 → 검증"},
+  "ui.hero.main": {"en":"Conductor", "ko":"지휘자"},
+  "ui.hero.flow": {"en":"Conductor → Work → Verification", "ko":"지휘자 → 작업 → 검증"},
   "ui.clearing.conversation": {"en":"Clearing conversation…", "ko":"대화를 초기화하고 있습니다…"},
   "attachment.convert.heading": {"en":"Convert image", "ko":"이미지 형식 변환"},
   "attachment.convert.source": {"en":"Original file", "ko":"원본 파일"},
@@ -633,11 +776,11 @@
   "general.notice.open": {"en": "Open chat", "ko": "채팅 열기"},
   "ui.docs.audit.description": {"en": "Checks documents read-only at the selected interval while idle and reports the results.", "ko": "설정한 주기로 대기 중 문서를 읽기 전용으로 점검하고 결과를 알려드립니다."},
   "docs.audit.request": {"en": "[Periodic documents check] Sent automatically at the interval set in General settings. Dispatch the explore profile (read-only) to check docs/ and report only: broken links, the same content in more than one place (single-source violations), documents that no longer match the code, and recurring docs/lessons-learned records worth consolidating into Skill rules. Change no files. List the items to fix so I can approve which ones the Scribe should draft.",
-    "ko": "[정기 문서 점검] 일반 설정의 주기에 따라 자동으로 보낸 요청입니다. 탐색자(explore, 읽기 전용)에게 docs/ 점검을 맡겨 결과만 보고해 주세요. 깨진 링크, 같은 내용이 여러 곳에 있는 문서(단일 출처 위반), 코드와 맞지 않게 된 문서, 스킬 규칙으로 정리할 만한 반복 교훈(docs/lessons-learned)을 확인합니다. 파일은 바꾸지 말고, 고칠 항목을 목록으로 정리해 주시면 서기관에게 맡길 항목을 제가 승인하겠습니다."},
+    "ko": "[정기 문서 점검] 일반 설정의 주기에 따라 자동으로 보낸 요청입니다. 탐색자(explore, 읽기 전용)에게 docs/ 점검을 맡겨 결과만 보고해 주세요. 깨진 링크, 같은 내용이 여러 곳에 있는 문서(단일 출처 위반), 코드와 맞지 않게 된 문서, 스킬 규칙으로 정리할 만한 반복 교훈(docs/lessons-learned)을 확인합니다. 파일은 바꾸지 말고, 고칠 항목을 목록으로 정리해 주시면 기록자에게 맡길 항목을 제가 승인하겠습니다."},
   "flow.review.changes-requested": {"en": "Changes requested", "ko": "수정 요청"},
   "flow.review.accepted": {"en": "Accepted", "ko": "반영 승인"},
   "flow.review.discarded": {"en": "Discarded", "ko": "폐기"},
-  "flow.review.detail": {"en": "Scribe draft, uncommitted until you decide: {0}", "ko": "서기관 초안이며 결정 전까지 커밋되지 않습니다: {0}"},
+  "flow.review.detail": {"en": "Scribe draft, uncommitted until you decide: {0}", "ko": "기록자 초안이며 결정 전까지 커밋되지 않습니다: {0}"},
   "flow.status.failed": {"en": "Failed", "ko": "실패"},
   "flow.status.blocked": {"en": "Blocked", "ko": "막힘"},
   "flow.status.cancelled": {"en": "Cancelled", "ko": "취소"},
@@ -654,7 +797,7 @@
   "flow.header.expert": {"en":"Expert {0}", "ko":"전문가 {0}"},
   "flow.header.worker": {"en":"Worker {0}", "ko":"작업자 {0}"},
   "flow.header.explorer": {"en":"Explorer {0}", "ko":"탐색자 {0}"},
-  "flow.header.scribe": {"en":"Scribe {0}", "ko":"서기관 {0}"},
+  "flow.header.scribe": {"en":"Scribe {0}", "ko":"기록자 {0}"},
   "flow.header.verifier": {"en":"Verifier {0}", "ko":"검증자 {0}"},
   "flow.header.unrecorded": {"en":"No record {0}", "ko":"기록 없음 {0}"},
   "flow.stop.pending": {"en":"Stopping…", "ko":"중지 중…"},
@@ -680,7 +823,7 @@
   "flow.role.worker": {"en":"Worker", "ko":"작업자"},
   "flow.role.expert": {"en":"Expert", "ko":"전문가"},
   "flow.role.explorer": {"en":"Explorer", "ko":"탐색자"},
-  "flow.role.scribe": {"en":"Scribe", "ko":"서기관"},
+  "flow.role.scribe": {"en":"Scribe", "ko":"기록자"},
   "flow.role.unassigned": {"en":"Unassigned", "ko":"미배정"},
   "flow.role.unavailable": {"en":"Role unavailable", "ko":"역할 미제공"},
   "ui.captured.run.model": {"en":"Captured run model", "ko":"실행에 기록된 모델"},
@@ -700,14 +843,14 @@
   "flow.assignment.expert.count": {"en":"Experts: {0}", "ko":"전문가 {0}명"},
   "flow.assignment.expert.unassigned": {"en":"Expert unassigned", "ko":"전문가 미배정"},
   "flow.assignment.explorer.count": {"en":"Explorers: {0}", "ko":"탐색자 {0}명"},
-  "flow.assignment.scribe.count": {"en":"Scribes: {0}", "ko":"서기관 {0}명"},
+  "flow.assignment.scribe.count": {"en":"Scribes: {0}", "ko":"기록자 {0}명"},
   "flow.assignment.unrecorded": {"en":"No record", "ko":"기록 없음"},
   "flow.assignment.unrecorded.count": {"en":"No record: {0}", "ko":"기록 없음 {0}명"},
   "flow.summary.count": {"en":"{0}: {1}", "ko":"{0} {1}개"},
   "flow.summary.current": {"en":"Current task: {0}", "ko":"현재 수행 작업: {0}"},
   "flow.summary.current.task": {"en":"{0} ({1})", "ko":"{0} ({1})"},
   "flow.summary.current.none": {"en":"No task currently running", "ko":"현재 수행 중인 작업 없음"},
-  "ui.background.continuation.failed": { "en": "Could not confirm background continuation acceptance for {0} / {1}. Automatic retries are paused. Ask Main to inspect this run and resume the existing workflow.", "ko": "{0} / {1}의 백그라운드 후속 요청 수락을 확인하지 못했습니다. 자동 재시도를 멈췄습니다. Main에 해당 실행을 확인하고 기존 작업 흐름을 재개하도록 요청해 주세요." },
+  "ui.background.continuation.failed": { "en": "Could not confirm background continuation acceptance for {0} / {1}. Automatic retries are paused. Ask Conductor to inspect this run and resume the existing workflow.", "ko": "{0} / {1}의 백그라운드 후속 요청 수락을 확인하지 못했습니다. 자동 재시도를 멈췄습니다. Main에 해당 실행을 확인하고 기존 작업 흐름을 재개하도록 요청해 주세요." },
   "ui.workflow.from.conversation": { "en": "Execute the selected workflow using the requirements agreed in this conversation.", "ko": "지금까지 대화에서 합의한 요구사항을 정리하여 선택한 작업 흐름을 실행해 주세요." },
   "ui.sidebar.archived.empty": { "en": "Agents are archived. Use Restore Archived Agent to bring them back.", "ko": "에이전트가 보관되어 있습니다. ‘보관한 에이전트 복원’으로 다시 표시할 수 있습니다." },
   "ui.sidebar.restore": { "en": "Restore Archived Agent", "ko": "보관한 에이전트 복원" },
@@ -754,6 +897,21 @@
   "ui.providers.tab": {"en":"Providers","ko":"공급자"},
   "ui.providers.version.cli": {"en":"CLI {0}","ko":"CLI {0}"},
   "ui.providers.version.plugin": {"en":"Plugin {0}","ko":"플러그인 {0}"},
+  "ui.providers.auth.signed-in": {"en":"Signed in","ko":"로그인됨"},
+  "ui.providers.auth.signed-in.api-key": {"en":"Signed in · API key","ko":"로그인됨 · API 키"},
+  "ui.providers.auth.signed-out": {"en":"Sign-in required","ko":"로그인 필요"},
+  "ui.providers.auth.unknown": {"en":"Cannot check","ko":"확인 불가"},
+  "ui.providers.auth.unknown.unsupported": {"en":"Cannot check · not supported by the CLI","ko":"확인 불가 · CLI 미지원"},
+  "ui.providers.auth.unknown.timeout": {"en":"Cannot check · timed out","ko":"확인 불가 · 시간 초과"},
+  "ui.providers.auth.unknown.error": {"en":"Cannot check · error","ko":"확인 불가 · 오류"},
+  "ui.providers.auth.missing": {"en":"No CLI","ko":"CLI 없음"},
+  "ui.providers.auth.checking": {"en":"Checking sign-in…","ko":"로그인 확인 중…"},
+  "ui.providers.auth.signing-in": {"en":"Signing in…","ko":"로그인 진행 중"},
+  "ui.providers.auth.refresh.label": {"en":"Refresh {0} sign-in status","ko":"{0} 로그인 상태 새로고침"},
+  "ui.providers.login": {"en":"Sign in","ko":"로그인"},
+  "ui.providers.login.label": {"en":"Sign in to {0} in the terminal","ko":"터미널에서 {0} 로그인"},
+  "ui.providers.login.terminal": {"en":"{0} sign-in","ko":"{0} 로그인"},
+  "ui.providers.login.unavailable": {"en":"Sign-in could not start because the CLI path cannot be used.","ko":"CLI 경로를 사용할 수 없어 로그인을 시작하지 못했습니다."},
   "ui.settings": {
     "en": "Settings",
     "ko": "설정"
@@ -890,8 +1048,8 @@
     "ko": "컨텍스트 압축 중단됨"
   },
   "ui.main": {
-    "en": "Main",
-    "ko": "메인"
+    "en": "Conductor",
+    "ko": "지휘자"
   },
   "ui.copy.question": {
     "en": "Copy question",
@@ -900,7 +1058,7 @@
   "flow.open.work.session": { "en": "Open worker session", "ko": "작업자 세션 열기" },
   "flow.open.expert.session": { "en": "Open expert session", "ko": "전문가 세션 열기" },
   "flow.open.explorer.session": { "en": "Open explorer session", "ko": "탐색자 세션 열기" },
-  "flow.open.scribe.session": { "en": "Open scribe session", "ko": "서기관 세션 열기" },
+  "flow.open.scribe.session": { "en": "Open scribe session", "ko": "기록자 세션 열기" },
   "flow.open.verification.session": { "en": "Open verifier session", "ko": "검증자 세션 열기" },
   "ui.work": {
     "en": "Work",
@@ -908,7 +1066,7 @@
   },
   "ui.role.main": {
     "en": "Orchestrator",
-    "ko": "조율자"
+    "ko": "지휘자"
   },
   "ui.role.work": {
     "en": "Expert",
@@ -924,7 +1082,7 @@
   },
   "ui.role.scribe": {
     "en": "Scribe",
-    "ko": "서기관"
+    "ko": "기록자"
   },
   "ui.role.verification": {
     "en": "Validator",
@@ -937,6 +1095,10 @@
   "ui.verification": {
     "en": "Verification",
     "ko": "검증"
+  },
+  "ui.verification.role": {
+    "en": "Verification",
+    "ko": "검증자"
   },
   "ui.default": {
     "en": "Default",
@@ -1204,23 +1366,23 @@
   },
   "ui.orchestrate": {
     "en": "Orchestrate",
-    "ko": "조율자"
+    "ko": "지휘자"
   },
   "ui.orchestrate.mode": {
     "en": "Orchestrator",
-    "ko": "조율자"
+    "ko": "지휘자"
   },
   "ui.orchestrate.mode.on": {
     "en": "Orchestrator mode on · Delegates changes to the Expert or Worker · Click for direct mode",
-    "ko": "조율자 모드 켜짐 · 변경 작업을 전문가·작업자에게 맡김 · 클릭하면 직접 모드"
+    "ko": "지휘자 모드 켜짐 · 변경 작업을 전문가·작업자에게 맡김 · 클릭하면 직접 모드"
   },
   "ui.orchestrate.mode.off": {
     "en": "Direct mode · The orchestrator works directly · Click for orchestrator mode",
-    "ko": "직접 모드 · 조율자가 직접 작업 · 클릭하면 조율자 모드"
+    "ko": "직접 모드 · 지휘자가 직접 작업 · 클릭하면 지휘자 모드"
   },
   "ui.orchestrate.mode.unavailable": {
-    "en": "Orchestrator mode is unavailable with the installed runtime · Main works directly",
-    "ko": "설치된 런타임은 조율자 모드를 지원하지 않음 · Main이 직접 작업"
+    "en": "Orchestrator mode is unavailable with the installed runtime · Conductor works directly",
+    "ko": "설치된 런타임은 지휘자 모드를 지원하지 않음 · Main이 직접 작업"
   },
   "ui.work.isolation": {
     "en": "Isolation",
@@ -1255,8 +1417,8 @@
     "ko": "Agent Factory에 질문하세요"
   },
   "ui.message.to.main.agent": {
-    "en": "Message to Main Agent",
-    "ko": "메인 에이전트에 보낼 메시지"
+    "en": "Message to Conductor",
+    "ko": "지휘자에 보낼 메시지"
   },
   "ui.send.enter": {
     "en": "Send (Enter)",
@@ -1295,8 +1457,8 @@
     "ko": "자동 스크롤 꺼짐 · 클릭하여 켜기"
   },
   "ui.document.main": {
-    "en": "Document · Main",
-    "ko": "문서 · 메인"
+    "en": "Document · Conductor",
+    "ko": "문서 · 지휘자"
   },
   "ui.migration": { "en": "Document migration", "ko": "문서 마이그레이션" },
   "ui.lessons": { "en": "Lessons learned to rules", "ko": "교훈 수집 및 규칙화" },
@@ -1387,8 +1549,8 @@
     "ko": "현재 실행·대기·결정 상태"
   },
   "ui.number.of.main.agent.work.and.verification.agents": {
-    "en": "Number of Main Agent work and verification agents",
-    "ko": "메인 에이전트의 작업·검증 에이전트 수"
+    "en": "Number of Conductor work and verification agents",
+    "ko": "지휘자의 작업·검증 에이전트 수"
   },
   "ui.current.vs.code.workspace.name": {
     "en": "Current VS Code workspace name",
@@ -1411,8 +1573,8 @@
     "ko": "현재 채팅 탭 이름"
   },
   "ui.main.work.or.verification.role": {
-    "en": "Main, work, or verification role",
-    "ko": "메인·작업·검증 역할"
+    "en": "Conductor, work, or verification role",
+    "ko": "지휘자·작업·검증 역할"
   },
   "ui.time.observed.for.the.current.run.in.this.view.shown.only.while.running": {
     "en": "Time observed for the current run in this view; shown only while running",
@@ -1435,8 +1597,8 @@
     "ko": "지원되는 경우 다음 메시지에 빠른 모드를 적용합니다"
   },
   "ui.task.mode.for.the.next.main.agent.message": {
-    "en": "Task mode for the next Main Agent message",
-    "ko": "다음 메인 에이전트 메시지의 작업 모드"
+    "en": "Task mode for the next Conductor message",
+    "ko": "다음 지휘자 메시지의 작업 모드"
   },
   "ui.permission.settings.reported.by.the.current.host": {
     "en": "Permission settings reported by the current host",
@@ -1467,12 +1629,12 @@
     "ko": "100%에서 주간 사용량을 뺀 값이며, 절대 토큰 수는 제공되지 않습니다"
   },
   "ui.number.of.work.and.verification.agents.called.by.main.agent": {
-    "en": "Number of work and verification agents called by Main Agent",
-    "ko": "메인 에이전트가 호출한 작업·검증 에이전트 수"
+    "en": "Number of work and verification agents called by Conductor",
+    "ko": "지휘자가 호출한 작업·검증 에이전트 수"
   },
   "ui.main.agent.goal.setting.and.latest.reported.goal.status": {
-    "en": "Main Agent Goal setting and latest reported goal status",
-    "ko": "메인 에이전트의 목표 설정과 최근 보고된 목표 상태"
+    "en": "Conductor Goal setting and latest reported goal status",
+    "ko": "지휘자의 목표 설정과 최근 보고된 목표 상태"
   },
   "ui.cumulative.tokens.used.as.reported.by.the.goal": {
     "en": "Cumulative tokens used as reported by the goal",
@@ -1495,12 +1657,12 @@
     "ko": "직접"
   },
   "ui.main.agent": {
-    "en": "Main Agent",
-    "ko": "메인 에이전트"
+    "en": "Conductor",
+    "ko": "지휘자"
   },
   "ui.main.agent.chat": {
-    "en": "Main Agent chat",
-    "ko": "메인 에이전트 채팅"
+    "en": "Conductor chat",
+    "ko": "지휘자 채팅"
   },
   "ui.conversation": {
     "en": "Conversation",
@@ -1523,8 +1685,8 @@
     "ko": "첨부"
   },
   "ui.main.agent.sessions": {
-    "en": "Main Agent sessions",
-    "ko": "메인 에이전트 세션"
+    "en": "Conductor sessions",
+    "ko": "지휘자 세션"
   },
   "ui.ongoing.goal": {
     "en": "Ongoing goal",
@@ -1563,12 +1725,12 @@
     "ko": "에이전트 상태"
   },
   "ui.starting.main.agent": {
-    "en": "Starting Main Agent",
-    "ko": "메인 에이전트 시작 중"
+    "en": "Starting Conductor",
+    "ko": "지휘자 시작 중"
   },
   "ui.main.agent.running": {
-    "en": "Main Agent running",
-    "ko": "메인 에이전트 실행 중"
+    "en": "Conductor running",
+    "ko": "지휘자 실행 중"
   },
   "ui.attachments.c53076": {
     "en": "Attachments: ",
@@ -1676,7 +1838,7 @@
   },
   "ui.verification.agent": {
     "en": "Verification agent",
-    "ko": "검증 에이전트"
+    "ko": "검증자"
   },
   "ui.work.agent": {
     "en": "Work agent",
@@ -1860,7 +2022,7 @@
   },
   "ui.reserved.verification.agent": {
     "en": "Reserved Verification Agent",
-    "ko": "예약된 검증 에이전트"
+    "ko": "예약된 검증자"
   },
   "ui.copy": {
     "en": "Copy",
@@ -1931,8 +2093,8 @@
     "ko": "세션을 불러오는 중…"
   },
   "ui.no.main.agent.sessions.to.load": {
-    "en": "No Main Agent sessions to load.",
-    "ko": "불러올 메인 에이전트 세션이 없습니다."
+    "en": "No Conductor sessions to load.",
+    "ko": "불러올 지휘자 세션이 없습니다."
   },
   "ui.user.questions.2eec27": {
     "en": "User questions (",
@@ -2104,16 +2266,16 @@
     "ko": "에이전트 —"
   },
   "ui.agents.main.only": {
-    "en": "Agents: Main only",
-    "ko": "에이전트: 메인 전용"
+    "en": "Agents: Conductor only",
+    "ko": "에이전트: 지휘자 전용"
   },
   "ui.calls": {
     "en": "Calls ",
     "ko": "호출 "
   },
   "ui.calls.main.only": {
-    "en": "Calls: Main only",
-    "ko": "호출: 메인 전용"
+    "en": "Calls: Conductor only",
+    "ko": "호출: 지휘자 전용"
   },
   "ui.project.f7d911": {
     "en": "Project —",
@@ -2204,16 +2366,16 @@
     "ko": "작업 "
   },
   "ui.task.main.only": {
-    "en": "Task: Main only",
-    "ko": "작업: 메인 전용"
+    "en": "Task: Conductor only",
+    "ko": "작업: 지휘자 전용"
   },
   "ui.perms": {
     "en": "Perms ",
     "ko": "권한 "
   },
   "ui.goal.main.only": {
-    "en": "Goal: Main only",
-    "ko": "목표: 메인 전용"
+    "en": "Goal: Conductor only",
+    "ko": "목표: 지휘자 전용"
   },
   "ui.goal.0c4444": {
     "en": "Goal —",
@@ -2484,12 +2646,12 @@
     "ko": "시스템에서 동작 줄이기를 켜면 애니메이션이 정지합니다."
   },
   "ui.select.the.main.agent.chat.tab.to.rename.first": {
-    "en": "Select the Main Agent chat tab to rename first.",
-    "ko": "먼저 이름을 변경할 메인 에이전트 채팅 탭을 선택하세요."
+    "en": "Select the Conductor chat tab to rename first.",
+    "ko": "먼저 이름을 변경할 지휘자 채팅 탭을 선택하세요."
   },
   "ui.rename.main.agent": {
-    "en": "Rename Main Agent",
-    "ko": "메인 에이전트 이름 변경"
+    "en": "Rename Conductor",
+    "ko": "지휘자 이름 변경"
   },
   "ui.enter.the.name.to.display.on.this.chat.tab": {
     "en": "Enter the name to display on this chat tab.",
@@ -2508,8 +2670,8 @@
     "ko": "80자 이하로 입력하세요."
   },
   "ui.select.the.main.agent.chat.tab.to.clear.first": {
-    "en": "Select the Main Agent chat tab to clear first.",
-    "ko": "먼저 초기화할 메인 에이전트 채팅 탭을 선택하세요."
+    "en": "Select the Conductor chat tab to clear first.",
+    "ko": "먼저 초기화할 지휘자 채팅 탭을 선택하세요."
   },
   "ui.received.an.invalid.message.from.the.chat.view": {
     "en": "The chat screen request could not be processed. See the Extension Host log for details.",
@@ -2536,24 +2698,24 @@
     "ko": "링크를 열 수 없습니다: {0}"
   },
   "ui.unable.to.find.the.work.or.verification.session.called.by.main.agent": {
-    "en": "Unable to find the work or verification session called by Main Agent.",
-    "ko": "메인 에이전트가 호출한 작업 또는 검증 세션을 찾을 수 없습니다."
+    "en": "Unable to find the work or verification session called by Conductor.",
+    "ko": "지휘자가 호출한 작업 또는 검증 세션을 찾을 수 없습니다."
   },
   "ui.other.main.agent.sessions.can.only.be.loaded.from.a.main.agent.panel": {
-    "en": "Other Main Agent sessions can only be loaded from a Main Agent panel.",
-    "ko": "다른 메인 에이전트 세션은 메인 에이전트 패널에서만 불러올 수 있습니다."
+    "en": "Other Conductor sessions can only be loaded from a Conductor panel.",
+    "ko": "다른 지휘자 세션은 지휘자 패널에서만 불러올 수 있습니다."
   },
   "ui.load.another.session.after.the.current.run.finishes": {
     "en": "Load another session after the current run finishes.",
     "ko": "현재 실행이 끝난 후 다른 세션을 불러오세요."
   },
   "ui.the.selected.main.agent.session.was.not.found.in.the.current.project": {
-    "en": "The selected Main Agent session was not found in the current project.",
-    "ko": "현재 프로젝트에서 선택한 메인 에이전트 세션을 찾을 수 없습니다."
+    "en": "The selected Conductor session was not found in the current project.",
+    "ko": "현재 프로젝트에서 선택한 지휘자 세션을 찾을 수 없습니다."
   },
   "ui.only.main.agent.conversations.can.be.cleared": {
-    "en": "Only Main Agent conversations can be cleared.",
-    "ko": "메인 에이전트 대화만 초기화할 수 있습니다."
+    "en": "Only Conductor conversations can be cleared.",
+    "ko": "지휘자 대화만 초기화할 수 있습니다."
   },
   "ui.wait.for.pending.messages.to.be.accepted.or.rejected.before.clearing.the.conversation": {
     "en": "Wait for pending messages to be accepted or rejected before clearing the conversation.",
@@ -2568,8 +2730,8 @@
     "ko": "실행 중인 작업 또는 검증 에이전트가 끝난 후 대화를 초기화하세요."
   },
   "ui.start.a.new.conversation.in.this.chat.the.main.agent.identity.settings.and.historical.run.records.will.be.retained": {
-    "en": "Start a new conversation in this chat? The Main Agent identity, settings, and historical run records will be retained.",
-    "ko": "이 채팅에서 새 대화를 시작하시겠습니까? 메인 에이전트 식별자, 설정과 이전 실행 기록은 유지됩니다."
+    "en": "Start a new conversation in this chat? The Conductor identity, settings, and historical run records will be retained.",
+    "ko": "이 채팅에서 새 대화를 시작하시겠습니까? 지휘자 식별자, 설정과 이전 실행 기록은 유지됩니다."
   },
   "ui.a.message.is.now.pending.wait.for.it.to.be.accepted.or.rejected.before.clearing.the.conversation": {
     "en": "A message is now pending. Wait for it to be accepted or rejected before clearing the conversation.",
@@ -3072,12 +3234,12 @@
     "ko": "Agent Factory 세션 목록 응답이 유효하지 않습니다."
   },
   "ui.invalid.main.agent.identifier": {
-    "en": "Invalid Main Agent identifier.",
-    "ko": "메인 에이전트 식별자가 유효하지 않습니다."
+    "en": "Invalid Conductor identifier.",
+    "ko": "지휘자 식별자가 유효하지 않습니다."
   },
   "ui.invalid.main.agent.run.identifier": {
-    "en": "Invalid Main Agent run identifier.",
-    "ko": "메인 에이전트 실행 식별자가 유효하지 않습니다."
+    "en": "Invalid Conductor run identifier.",
+    "ko": "지휘자 실행 식별자가 유효하지 않습니다."
   },
   "ui.the.current.agent.factory.runtime.does.not.support.execution.permission.selection.update.the.plugin.and.try.again": {
     "en": "The current Agent Factory runtime does not support execution permission selection. Update the plugin and try again.",
@@ -3116,12 +3278,12 @@
     "ko": "목표가 활성화되어 있습니다. Codex가 다음 턴을 계속 진행합니다."
   },
   "ui.main.agent.connected": {
-    "en": "Main Agent connected",
-    "ko": "메인 에이전트 연결됨"
+    "en": "Conductor connected",
+    "ko": "지휘자 연결됨"
   },
   "ui.main.agent.is.analyzing.the.request": {
-    "en": "Main Agent is analyzing the request",
-    "ko": "메인 에이전트가 요청 분석 중"
+    "en": "Conductor is analyzing the request",
+    "ko": "지휘자가 요청 분석 중"
   },
   "ui.finalizing.response": {
     "en": "Finalizing response",
@@ -3395,8 +3557,8 @@
     "ko": "이미지"
   },
   "host.workspace.required": {
-    "en": "Open a VS Code workspace to run Main Agent.",
-    "ko": "메인 에이전트를 실행하려면 VS Code 작업 공간을 여세요."
+    "en": "Open a VS Code workspace to run Conductor.",
+    "ko": "지휘자를 실행하려면 VS Code 작업 공간을 여세요."
   },
   "host.setting.model": {
     "en": "model changes",

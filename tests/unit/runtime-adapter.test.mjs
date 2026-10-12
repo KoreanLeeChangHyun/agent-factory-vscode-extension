@@ -758,7 +758,7 @@ test("runtime client invokes official commands and reads the bounded managed res
   assert.deepEqual(await client.updates("main-test", "run-fake", 0), {
     cursor: 10,
     updates: [
-      { kind: "status", text: "Main Agent is analyzing the request" },
+      { kind: "status", text: "Conductor is analyzing the request" },
       { kind: "activity", id: "command-1", category: "command", phase: "started", text: "npm run check" },
       { kind: "status", text: "Running command" },
       { kind: "activity", id: "command-1", category: "command", phase: "completed", text: "npm run check" },
@@ -768,7 +768,7 @@ test("runtime client invokes official commands and reads the bounded managed res
       { kind: "status", text: "Recording response" },
       { kind: "activity", id: "skill-1", category: "command", phase: "started", text: "sed -n '1,240p' /home/test/.codex/plugins/cache/personal/agent-factory/0.1.0/skills/agent/SKILL.md", title: "Read Skill · agent-factory:agent" },
       { kind: "status", text: "Running command" },
-      { kind: "status", text: "Main Agent is analyzing the request" },
+      { kind: "status", text: "Conductor is analyzing the request" },
       { kind: "status", text: "Finalizing response" },
       { kind: "activity", id: "mcp-1", category: "tool", phase: "started", text: "codex/list_mcp_resources" },
       { kind: "status", text: "Running connected tool" },
@@ -972,7 +972,7 @@ test("runtime client refreshes changed context usage during a turn and forces th
   assert.deepEqual(await client.updates("main-test", "run-live", 0), {
     cursor: 1,
     updates: [
-      { kind: "status", text: "Main Agent is analyzing the request" },
+      { kind: "status", text: "Conductor is analyzing the request" },
       { kind: "usage", usedTokens: 10_000, contextWindowTokens: 258_400, weeklyUsedPercent: 12.5,
         weeklyResetsAt: 1_790_953_200, fiveHourUsedPercent: 25, fiveHourResetsAt: 1_790_506_200 },
       { kind: "accountLimits", limits: { provider: "codex", weeklyUsedPercent: 12.5, weeklyResetsAt: 1_790_953_200,
@@ -2369,6 +2369,17 @@ test('observed relationship cache rereads only changed runs and survives watcher
   const directory = agentsRoot(root), client = new AgentFactoryClient('/unused', root);
   client.location = async () => ({ agentsRoot: directory });
   t.after(async () => { client.observedChildRuns.dispose(); await rm(root, { recursive: true, force: true }); });
+  // Resource exhaustion must exercise fresh inspection, as the production cache does.
+  let watcherUnavailable = false;
+  const createWatcher = client.observedChildRuns.createWatcher;
+  client.observedChildRuns.createWatcher = (...args) => {
+    try { return createWatcher(...args); }
+    catch (error) {
+      if (!['ENOSPC', 'EMFILE', 'ENOSYS'].includes(error.code)) throw error;
+      watcherUnavailable = true;
+      throw error;
+    }
+  };
   const files = [];
   for (let i = 0; i < 3; i++) {
     const path = join(directory, 'main-one', 'runs', 'run-' + i, 'children', 'child.json');
@@ -2379,13 +2390,14 @@ test('observed relationship cache rereads only changed runs and survives watcher
   assert.equal((await client.discoverChildAgents('main-one')).size, 3);
   const original = client.cachedRunState.bind(client); let reads = [];
   client.cachedRunState = async path => { reads.push(path); return original(path); };
-  await client.discoverChildAgents('main-one'); assert.equal(reads.length, 0);
+  await client.discoverChildAgents('main-one'); assert.equal(reads.length, watcherUnavailable ? 3 : 0);
+  reads = [];
   await writeFile(files[1], JSON.stringify({ parentAgentId: 'main-one', parentRunId: 'run-1', agentId: 'work-1', runId: 'child-after' }));
   const deadline = Date.now() + 2000;
   let result;
   do { result = await client.discoverChildAgents('main-one'); if (result.get('work-1')?.runId === 'child-after') break; await new Promise(r => setTimeout(r, 5)); } while (Date.now() < deadline);
   assert.equal(result.get('work-1').runId, 'child-after');
-  assert.deepEqual([...new Set(reads)], [files[1]]);
+  assert.deepEqual([...new Set(reads)], watcherUnavailable ? [...files].reverse() : [files[1]]);
   client.observedChildRuns.dispose(); reads = [];
   assert.equal((await client.discoverChildAgents('main-one')).size, 3);
   assert.equal(reads.length, 3, 'lost watchers must fall back to fresh inspection');
@@ -2637,4 +2649,78 @@ test("child activity follows exact run events, partial appends and terminal stat
     await writeFile(state, JSON.stringify({ status }));
     assert.equal((await client.latestRunInfo("worker", "run-one")).progressKey, undefined);
   }
+});
+
+test("team roster adds the provider phase from the exact still-running latest run", async () => {
+  const { AgentFactoryClient } = await importTypeScript("src/infrastructure/agent-factory/agent-client.ts");
+  const client = new AgentFactoryClient("/unused", "/unused-project");
+  client.teamCommand = async () => ({ workers: [
+    { agentId: "worker-live", availability: "busy", currentTasks: [], queuedTasks: [], failedTasks: [], holds: [], latestRun: { runId: "run-live", status: "running" } },
+    { agentId: "worker-finished", availability: "idle", currentTasks: [], queuedTasks: [], failedTasks: [], holds: [], latestRun: { runId: "run-finished", status: "completed" } }
+  ] });
+  const inspected = [];
+  client.latestRunInfo = async (agentId, runId) => {
+    inspected.push([agentId, runId]);
+    return { runId, status: "running", progressKey: "ui.running.command", activity: "private commentary" };
+  };
+  const actions = [];
+  client.childLatestActivity = async (agentId, runId) => { actions.push([agentId, runId]); return { category: "command", phase: "started", text: "npm test" }; };
+  const roster = await client.teamRoster();
+  assert.deepEqual(inspected, [["worker-live", "run-live"]], "Only a roster run recorded as running is inspected");
+  assert.deepEqual(actions, [["worker-live", "run-live"]], "The latest action is read for that exact run only");
+  assert.equal(roster.status, "ok");
+  assert.equal(roster.workers[0].latestRun.status, "running");
+  assert.equal(roster.workers[0].latestRun.progressKey, "ui.running.command");
+  assert.deepEqual(roster.workers[0].latestRun.liveActivity, { category: "command", phase: "started", text: "npm test" });
+  assert.equal("activity" in roster.workers[0].latestRun, false, "Commentary does not cross into the Control Center");
+  assert.equal(roster.workers[1].latestRun.progressKey, undefined, "Terminal runs carry no activity phase");
+  assert.equal(roster.workers[1].latestRun.liveActivity, undefined, "Terminal runs carry no live action");
+  // A refresh between roster reads re-reads only the live part; a run that ended drops its phase and action.
+  client.childLatestActivity = async () => ({ category: "tool", phase: "completed", text: "Reasoning", kind: "think" });
+  const refreshed = await client.teamLive(roster);
+  assert.deepEqual(refreshed.workers[0].latestRun.liveActivity, { category: "tool", phase: "completed", text: "Reasoning", kind: "think" });
+  client.latestRunInfo = async (_agentId, runId) => ({ runId, status: "completed" });
+  const ended = await client.teamLive(refreshed);
+  assert.equal(ended.workers[0].latestRun.status, "completed");
+  assert.equal(ended.workers[0].latestRun.progressKey, undefined);
+  assert.equal(ended.workers[0].latestRun.liveActivity, undefined, "An ended run keeps no stale action");
+  assert.deepEqual(await client.teamLive({ status: "unsupported" }), { status: "unsupported" });
+});
+
+test("a running run's latest action is its newest session timeline row, without output, diff or summary", async t => {
+  const { AgentFactoryClient } = await importTypeScript("src/infrastructure/agent-factory/agent-client.ts");
+  const root = await mkdtemp(join(tmpdir(), "af-child-action-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const client = new AgentFactoryClient("/unused", root);
+  client.managedPath = async (agent, _runs, run, name) => name ? join(root, agent + "-" + run + "-" + name) : root;
+  const file = join(root, "worker-run-one-events.jsonl");
+  const action = () => client.childLatestActivity("worker", "run-one");
+  assert.equal(await action(), undefined, "No events: no action");
+  const append = event => appendFile(file, JSON.stringify(event) + "\n");
+  await append({ type: "turn.started" });
+  await append({ type: "native.commentary", text: "private commentary" });
+  assert.equal(await action(), undefined, "Phases and commentary are not actions");
+  await append({ type: "item.started", item: { id: "read", type: "command_execution", command: "sed -n 1,40p docs/guide.md" } });
+  let value = await action();
+  assert.equal(value.category, "command");
+  assert.equal(value.phase, "started");
+  assert.match(value.text, /sed -n 1,40p docs\/guide\.md/);
+  await append({ type: "item.completed", item: { id: "read", type: "command_execution", command: "sed -n 1,40p docs/guide.md", exit_code: 0, aggregated_output: "secret output" } });
+  value = await action();
+  assert.equal(value.phase, "completed");
+  assert.equal("output" in value, false, "Output stays in the session");
+  // A row is placed where its action started: a later completion of an older action does not displace a newer one.
+  await append({ type: "item.started", item: { id: "edit", type: "command_execution", command: "npm test" } });
+  await append({ type: "item.started", item: { id: "think", type: "reasoning", summary: ["private summary"] } });
+  await append({ type: "item.completed", item: { id: "edit", type: "command_execution", command: "npm test", exit_code: 1 } });
+  value = await action();
+  assert.equal(value.kind, "think");
+  assert.equal(value.phase, "started");
+  assert.equal("summary" in value, false, "The reasoning summary stays in the session");
+  await append({ type: "item.completed", item: { id: "change", type: "file_change", status: "completed", changes: [{ path: join(root, "src", "a.ts"), kind: "update" }] } });
+  value = await action();
+  assert.equal(value.category, "file");
+  assert.equal(value.phase, "completed");
+  assert.equal("diff" in value, false, "No diff is read for the list row");
+  assert.equal(await client.childLatestActivity("worker", "run-two"), undefined, "No action leaks to another run");
 });

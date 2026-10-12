@@ -208,6 +208,11 @@
     startedMessageIds: Array.isArray(saved?.startedMessageIds) ? saved.startedMessageIds : [],
     pendingRequests: Array.isArray(saved?.pendingRequests) ? saved.pendingRequests.map(item => ({ ...item, hostAcknowledged: false })) : [],
     recoveredRequest: saved?.recoveredRequest,
+    conductorView: {
+      filter: ["all", "tasks", "decisions"].includes(saved?.conductorView?.filter) ? saved.conductorView.filter : "all",
+      target: typeof saved?.conductorView?.target === "string" ? saved.conductorView.target : "",
+      collapsed: { ...saved?.conductorView?.collapsed }, answers: { ...saved?.conductorView?.answers }
+    },
     timeline: collapseAdjacentReads(collapseCancellationNotices(Array.isArray(saved?.timeline) ? saved.timeline : [])),
     statusItems: normalizeStatusItems(saved?.statusItems),
     projectName: typeof saved?.projectName === "string" ? saved.projectName : "",
@@ -311,7 +316,8 @@
     get statusRenderKeys() { return statusRenderKeys; },
     get goalError() { return goalError; },
     get nativeGoal() { return nativeGoal; },
-    get chatAgentSettings() { return chatAgentSettings; }
+    get chatAgentSettings() { return chatAgentSettings; },
+    get conductorUI() { return chatConductorUi; }
   });
   const chatAgents = globalThis.AgentFactoryChat.agents({
     agentsMenu, state, renderStatusBar: chatStatusBar.renderStatusBar, vscode, agentsList, t,
@@ -380,7 +386,18 @@
     state, t, uiLocale, vscode, activityPhaseAccessibleLabel, chatTerminal, taskModeNames, chatAgents
   });
   const chatInterview = globalThis.AgentFactoryChat.interview({
-    indexedTimeline, state, submit, renderAll, persist
+    indexedTimeline, state, submit, renderAll, persist,
+    get conductorUI() { return chatConductorUi; }
+  });
+  const chatConductorQueue = globalThis.AgentFactoryChat.conductorQueue({
+    state, t, vscode, renderAll, persist,
+    renderAssistant: (content, event) => event.streaming ? renderPreviewMarkdown(content, event.text, event) : renderAssistantContent(content, event)
+  });
+  const chatConductorUi = globalThis.AgentFactoryChat.conductorUi({
+    state, timeline, vscode, persist, renderAll, uiLocale, t, queue: chatConductorQueue,
+    models: () => ({ main: chatAgentSettings.effectiveAgentValue("main", "model"), work: chatAgentSettings.effectiveAgentValue("work", "model") }),
+    renderQuestion: (content, event) => renderAssistantContent(content, event),
+    submitAnswer: text => submit("direct", "normal", false, text)
   });
   const chatAgentSettings = globalThis.AgentFactoryChat.agentSettings({
     state, t, fastModeButton, currentCapabilities, settingOptions, reasoningDisplayLabel, createId,
@@ -388,7 +405,8 @@
     modelMenu, createModeIcon, fastModeSetting, closeSettingMenu, executionModeName,
     executionModeExplanation, renderStatusBar: chatStatusBar.renderStatusBar,
     get openSettingId() { return openSettingId; },
-    get chatProviders() { return chatProviders; }
+    get chatProviders() { return chatProviders; },
+    get conductorUI() { return chatConductorUi; }
   });
   globalThis.AgentFactoryI18n.apply(document, uiLocale());
   document.documentElement.lang = uiLocale();
@@ -1085,6 +1103,9 @@
       case "providers.status":
         chatProviders.receiveProviders(message);
         break;
+      case "providers.auth":
+        chatProviders.receiveAuth(message);
+        break;
       case "providers.catalog":
         chatProviders.providerCatalog = message.catalog;
         chatProviders.providerVersionsRequested = false;
@@ -1616,6 +1637,13 @@
         persist(false);
         break;
       }
+      case "conductor.state":
+      case "conductor.snapshot":
+      case "conductor.feed":
+      case "conductor.accepted":
+        chatConductorUi.receive(message);
+        chatConductorQueue.receive(message);
+        break;
       case "chat.started": {
         const pending = (state.pendingRequests || []).find(function (item) { return item.id === message.id; });
         state.pendingRequests = (state.pendingRequests || []).filter(function (item) { return item.id !== message.id; });
@@ -1743,9 +1771,13 @@
       return;
     }
     const recovered = choiceAnswer === null && action === enterAction() && workflow === "normal" && !asGoal ? state.recoveredRequest : undefined;
+    const conductorTarget = recovered?.conductorTarget || chatConductorUi.submissionTarget?.();
+    const targetError = chatConductorUi.submissionError?.(conductorTarget);
+    if (targetError) { inputFeedback.textContent = targetError; inputFeedback.hidden = false; return; }
     if (!recovered && workflow === "normal" && state.role === "main" && state.maestroMode) workflow = "maestro";
     const message = {
       id: recovered?.id || createId(),
+      ...(conductorTarget ? { conductorTarget } : {}),
       text,
       attachments: (choiceAnswer === null ? state.attachments : []).map(function (attachment) {
         const { previewUri, pending, ...reference } = attachment;
@@ -2055,6 +2087,7 @@
     updateSendButton();
     updateRunControls();
     updateModeControls();
+    chatConductorUi.render?.();
     chatNavigation.updateQuestionControl();
   }
 
@@ -2134,21 +2167,23 @@
     cancelAnimationFrame(timelineRenderFrame);
     timelineRenderFrame = undefined;
     if (document.hidden) return;
+    chatConductorUi.prepareTimeline?.();
     cancelAnimationFrame(previewFrame);
     previewFrame = undefined;
     pendingPreviews.clear();
     cancelAnimationFrame(autoScrollFrame);
     const shouldFollowLatest = state.autoScroll && followLatest;
     const existingMessages = messageElements;
-    const endIndex = timelineEndId ? state.timeline.findIndex(item => item.id === timelineEndId) + 1 : state.timeline.length;
-    const end = endIndex > 0 ? endIndex : state.timeline.length;
+    const projectedTimeline = chatConductorUi.events?.(state.timeline) || state.timeline;
+    const endIndex = timelineEndId ? projectedTimeline.findIndex(item => item.id === timelineEndId) + 1 : projectedTimeline.length;
+    const end = endIndex > 0 ? endIndex : projectedTimeline.length;
     const start = Math.max(0, end - 200);
-    const visibleEvents = state.timeline.slice(start, end);
+    const visibleEvents = projectedTimeline.slice(start, end);
     const retainedIds = new Set();
     let previousMessage = emptyState;
     const displayStates = messageViewStates;
     let focusedControl;
-    emptyState.hidden = state.timeline.length > 0;
+    emptyState.hidden = state.timeline.length > 0 || projectedTimeline.length > 0;
     let historyStatus = timeline.querySelector(".history-feedback");
     if (!historyStatus) {
       historyStatus = document.createElement("p");
@@ -2192,15 +2227,15 @@
     else historyStatus.removeAttribute("title");
     let pages = timeline.querySelector(".history-pages");
     if (!pages) { pages = document.createElement("nav"); pages.className = "history-pages"; timeline.prepend(pages); }
-    const pageKey = [start, end, state.timeline.length, uiLocale()].join(":");
+    const pageKey = [start, end, projectedTimeline.length, uiLocale()].join(":");
     if (pages.dataset.renderKey !== pageKey) {
       pages.dataset.renderKey = pageKey;
       pages.replaceChildren();
-      for (const [label, enabled, target] of [["ui.history.previous", start > 0, start], ["ui.history.next", end < state.timeline.length, Math.min(state.timeline.length, end + 200)]]) {
+      for (const [label, enabled, target] of [["ui.history.previous", start > 0, start], ["ui.history.next", end < projectedTimeline.length, Math.min(projectedTimeline.length, end + 200)]]) {
         const button = document.createElement("button"); button.type = "button"; button.textContent = t(label); button.disabled = !enabled;
         button.addEventListener("click", function () {
           if (state.historyPageOperation) return;
-          const nextEndId = target === state.timeline.length ? undefined : state.timeline[target - 1]?.id;
+          const nextEndId = target === projectedTimeline.length ? undefined : projectedTimeline[target - 1]?.id;
           const operation = { agentId: state.agentId, conversationId: state.conversationId };
           state.historyPageOperation = operation;
           state.historyPageError = undefined;
@@ -2251,11 +2286,11 @@
         });
         pages.append(button);
       }
-      pages.hidden = state.timeline.length <= 200;
+      pages.hidden = projectedTimeline.length <= 200;
       pages.setAttribute("aria-label", t("ui.history.pages"));
     }
     Array.from(pages.children).forEach(function (button, index) {
-      const disabled = Boolean(state.historyPageOperation) || (index === 0 ? start === 0 : end >= state.timeline.length);
+      const disabled = Boolean(state.historyPageOperation) || (index === 0 ? start === 0 : end >= projectedTimeline.length);
       if (button.disabled !== disabled) button.disabled = disabled;
     });
     const managedByEvent = managedActivities(visibleEvents);
@@ -2268,6 +2303,7 @@
       retainedIds.add(event.id);
       const existing = existingMessages.get(event.id);
       const renderKey = [eventVersion(event), chatSyntax.syntaxRevision, uiLocale(),
+        chatConductorUi.key?.(event),
         event.type === "assistant" ? assistantContext : null,
         event.type === "assistant" || event.type === "interview" ? chatInterview.canAnswerInterview(event) : null,
         event.type === "assistant" && event.runId === state.pendingDecisionRunId && event.runId
@@ -2360,6 +2396,8 @@
         renderPreviewMarkdown(content, event.text, event);
       } else if (event.type === "interview") {
         chatInterview.renderStructuredInterview(content, event);
+      } else if (event.type === "conductor") {
+        chatConductorUi.renderEntry(content, event);
       } else if (event.type === "assistant") {
         renderAssistantContent(content, event);
       } else if (activityRow) {
@@ -2432,6 +2470,7 @@
     while (messageViewStates.size > 2000) messageViewStates.delete(messageViewStates.keys().next().value);
     chatNavigation.updateQuestionControl();
     timeline.setAttribute("aria-busy", String(state.running));
+    chatConductorUi.finishTimeline?.();
     if (shouldFollowLatest) {
       autoScrollFrame = requestAnimationFrame(function () {
         // Recheck both the preference and reading position before following.
@@ -3112,6 +3151,7 @@
       guidanceExpanded: state.guidanceExpanded,
       pendingRequests: state.pendingRequests,
       recoveredRequest: state.recoveredRequest,
+      conductorView: state.conductorView,
       notesScope: chatNotes.selectedNotesScope,
       noteDraft: chatNotes.noteDraft && (chatNotes.noteDirty || chatNotes.noteSending) ? { ...chatNotes.noteDraft } : null,
       panelId: state.panelId,

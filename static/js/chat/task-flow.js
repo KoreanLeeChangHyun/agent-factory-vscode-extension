@@ -223,7 +223,7 @@ globalThis.AgentFactoryChat.taskFlow = function (host) {
     const assignment = document.createElement(canOpen ? "button" : "span");
     assignment.className = "task-flow-assignment task-flow-agent";
     assignment.dataset.assigned = String(Boolean(agentId && (profile || role === "verification")));
-    const key = stage === "verification" || role === "verification" ? "ui.verification" : !agentId ? "flow.role.unassigned"
+    const key = stage === "verification" || role === "verification" ? "ui.verification.role" : !agentId ? "flow.role.unassigned"
       : profile ? "flow.role." + PROFILE_ROLES[profile] : "flow.role.unavailable";
     assignment.textContent = t(key);
     assignment.title = agentId || assignment.textContent;

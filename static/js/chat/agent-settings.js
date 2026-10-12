@@ -572,8 +572,9 @@ globalThis.AgentFactoryChat.agentSettings = function (host) {
       columns.append(column);
     }
     menu.append(columns);
-    const roles = state.role === "main" ? [["main", t("ui.role.main")], ["work", t("ui.role.work")], ["workLight", t("ui.role.workLight")], ["explore", t("ui.role.explore")], ["scribe", t("ui.role.scribe")], ["verification", t("ui.role.verification")]] : [["main", state.role === "work" ? t("ui.work") : t("ui.verification")]];
-    for (const [role, label] of roles) {
+    const roles = state.role === "main" ? [["main", t("ui.role.main")], ["work", t("ui.role.work")], ["workLight", t("ui.role.workLight")], ["explore", t("ui.role.explore")], ["scribe", t("ui.role.scribe")], ["verification", t("ui.role.verification")]] : [["main", state.role === "work" ? t("ui.work") : t("ui.verification.role")]];
+    for (const [role, originalLabel] of roles) {
+      const label = host.conductorUI?.roleLabel?.(role) || originalLabel;
       const row = document.createElement("div");
       row.className = "agent-model-row";
       row.dataset.agentRole = role;

@@ -49,6 +49,8 @@ const clientMessageTypes = new Set([
   "providers.cli.install",
   "providers.versions.request",
   "providers.updateMode.select",
+  "providers.auth.request",
+  "providers.login",
   "session.select",
   "agents.request",
   "history.request",
@@ -63,8 +65,14 @@ const clientMessageTypes = new Set([
   "worker.remove",
   "worker.handoff",
   "supervision.request",
+  "team.history.request",
+  "team.run.open",
   "handoff.models.request",
   "worker.order",
+  "domain.order",
+  "worker.visibility",
+  "conductor.control",
+  "conductor.resync",
   "project.task.open",
   "control.center.open",
   "conversations.request",
@@ -134,6 +142,7 @@ export function parseClientMessage(value: unknown): ClientMessage | undefined {
           || value.path.length > 4096 || /[\u0000-\u001f]/.test(value.path)) return undefined;
       return { type: value.type, provider: value.provider as ProviderId, path: value.path };
     case "providers.pick":
+    case "providers.login":
       return PROVIDER_IDS.includes(value.provider as ProviderId)
         ? { type: value.type, provider: value.provider as ProviderId } : undefined;
     case "providers.updateMode.select":
@@ -266,6 +275,30 @@ export function parseClientMessage(value: unknown): ClientMessage | undefined {
     case "client.ready":
       if (value.pendingMessageIds !== undefined && (!Array.isArray(value.pendingMessageIds) || !value.pendingMessageIds.every(id => typeof id === "string" && id.length > 0 && id.length <= 128))) return undefined;
       return { type: value.type, ...(value.pendingMessageIds ? { pendingMessageIds: value.pendingMessageIds as string[] } : {}) };
+    case "conductor.resync":
+      return { type: value.type };
+    case "conductor.control": {
+      // Exact runtime identifiers and the version the Human saw; the runtime decides the transition.
+      if (!["cancel", "approve", "resolve-input", "answer-worker", "answer-question", "resolve-area", "integrate-workspace", "cleanup-workspace"].includes(String(value.action))) return undefined;
+      const optional = (key: "requestId" | "delegationId" | "inputId" | "questionId") => value[key] === undefined ? {} : isRuntimeId(value[key]) ? { [key]: value[key] as string } : undefined;
+      const ids = [optional("requestId"), optional("delegationId"), optional("inputId"), optional("questionId")];
+      if (ids.some(id => id === undefined)) return undefined;
+      if (value.relation !== undefined && value.relation !== "new" && value.relation !== "followup") return undefined;
+      if (value.expectedVersion !== undefined && (!Number.isSafeInteger(value.expectedVersion) || Number(value.expectedVersion) < 1)) return undefined;
+      if (value.action === "resolve-input" ? !value.inputId || !value.relation : value.action === "resolve-area" ? !value.inputId : value.expectedVersion === undefined || (!value.requestId && !value.delegationId)) return undefined;
+      if (value.area !== undefined && (!isRecord(value.area) || !isRuntimeId(value.area.domainId) || !isRuntimeId(value.area.subdomainId))) return undefined;
+      if (value.action === "resolve-area" && !isRecord(value.area)) return undefined;
+      // The control center names the chat of the row it acts on; a chat panel always uses its own chat.
+      if (value.chatId !== undefined && (typeof value.chatId !== "string" || !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,199}$/.test(value.chatId))) return undefined;
+      if (value.action === "answer-worker" && (!value.delegationId || typeof value.text !== "string" || !value.text.trim())) return undefined;
+      if (value.action === "answer-question" && (!value.requestId || !value.questionId || typeof value.text !== "string" || !value.text.trim())) return undefined;
+      if (["integrate-workspace", "cleanup-workspace"].includes(String(value.action)) && !value.delegationId) return undefined;
+      return { type: value.type, ...(["answer-worker", "answer-question"].includes(String(value.action)) ? { text: value.text as string } : {}), action: value.action as "cancel" | "approve" | "resolve-input" | "answer-worker" | "answer-question" | "resolve-area" | "integrate-workspace" | "cleanup-workspace", ...Object.assign({}, ...ids),
+        ...(isRecord(value.area) ? { area: { domainId: value.area.domainId as string, subdomainId: value.area.subdomainId as string } } : {}),
+        ...(value.chatId !== undefined ? { chatId: value.chatId as string } : {}),
+        ...(value.relation ? { relation: value.relation as "new" | "followup" } : {}),
+        ...(value.expectedVersion !== undefined ? { expectedVersion: Number(value.expectedVersion) } : {}) };
+    }
     case "queue.resume":
     case "run.cancel":
     case "conversation.clear":
@@ -278,6 +311,7 @@ export function parseClientMessage(value: unknown): ClientMessage | undefined {
     case "providers.request":
     case "providers.detect":
     case "providers.versions.request":
+    case "providers.auth.request":
     case "agents.request":
     case "attachments.pick":
       return { type: value.type };
@@ -368,10 +402,12 @@ export function parseClientMessage(value: unknown): ClientMessage | undefined {
       // A rework names the ended task it revises; it cannot also target a running loop or run.
       const rework = value.rework;
       if (rework !== undefined && (!isRecord(rework) || !isRuntimeId(rework.workflowId) || !isRuntimeId(rework.taskId)
+        || (rework.runId !== undefined && !isRuntimeId(rework.runId))
         || value.loopId !== undefined || value.runId !== undefined)) return undefined;
       return { type: value.type, agentId: value.agentId as string, text: value.text, commandId: value.commandId,
         ...(typeof value.loopId === "string" ? { loopId: value.loopId } : {}), ...(typeof value.runId === "string" ? { runId: value.runId } : {}),
-        ...(isRecord(rework) ? { rework: { workflowId: rework.workflowId as string, taskId: rework.taskId as string } } : {}) };
+        ...(isRecord(rework) ? { rework: { workflowId: rework.workflowId as string, taskId: rework.taskId as string,
+          ...(typeof rework.runId === "string" ? { runId: rework.runId } : {}) } } : {}) };
     }
     case "worker.stop":
       if (!isRuntimeId(value.agentId) || !isRuntimeId(value.loopId) || !isRuntimeId(value.workflowId) || !isRuntimeId(value.taskId)) return undefined;
@@ -385,6 +421,20 @@ export function parseClientMessage(value: unknown): ClientMessage | undefined {
     case "supervision.request":
     case "handoff.models.request":
       return { type: value.type };
+    case "team.history.request":
+      if (!isRuntimeId(value.agentId) || !Number.isSafeInteger(value.requestId) || Number(value.requestId) < 0) return undefined;
+      return { type: value.type, agentId: value.agentId, requestId: Number(value.requestId) };
+    case "team.run.open":
+      if (!isRuntimeId(value.agentId) || !isRuntimeId(value.runId) || !["request", "result", "receipt"].includes(String(value.document))) return undefined;
+      return { type: value.type, agentId: value.agentId, runId: value.runId, document: value.document as "request" | "result" | "receipt" };
+    case "worker.visibility":
+      if (!isRuntimeId(value.agentId) || typeof value.hidden !== "boolean") return undefined;
+      return { type: value.type, agentId: value.agentId, hidden: value.hidden };
+    case "domain.order": {
+      const order = value.order;
+      if (!Array.isArray(order) || !order.every(id => typeof id === "string" && /^domain-[0-9a-f]{12}$/.test(id)) || new Set(order).size !== order.length) return undefined;
+      return { type: value.type, order: [...order] };
+    }
     case "worker.order": {
       // Agent IDs only, each once; the host keeps this list as display data and never acts on it.
       const order = value.order;
@@ -442,6 +492,9 @@ export function parseClientMessage(value: unknown): ClientMessage | undefined {
         ...(typeof value.workLoopMode === "boolean" ? { workLoopMode: value.workLoopMode } : {})
       };
     case "chat.send": {
+      const target = value.conductorTarget;
+      if (target !== undefined && (!isRecord(target) || !["new", "followup"].includes(String(target.relation)) ||
+          (target.relation === "followup" ? !isRuntimeId(target.requestId) : target.requestId !== undefined))) return undefined;
       if (
         typeof value.id !== "string" ||
         !value.id ||
@@ -478,6 +531,7 @@ export function parseClientMessage(value: unknown): ClientMessage | undefined {
         type: value.type,
         id: value.id,
         text: value.text,
+        ...(isRecord(target) ? { conductorTarget: { relation: target.relation as "new" | "followup", ...(target.requestId ? { requestId: target.requestId as string } : {}) } } : {}),
         attachments,
         execution: {
           ...(value.execution.businessMode !== undefined ? { businessMode: value.execution.businessMode as BusinessMode } : {}),

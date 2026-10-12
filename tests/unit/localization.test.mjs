@@ -35,6 +35,27 @@ test('dynamic labels preserve filenames, commands, IDs and parameter-like source
   assert.equal(i18n.resolve({ key: 'attachment.open', values: [{}] }, 'ko', source), source);
 });
 
+test('Korean role labels use the selected names while verification actions keep their wording', () => {
+  assert.equal(i18n.format('ui.main.agent.chat', 'ko'), '지휘자 채팅');
+  assert.equal(i18n.format('ui.main.agent.chat', 'en'), 'Conductor chat');
+  assert.equal(i18n.format('conductorQueue.conductor', 'ko', 2), '지휘자 인스턴스 2');
+  assert.equal(i18n.format('conductorQueue.conductor', 'en', 2), 'Conductor instance 2');
+  assert.equal(i18n.format('maestro.domain', 'ko'), '도메인');
+  assert.equal(i18n.format('attachment.open', 'ko', 'Main/domain-main'), 'Main/domain-main · 원본 열기');
+  assert.equal(i18n.format('ui.role.verification', 'ko'), '검증자');
+  assert.equal(i18n.format('ui.verification.role', 'en'), 'Verification');
+  assert.equal(i18n.format('ui.verification.role', 'ko'), '검증자');
+  assert.equal(i18n.format('ui.verification.agent', 'ko'), '검증자');
+  assert.equal(i18n.format('ui.reserved.verification.agent', 'ko'), '예약된 검증자');
+  assert.equal(i18n.format('flow.header.verifier', 'ko', 'A'), '검증자 A');
+  assert.equal(i18n.format('ui.role.scribe', 'ko'), '기록자');
+  assert.equal(i18n.format('flow.role.scribe', 'ko'), '기록자');
+  assert.equal(i18n.format('flow.header.scribe', 'ko', 'A'), '기록자 A');
+  assert.equal(i18n.format('flow.assignment.scribe.count', 'ko', 2), '기록자 2명');
+  assert.equal(i18n.format('ui.verification', 'ko'), '검증');
+  assert.equal(i18n.format('submission.work.verification.label', 'ko'), '작업-검증');
+});
+
 test('VS Code command, configuration and public view resources are packaged', async () => {
   const pkg = JSON.parse(await readFile(new URL('package.json', root)));
   const en = JSON.parse(await readFile(new URL('package.nls.json', root)));

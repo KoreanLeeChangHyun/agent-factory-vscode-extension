@@ -215,7 +215,7 @@
     for (const task of tasks) {
       const row=el('tr'), name=el('td');
       name.append(el('strong',`${task.id} · ${task.title || '작업'}`));
-      name.append(el('p',`작업자: ${task.workAgentId || '미배정'}`, 'muted'),el('p',`검증자: ${task.verificationAgentId || '미배정'}`, 'muted'));
+      name.append(el('p',`수행자: ${task.workAgentId || '미배정'}`, 'muted'),el('p',`검증자: ${task.verificationAgentId || '미배정'}`, 'muted'));
       const noVerify=['work','plan-work','direct'].includes(flow.taskMode);
       const verification=noVerify ? '별도 검증 미요청' : flow.humanSkip && task.verificationStatus !== 'completed' ? '검증 생략' : status(task.verificationStatus);
       const evidence=el('td');
@@ -228,7 +228,7 @@
   }
   function renderAgents(content, flow) {
     if (!flow) {
-      content.append(el('p','이 계약에 연결된 실행 기록이 없어 요청 Main·작업자·검증자를 확인할 수 없습니다.'));
+      content.append(el('p','이 계약에 연결된 실행 기록이 없어 요청 Main·수행자·검증자를 확인할 수 없습니다.'));
       return;
     }
     content.append(el('p', `선택 실행: ${flow.loopId} · 계약 v${contractOf(flow)?.version ?? '?'} 기준`, 'muted'));
@@ -247,7 +247,7 @@
       group.append(el('h2', `${task.id} · ${task.title || ''}`));
       const chain = el('div', undefined, 'agent-chain');
       const noVerify = ['work','plan-work','direct'].includes(flow.taskMode);
-      chain.append(card('작업자',task.workAgentId,task.workRunId,status(task.workStatus)),el('span','→','agent-arrow'),card('검증자',task.verificationAgentId,task.verificationRunId,noVerify ? '별도 검증 미요청' : flow.humanSkip && task.verificationStatus !== 'completed' ? '검증 생략' : status(task.verificationStatus)));
+      chain.append(card('수행자',task.workAgentId,task.workRunId,status(task.workStatus)),el('span','→','agent-arrow'),card('검증자',task.verificationAgentId,task.verificationRunId,noVerify ? '별도 검증 미요청' : flow.humanSkip && task.verificationStatus !== 'completed' ? '검증 생략' : status(task.verificationStatus)));
       group.append(chain); content.append(group);
     }
     content.append(el('p','대화 열기는 기존 에이전트 화면으로 이동합니다. 새 작업을 제출하거나 실행을 재시작하지 않습니다.', 'muted'));

@@ -60,7 +60,9 @@ export interface ProjectTaskHandoff {
 }
 /** One command delivered (or waiting) for a worker, from the loop's managed records only. */
 export interface ProjectTaskCommand {
-  readonly kind: "request" | "addition";
+  readonly kind: "request" | "addition" | "revision";
+  readonly number?: number;
+  readonly baseRevision?: number;
   readonly text: string;
   /** Known sender only: human (recorded actor or control center request) or main (Main's dispatch). */
   readonly sender?: "human" | "main" | "ai";
@@ -77,6 +79,7 @@ export interface ProjectTaskDetail {
   readonly domain?: string;
   readonly description?: string;
   readonly completionCriteria?: string;
+  readonly userRevisionCount?: number;
   readonly workStatus?: string;
   readonly workAgentId?: string;
   readonly verificationAgentId?: string;
@@ -90,6 +93,51 @@ export interface ProjectTaskDetail {
 /** Who changed an editable domain record, when, and the evidence (a Main run/loop or the control center). */
 export interface ProjectDomainChange { readonly actor: "human" | "ai"; readonly at: string; readonly source: string }
 /** The project's shared, editable domain list and worker memberships (plugin domains.py). Execution evidence is separate. */
+/** One task reference of the plugin's team roster (loop.py team-roster): what a worker holds now, waits for or failed. */
+export interface TeamTaskRef { readonly workflowId?: string; readonly taskId?: string; readonly title?: string; readonly state?: string; readonly latestRunId?: string; readonly parentAgentId?: string }
+/** Why a worker is held: a running/queued task, a decision it waits for, or a failed loop. Recorded fields only. */
+export interface TeamHold { readonly kind: string; readonly source?: string; readonly runStatus?: string; readonly loopStatus?: string; readonly phase?: string; readonly position?: string; readonly workflowId?: string; readonly taskId?: string; readonly runId?: string }
+/** One session-view activity entry without its output, diff or reasoning summary (those stay in the session). */
+export type TeamActivity = {
+  readonly category: "command" | "file" | "tool";
+  readonly phase: "started" | "completed" | "failed";
+  readonly text: string;
+  readonly title?: string;
+} & Omit<ActivityDetails, "summary" | "error">;
+export interface TeamRunRef { readonly runId: string; readonly role?: string; readonly status?: string; readonly model?: string; readonly provider?: string; readonly trigger?: string;
+  readonly requestRevision?: number; readonly userRevisionNumber?: number; readonly attempt?: number;
+  readonly workflowId?: string; readonly taskId?: string; readonly startedAt?: string; readonly updatedAt?: string; readonly finishedAt?: string;
+  /** Localizable phase from this exact running child run's recorded provider events. */
+  readonly progressKey?: string;
+  /** The latest timeline action of this exact running run, as the session view would show it; never inferred. */
+  readonly liveActivity?: TeamActivity;
+  /** present | missing | pending, as the plugin reports; never inferred. */
+  readonly report?: string; readonly receipt?: string }
+/** A compact projection of one team-roster worker; the model is the recorded one (absent means unknown). */
+export interface TeamWorker {
+  readonly agentId: string; readonly role?: string; readonly workProfile?: string; readonly provider?: string; readonly model?: string; readonly lastModel?: string;
+  readonly availability: string; readonly removed: boolean; readonly domain?: { readonly domainId?: string; readonly name?: string };
+  readonly current: readonly TeamTaskRef[]; readonly queued: readonly TeamTaskRef[]; readonly failed: readonly TeamTaskRef[];
+  readonly holds: readonly TeamHold[]; readonly latestRun?: TeamRunRef; readonly taskCounts: Readonly<Record<string, number>>; readonly runCount: number;
+}
+/** The team roster as the Control Center consumes it, or why it is not available (an installed plugin without the command). */
+export type TeamRoster =
+  | { readonly status: "ok"; readonly workers: readonly TeamWorker[] }
+  | { readonly status: "unsupported" }
+  | { readonly status: "error"; readonly error: string };
+/** One worker's full history (loop.py team-history): every task and every run with its trigger and document state. */
+export interface TeamHistoryTask { readonly workflowId?: string; readonly taskId?: string; readonly title?: string; readonly state?: string; readonly lastActivityAt?: string; readonly userRevisionCount?: number; readonly runs: readonly TeamRunRef[] }
+/** Read-only presentation of one exact recorded request and its accepted additions. */
+export interface RequestView {
+  readonly agentId: string; readonly runId: string; readonly workflowId?: string; readonly taskId?: string; readonly title: string;
+  readonly fields: { readonly goal: string; readonly scope: string; readonly completion: string; readonly constraints: string };
+  readonly changes: readonly { readonly text: string; readonly number?: number; readonly baseRevision?: number; readonly at?: string; readonly status?: string }[];
+  readonly original: string; readonly metadata: string;
+}
+export type TeamHistory =
+  | { readonly status: "ok"; readonly agentId: string; readonly tasks: readonly TeamHistoryTask[] }
+  | { readonly status: "unsupported"; readonly agentId: string }
+  | { readonly status: "error"; readonly agentId: string; readonly error: string };
 export interface ProjectDomains {
   readonly revision: number;
   /** The domain the last edit created or changed, when the edit reports one. */
@@ -176,18 +224,25 @@ export type ClientMessage =
   | { readonly type: "project.tasks.request" }
   | ProjectDomainEdit
   | { readonly type: "worker.command"; readonly agentId: string; readonly text: string; readonly commandId: string; readonly loopId?: string; readonly runId?: string;
-      /** Rework of this ended task: always a new task in the worker's session, never an addition to a running one. */
-      readonly rework?: { readonly workflowId: string; readonly taskId: string } }
+      /** Correction of this exact accepted task, preserving its identity and captured authority. */
+      readonly rework?: { readonly workflowId: string; readonly taskId: string; readonly runId?: string } }
   | { readonly type: "worker.stop"; readonly agentId: string; readonly loopId: string; readonly workflowId: string; readonly taskId: string }
+  /** Project-scoped display preference; never a runtime worker action. */
+  | { readonly type: "worker.visibility"; readonly agentId: string; readonly hidden: boolean }
   | { readonly type: "worker.remove"; readonly agentId: string; readonly revision: number }
   /** The Human moves the current Work task of this loop to a new session on the chosen detected model. */
   | { readonly type: "worker.handoff"; readonly agentId: string; readonly loopId: string; readonly toModel: string; readonly reason: string }
   /** Read-only supervision verdicts of unfinished loops (operation_records.py supervise --dry-run). */
   | { readonly type: "supervision.request" }
+  /** One worker's team history; requestId lets the view drop a reply that arrives after a newer request. */
+  | { readonly type: "team.history.request"; readonly agentId: string; readonly requestId: number }
+  /** Open one exact run's request, result or receipt from the team history. */
+  | { readonly type: "team.run.open"; readonly agentId: string; readonly runId: string; readonly document: "request" | "result" | "receipt" }
   /** Detected models a provider handoff may target. */
   | { readonly type: "handoff.models.request" }
   /** Display order of the control center's workers, by agent ID; it changes no worker, run or domain. */
   | { readonly type: "worker.order"; readonly order: readonly string[] }
+  | { readonly type: "domain.order"; readonly order: readonly string[] }
   | { readonly type: "project.task.open"; readonly workflowId: string; readonly taskId: string; readonly target: "chat" | "run" | "records" | "feedback" | "result" | "request"; readonly agentId?: string; readonly runId?: string }
   | { readonly type: "agent.preset"; readonly action: "save" | "apply" | "copy" | "update" | "delete" | "rename" | "default"; readonly scope: "global" | "project" | "chat"; readonly name: string; readonly newName?: string; readonly sourceName?: string }
   | { readonly type: "agent.defaults.save"; readonly scope: "global" | "project"; readonly role: import("../core/config/agent-settings").AgentRole; readonly field: "model" | "reasoningEffort" | "fast"; readonly value: string | boolean }
@@ -214,6 +269,7 @@ export type ClientMessage =
   | { readonly type: "link.open"; readonly href: string }
   | {
       readonly type: "chat.send";
+      readonly conductorTarget?: { readonly relation: "new" | "followup"; readonly requestId?: string };
       readonly id: string;
       readonly text: string;
       readonly attachments: readonly AttachmentReference[];
@@ -239,6 +295,9 @@ export type ClientMessage =
   | { readonly type: "docsAudit.set"; readonly interval: import("../common/types/docs-audit").DocsAuditInterval }
   | { readonly type: "docsAudit.started" }
   | { readonly type: "queue.resume" }
+  | { readonly type: "conductor.control"; readonly action: "cancel" | "approve" | "resolve-input" | "answer-worker" | "answer-question" | "resolve-area" | "integrate-workspace" | "cleanup-workspace"; readonly requestId?: string; readonly delegationId?: string;
+      readonly inputId?: string; readonly questionId?: string; readonly area?: { readonly domainId: string; readonly subdomainId: string }; readonly relation?: "new" | "followup"; readonly expectedVersion?: number; readonly chatId?: string; readonly text?: string }
+  | { readonly type: "conductor.resync" }
   | { readonly type: "run.cancel" }
   | { readonly type: "conversation.clear" }
   | { readonly type: "sessions.request" }
@@ -250,6 +309,8 @@ export type ClientMessage =
   | { readonly type: "providers.configure"; readonly provider: import("../common/types/provider").ProviderId; readonly path: string }
   | { readonly type: "providers.pick"; readonly provider: import("../common/types/provider").ProviderId }
   | { readonly type: "providers.updateMode.select"; readonly mode: import("../common/types/provider").PluginUpdateMode }
+  | { readonly type: "providers.auth.request" }
+  | { readonly type: "providers.login"; readonly provider: import("../common/types/provider").ProviderId }
   | { readonly type: "session.select"; readonly agentId: string }
   | ({ readonly type: "task.stop" } & import("../common/types/agent-runtime").TaskStopTarget)
   | { readonly type: "task.delete"; readonly workflowId: string; readonly taskId: string; readonly mainAgentId?: string }
@@ -289,12 +350,14 @@ export interface AccountUsage {
 }
 
 export type HostMessage =
+  | { readonly type: "worker.visibility.result"; readonly hiddenWorkers: readonly string[]; readonly error?: string }
   | { readonly type: "composer.reference"; readonly text: string }
   | { readonly type: "interview.question"; readonly question: InterviewQuestion; readonly runId?: string }
   | { readonly type: "usage.accounts"; readonly accounts: Readonly<Record<string, AccountUsage>> }
   | { readonly type: "agent.preset.field.result"; readonly error?: string }
   | { readonly type: "contracts.list"; readonly contracts: readonly import("../infrastructure/filesystem/contracts").ContractEntry[]; readonly error?: string }
-  | { readonly type: "project.tasks"; readonly entries: readonly ProjectTaskEntry[]; readonly error?: string; readonly domains?: ProjectDomains; readonly domainsError?: string; readonly workerOrder?: readonly string[] }
+  | { readonly type: "project.tasks"; readonly entries: readonly ProjectTaskEntry[]; readonly error?: string; readonly domains?: ProjectDomains; readonly domainsError?: string; readonly workerOrder?: readonly string[]; readonly domainOrder?: readonly string[]; readonly hiddenWorkers?: readonly string[] }
+  | { readonly type: "request.view"; readonly view: RequestView }
   | { readonly type: "agent.preset.result"; readonly scope?: import("../core/config/agent-settings").AgentPresetScope; readonly name?: string; readonly settings?: import("../core/config/agent-settings").AgentDefaults; readonly error?: string }
   | { readonly type: "agent.defaults"; readonly settings: import("../core/config/agent-settings").AgentDefaultsSnapshot }
   | import("../infrastructure/vscode/sudo-broker").SudoChallenge
@@ -314,6 +377,10 @@ export type HostMessage =
   | { readonly type: "bot.model.saved"; readonly model: string; readonly failed?: boolean }
   | { readonly type: "bot.prompt.saved"; readonly requestId: string; readonly prompt?: string; readonly failed?: boolean }
   | { readonly type: "chat.rejected"; readonly id: string }
+  | { readonly type: "conductor.state"; readonly enabled: boolean; readonly targeting?: boolean; readonly role?: string; readonly error?: string }
+  | { readonly type: "conductor.snapshot"; readonly snapshot: Readonly<Record<string, unknown>> }
+  | { readonly type: "conductor.feed"; readonly cursor: number; readonly entries: readonly import("../infrastructure/agent-factory/conductor-queue-client").ConductorFeedEntry[]; readonly emittedAt: number }
+  | { readonly type: "conductor.accepted"; readonly id: string; readonly text: string; readonly acceptedAt: string; readonly inputId: string }
   | { readonly type: "chat.pending"; readonly id: string }
   | { readonly type: "chat.started"; readonly submission?: MessageSubmission; readonly id: string; readonly text: string; readonly attachments: readonly AttachmentReference[] }
   | { readonly type: "agent.run.selected"; readonly capturedRun?: import("../modules/chat/chat-state").CapturedAgentRun }
@@ -337,6 +404,7 @@ export type HostMessage =
       readonly versions?: Partial<Readonly<Record<import("../common/types/provider").ProviderId, import("../infrastructure/vscode/provider-settings").ProviderVersions>>>;
     }
   | { readonly type: "providers.catalog"; readonly catalog: import("../infrastructure/agent-factory/provider-version-catalog").ProviderVersionCatalog }
+  | ({ readonly type: "providers.auth" } & import("../infrastructure/vscode/provider-authentication").ProviderAuthSnapshot)
   | { readonly type: "runtime.updated"; readonly runtimeAvailable: boolean; readonly capabilities?: { readonly submit: import("../common/types/agent-runtime").ExecutionCapabilities; readonly send: import("../common/types/agent-runtime").ExecutionCapabilities } }
   | ({
       readonly type: "host.initialize";

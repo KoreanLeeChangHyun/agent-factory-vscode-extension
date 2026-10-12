@@ -8,38 +8,54 @@
     />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <link rel="stylesheet" href="{{styleUri}}" />
+    <link rel="stylesheet" href="{{chatStyleBaseUri}}/role-pools.css" />
     <link rel="stylesheet" href="{{chatStyleBaseUri}}/chat/controls.css" />
     <link rel="stylesheet" href="{{chatStyleBaseUri}}/chat/panels.css" />
     <link rel="stylesheet" href="{{chatStyleBaseUri}}/chat/settings.css" />
     <link rel="stylesheet" href="{{chatStyleBaseUri}}/chat/maestro.css" />
+    <link rel="stylesheet" href="{{chatStyleBaseUri}}/chat/conductor-queue.css" />
   </head>
   <body>
     <main id="maestro-center" class="maestro-center" aria-label="Control center" data-i18n-aria-label="maestro.center">
       <header class="maestro-header">
-        <h1 class="maestro-title" data-i18n="maestro.center">Control center</h1>
         <div class="maestro-views" role="tablist" aria-label="View" data-i18n-aria-label="maestro.view">
           <button id="maestro-workers-view" type="button" role="tab" aria-selected="true" aria-controls="maestro-tasks"><span data-i18n="maestro.workers">Workers</span><span id="maestro-workers-count" class="maestro-tab-count" aria-live="polite"></span></button>
           <button id="maestro-tasks-view" type="button" role="tab" aria-selected="false" aria-controls="maestro-tasks" tabindex="-1" data-i18n="maestro.tasks">Tasks</button>
         </div>
+        <div id="maestro-scope-switch" class="maestro-scope-switch" role="group" aria-label="Workers shown" data-i18n-aria-label="maestro.scopeLabel" hidden>
+          <button id="maestro-scope-active" type="button" aria-pressed="true">Active</button>
+          <button id="maestro-scope-all" type="button" aria-pressed="false">All</button>
+        </div>
+        <div class="maestro-search" role="search"><svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="M7 12A5 5 0 1 0 7 2a5 5 0 0 0 0 10zM10.5 10.5L14 14" /></svg><input id="maestro-search" type="search" aria-label="Search" placeholder="Search" data-i18n-aria-label="maestro.search" data-i18n-placeholder="maestro.searchPlaceholder" /></div>
+        <div class="maestro-filter-menu">
+          <button id="maestro-filter-toggle" class="maestro-button maestro-filter-toggle" type="button" aria-label="Filters" aria-haspopup="true" aria-expanded="false" aria-controls="maestro-filter-popover" data-i18n-aria-label="maestro.filters">
+            <span data-i18n="maestro.filters">Filters</span><span id="maestro-filter-count" class="maestro-filter-count" aria-live="polite" hidden></span>
+          </button>
+          <div id="maestro-filter-popover" class="maestro-filters maestro-filter-popover" role="group" aria-label="Filters" data-i18n-aria-label="maestro.filters" hidden>
+            <fieldset id="maestro-status" class="maestro-status-filter"><legend data-i18n="maestro.status">Status</legend><span id="maestro-status-summary" class="maestro-status-summary" aria-live="polite"></span><div id="maestro-status-options" class="maestro-status-options"></div></fieldset>
+            <span class="maestro-select"><select id="maestro-scope" aria-label="Conversation" data-i18n-aria-label="maestro.scope"></select><svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="M4 6l4 4 4-4" /></svg></span>
+            <span id="maestro-domain-filter" class="maestro-select" hidden><select id="maestro-domain" aria-label="Domain" data-i18n-aria-label="maestro.domain"></select><svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="M4 6l4 4 4-4" /></svg></span>
+            <label class="maestro-show-hidden"><input id="maestro-show-hidden" type="checkbox" /><span data-i18n="maestro.showHidden">Show hidden workers</span></label>
+          </div>
+        </div>
+        <button id="maestro-domain-add" class="maestro-button maestro-add" type="button" hidden><svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="M8 3v10M3 8h10" /></svg><span data-i18n="maestro.domainAdd">New domain</span></button>
         <button id="maestro-supervision" class="maestro-button" type="button" aria-controls="maestro-detail" data-i18n="maestro.supervisionReport">Supervision report</button>
         <button id="maestro-refresh" class="maestro-icon-button" type="button" aria-label="Refresh" title="Refresh" data-i18n-aria-label="maestro.refresh" data-i18n-title="maestro.refresh"><svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="M13 8a5 5 0 1 1-1.5-3.5M13 2.5v3h-3" /></svg></button>
       </header>
-      <div class="maestro-filters" role="search">
-        <span class="maestro-search"><svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="M7 12A5 5 0 1 0 7 2a5 5 0 0 0 0 10zM10.5 10.5L14 14" /></svg><input id="maestro-search" type="search" aria-label="Search" placeholder="Search" data-i18n-aria-label="maestro.search" data-i18n-placeholder="maestro.searchPlaceholder" /></span>
-        <div class="maestro-filter-group" role="group" aria-label="Filters" data-i18n-aria-label="maestro.filters">
-          <span class="maestro-select"><select id="maestro-status" aria-label="Status" data-i18n-aria-label="maestro.status"></select><svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="M4 6l4 4 4-4" /></svg></span>
-          <span class="maestro-select"><select id="maestro-scope" aria-label="Conversation" data-i18n-aria-label="maestro.scope"></select><svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="M4 6l4 4 4-4" /></svg></span>
-          <span id="maestro-domain-filter" class="maestro-select" hidden><select id="maestro-domain" aria-label="Domain" data-i18n-aria-label="maestro.domain"></select><svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="M4 6l4 4 4-4" /></svg></span>
-        </div>
-        <button id="maestro-domain-add" class="maestro-button maestro-add" type="button" hidden><svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="M8 3v10M3 8h10" /></svg><span data-i18n="maestro.domainAdd">New domain</span></button>
-      </div>
+      <section id="conductor-queue-workers" class="conductor-queue-board conductor-queue-workers" aria-label="Conductor queue" data-i18n-aria-label="conductorQueue.board" hidden></section>
+      <section id="role-pools" class="role-pools" aria-label="Areas and roles" hidden></section>
       <div id="maestro-workspace" class="maestro-workspace" data-layout="list">
         <nav id="maestro-tasks" class="maestro-list" aria-label="Workers" data-i18n-aria-label="maestro.workers"></nav>
+        <div id="maestro-splitter" class="maestro-splitter" role="separator" tabindex="0" aria-orientation="vertical" aria-controls="maestro-tasks" aria-label="Resize list and detail" data-i18n-aria-label="maestro.resizePanes" hidden></div>
         <article id="maestro-detail" class="maestro-detail" tabindex="-1" hidden></article>
       </div>
     </main>
+    <script nonce="{{nonce}}" src="{{executionReferencesScriptUri}}"></script>
     <script nonce="{{nonce}}" src="{{localizationScriptUri}}"></script>
+    <script nonce="{{nonce}}" src="{{chatModuleBaseUri}}/chat/activity-rows.js"></script>
     <script nonce="{{nonce}}" src="{{chatModuleBaseUri}}/chat/maestro.js"></script>
+    <script nonce="{{nonce}}" src="{{chatModuleBaseUri}}/chat/conductor-queue.js"></script>
+    <script nonce="{{nonce}}" src="{{chatModuleBaseUri}}/role-pools.js"></script>
     <script nonce="{{nonce}}" src="{{chatModuleBaseUri}}/control-center.js"></script>
   </body>
 </html>

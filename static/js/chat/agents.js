@@ -45,7 +45,7 @@ globalThis.AgentFactoryChat.agents = function (host) {
       main.className = "agent-item-main";
       const role = document.createElement("span");
       role.className = "agent-role";
-      role.textContent = agent.role === "work" ? t("ui.work") : t("ui.verification");
+      role.textContent = agent.role === "work" ? t("ui.work") : t("ui.verification.role");
       const id = document.createElement("span");
       id.className = "agent-id";
       id.textContent = host.chatTaskFlow.childTaskName(agent);

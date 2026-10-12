@@ -15,6 +15,21 @@
   // Provider tool names known before structured arguments existed in saved history.
   const LEGACY_TOOL_KINDS = { Read: "read", view_file: "read", Grep: "search", grep_search: "search", Glob: "list", LS: "list",
     list_dir: "list", find_by_name: "list", WebSearch: "web", search_web: "web", WebFetch: "page", read_url_content: "page" };
+  // Monochrome 16px glyph per row kind, shared by every view that shows an activity row.
+  const ICONS = Object.freeze({
+    read: "M4 2h6l3 3v9H4z M10 2v3h3 M6 8h5 M6 11h5",
+    search: "M7 3a4 4 0 1 1 0 8a4 4 0 1 1 0-8z M10 10l4 4",
+    list: "M2 4h5l1 2h6v7H2z",
+    skill: "M3 3h4a2 2 0 0 1 1 1v10a2 2 0 0 0-1-1H3z M13 3H9a2 2 0 0 0-1 1v10a2 2 0 0 1 1-1h4z",
+    git: "M5 3v10 M11 6a2 2 0 1 0 0-.1z M5 13a2 2 0 1 0 0-.1z M11 8c0 3-6 2-6 4",
+    web: "M8 2a6 6 0 1 1 0 12a6 6 0 1 1 0-12z M2 8h12 M8 2c3 3 3 9 0 12 M8 2c-3 3-3 9 0 12",
+    page: "M7 9l2-2 M6 6l2-2a2.5 2.5 0 0 1 4 4l-2 2 M10 10l-2 2a2.5 2.5 0 0 1-4-4l2-2",
+    edit: "M3 13l1-3 7-7 2 2-7 7z M9 5l2 2",
+    run: "M3 4l4 4-4 4 M8 12h5",
+    test: "M6 2h4 M7 2v4l-4 7a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1l-4-7V2",
+    tool: "M6 2v4 M10 2v4 M4 6h8v2a4 4 0 0 1-8 0z M8 12v2",
+    think: "M8 2a4 4 0 0 1 3 7v2H5V9a4 4 0 0 1 3-7z M6 14h4"
+  });
 
   function shellWords(line) {
     const words = [];
@@ -302,7 +317,45 @@
     });
   }
 
-  globalThis.agentFactoryActivityRows = Object.freeze({ shellWords, classifyCommand, splitDiff, pageTarget, errorLine, describe, splitPaths, shortPaths });
+  function durationText(ms, t) {
+    if (!(ms >= 0)) return "";
+    if (ms < 1000) return t("activity.duration.ms", Math.round(ms));
+    const seconds = ms / 1000;
+    if (seconds < 10) return t("duration.seconds", (Math.round(seconds * 10) / 10).toFixed(1));
+    if (seconds < 60) return t("duration.seconds", Math.round(seconds));
+    const whole = Math.round(seconds);
+    if (whole < 3600) return t("duration.minutes", Math.floor(whole / 60), whole % 60);
+    return t("duration.hours", Math.floor(whole / 3600), Math.floor(whole % 3600 / 60), whole % 60);
+  }
+
+  /**
+   * One activity event as a single line, in the words of its timeline row: verb, target (path names only), scope,
+   * result and duration. `full` names the full paths and the raw command for a tooltip. Several changed files share one line.
+   */
+  function headline(event, t) {
+    const rows = describe(event);
+    const row = rows[0];
+    if (!row) return undefined;
+    const verb = t("activity.verb." + row.kind + "." + row.phase);
+    const targets = rows.map(item => item.target).filter(Boolean);
+    const paths = row.path ? targets.flatMap(splitPaths) : [];
+    const target = row.path ? shortPaths(paths).join(", ") : targets.join(", ");
+    const scopes = splitPaths(row.scope);
+    const scope = scopes.length ? t("activity.target.in", "", shortPaths(scopes).join(", ")).trim() : "";
+    const results = (Array.isArray(row.result) ? row.result : row.result ? [row.result] : [])
+      .map(part => part.key ? t(part.key, ...part.values) : part.text).filter(Boolean);
+    const took = row.phase !== "started" && Number.isFinite(event.durationMs) ? durationText(event.durationMs, t) : "";
+    const tail = [...results, took].filter(Boolean);
+    const text = [verb, target, scope, row.argument].filter(Boolean).join(" ") + (tail.length ? " · " + tail.join(" · ") : "");
+    const fullTarget = row.path ? paths.join(", ") : targets.join(", ");
+    const fullScope = scopes.length ? t("activity.target.in", "", scopes.join(", ")).trim() : "";
+    const raw = row.kind === "edit" || row.kind === "think" ? "" : String(event.text || "");
+    const first = [verb, fullTarget, fullScope, row.argument].filter(Boolean).join(" ") + (tail.length ? " · " + tail.join(" · ") : "");
+    const full = [first, raw && !fullTarget.split(", ").includes(raw) && raw !== fullTarget ? raw : ""].filter(Boolean).join("\n");
+    return { kind: row.kind, phase: row.phase, text, full };
+  }
+
+  globalThis.agentFactoryActivityRows = Object.freeze({ shellWords, classifyCommand, splitDiff, pageTarget, errorLine, describe, splitPaths, shortPaths, durationText, headline, ICONS });
 })();
 
 globalThis.AgentFactoryChat = globalThis.AgentFactoryChat || {};
@@ -313,20 +366,7 @@ globalThis.AgentFactoryChat.activityRows = function (host) {
   const model = globalThis.agentFactoryActivityRows;
   const SVG = "http://www.w3.org/2000/svg";
   // Monochrome 16px glyphs; status is carried by text and a small leading mark, never by borders.
-  const ICONS = {
-    read: "M4 2h6l3 3v9H4z M10 2v3h3 M6 8h5 M6 11h5",
-    search: "M7 3a4 4 0 1 1 0 8a4 4 0 1 1 0-8z M10 10l4 4",
-    list: "M2 4h5l1 2h6v7H2z",
-    skill: "M3 3h4a2 2 0 0 1 1 1v10a2 2 0 0 0-1-1H3z M13 3H9a2 2 0 0 0-1 1v10a2 2 0 0 1 1-1h4z",
-    git: "M5 3v10 M11 6a2 2 0 1 0 0-.1z M5 13a2 2 0 1 0 0-.1z M11 8c0 3-6 2-6 4",
-    web: "M8 2a6 6 0 1 1 0 12a6 6 0 1 1 0-12z M2 8h12 M8 2c3 3 3 9 0 12 M8 2c-3 3-3 9 0 12",
-    page: "M7 9l2-2 M6 6l2-2a2.5 2.5 0 0 1 4 4l-2 2 M10 10l-2 2a2.5 2.5 0 0 1-4-4l2-2",
-    edit: "M3 13l1-3 7-7 2 2-7 7z M9 5l2 2",
-    run: "M3 4l4 4-4 4 M8 12h5",
-    test: "M6 2h4 M7 2v4l-4 7a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1l-4-7V2",
-    tool: "M6 2v4 M10 2v4 M4 6h8v2a4 4 0 0 1-8 0z M8 12v2",
-    think: "M8 2a4 4 0 0 1 3 7v2H5V9a4 4 0 0 1 3-7z M6 14h4"
-  };
+  const ICONS = model.ICONS;
   const builders = new WeakMap();
   const tooltips = new WeakMap();
   let tooltip;
@@ -356,14 +396,7 @@ globalThis.AgentFactoryChat.activityRows = function (host) {
   }
 
   function duration(ms) {
-    if (!(ms >= 0)) return "";
-    if (ms < 1000) return t("activity.duration.ms", Math.round(ms));
-    const seconds = ms / 1000;
-    if (seconds < 10) return t("duration.seconds", (Math.round(seconds * 10) / 10).toFixed(1));
-    if (seconds < 60) return t("duration.seconds", Math.round(seconds));
-    const whole = Math.round(seconds);
-    if (whole < 3600) return t("duration.minutes", Math.floor(whole / 60), whole % 60);
-    return t("duration.hours", Math.floor(whole / 3600), Math.floor(whole % 3600 / 60), whole % 60);
+    return model.durationText(ms, t);
   }
 
   function elapsedSeconds(startedAt) {

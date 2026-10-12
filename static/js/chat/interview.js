@@ -8,6 +8,8 @@ globalThis.AgentFactoryChat.interview = function (host) {
 
   function canAnswerInterview(event) {
     if (event.streaming) return false;
+    const scoped = host.conductorUI?.canAnswerChoice?.(event);
+    if (scoped !== undefined) return scoped;
     if (event.type === "interview") {
       const position = indexedTimeline().positions.get(event.id);
       if (position === undefined || state.timeline.slice(position + 1).some(item => item.type === "user" || item.type === "interview")) return false;
@@ -44,6 +46,7 @@ globalThis.AgentFactoryChat.interview = function (host) {
       const button = document.createElement("button");
       button.type = "button";
       button.className = "interview-choice";
+      button.dataset.answerValue = option.value;
       button.textContent = question.yesNo ? option.label : String(index + 1);
       button.setAttribute("aria-label", `${index + 1}: ${option.label}`);
       button.disabled = !canAnswerInterview(event);
@@ -102,6 +105,7 @@ globalThis.AgentFactoryChat.interview = function (host) {
         const button = document.createElement("button");
         button.type = "button";
         button.className = "interview-choice";
+        button.dataset.answerValue = number;
         button.textContent = yesNo ? row.cells[1].textContent.trim() : number;
         button.setAttribute("aria-label", number + ": " + row.cells[1].textContent.trim());
         button.disabled = !canAnswerInterview(event);

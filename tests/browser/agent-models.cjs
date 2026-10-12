@@ -25,13 +25,13 @@ async function checkFastSetting(page) {
   assert.equal(await page.locator('#model-menu > #agent-fast-setting').count(), 0);
   assert.equal(await page.locator('#model-menu .agent-settings-columns > span').last().textContent(), '빠른 모드');
   assert.equal(await fast.getAttribute('aria-pressed'), 'true');
-  assert.equal(await fast.getAttribute('aria-label'), '조율자 빠른 모드 켜짐');
+  assert.equal(await fast.getAttribute('aria-label'), '지휘자 빠른 모드 켜짐');
   assert.equal(await fast.locator('span').textContent(), '켜짐');
   const scopeBefore = await page.locator('#agent-default-scope').inputValue();
   const defaultsBefore = await page.evaluate(() => window.sentMessages.filter(message => message.type === 'agent.defaults.save' || message.type === 'agent.preset.field').length);
   await fast.click();
   assert.equal(await fast.getAttribute('aria-pressed'), 'false');
-  assert.equal(await fast.getAttribute('aria-label'), '조율자 빠른 모드 꺼짐');
+  assert.equal(await fast.getAttribute('aria-label'), '지휘자 빠른 모드 꺼짐');
   assert.equal(await fast.locator('span').textContent(), '꺼짐');
   assert.equal(await page.locator('#agent-default-scope').inputValue(), scopeBefore, 'Fast is independent of the selected defaults scope');
   assert.equal(await page.evaluate(() => window.sentMessages.filter(message => message.type === 'agent.defaults.save' || message.type === 'agent.preset.field').length), defaultsBefore);

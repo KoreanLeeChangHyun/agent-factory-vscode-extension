@@ -1,0 +1,157 @@
+/* Multi-conductor queue harness: request board above the composer and conductor timeline entries. */
+.conductor-queue-board {
+  display: grid;
+  gap: 4px;
+  max-height: 30vh;
+  margin: 0 0 6px;
+  padding: 6px 8px;
+  overflow-y: auto;
+  border: 1px solid var(--vscode-panel-border, rgba(128, 128, 128, 0.35));
+  border-radius: 6px;
+  font-size: 12px;
+}
+
+.conductor-queue-board[hidden] {
+  display: none;
+}
+
+.conductor-queue-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  color: var(--vscode-descriptionForeground);
+}
+
+.conductor-queue-role::before {
+  content: "";
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  margin-right: 5px;
+  border-radius: 50%;
+  background: var(--vscode-descriptionForeground);
+  vertical-align: middle;
+}
+
+.conductor-queue-role[data-role="leader"]::before,
+.conductor-queue-role[data-role="follower"]::before {
+  background: var(--vscode-testing-iconPassed, #3fa45b);
+}
+
+.conductor-queue-role[data-role="disconnected"]::before {
+  background: var(--vscode-errorForeground, #d16969);
+}
+
+.conductor-queue-error {
+  color: var(--vscode-errorForeground);
+  overflow-wrap: anywhere;
+}
+
+.conductor-queue-requests {
+  display: grid;
+  gap: 3px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.conductor-queue-requests li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.conductor-queue-request {
+  flex: 1 1 180px;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.conductor-queue-approval {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  color: var(--vscode-descriptionForeground);
+}
+
+.conductor-queue-button {
+  min-height: 22px;
+  padding: 0 8px;
+  border: 1px solid var(--vscode-button-border, var(--vscode-panel-border, rgba(128, 128, 128, 0.45)));
+  border-radius: 4px;
+  background: var(--vscode-button-secondaryBackground, transparent);
+  color: var(--vscode-button-secondaryForeground, inherit);
+  font: inherit;
+  cursor: pointer;
+}
+
+.conductor-queue-button:hover {
+  background: var(--vscode-button-secondaryHoverBackground, rgba(128, 128, 128, 0.15));
+}
+
+.conductor-queue-button:focus-visible {
+  outline: 1px solid var(--vscode-focusBorder);
+  outline-offset: 1px;
+}
+
+.conductor-entry-label {
+  margin-bottom: 2px;
+  color: var(--vscode-descriptionForeground);
+  font-size: 11px;
+  overflow-wrap: anywhere;
+}
+
+.conductor-entry[data-kind="status"] .conductor-entry-body,
+.conductor-entry-meta {
+  color: var(--vscode-descriptionForeground);
+}
+
+.conductor-entry-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 6px;
+}
+
+/* In the control center the section sits between the header and the workspace, which keeps the remaining height. */
+.maestro-center:has(> .conductor-queue-workers:not([hidden])) {
+  grid-template-rows: auto auto minmax(0, 1fr);
+}
+
+.conductor-queue-workers {
+  align-content: start;
+  max-height: 40vh;
+  margin: 0 8px 8px;
+}
+
+.conductor-queue-workers-list {
+  display: grid;
+  gap: 4px;
+  margin: 2px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.conductor-queue-workers-list li {
+  display: grid;
+  gap: 1px;
+  min-width: 0;
+  padding: 3px 0;
+  border-top: 1px solid var(--vscode-panel-border, rgba(128, 128, 128, 0.2));
+}
+
+.conductor-queue-worker-title {
+  overflow-wrap: anywhere;
+}
+
+.conductor-queue-worker-meta {
+  color: var(--vscode-descriptionForeground);
+  font-size: 11px;
+  overflow-wrap: anywhere;
+}
+
+.conductor-queue-plans { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 11px; }

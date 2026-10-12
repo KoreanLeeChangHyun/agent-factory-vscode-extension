@@ -28,9 +28,16 @@ globalThis.AgentFactoryChat.statusBar = function (host) {
         item.dataset.itemId = itemId;
         bindStatusDrag(item, itemId, false);
         item.addEventListener("click", function () {
+          if (host.conductorUI?.enabled) {
+            if (["agents", "context", "status"].includes(itemId)) host.conductorUI.openSessions();
+            return;
+          }
           if (itemId === "agents" && state.role === "main") host.chatAgents.openAgentsMenu();
         });
         item.addEventListener("keydown", function (event) {
+          if (host.conductorUI?.enabled && ["agents", "context", "status"].includes(itemId) && ["Enter", " "].includes(event.key)) {
+            event.preventDefault(); host.conductorUI.openSessions(); return;
+          }
           if (itemId === "agents" && state.role === "main" && ["Enter", " "].includes(event.key)) {
             event.preventDefault();
             host.chatAgents.openAgentsMenu();
@@ -68,7 +75,11 @@ globalThis.AgentFactoryChat.statusBar = function (host) {
         item.setAttribute("aria-haspopup", "dialog");
         item.setAttribute("aria-expanded", String(!agentsMenu.hidden));
       } else if (itemId === "context" && state.contextUsedTokens !== undefined && state.contextWindowTokens > 0) {
-        renderContextStatus(item);
+        if (!host.conductorUI?.enabled) renderContextStatus(item);
+      }
+      if (host.conductorUI?.enabled && ["agents", "context", "status"].includes(itemId)) {
+        item.setAttribute("role", "button"); item.setAttribute("aria-haspopup", "dialog");
+        item.title = label; item.setAttribute("aria-description", label); item.removeAttribute("aria-expanded");
       }
       if ((itemId === "agents" && state.role === "main") || (itemId === "runtime" && !state.runtimeAvailable)) {
         const indicator = document.createElementNS("http://www.w3.org/2000/svg", "svg");
@@ -266,6 +277,10 @@ globalThis.AgentFactoryChat.statusBar = function (host) {
     statusSettingsButton.focus();
   }
   function statusItemAvailable(id) {
+    if (host.conductorUI?.enabled) {
+      if (["status", "agents", "queue", "context"].includes(id)) return true;
+      if (["agent", "role", "agentsTotal", "contextUsed", "contextRemainingTokens", "contextUsedPercent", "contextWindow", "elapsed", "goal", "goalTokens", "goalBudget", "goalTime"].includes(id)) return false;
+    }
     const main = state.role === "main";
     const hasUsage = safeCountOrUndefined(state.contextUsedTokens) !== undefined;
     const hasWindow = state.contextWindowTokens > 0;
@@ -294,6 +309,8 @@ globalThis.AgentFactoryChat.statusBar = function (host) {
     }
   }
   function statusLabel(itemId) {
+    const projected = host.conductorUI?.statusLabel(itemId);
+    if (projected !== undefined) return projected;
     const main = state.role === "main";
     const count = value => safeCountOrUndefined(value) === undefined ? "—" : value.toLocaleString(uiLocale());
     const goalLabels = { active: t("ui.active.a733b8"), paused: t("ui.paused"), blocked: t("ui.awaiting.input"), usageLimited: t("ui.usage.limit"), budgetLimited: t("ui.budget.limit"), complete: t("ui.done") };

@@ -11,6 +11,46 @@ async function writeLoop(agentsRoot, agent, loop, state) {
   await writeFile(path, JSON.stringify(state));
 }
 
+test("request views and restored task history preserve A/A-1/A-2 and separate an identical B", async t => {
+  const { AgentFactoryClient } = await importTypeScript("src/infrastructure/agent-factory/agent-client.ts");
+  const { requestFields } = await importTypeScript("src/infrastructure/agent-factory/request-presentation.ts");
+  const root = await mkdtemp(join(tmpdir(), "af-request-view-")); t.after(() => rm(root, { recursive: true, force: true }));
+  const agentsRoot = join(root, "agents");
+  const original = "# Goal\n설정 복원\n# Scope\n원래 범위 유지\n# Done\n재시작 검사 통과\n# Constraints\n권한 확대 금지\n";
+  assert.deepEqual(requestFields(original), { goal: "설정 복원", scope: "원래 범위 유지", completion: "재시작 검사 통과", constraints: "권한 확대 금지" });
+  assert.equal(requestFields("Free text\n```md\n# Goal\nQuoted heading\n```").goal, "Free text\n```md\n# Goal\nQuoted heading\n```", "Code fences are never interpreted as fields");
+  assert.equal(requestFields("## 1. 범위\n### 포함\n저장\n### 제외\n삭제\n## 2. 완료 기준\n복원 확인").scope,
+    "### 포함\n저장\n### 제외\n삭제", "Nested sections remain inside their explicit scope");
+  const task = { id: "task-A", title: "동일 제목", description: original, completionCriteria: "재시작 검사 통과",
+    workStatus: "completed", workAgentId: "worker", workRunId: "run-A2", requestRevision: 3, userRevisionCount: 2 };
+  const history = [0, 1, 2].map(number => ({ agentId: "worker", runId: "run-A" + number, role: "work", workflowId: "flow-A", taskId: "task-A", requestRevision: number + 1 }));
+  const corrections = [1, 2].map(number => ({ taskId: "task-A", number, baseRequestRevision: number,
+    previousRunId: "run-A" + (number - 1), continuationRunId: "run-A" + number, message: "수정 " + number,
+    status: "delivered", actor: "human", createdAt: `2026-10-12T13:0${number}:00Z` }));
+  await writeLoop(agentsRoot, "worker", "loop-A", { status: "completed", workAgentId: "worker", workflow: { id: "flow-A", title: "A", tasks: [task] },
+    dispatchHistory: history, userRevisions: corrections, execution: { taskMode: "work" } });
+  for (const [index, item] of history.entries()) {
+    const directory = join(agentsRoot, "worker", "runs", item.runId); await mkdir(directory, { recursive: true });
+    await writeFile(join(directory, "state.json"), JSON.stringify({ ...item, status: "completed", acceptedAt: `2026-10-12T13:0${index}:01Z`,
+      taskBinding: { workflowId: "flow-A", taskId: "task-A", title: task.title, description: original, completionCriteria: task.completionCriteria } }));
+    await writeFile(join(directory, "request.md"), index ? "Exact delta " + index + "\n" : original);
+  }
+  await writeLoop(agentsRoot, "worker", "loop-B", { status: "completed", workAgentId: "worker", workflow: { id: "flow-B", title: "B", tasks: [{ ...task, id: "task-B", workRunId: undefined, userRevisionCount: 0 }] }, execution: { taskMode: "work" } });
+  const client = () => { const value = new AgentFactoryClient(join(root, "exec.py"), root); value.location = async () => ({ home: root, projectId: "project-test", agentsRoot }); return value; };
+  const entries = await client().listProjectTasks();
+  assert.equal(entries.length, 2);
+  const a = entries.find(entry => entry.id === "flow-A").tasks[0];
+  assert.equal(a.runs.length, 3); assert.equal(a.userRevisionCount, 2);
+  assert.deepEqual(a.commands.map(command => command.kind), ["request", "revision", "revision"]);
+  assert.deepEqual((await client().requestView("worker", "run-A0")).changes, [], "Historical original cannot acquire future corrections");
+  const view = await client().requestView("worker", "run-A2");
+  assert.deepEqual(view.fields, requestFields(original));
+  assert.deepEqual(view.changes.map(change => [change.number, change.baseRevision, change.text]), [[1, 1, "수정 1"], [2, 2, "수정 2"]]);
+  assert.equal(view.original, "Exact delta 2\n");
+  assert.equal(JSON.parse(view.metadata).taskBinding.description, original);
+  await assert.rejects(client().requestView("../escape", "run-A0"));
+});
+
 test("project task history reads every conversation's briefs without driving loops", async t => {
   const { AgentFactoryClient } = await importTypeScript("src/infrastructure/agent-factory/agent-client.ts");
   const root = await mkdtemp(join(tmpdir(), "af-project-tasks-"));
@@ -165,6 +205,54 @@ test("control center projects the recorded allocation domain and leaves missing 
   assert.equal(entry.tasks[0].allocation.domain, "extension UI");
 });
 
+test("team records are read through loop.py pages with one revision; a changed revision restarts and an older plugin is unsupported", async t => {
+  const { AgentFactoryClient } = await importTypeScript("src/infrastructure/agent-factory/agent-client.ts");
+  const root = await mkdtemp(join(tmpdir(), "af-team-")); t.after(() => rm(root, { recursive: true, force: true }));
+  const client = new AgentFactoryClient(join(root, "exec.py"), root, process.execPath);
+  client.location = async () => ({ home: join(root, "home"), projectId: "project-test", agentsRoot: join(root, "agents") });
+  const log = join(root, "calls.jsonl"), mode = join(root, "mode.json");
+  // A stand-in loop.py (run by node): serves the roster in 40-character pages; "change" makes the first continued page stale.
+  await writeFile(join(root, "loop.py"), `
+    const fs = require("node:fs"); const argv = process.argv.slice(2); fs.appendFileSync(${JSON.stringify(log)}, JSON.stringify(argv) + "\\n");
+    const state = JSON.parse(fs.readFileSync(${JSON.stringify(mode)}, "utf8"));
+    if (state.unsupported) { console.log(JSON.stringify({ kind: "error", error: { code: "invalid_arguments", message: "argument command: invalid choice: '" + argv[0] + "' (choose from 'start', 'status')" } })); process.exit(2); }
+    const roster = { kind: "team-roster", workers: [{ agentId: "work-a", availability: "waiting-human", model: "claude-opus-5-5", removed: false, currentTasks: [{ taskId: "task-a", title: "Long title", state: "waiting-human" }],
+      failedTasks: [], queuedTasks: [], holds: [{ kind: "waiting-human", runStatus: "needs-human-decision", statePath: "/secret/path" }], latestRun: { runId: "run-a", status: "needs-human-decision", report: "missing", requestPath: "/secret" }, taskCounts: { "waiting-human": 1 }, runCount: 2 },
+      { agentId: "work-b", availability: "idle", removed: false }] };
+    const text = JSON.stringify({ ...roster, version: state.version || "0" });
+    const offset = Number(argv[argv.indexOf("--offset") + 1]); const revision = argv.includes("--revision") ? argv[argv.indexOf("--revision") + 1] : undefined;
+    const current = "rev-" + (state.version || "0");
+    if (revision && revision !== current) { console.log(JSON.stringify({ kind: "error", error: { code: "read_revision_changed", message: "changed" } })); process.exit(2); }
+    if (state.change && offset > 0) { state.change = false; state.version = "1"; fs.writeFileSync(${JSON.stringify(mode)}, JSON.stringify(state)); }
+    const end = Math.min(text.length, offset + 40);
+    console.log(JSON.stringify({ kind: "text-page", offset, nextOffset: end < text.length ? end : null, revision: current, text: text.slice(offset, end) }));`);
+  await writeFile(mode, JSON.stringify({}));
+  const roster = await client.teamRoster();
+  assert.equal(roster.status, "ok", JSON.stringify(roster));
+  assert.deepEqual(JSON.parse(JSON.stringify(roster.workers[0])), { agentId: "work-a", model: "claude-opus-5-5", availability: "waiting-human", removed: false,
+    current: [{ taskId: "task-a", title: "Long title", state: "waiting-human" }], queued: [], failed: [], holds: [{ kind: "waiting-human", runStatus: "needs-human-decision" }],
+    latestRun: { runId: "run-a", status: "needs-human-decision", report: "missing" }, taskCounts: { "waiting-human": 1 }, runCount: 2 }, "Recorded fields only; paths stay in the plugin");
+  assert.equal(roster.workers[1].model, undefined, "An unknown model stays unknown");
+  const calls = (await readFile(log, "utf8")).trim().split("\n").map(line => JSON.parse(line));
+  assert.ok(calls.length > 5, "Every page was read");
+  assert.ok(calls.slice(1).every(argv => argv[argv.indexOf("--revision") + 1] === "rev-0"), "Each later page is bound to the first page's revision");
+  assert.deepEqual(calls[0].slice(0, 7), ["team-roster", "--project-root", root, "--runtime-home", join(root, "home"), "--project-id", "project-test"]);
+  // The records change between pages: the read restarts from offset 0 with the new revision.
+  await writeFile(log, ""); await writeFile(mode, JSON.stringify({ change: true }));
+  const changed = await client.teamRoster();
+  assert.equal(changed.status, "ok", JSON.stringify(changed));
+  const restarted = (await readFile(log, "utf8")).trim().split("\n").map(line => JSON.parse(line));
+  assert.ok(restarted.filter(argv => argv[argv.indexOf("--offset") + 1] === "0").length === 2, "The read restarted once from the start");
+  // An installed plugin without the team commands: unsupported, not an error.
+  await writeFile(mode, JSON.stringify({ unsupported: true }));
+  assert.deepEqual(await client.teamRoster(), { status: "unsupported" });
+  assert.deepEqual(await client.teamHistory("work-a"), { status: "unsupported", agentId: "work-a" });
+  assert.equal((await client.teamHistory("../escape")).status, "error", "Agent IDs are validated before any call");
+  // Run files resolve only inside the managed records and only when written.
+  assert.equal(await client.teamRunDocument("work-a", "run-a", "receipt"), undefined);
+  assert.equal(await client.teamRunDocument("../x", "run-a", "receipt"), undefined);
+});
+
 test("project domains are read and edited through the plugin's domains.py as the Human, with errors kept", async t => {
   const { AgentFactoryClient } = await importTypeScript("src/infrastructure/agent-factory/agent-client.ts");
   const root = await mkdtemp(join(tmpdir(), "af-domains-")); t.after(() => rm(root, { recursive: true, force: true }));
@@ -260,7 +348,7 @@ test("worker commands bind the exact running loop or start a same-session task; 
   assert.deepEqual(await client.sendWorkerCommand("worker-idle", "Start\nfollow-up", "cmd-00000004"), { mode: "task", loopId: "loop-created" });
   call = (await calls()).at(-1);
   assert.deepEqual(call.argv.filter((value, index) => call.argv[index - 1] !== "--request-file"),
-    ["start", ...scope, "--work-agent", "worker-idle", "--requested-by", "human", "--task-mode", "work", "--request-file", "--receipt-recovery", "auto",
+    ["start", ...scope, "--work-agent", "worker-idle", "--requested-by", "human", "--task-mode", "work", "--acceptance-id", "cmd-00000004", "--request-file", "--receipt-recovery", "auto",
       "--work-model", "newest-model", "--work-execution-mode", "bypass", "--work-profile", "work"]);
   assert.equal(call.request, "Start\nfollow-up", "The Human's text is the request, unchanged");
   assert.equal(call.parent, parent);
@@ -304,7 +392,7 @@ test("worker control messages are validated before reaching the host", async () 
   }
 });
 
-test("a rework starts a new same-session task linked to the ended task and never steers a running one", async t => {
+test("a rework revises the same accepted task with only the delta and never steers another running task", async t => {
   const { AgentFactoryClient } = await importTypeScript("src/infrastructure/agent-factory/agent-client.ts");
   const root = await mkdtemp(join(tmpdir(), "af-worker-rework-")); t.after(() => rm(root, { recursive: true, force: true }));
   const agentsRoot = join(root, "agents"), log = join(root, "calls.jsonl");
@@ -324,17 +412,21 @@ test("a rework starts a new same-session task linked to the ended task and never
   const calls = async () => (await readFile(log, "utf8").catch(() => "")).trim().split("\n").filter(Boolean).map(line => JSON.parse(line));
   // The ended task's own loop supplies the settings, not the worker's newest loop.
   assert.deepEqual(await client.sendWorkerCommand("worker-a", "Fix the empty state", "cmd-00000011", { rework: { workflowId: "flow-old", taskId: "task-old" } }),
-    { mode: "task", loopId: "loop-rework", rework: { workflowId: "flow-old", taskId: "task-old" } });
+    { mode: "revision", loopId: "loop-old", taskId: "task-old", rework: { workflowId: "flow-old", taskId: "task-old" } });
   const call = (await calls()).at(-1);
-  assert.equal(call.argv[0], "start");
-  assert.deepEqual(call.argv.slice(call.argv.indexOf("--work-model"), call.argv.indexOf("--work-model") + 2), ["--work-model", "old-model"]);
-  assert.match(call.request, /^Rework of task task-old \(Done task\)\nEarlier workflow flow-old, loop loop-old, latest Work run run-task-old\./);
-  assert.ok(call.request.endsWith("\n\nFix the empty state"), "The Human's text follows the reference unchanged");
+  assert.equal(call.argv[0], "revise");
+  assert.equal(call.argv[call.argv.indexOf("--loop-id") + 1], "loop-old");
+  assert.equal(call.argv[call.argv.indexOf("--workflow-id") + 1], "flow-old");
+  assert.equal(call.argv[call.argv.indexOf("--task-id") + 1], "task-old");
+  assert.equal(call.argv[call.argv.indexOf("--run-id") + 1], "run-task-old");
+  assert.equal(call.argv[call.argv.indexOf("--message") + 1], "Fix the empty state");
+  assert.equal(call.request, null, "The original request is not copied into a new task");
   // Busy worker, a task of another worker, or a rework that also names a loop: refused before anything runs.
   const count = (await calls()).length;
   await assert.rejects(client.sendWorkerCommand("worker-busy", "x", "cmd-00000012", { rework: { workflowId: "flow-done", taskId: "task-done" } }), error => error.code === "worker_rework_busy");
   await assert.rejects(client.sendWorkerCommand("worker-a", "x", "cmd-00000013", { rework: { workflowId: "flow-done", taskId: "task-done" } }), error => error.code === "worker_rework_scope");
   await assert.rejects(client.sendWorkerCommand("worker-a", "x", "cmd-00000014", { loopId: "loop-old", rework: { workflowId: "flow-old", taskId: "task-old" } }));
+  await assert.rejects(client.sendWorkerCommand("worker-a", "x", "cmd-00000015", { rework: { workflowId: "flow-old", taskId: "task-old", runId: "run-stale" } }), error => error.code === "worker_command_stale");
   assert.equal((await calls()).length, count);
 });
 

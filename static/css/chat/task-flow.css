@@ -51,9 +51,12 @@
 }
 
 .run-status-pulse {
+  /* The ripple ring grows to this multiple of the dot; layouts that align the ring's outer edge read it. */
+  --run-status-pulse-size: 7px;
+  --run-status-ring-scale: 2.4;
   position: relative;
-  width: 7px;
-  height: 7px;
+  width: var(--run-status-pulse-size);
+  height: var(--run-status-pulse-size);
   flex: 0 0 auto;
   border-radius: 50%;
   background: var(--vscode-descriptionForeground);
@@ -91,7 +94,7 @@
 @keyframes run-status-dot-ripple {
   0% { transform: scale(1); opacity: .9; }
   55% { opacity: .55; }
-  100% { transform: scale(2.4); opacity: 0; }
+  100% { transform: scale(var(--run-status-ring-scale)); opacity: 0; }
 }
 
 @media (prefers-reduced-motion: reduce) {

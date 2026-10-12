@@ -74,9 +74,10 @@ function editorFixture({ supported = true, web = false, active = true, moveError
       send(message) { receive?.(message); } };
     mainGroup.tabs.push({input:new TabInputWebview(type)});panels.push(panel); return panel;
   };
-  const prompts=[];let answer;
+  const prompts=[], documents=[];let answer;
   const vscode = { TabInputWebview, UIKind:{Web:2}, env:{uiKind:web?2:1}, ViewColumn:{Active:-1,Beside:-2},
-    window:{createWebviewPanel:makePanel,tabGroups,async showWarningMessage(text,options,...items){prompts.push({text,options,items});return answer===undefined?items[0]:answer;}},
+    window:{createWebviewPanel:makePanel,tabGroups,async showWarningMessage(text,options,...items){prompts.push({text,options,items});return answer===undefined?items[0]:answer;},async showTextDocument(document){documents.push(document.fsPath);}},
+    workspace:{async openTextDocument(uri){return uri;}}, Uri:{file:path=>({fsPath:path})},
     commands:{async getCommands(){return supported?['workbench.action.moveEditorToNewWindow']:[];},
       async executeCommand(command){
         moves.push(command);if(moveError)throw new Error('Fixture window failure');
@@ -91,7 +92,7 @@ function editorFixture({ supported = true, web = false, active = true, moveError
     clearInterval(timer){timer.cleared=true;}, require:name=>name==='vscode'?vscode:nodeRequire(name) });
   const windows = new module.exports.ControlCenterWindows({localResourceRoots:[],async render(_webview,name){assert.equal(name,'control-center.html');return '<html>Center</html>'; }},
     async root=>{reads.push(root);return read?read(root):[{id:root,tasks:[]}];},async(root,message)=>{actions.push({root,message});},undefined,undefined,undefined,orderStore);
-  return {windows,panels,moves,actions,reads,timers,prompts,answer:value=>{answer=value;},
+  return {windows,panels,moves,actions,reads,timers,prompts,documents,answer:value=>{answer=value;},
     moveTab(){const group={tabs:mainGroup.tabs.splice(0),viewColumn:2};tabGroups.all=[group];
       for(const listener of groupListeners)listener({closed:[mainGroup],opened:[group],changed:[]});}};
 }
@@ -118,6 +119,20 @@ test('editor tab is singleton per project under concurrent opening; close/reopen
   assert.equal(JSON.stringify(f.panels[2].messages.find(value=>value.type==='control.center.project')),JSON.stringify({type:'control.center.project',projectRoot:'/projects/B'}));
   assert.equal(f.reads.at(-1),'/projects/B');
   f.windows.dispose();assert.ok(f.panels.every(panel=>panel.disposed));
+});
+
+test('request views wait for webview readiness and preserve the exact read-only payload',async()=>{
+  const f=editorFixture();
+  const view={title:'작업 A',agentId:'worker-A',runId:'run-A2',fields:{goal:'목표',scope:'범위',completion:'완료 기준',constraints:'권한 유지'},
+    changes:[{number:2,text:'이번 수정'}],original:'원문😀\n'.repeat(5000),metadata:'{"taskId":"task-A"}'};
+  await f.windows.showRequest('/projects/A',view);
+  assert.equal(f.panels.length,1);
+  assert.equal(f.panels[0].messages.some(message=>message.type==='request.view'),false);
+  f.panels[0].send({type:'client.ready'});await settle();
+  assert.deepEqual(f.panels[0].messages.find(message=>message.type==='request.view').view,view);
+  assert.equal(f.documents.length,0,'The default view does not open an editable request file');
+  assert.equal(f.actions.length,0,'Reading a request dispatches no work');
+  f.windows.dispose();
 });
 
 test('editor tabs open on desktop and web hosts without requesting new OS windows',async()=>{
@@ -191,8 +206,11 @@ test('worker index names the model and first assignment, lists every open task a
   assert.deepEqual(Array.from(a.current,value=>value.task.id),['running','waiting'],'Running work leads even when a waiting task is newer');
   assert.equal(a.ended.task.id,'newest-done','Only the newest ended task is listed; older ones stay in history');
   assert.equal(a.status,'running','The row state is an open task, not a past result');
+  // The row's task: title, state and the line under the row all describe the most urgent open task.
+  assert.equal(a.primary.task.id,'running');assert.equal(a.primaryShort,'Task running');assert.equal(a.status,a.primary.status);
   const ended=context.AgentFactoryChat.maestroWorkerIndex([row('only','completed','2026-10-05T00:00:00Z',{run:{provider:'codex'}})],undefined,Date.now())[0];
   assert.equal(ended.model,'');assert.equal(ended.provider,'codex');assert.equal(ended.current.length,0);assert.equal(ended.status,'completed');
+  assert.equal(ended.primary,ended.ended,'Without open work the row task is the newest ended one, with its own result');
   assert.equal(ended.purposeReason,'');
 });
 
@@ -341,6 +359,64 @@ test('domain edits from a tab return their result to it and refresh the shared l
   windows.dispose();failing.dispose();f.windows.dispose();
 });
 
+test('team records join the list read; unchanged reads are not reposted; stale history replies and missing run files are handled', async()=>{
+  const json=value=>JSON.parse(JSON.stringify(value));
+  const f=editorFixture();let tasks=[{id:'flow',tasks:[]}];let rosterReads=0,roster={status:'ok',workers:[{agentId:'work-a',availability:'busy',removed:false,current:[],queued:[],failed:[],holds:[],taskCounts:{},runCount:1}]};
+  const histories=[];
+  const team={async roster(){rosterReads++;return roster;},
+    async history(root,agentId){return new Promise(resolve=>histories.push({agentId,resolve}));},
+    async runDocument(root,agentId,runId,document){return runId==='run-present'?'/records/'+agentId+'/'+runId+'/'+document:undefined;}};
+  const windows=new f.windows.constructor({localResourceRoots:[],async render(){return '<html>Center</html>';}},async()=>tasks,async()=>{},async()=>undefined,undefined,undefined,undefined,team);
+  await windows.open('/projects/T');const panel=f.panels.at(-1);panel.send({type:'client.ready'});for(let i=0;i<4;i++)await settle();
+  const lists=()=>panel.messages.filter(value=>value.type==='project.tasks');
+  assert.deepEqual(json(lists().at(-1).team),json(roster),'The roster arrives with the task records');
+  // An identical periodic read is not posted again: only its observation time moves (the view keeps its DOM and scroll).
+  f.timers.at(-1).callback();for(let i=0;i<4;i++)await settle();
+  assert.equal(lists().length,1);assert.equal(panel.messages.at(-1).type,'project.tasks.unchanged');
+  assert.equal(rosterReads,1,'Unchanged records reuse the roster read within its age');
+  // A manual refresh always answers in full and re-reads the roster; changed records post again.
+  panel.send({type:'project.tasks.request'});for(let i=0;i<4;i++)await settle();
+  assert.equal(lists().length,2);assert.equal(rosterReads,2);
+  tasks=[{id:'flow',tasks:[{id:'new'}]}];f.timers.at(-1).callback();for(let i=0;i<4;i++)await settle();
+  assert.equal(lists().length,3);assert.equal(rosterReads,3,'Changed task records re-read the roster');
+  // A runtime without the command reports it; the task list still arrives.
+  roster={status:'unsupported'};panel.send({type:'project.tasks.request'});for(let i=0;i<4;i++)await settle();
+  assert.deepEqual(json(lists().at(-1).team),{status:'unsupported'});assert.deepEqual(json(lists().at(-1).entries),json(tasks));
+  // History replies carry their request ID; a slower reply to an older request arrives later and the view can drop it.
+  panel.send({type:'team.history.request',agentId:'work-a',requestId:1});panel.send({type:'team.history.request',agentId:'work-a',requestId:2});await settle();
+  histories[1].resolve({status:'ok',agentId:'work-a',tasks:[]});for(let i=0;i<3;i++)await settle();
+  histories[0].resolve({status:'error',agentId:'work-a',error:'old'});for(let i=0;i<3;i++)await settle();
+  assert.deepEqual(json(panel.messages.filter(value=>value.type==='team.history')).map(value=>value.requestId),[2,1]);
+  // Run files open by exact agent/run; a missing one is reported, nothing else opens.
+  panel.send({type:'team.run.open',agentId:'work-a',runId:'run-present',document:'receipt'});for(let i=0;i<3;i++)await settle();
+  panel.send({type:'team.run.open',agentId:'work-a',runId:'run-absent',document:'result'});for(let i=0;i<3;i++)await settle();
+  assert.deepEqual(f.documents,['/records/work-a/run-present/receipt']);
+  assert.match(panel.messages.filter(value=>value.type==='host.notice').at(-1).text,/run-absent/);
+  windows.dispose();f.windows.dispose();
+});
+
+test('each periodic read follows running workers\' latest action without re-reading the whole roster', async()=>{
+  const json=value=>JSON.parse(JSON.stringify(value));
+  const f=editorFixture();let rosterReads=0,liveReads=0,action={category:'command',phase:'started',text:'npm test'},liveFails=false;
+  const roster={status:'ok',workers:[{agentId:'work-a',availability:'busy',removed:false,current:[],queued:[],failed:[],holds:[],latestRun:{runId:'run-a',status:'running'},taskCounts:{},runCount:1}]};
+  const team={async roster(){rosterReads++;return roster;},async history(){return {status:'ok',tasks:[]};},async runDocument(){return undefined;},
+    async live(root,known){liveReads++;if(liveFails)throw new Error('events unavailable');return {...known,workers:known.workers.map(worker=>({...worker,latestRun:{...worker.latestRun,liveActivity:action}}))};}};
+  const windows=new f.windows.constructor({localResourceRoots:[],async render(){return '<html>Center</html>';}},async()=>[{id:'flow',tasks:[]}],async()=>{},async()=>undefined,undefined,undefined,undefined,team);
+  await windows.open('/projects/L');const panel=f.panels.at(-1);panel.send({type:'client.ready'});for(let i=0;i<4;i++)await settle();
+  const lists=()=>panel.messages.filter(value=>value.type==='project.tasks');
+  assert.equal(rosterReads,1);assert.equal(liveReads,0,'A fresh roster read already carries the live part');
+  f.timers.at(-1).callback();for(let i=0;i<4;i++)await settle();
+  assert.equal(rosterReads,1,'The roster itself is not re-read within its age');assert.equal(liveReads,1);
+  assert.deepEqual(json(lists().at(-1).team.workers[0].latestRun.liveActivity),json(action),'A new action is posted on the next tick');
+  f.timers.at(-1).callback();for(let i=0;i<4;i++)await settle();
+  assert.equal(panel.messages.at(-1).type,'project.tasks.unchanged','An unchanged action is not reposted');
+  action={category:'tool',phase:'completed',text:'Reasoning',kind:'think'};f.timers.at(-1).callback();for(let i=0;i<4;i++)await settle();
+  assert.deepEqual(json(lists().at(-1).team.workers[0].latestRun.liveActivity),json(action));
+  liveFails=true;f.timers.at(-1).callback();for(let i=0;i<4;i++)await settle();
+  assert.equal(panel.messages.at(-1).type,'project.tasks.unchanged','A failed live read keeps the last roster');
+  windows.dispose();f.windows.dispose();
+});
+
 test('display domains prefer the editable membership, then the recorded allocation name through former names', async()=>{
   const context={Intl,Date};runInNewContext(await readFile(new URL('../../static/js/chat/maestro.js',import.meta.url),'utf8'),context);
   const resolve=context.AgentFactoryChat.maestroDomain;
@@ -372,7 +448,7 @@ test('worker actions confirm stop and removal, never run twice at once, report f
   let unblock;release=new Promise(resolve=>{unblock=resolve;});
   panel.send({type:'worker.command',agentId:'worker-a',text:'Do it',commandId:'cmd-00000001'});await settle();
   panel.send({type:'worker.command',agentId:'worker-a',text:'Again',commandId:'cmd-00000002'});await settle();
-  assert.deepEqual(results().at(-1),{type:'worker.result',action:'worker.command',agentId:'worker-a',commandId:'cmd-00000002',error:'This worker\'s previous action is still in progress.',code:'worker_action_pending'});
+  assert.deepEqual(results().at(-1),{type:'worker.result',action:'worker.command',agentId:'worker-a',commandId:'cmd-00000002',error:'This agent\'s previous action is still in progress.',code:'worker_action_pending'});
   release=undefined;unblock();for(let i=0;i<6;i++)await settle();
   assert.deepEqual(calls,[['command','/projects/A','worker-a','Do it']],'The second action did not start while the first ran');
   assert.deepEqual(results().find(value=>value.commandId==='cmd-00000001'),{type:'worker.result',action:'worker.command',agentId:'worker-a',commandId:'cmd-00000001',result:{mode:'addition',loopId:'loop-a'}});
@@ -389,7 +465,7 @@ test('worker actions confirm stop and removal, never run twice at once, report f
   panel.send({type:'worker.stop',agentId:'worker-a',loopId:'loop-a',workflowId:'flow',taskId:'bad'});for(let i=0;i<6;i++)await settle();
   assert.equal(results().at(-1).code,'loop_stop_scope');
   panel.send({type:'worker.remove',agentId:'worker-a',revision:4});for(let i=0;i<6;i++)await settle();
-  assert.match(f.prompts.at(-1).text,/Remove worker-a from the worker list\? Its tasks, runs, results and artifacts are kept/);
+  assert.match(f.prompts.at(-1).text,/Remove worker-a from the agent list\? Its tasks, runs, results and artifacts are kept/);
   assert.deepEqual(calls.at(-1),['remove','worker-a',4]);assert.equal(results().at(-1).code,'worker_running');
   assert.ok(reads>before+3,'Every action refreshes the records afterwards');
   const none=new f.windows.constructor({localResourceRoots:[],async render(){return '<html>Center</html>';}},async()=>[],async()=>{});
@@ -461,6 +537,34 @@ test('worker order message carries unique agent IDs only', async()=>{
   }
 });
 
+test('domain order validates stable domain IDs and persists independently of worker order', async()=>{
+  const {parseClientMessage}=await importTypeScript('src/protocol/validator.ts');
+  const a='domain-aaaaaaaaaaaa', b='domain-bbbbbbbbbbbb', c='domain-cccccccccccc';
+  assert.deepEqual(parseClientMessage({type:'domain.order',order:[b,a]}),{type:'domain.order',order:[b,a]});
+  for(const order of [[a,a],['work-a'],['../escape'],[1],'domain-aaaaaaaaaaaa',undefined]) assert.equal(parseClientMessage({type:'domain.order',order}),undefined);
+  const values=new Map();let fail=false;
+  const orderStore={get:key=>values.get(key),async update(key,value){await settle();if(fail)throw new Error('Fixture storage failure');values.set(key,value);}};
+  const json=value=>JSON.parse(JSON.stringify(value));
+  const f=editorFixture({orderStore});await f.windows.open('/projects/A');const panel=f.panels[0];panel.send({type:'client.ready'});await settle();await settle();
+  panel.send({type:'worker.order',order:['work-a','work-b']});
+  panel.send(parseClientMessage({type:'domain.order',order:[b,a,c]}));
+  panel.send(parseClientMessage({type:'domain.order',order:[c,b,a]}));
+  for(let i=0;i<8;i++)await settle();
+  assert.deepEqual(json(values.get('agentFactory.controlCenter.domainOrder')),{'/projects/A':[c,b,a]});
+  assert.deepEqual(json(values.get('agentFactory.controlCenter.workerOrder')),{'/projects/A':['work-a','work-b']});
+  assert.deepEqual(json(panel.messages.filter(message=>message.type==='domain.order.result')),[{type:'domain.order.result',order:[b,a,c]},{type:'domain.order.result',order:[c,b,a]}]);
+  f.timers[0].callback();await settle();await settle();
+  assert.deepEqual(json(panel.messages.filter(message=>message.type==='project.tasks').at(-1).domainOrder),[c,b,a]);
+  fail=true;panel.send({type:'domain.order',order:[a,b,c]});for(let i=0;i<4;i++)await settle();
+  assert.deepEqual(json(panel.messages.at(-1)),{type:'domain.order.result',order:[c,b,a],error:'Fixture storage failure'});
+  fail=false;panel.dispose();await f.windows.open('/projects/A');const reopened=f.panels.at(-1);reopened.send({type:'client.ready'});await settle();await settle();
+  assert.deepEqual(json(reopened.messages.find(message=>message.type==='project.tasks').domainOrder),[c,b,a]);
+  await f.windows.open('/projects/B');const other=f.panels.at(-1);other.send({type:'client.ready'});await settle();await settle();
+  assert.deepEqual(json(other.messages.find(message=>message.type==='project.tasks').domainOrder),[]);
+  assert.deepEqual(f.actions,[],'Display order never edits domain membership, tasks or runs');
+  f.windows.dispose();
+});
+
 test('control center saves worker order per project in host storage and restores it on refresh and reopen', async()=>{
   const values=new Map();let fail=false;const writes=[];
   const orderStore={get:key=>values.get(key),async update(key,value){if(fail)throw new Error('Fixture storage failure');await settle();writes.push(value);values.set(key,value);}};
@@ -517,4 +621,39 @@ test('every worker belongs to a real domain: legacy and missing memberships need
   assert.deepEqual(plain(membership(registry,'work-new',' Runtime ')),{state:'required',reason:'missing',suggestion:{name:'Runtime'}},'An unlisted recorded name is offered for creation');
   assert.deepEqual(plain(membership(registry,'work-new')),{state:'required',reason:'missing'});
   assert.deepEqual(plain(membership({revision:0,domains:[],assignments:{}},'work-first')),{state:'required',reason:'missing'},'With no domains yet, nothing is placed');
+});
+
+test('worker visibility is display-only, serialized per project and restored after reopening', async()=>{
+  const values=new Map();let fail=false;
+  const orderStore={get:key=>values.get(key),async update(key,value){if(fail)throw new Error('Fixture visibility storage failure');await settle();values.set(key,value);}};
+  const {parseClientMessage}=await importTypeScript('src/protocol/validator.ts');
+  const json=value=>JSON.parse(JSON.stringify(value));
+  const f=editorFixture({orderStore});
+  await f.windows.open('/projects/A');const panel=f.panels[0];panel.send({type:'client.ready'});await settle();await settle();
+  const message=(agentId,hidden)=>parseClientMessage({type:'worker.visibility',agentId,hidden});
+  for(const bad of [{agentId:'../escape',hidden:true},{agentId:'a',hidden:'true'},{agentId:'a'}]) assert.equal(parseClientMessage({type:'worker.visibility',...bad}),undefined);
+  panel.send(message('running-worker',true));panel.send(message('other-worker',true));
+  for(let i=0;i<6;i++)await settle();
+  assert.deepEqual(json(values.get('agentFactory.controlCenter.hiddenWorkers')),{'/projects/A':['running-worker','other-worker']});
+  assert.deepEqual(json(panel.messages.filter(m=>m.type==='worker.visibility.result').at(-1)),{type:'worker.visibility.result',hiddenWorkers:['running-worker','other-worker']});
+  // Failure retains both workers; the UI can retry without touching runtime state.
+  fail=true;panel.send(message('running-worker',false));for(let i=0;i<4;i++)await settle();
+  assert.deepEqual(json(panel.messages.at(-1)),{type:'worker.visibility.result',hiddenWorkers:['running-worker','other-worker'],error:'Fixture visibility storage failure'});
+  fail=false;panel.dispose();await f.windows.open('/projects/A');const reopened=f.panels.at(-1);reopened.send({type:'client.ready'});await settle();await settle();
+  assert.deepEqual(json(reopened.messages.find(m=>m.type==='project.tasks').hiddenWorkers),['running-worker','other-worker']);
+  await f.windows.open('/projects/B');const other=f.panels.at(-1);other.send({type:'client.ready'});await settle();await settle();
+  assert.deepEqual(json(other.messages.find(m=>m.type==='project.tasks').hiddenWorkers),[]);
+  other.send(message('running-worker',true));reopened.send(message('running-worker',false));for(let i=0;i<6;i++)await settle();
+  assert.deepEqual(json(values.get('agentFactory.controlCenter.hiddenWorkers')),{'/projects/A':['other-worker'],'/projects/B':['running-worker']});
+  assert.equal(f.prompts.length,0,'Display preferences do not invoke destructive confirmations');
+  f.windows.dispose();
+});
+
+test('worker sub-area display uses a recorded area distinct from its group and never invents one from the title',async()=>{
+  const context={};runInNewContext(await readFile(new URL('../../static/js/chat/maestro.js',import.meta.url),'utf8'),context);
+  const row=(domain,domainName)=>({agentId:'worker-area',entry:{id:'flow-area',status:'completed'},task:{id:'task-area',title:'작업 목록 검사기 시험 범위 확장',...(domain?{domain}:{}),allocation:{profile:{id:'work'}}},domain:'group-area',domainName,status:'completed',at:'2026-10-12T15:52:00Z'});
+  const index=values=>context.AgentFactoryChat.maestroWorkerIndex(values)[0];
+  assert.equal(index([row('작업 목록','통제 화면')]).responsibility,'작업 목록');
+  assert.equal(index([row('작업 조율','작업 조율')]).responsibility,'');
+  assert.equal(index([row(undefined,'작업 조율')]).responsibility,'','A meaningful task title does not supply a missing sub-area');
 });

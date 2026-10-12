@@ -48,10 +48,13 @@ import { isProviderDetected, providerStatuses, type ProviderId } from "../agent-
 import { installProviderCliVersion } from "../agent-factory/provider-cli-installer";
 import { readProviderVersionCatalog } from "../agent-factory/provider-version-catalog";
 import { redetectProviders, saveProviderPath, pluginUpdateMode, savePluginUpdateMode, updateProviderPlugins, providerVersions, refreshProviderVersions } from "./provider-settings";
+import { ProviderAuthentication } from "./provider-authentication";
+import { PROVIDER_LABELS } from "../../common/types/provider";
 import { ChatSessionController } from "../../modules/chat/session-controller";
 import { saveConvertedImage } from "./converted-image-store";
 import { writeNewImageAttachment } from "./image-attachment-store";
 import { SudoBroker } from "./sudo-broker";
+import { ConductorQueueChannel, type ConductorQueueLine } from "../agent-factory/conductor-queue-client";
 import { DeployError, deployRunStatus, detectDeployTarget, dispatchDeploy, setupDeploySecret, type DeployTarget } from "../github/deploy-workflows";
 
 type RuntimeConnection =
@@ -132,6 +135,9 @@ export interface SidebarAgent {
 
 export class ChatPanelManager implements vscode.Disposable {
   private controlCenters?: ControlCenterWindows;
+  private readonly conductorQueues = new Map<string, ConductorQueueChannel>();
+  private readonly conductorPanels = new Set<string>();
+  private readonly conductorListeners = new Set<(projectRoot: string, line: ConductorQueueLine) => void>();
   private readonly taskStopsPending = new Set<string>();
   private generalSettingsWrite: Promise<void> = Promise.resolve();
   private startupHandled = false;
@@ -445,7 +451,36 @@ export class ChatPanelManager implements vscode.Disposable {
         return client.superviseProject();
       },
       models: async () => (await modelSelectionCatalog()).candidates.map(candidate => ({ id: candidate.id, provider: candidate.provider }))
-    }, this.context.globalState);
+    }, this.context.globalState, {
+      // Team records come from the bound runtime's own loop.py; an installed plugin without them reports "unsupported".
+      roster: async projectRoot => {
+        const client = await this.controlCenterClient(projectRoot);
+        return client.teamRoster ? client.teamRoster() : { status: "unsupported" };
+      },
+      history: async (projectRoot, agentId) => {
+        const client = await this.controlCenterClient(projectRoot);
+        return client.teamHistory ? client.teamHistory(agentId) : { status: "unsupported", agentId };
+      },
+      runDocument: async (projectRoot, agentId, runId, document) => (await this.controlCenterClient(projectRoot)).teamRunDocument?.(agentId, runId, document),
+      requestView: async (projectRoot, agentId, runId) => {
+        const client = await this.controlCenterClient(projectRoot);
+        if (!client.requestView) throw new Error("Request presentation is unavailable");
+        return client.requestView(agentId, runId);
+      },
+      live: async (projectRoot, roster) => {
+        const client = await this.controlCenterClient(projectRoot);
+        return client.teamLive ? client.teamLive(roster) : roster;
+      }
+    }, {
+      // The control center reads the same conductor queue projection as the chats, across every chat of the project.
+      enabled: () => this.conductorQueueEnabled(),
+      board: async projectRoot => await this.conductorQueue(projectRoot).request("board") as Record<string, unknown>,
+      role: projectRoot => this.conductorQueue(projectRoot).role,
+      subscribe: listener => this.onConductorLine(listener),
+      control: async (projectRoot, chatId, control) => {
+        await this.conductorQueue(projectRoot).request("ingest", { chatId, class: "control", payload: { commandId: randomUUID(), ...control }, sentAt: Date.now() / 1000 });
+      }
+    });
   }
 
   private async controlCenterClient(projectRoot: string) {
@@ -477,6 +512,10 @@ export class ChatPanelManager implements vscode.Disposable {
       const kind = message.target;
       const run = task.runs?.find(value => value.agentId === message.agentId && value.runId === message.runId);
       if (!run || run[kind]?.availability !== "recorded") throw new Error(`The recorded ${kind} is unavailable`);
+      if (kind === "request" && connection.client.requestView) {
+        await this.controlCenterWindows().showRequest(projectRoot, await connection.client.requestView(run.agentId, run.runId));
+        return;
+      }
       const records = await connection.client.projectTaskRecords?.(entry.id, task.id) ?? [];
       const document = records.find(value => value.name === `${run.role} · ${run.runId} · ${kind}.md`);
       if (!document) throw new Error(`The recorded ${kind} is unavailable`);
@@ -529,6 +568,10 @@ export class ChatPanelManager implements vscode.Disposable {
     const listener = vscode.workspace.onDidChangeConfiguration?.(event => {
       if (event.affectsConfiguration("agentFactory.agents")) {
         for (const managed of this.panels.values()) void this.refreshAgentDefaults(managed);
+      }
+      if (event.affectsConfiguration("agentFactory.conductorQueue")) {
+        for (const managed of this.panels.values()) void this.syncConductorQueue(managed);
+        this.controlCenters?.conductorChanged();
       }
     });
     if (listener) this.context.subscriptions.push(listener);
@@ -696,8 +739,11 @@ export class ChatPanelManager implements vscode.Disposable {
 
   public dispose(): void {
     if (this.docsAuditTimer) clearInterval(this.docsAuditTimer);
+    for (const channel of this.conductorQueues.values()) channel.dispose();
+    this.conductorQueues.clear();
     this.sudoBroker.dispose();
     this.controlCenters?.dispose();
+    this.providerAuth?.dispose();
     for (const managed of this.panels.values()) {
       managed.disposed = true;
       this.disposedPanels.add(managed.panel);
@@ -1093,6 +1139,21 @@ export class ChatPanelManager implements vscode.Disposable {
         const ready = (managed.chatSendPreparation ?? Promise.resolve()).then(() => this.initializeClient(managed, message.pendingMessageIds ?? []));
         managed.chatSendPreparation = ready.then(() => undefined, () => undefined);
         await ready;
+        await this.syncConductorQueue(managed);
+        return;
+      }
+      case "conductor.resync":
+        await this.syncConductorQueue(managed);
+        return;
+      case "conductor.control": {
+        try {
+          if (!this.conductorQueueEnabled() || !managed.state.projectRoot) throw new Error(localize("conductorQueue.disabled"));
+          const { type: _type, chatId: _chatId, ...control } = message;
+          await this.conductorQueue(managed.state.projectRoot).request("ingest", { chatId: this.conductorChatId(managed), class: "control",
+            payload: { commandId: randomUUID(), ...control }, sentAt: Date.now() / 1000 });
+        } catch (error) {
+          await this.post(managed.panel, { type: "host.notice", level: "error", text: error instanceof Error ? error.message : String(error) });
+        }
         return;
       }
       case "message.copy":
@@ -1114,6 +1175,15 @@ export class ChatPanelManager implements vscode.Disposable {
         this.sudoBroker.respond(managed.state.panelId, message);
         return;
       case "chat.send": {
+        if (this.conductorQueueEnabled()) {
+          // The conductor queue is the chat's single ingress: durable acceptance first, routing and answers follow on the feed.
+          try { await this.sendConductorMessage(managed, message); }
+          catch (error) {
+            await this.post(managed.panel, { type: "chat.rejected", id: message.id });
+            await this.post(managed.panel, { type: "host.notice", level: "error", text: error instanceof Error ? error.message : String(error) });
+          }
+          return;
+        }
         // Reserve identity before any asynchronous preparation or status snapshot.
         const previous = managed.startedMessages?.find(item => item.id === message.id);
         if (previous) { await this.post(managed.panel, previous); return; }
@@ -1352,7 +1422,17 @@ export class ChatPanelManager implements vscode.Disposable {
       case "providers.cli.install":
         await this.installProviderCliNow(message.provider, message.version);
         return;
+      case "providers.auth.request":
+        await this.post(managed.panel, { type: "providers.auth", ...this.providerAuthentication().snapshot() });
+        await this.providerAuthentication().refresh();
+        return;
+      case "providers.login":
+        if (this.providerAuthentication().login(message.provider) === "unavailable") {
+          await this.post(managed.panel, { type: "host.notice", level: "error", text: localize("ui.providers.login.unavailable") });
+        }
+        return;
       case "providers.versions.request":
+        void this.providerAuthentication().refresh();
         await refreshProviderVersions(this.context.extension?.packageJSON?.version);
         await this.broadcast({ type: "providers.status", providers: providerStatuses(), busy: this.providerRefresh !== undefined, errors: this.providerErrors, pluginUpdateMode: pluginUpdateMode(), versions: providerVersions() });
         await this.post(managed.panel, { type: "providers.catalog", catalog: await readProviderVersionCatalog(
@@ -1506,9 +1586,13 @@ export class ChatPanelManager implements vscode.Disposable {
       case "worker.stop":
       case "worker.remove":
       case "worker.handoff":
+      case "worker.visibility":
+      case "domain.order":
       case "worker.order":
       case "supervision.request":
       case "handoff.models.request":
+      case "team.history.request":
+      case "team.run.open":
         // Worker control belongs to the control center tab, which confirms and binds the exact worker; chat tabs ignore it.
         return;
       case "project.task.open": {
@@ -1822,6 +1906,18 @@ export class ChatPanelManager implements vscode.Disposable {
   private providerRefresh?: Promise<void>;
   private providerRefreshQueued = false;
   private providerErrors: Partial<Record<ProviderId, string>> = {};
+  private providerAuth?: ProviderAuthentication;
+
+  /** Created on first use so sign-in state is only checked once the providers tab asks for it. */
+  private providerAuthentication(): ProviderAuthentication {
+    this.providerAuth ??= new ProviderAuthentication({
+      window: vscode.window,
+      statuses: providerStatuses,
+      publish: snapshot => this.broadcast({ type: "providers.auth", ...snapshot }),
+      terminalName: id => localize("ui.providers.login.terminal", PROVIDER_LABELS[id])
+    });
+    return this.providerAuth;
+  }
 
   /** Detect provider CLIs again and bring every open chat up to date without a window reload. */
   public refreshProviders(): Promise<void> {
@@ -1842,6 +1938,8 @@ export class ChatPanelManager implements vscode.Disposable {
         this.providerRefresh = undefined;
       }
       await this.broadcast({ type: "providers.status", providers: providerStatuses(), busy: false, errors: this.providerErrors, pluginUpdateMode: pluginUpdateMode(), versions: providerVersions() });
+      // A changed executable may belong to another account; never show the old sign-in state for it.
+      if (this.providerAuth) void this.providerAuth.refresh();
       try {
         for (const managed of this.panels.values()) {
           if (managed.disposed) continue;
@@ -3577,6 +3675,99 @@ Read the exact stored child result/receipt and existing workflow status for repo
         vscode.Uri.joinPath(this.storageRoot(), "chat-images", panelId)
       ])
     };
+  }
+
+  private conductorQueueEnabled(): boolean {
+    return vscode.workspace.getConfiguration("agentFactory").get<boolean>("conductorQueue.enabled", false) === true;
+  }
+
+  /** A chat's queue identity is its panel, stable across webview reloads and editor restarts. */
+  private conductorChatId(managed: ManagedPanel): string {
+    return "panel-" + managed.state.panelId;
+  }
+
+  /**
+   * Captured from settings when the chat is first created; a later different setting is reported as a conflict.
+   * "managed" drivers run the conductor and workers through exec.py with this chat's Main and Work model
+   * settings and execution permission; nothing is chosen for the user when a setting is missing.
+   */
+  private conductorPolicy(managed: ManagedPanel): Record<string, unknown> {
+    const configuration = vscode.workspace.getConfiguration("agentFactory");
+    const approval = configuration.get<string>("conductorQueue.approval", "bypass");
+    const base = { approvalPolicy: approval === "required" ? "required" : "bypass", reference: "VS Code setting agentFactory.conductorQueue" };
+    if (configuration.get<string>("conductorQueue.drivers", "fake") !== "managed") return { ...base, executor: "fake", conductor: "fake" };
+    const state = managed.state;
+    const work = state.agentModels?.work;
+    if (!state.model || !work?.model) throw new Error(localize("conductorQueue.modelsRequired"));
+    const mode = managed.executionMode ?? this.defaultExecutionMode();
+    const sandbox = mode === "workspace-write" ? "workspace-write" : mode === "cli-default" ? "read-only" : "danger-full-access";
+    const settings = (model: string, reasoningEffort?: string) => ({ model, provider: modelProvider(model), ...(reasoningEffort ? { reasoningEffort } : {}) });
+    return { ...base, conductor: "managed", executor: "managed", sandbox, conductorSettings: settings(state.model, state.reasoning),
+      work: settings(work.model, work.reasoningEffort), ...(this.workIsolation() ? { workIsolation: true } : {}) };
+  }
+
+  /** One runtime process per project; its feed fans out to every bound chat and to the control center. */
+  public conductorQueue(projectRoot: string): ConductorQueueChannel {
+    const existing = this.conductorQueues.get(projectRoot);
+    if (existing) return existing;
+    const channel = new ConductorQueueChannel(async () => {
+      const connection = await this.controlCenterRuntime(projectRoot);
+      if (!connection.available) throw new Error(connection.diagnostic);
+      const command = await connection.client.conductorQueueCommand?.();
+      if (!command) throw new Error(localize("conductorQueue.unsupported"));
+      return command;
+    });
+    channel.onLine(line => this.forwardConductorLine(projectRoot, line));
+    this.conductorQueues.set(projectRoot, channel);
+    return channel;
+  }
+
+  public onConductorLine(listener: (projectRoot: string, line: ConductorQueueLine) => void): () => void {
+    this.conductorListeners.add(listener);
+    return () => this.conductorListeners.delete(listener);
+  }
+
+  private forwardConductorLine(projectRoot: string, line: ConductorQueueLine): void {
+    for (const managed of this.panels.values()) {
+      if (managed.state.projectRoot !== projectRoot || !this.conductorPanels.has(managed.state.panelId)) continue;
+      if (line.type === "feed") {
+        const chatId = this.conductorChatId(managed);
+        const entries = line.entries.filter(entry => entry.chatId === chatId);
+        if (entries.length) void this.post(managed.panel, { type: "conductor.feed", cursor: line.cursor, entries, emittedAt: line.emittedAt });
+      } else if (line.type === "role") {
+        void this.post(managed.panel, { type: "conductor.state", enabled: true, targeting: true, role: line.role, ...(line.diagnostic ? { error: line.diagnostic } : {}) });
+      }
+    }
+    for (const listener of this.conductorListeners) listener(projectRoot, line);
+  }
+
+  /** Bind the chat to its queue and send a snapshot; the webview applies later feed rows after its cursor. */
+  private async syncConductorQueue(managed: ManagedPanel): Promise<void> {
+    const projectRoot = managed.state.projectRoot;
+    if (!this.conductorQueueEnabled() || !projectRoot) {
+      if (this.conductorPanels.delete(managed.state.panelId) || this.conductorQueueEnabled()) await this.post(managed.panel, { type: "conductor.state", enabled: false });
+      return;
+    }
+    const channel = this.conductorQueue(projectRoot);
+    const chatId = this.conductorChatId(managed);
+    try {
+      await channel.request("ensure-chat", { chatId, policy: this.conductorPolicy(managed) });
+      this.conductorPanels.add(managed.state.panelId);
+      await this.post(managed.panel, { type: "conductor.state", enabled: true, targeting: true, role: channel.role });
+      const snapshot = await channel.request("snapshot", { chatId }) as Record<string, unknown>;
+      await this.post(managed.panel, { type: "conductor.snapshot", snapshot });
+    } catch (error) {
+      await this.post(managed.panel, { type: "conductor.state", enabled: true, targeting: true, role: "disconnected", error: error instanceof Error ? error.message : String(error) });
+    }
+  }
+
+  private async sendConductorMessage(managed: ManagedPanel, message: Extract<import("../../protocol/messages").ClientMessage, { type: "chat.send" }>): Promise<void> {
+    if (message.attachments.length) throw new Error(localize("conductorQueue.attachments"));
+    if (!managed.state.projectRoot) throw new Error(localize("ui.no.workspace"));
+    if (!this.conductorPanels.has(managed.state.panelId)) await this.syncConductorQueue(managed);
+    const accepted = await this.conductorQueue(managed.state.projectRoot).request("ingest", { chatId: this.conductorChatId(managed), class: "conversation",
+      payload: { clientMessageId: message.id, text: message.text, ...(message.conductorTarget ?? {}) }, sentAt: Date.now() / 1000 }) as { inputId: string; acceptedAt: string };
+    await this.post(managed.panel, { type: "conductor.accepted", id: message.id, text: message.text, acceptedAt: accepted.acceptedAt, inputId: accepted.inputId });
   }
 
   private async post(panel: vscode.WebviewPanel, message: HostMessage): Promise<void> {

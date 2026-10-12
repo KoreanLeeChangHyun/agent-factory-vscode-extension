@@ -125,16 +125,45 @@ async function main() {
       assert.deepEqual(pageErrors, []);
       return;
     }
+    if (process.argv.includes('--control-layout-only')) {
+      await require('./control-layout.cjs').checkControlLayout(page);
+      assert.deepEqual(pageErrors, []);
+      console.log('Control center density measurements and layout checks completed.');
+      return;
+    }
+    if (process.argv.includes('--control-dnd-only')) {
+      await require('./control-dnd.cjs').checkControlDnD(page);
+      assert.deepEqual(pageErrors, []);
+      console.log(process.argv.includes('--dnd-reproduce')?'Control center native DnD reproduction measurements collected.':'Control center native pointer DnD and persistence checks passed.');
+      return;
+    }
     if (process.argv.includes('--control-screens-only')) {
       await require('./control-screens.cjs').checkControlScreens(page);
       assert.deepEqual(pageErrors, []);
-      console.log('Control center kanban, card summary, rework and direct worker message checks passed.');
+      console.log('Control center kanban, card summary, rework, performer session navigation and handoff checks passed.');
       return;
     }
-    if (process.argv.includes('--maestro-only')) {
+    if (process.argv.includes('--maestro-only') || process.argv.includes('--request-view-only') || process.argv.includes('--worker-display-only')) {
       await require('./maestro.cjs').checkMaestro(page);
       assert.deepEqual(pageErrors, [], 'Maestro view caused a browser error');
       console.log('Maestro selection, runtime projection, navigation, restoration and responsive checks passed.');
+      return;
+    }
+    if (process.argv.includes('--conductor-ui-only')) {
+      await require('./conductor-ui.cjs').checkConductorUI(page);
+      assert.deepEqual(pageErrors, [], 'conductor UI caused a browser error');
+      console.log('Conductor task threads, two questions, filters, target guard, projection replay and responsive checks passed.');
+      return;
+    }
+    if (process.argv.includes('--role-pools-only')) {
+      await require('./role-pools.cjs').checkRolePools(page);
+      assert.deepEqual(pageErrors, [], 'role pools caused a browser error');
+      return;
+    }
+    if (process.argv.includes('--conductor-queue-only')) {
+      await require('./conductor-queue.cjs').checkConductorQueue(page);
+      assert.deepEqual(pageErrors, [], 'conductor queue caused a browser error');
+      console.log('Conductor queue ingress, ambiguity, parallel conductors, cancel, synthesis and reconnect checks passed.');
       return;
     }
     if (process.argv.includes('--queue-confirmation-only')) {

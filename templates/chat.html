@@ -17,11 +17,14 @@
     <link rel="stylesheet" href="{{chatStyleBaseUri}}/chat/timeline.css" />
     <link rel="stylesheet" href="{{chatStyleBaseUri}}/chat/settings.css" />
     <link rel="stylesheet" href="{{chatStyleBaseUri}}/chat/bot.css" />
-    <title>Main Agent</title>
+    <link rel="stylesheet" href="{{chatStyleBaseUri}}/chat/conductor-queue.css" />
+    <link rel="stylesheet" href="{{chatStyleBaseUri}}/chat/conductor-ui.css" />
+    <title>Conductor</title>
   </head>
   <body>
-    <main class="chat-shell" aria-label="Main Agent chat" data-i18n-aria-label="ui.main.agent.chat">
+    <main class="chat-shell" aria-label="Conductor chat" data-i18n-aria-label="ui.main.agent.chat">
       <div class="timeline-region">
+        <nav id="conductor-filters" class="conductor-filters" aria-label="Task filters" hidden></nav>
         <section id="timeline" class="timeline" aria-live="polite" aria-label="Conversation" data-i18n-aria-label="ui.conversation">
           <div id="empty-state" class="empty-state">
             <div class="hero-mark" aria-hidden="true">
@@ -31,8 +34,8 @@
             </div>
             <h1 class="hero-title">Agent Factory</h1>
             <p class="hero-tagline" data-i18n="ui.hero.tagline">Plan, build and verify with your agent team.</p>
-            <ol class="hero-flow" aria-label="Main → Work → Verification" data-i18n-aria-label="ui.hero.flow">
-              <li data-i18n="ui.hero.main">Main</li>
+            <ol class="hero-flow" aria-label="Conductor → Work → Verification" data-i18n-aria-label="ui.hero.flow">
+              <li data-i18n="ui.hero.main">Conductor</li>
               <li data-i18n="ui.work">Work</li>
               <li data-i18n="ui.verification">Verification</li>
             </ol>
@@ -65,6 +68,12 @@
       </div>
 
       <section class="composer-region" aria-label="Compose message" data-i18n-aria-label="ui.compose.message">
+        <details id="conductor-waiting" class="conductor-waiting" hidden></details>
+        <div id="conductor-target-row" class="conductor-target-row" hidden>
+          <select id="conductor-target" aria-label="Message target"></select>
+          <span id="conductor-models"></span>
+          <span id="conductor-isolation"></span>
+        </div>
         <div class="composer-topline"><div class="agent-progress-dock"><div id="agent-progress" class="agent-progress" role="status" aria-live="polite" hidden>
               <span class="run-status-pulse" aria-hidden="true"></span>
               <span class="run-status-copy">
@@ -119,7 +128,7 @@
               rows="1"
               maxlength="100000"
               placeholder="Ask Agent Factory"
-              aria-label="Message to Main Agent"
+              aria-label="Message to Conductor"
              data-i18n-aria-label="ui.message.to.main.agent" data-i18n-placeholder="ui.ask.agent.factory"></textarea>
           </div>
           <div class="composer-actions">
@@ -172,7 +181,7 @@
                 <span data-i18n="ui.work.isolation">Isolation</span><svg class="toggle-icon" viewBox="0 0 28 18" aria-hidden="true" focusable="false"><rect x="1" y="1" width="26" height="16" rx="8"></rect><circle class="toggle-thumb" cx="9" cy="9" r="4"></circle></svg>
               </button>
               <div class="utility-picker session-picker">
-                <div id="session-menu" class="utility-list-menu session-menu" role="listbox" aria-label="Main Agent sessions" hidden data-i18n-aria-label="ui.main.agent.sessions">
+                <div id="session-menu" class="utility-list-menu session-menu" role="listbox" aria-label="Conductor chat sessions" hidden data-i18n-aria-label="ui.main.agent.sessions">
                   <div id="session-list" class="session-list"></div>
                 </div>
               </div>
@@ -472,6 +481,8 @@
     <script nonce="{{nonce}}" src="{{chatModuleBaseUri}}/chat/agents.js"></script>
     <script nonce="{{nonce}}" src="{{chatModuleBaseUri}}/chat/attachments.js"></script>
     <script nonce="{{nonce}}" src="{{chatModuleBaseUri}}/chat/bot.js"></script>
+    <script nonce="{{nonce}}" src="{{chatModuleBaseUri}}/chat/conductor-queue.js"></script>
+    <script nonce="{{nonce}}" src="{{chatModuleBaseUri}}/chat/conductor-ui.js"></script>
     <script nonce="{{nonce}}" src="{{chatModuleBaseUri}}/chat/history.js"></script>
     <script nonce="{{nonce}}" src="{{chatModuleBaseUri}}/chat/image-converter.js"></script>
     <script nonce="{{nonce}}" src="{{chatModuleBaseUri}}/chat/interview.js"></script>
@@ -483,6 +494,9 @@
     <script nonce="{{nonce}}" src="{{chatModuleBaseUri}}/chat/shortcuts.js"></script>
     <script nonce="{{nonce}}" src="{{chatModuleBaseUri}}/chat/status-bar.js"></script>
     <script nonce="{{nonce}}" src="{{chatModuleBaseUri}}/chat/settings-tab-order.js"></script>
+    <dialog id="conductor-sessions" class="conductor-sessions" aria-labelledby="conductor-sessions-title">
+      <h3 id="conductor-sessions-title">Conductor instances and handoff slots</h3><ul></ul><button type="button">Close</button>
+    </dialog>
     <script nonce="{{nonce}}" src="{{chatModuleBaseUri}}/chat/sudo.js"></script>
     <script nonce="{{nonce}}" src="{{chatModuleBaseUri}}/chat/syntax.js"></script>
     <script nonce="{{nonce}}" src="{{chatModuleBaseUri}}/chat/task-flow.js"></script>
