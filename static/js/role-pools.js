@@ -6,7 +6,7 @@
     const drafts = new Map(), commands = new Set(), outcomes = new Map();
     const ko = language.startsWith("ko");
     const label = (k, e) => ko ? k : e;
-    const names = { workLight: label("작업자", "Worker"), work: label("전문가", "Expert"), verification: label("검증자", "Verifier") };
+    const names = { workLight: label("작업자", "Worker"), work: label("전문가", "Expert"), verification: label("검증자", "Verifier"), explore: label("탐색자", "Explorer"), scribe: label("기록자", "Scribe") };
     const stages = { "not-requested": label("독립 검증 미요청", "Independent verification not requested"), "waiting-assignment": label("검증자 배정 대기", "Waiting for verifier"), "waiting-result": label("작업 결과 대기", "Waiting for Work result"), verifying: label("검증 중", "Verifying"), "revision-waiting": label("수정·재검증 대기", "Waiting for revision / verification"), pass: label("검증 통과", "Verification passed"), "skipped-by-human": label("사용자 결정으로 생략", "Skipped by Human decision") };
     function el(tag, text, cls) { const n = document.createElement(tag); if (text !== undefined) n.textContent = text; if (cls) n.className = cls; return n; }
     function select(title, values, value) {
@@ -27,7 +27,8 @@
       const [chatWrap, chatSelect] = select(label("요청 정책", "Request policy"), chats.map(c => [c.id, c.title || c.id]), selectedChat || chats[0]?.id);
       chatSelect.addEventListener("change", () => { selectedChat = chatSelect.value; });
       container.append(chatWrap);
-      const notice = el("p", noticeText); notice.id = "role-pool-notice"; notice.setAttribute("role", "status"); container.append(notice);
+      if (projection.nativeObservation) container.append(el("p", `${label("기존 수행자 관측", "Existing worker observation")}: ${new Date(projection.nativeObservation.at * 1000).toLocaleTimeString()}`));
+      const notice = el("p", chats.length ? noticeText : label("지휘자 채팅에서 요청을 먼저 접수해 처리 설정을 연결해 주세요.", "Accept a request in the conductor chat first to connect its processing settings.")); notice.id = "role-pool-notice"; notice.setAttribute("role", "status"); container.append(notice);
       function areaRow(area, parent) {
         const detail = el("details"); detail.dataset.id = area.id; detail.open = open.has(area.id);
         const summary = el("summary", area.name);
@@ -38,7 +39,7 @@
         policy.disabled = !chats.length;
         detail.append(policyWrap, el("p", area.processing.inheritedFrom === area.id ? label("이 영역 설정", "Set for this area") : area.processing.inheritedFrom ? label("상위 도메인에서 상속", "Inherited from domain") : label("기존 기본 처리", "Existing default")));
         const groups = el("div", undefined, "role-pool-groups");
-        for (const group of [["workLight", "work"], ["verification"]]) {
+        for (const group of [["workLight", "work", "explore", "scribe"], ["verification"]]) {
           const column = el("section"); column.append(el("h3", group.length === 1 ? names.verification : label("작업 역할", "Work roles")));
           const members = area.members.filter(m => group.includes(m.profile));
           if (!members.length) column.append(el("p", label("고용된 수행자 없음", "No hired members")));
@@ -101,7 +102,7 @@
           answer.required = true; answer.setAttribute("aria-label", label("질문 답변", "Question answer")); remember(answer, question.id);
           answer.addEventListener("input", () => drafts.set(question.id, answer.value)); submit.type = "submit";
           function respond(text) { vscode.postMessage({ type: "conductor.control", action: "answer-worker", chatId: task.chatId, delegationId: task.id, expectedVersion: task.version, questionId: question.id, text }); }
-          for (const choice of question.alternatives || []) { const text = typeof choice === "string" ? choice : choice.label; if (!text) continue; const button = el("button", text, "maestro-button"); button.type = "button"; button.addEventListener("click", () => respond(text)); row.append(button); }
+          for (const choice of Array.isArray(question.alternatives) ? question.alternatives : []) { const text = typeof choice === "string" ? choice : choice?.label; if (!text) continue; const button = el("button", text, "maestro-button"); button.type = "button"; button.addEventListener("click", () => respond(text)); row.append(button); }
           form.append(answer, submit); form.addEventListener("submit", event => { event.preventDefault(); if (answer.value.trim()) respond(answer.value); }); row.append(form);
         }
         tasks.append(row);
@@ -120,6 +121,7 @@
     }
     function result(value) { const n = container.querySelector("#role-pool-notice"); noticeText = value.error || label("반영되었습니다.", "Applied."); if (n) n.textContent = noticeText; }
     return { receive(message) {
+      if (message.type === "conductor.state" && message.enabled === false) { container.hidden = true; return; }
       const rows = message.type === "conductor.snapshot" ? message.snapshot.state || [] : message.type === "conductor.feed" ? message.entries || [] : [];
       for (const row of rows) {
         const payload = row.payload || {};
